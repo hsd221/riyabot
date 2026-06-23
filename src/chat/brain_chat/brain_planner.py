@@ -713,6 +713,3 @@ class BrainPlanner:
                         logger.debug(f"处理不完整的JSON代码块时出错: {e}")
 
         return json_objects, reasoning_content
-
-
-init_prompt()
