@@ -525,12 +525,12 @@ def _build_readable_messages_internal(
         if long_time_notice and prev_timestamp is not None:
             time_diff = timestamp - prev_timestamp
             time_diff_hours = time_diff / 3600
-            
+
             # 检查是否跨天
             prev_date = time.strftime("%Y-%m-%d", time.localtime(prev_timestamp))
             current_date = time.strftime("%Y-%m-%d", time.localtime(timestamp))
             is_cross_day = prev_date != current_date
-            
+
             # 如果间隔大于8小时或跨天，插入提示
             if time_diff_hours > 8 or is_cross_day:
                 # 格式化日期为中文格式：xxxx年xx月xx日（去掉前导零）
@@ -542,7 +542,7 @@ def _build_readable_messages_internal(
                 hours_str = f"{int(time_diff_hours)}h"
                 notice = f"以下聊天开始时间：{date_str}。距离上一条消息过去了{hours_str}\n"
                 output_lines.append(notice)
-        
+
         readable_time = translate_timestamp_to_human_readable(timestamp, mode=timestamp_mode)
 
         # 查找消息id（如果有）并构建id_prefix
@@ -555,7 +555,7 @@ def _build_readable_messages_internal(
         else:
             output_lines.append(f"{id_prefix}{readable_time}, {name}: {content}")
         output_lines.append("\n")  # 在每个消息块后添加换行，保持可读性
-        
+
         prev_timestamp = timestamp
 
     formatted_string = "".join(output_lines).strip()

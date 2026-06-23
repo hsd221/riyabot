@@ -198,9 +198,11 @@ async def check_auth_status(
     """
     try:
         token = None
-        
+
         # 记录请求信息用于调试
-        logger.debug(f"检查认证状态 - Cookie: {maibot_session[:20] if maibot_session else 'None'}..., Authorization: {'Present' if authorization else 'None'}")
+        logger.debug(
+            f"检查认证状态 - Cookie: {maibot_session[:20] if maibot_session else 'None'}..., Authorization: {'Present' if authorization else 'None'}"
+        )
 
         # 优先从 Cookie 获取
         if maibot_session:
@@ -218,7 +220,7 @@ async def check_auth_status(
         token_manager = get_token_manager()
         is_valid = token_manager.verify_token(token)
         logger.debug(f"Token 验证结果: {is_valid}")
-        
+
         if is_valid:
             return {"authenticated": True}
         else:

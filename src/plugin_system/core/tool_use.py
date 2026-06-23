@@ -6,30 +6,11 @@ from src.plugin_system.core.global_announcement_manager import global_announceme
 from src.llm_models.utils_model import LLMRequest
 from src.llm_models.payload_content import ToolCall
 from src.config.config import global_config, model_config
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
+from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.common.logger import get_logger
 
 logger = get_logger("tool_use")
-
-
-def init_tool_executor_prompt():
-    """初始化工具执行器的提示词"""
-    tool_executor_prompt = """
-你是一个专门执行工具的助手。你的名字是{bot_name}。现在是{time_now}。
-群里正在进行的聊天内容：
-{chat_history}
-
-现在，{sender}发送了内容:{target_message},你想要回复ta。
-请仔细分析聊天内容，考虑以下几点：
-1. 内容中是否包含需要查询信息的问题
-2. 是否有明确的工具使用指令
-你可以选择多个动作
-
-If you need to use tools, please directly call the corresponding tool function. If you do not need to use any tool, simply output "No tool needed".
-"""
-    Prompt(tool_executor_prompt, "tool_executor")
-
 
 
 class ToolExecutor:

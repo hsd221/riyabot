@@ -61,7 +61,7 @@ class GoalAnalyzer:
     def _get_personality_prompt(self) -> str:
         """获取个性提示信息"""
         prompt_personality = global_config.personality.personality
-        
+
         # 检查是否需要随机替换为状态
         if (
             global_config.personality.states
@@ -69,7 +69,7 @@ class GoalAnalyzer:
             and random.random() < global_config.personality.state_probability
         ):
             prompt_personality = random.choice(global_config.personality.states)
-        
+
         bot_name = global_config.bot.nickname
         return f"你的名字是{bot_name},你{prompt_personality};"
 
@@ -124,7 +124,13 @@ class GoalAnalyzer:
         for action in action_history_list:
             action_history_text += f"{action}\n"
 
-        prompt = load_prompt("pfc_goal_analyzer", persona_text=persona_text, action_history_text=action_history_text, goals_str=goals_str, chat_history_text=chat_history_text)
+        prompt = load_prompt(
+            "pfc_goal_analyzer",
+            persona_text=persona_text,
+            action_history_text=action_history_text,
+            goals_str=goals_str,
+            chat_history_text=chat_history_text,
+        )
 
         logger.debug(f"[私聊][{self.private_name}]发送到LLM的提示词: {prompt}")
         try:
@@ -220,7 +226,13 @@ class GoalAnalyzer:
         # ===> Persona 文本构建结束 <===
 
         # --- 修改 Prompt 字符串，使用 persona_text ---
-        prompt = load_prompt("pfc_goal_analyzer_assess", persona_text=persona_text, goal=goal, reasoning=reasoning, chat_history_text=chat_history_text)
+        prompt = load_prompt(
+            "pfc_goal_analyzer_assess",
+            persona_text=persona_text,
+            goal=goal,
+            reasoning=reasoning,
+            chat_history_text=chat_history_text,
+        )
 
         try:
             content, _ = await self.llm.generate_response_async(prompt)

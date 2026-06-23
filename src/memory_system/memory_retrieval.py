@@ -4,10 +4,10 @@ import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from src.common.logger import get_logger
 from src.config.config import global_config, model_config
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
+from src.chat.utils.prompt_builder import global_prompt_manager
 from src.plugin_system.apis import llm_api
 from src.common.database.database_model import ThinkingBack
-from src.memory_system.retrieval_tools import get_tool_registry, init_all_tools
+from src.memory_system.retrieval_tools import get_tool_registry
 from src.memory_system.memory_utils import parse_questions_json
 from src.llm_models.payload_content.message import MessageBuilder, RoleType, Message
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -40,101 +40,6 @@ def _cleanup_stale_not_found_thinking_back() -> None:
         _last_not_found_cleanup_ts = now
     except Exception as e:
         logger.error(f"清理未找到答案的thinking_back记录失败: {e}")
-
-
-def init_memory_retrieval_prompt():
-    """初始化记忆检索相关的 prompt 模板和工具"""
-    # 首先注册所有工具
-    init_all_tools()
-
-    # 第一步：问题生成prompt
-    Prompt(
-        """
-你的名字是{bot_name}。现在是{time_now}。
-群里正在进行的聊天内容：
-{chat_history}
-
-{recent_query_history}
-
-现在，{sender}发送了内容:{target_message},你想要回复ta。
-请仔细分析聊天内容，考虑以下几点：
-1. 对话中是否提到了过去发生的事情、人物、事件或信息
-2. 是否有需要回忆的内容（比如"之前说过"、"上次"、"以前"等）
-3. 是否有需要查找历史信息的问题
-4. 是否有问题可以搜集信息帮助你聊天
-
-重要提示：
-- **每次只能提出一个问题**，选择最需要查询的关键问题
-- 如果"最近已查询的问题和结果"中已经包含了类似的问题并得到了答案，请避免重复生成相同或相似的问题，不需要重复查询
-- 如果之前已经查询过某个问题但未找到答案，可以尝试用不同的方式提问或更具体的问题
-
-如果你认为需要从记忆中检索信息来回答，请根据上下文提出**一个**最关键的问题来帮助你回复目标消息，放入"questions"字段
-
-问题格式示例：
-- "xxx在前几天干了什么"
-- "xxx是什么，在什么时候提到过?"
-- "xxxx和xxx的关系是什么"
-- "xxx在某个时间点发生了什么"
-
-问题要说明前因后果和上下文，使其全面且精准
-
-输出格式示例：
-```json
-{{
-  "questions": ["张三在前几天干了什么"] #问题数组（字符串数组），如果不需要检索记忆则输出空数组[]，如果需要检索则只输出包含一个问题的数组
-}}
-```
-请只输出JSON对象，不要输出其他内容：
-""",
-        name="question",
-    )
-
-    # 第二步：ReAct Agent prompt（使用function calling，要求先思考再行动）
-    Prompt(
-        """你的名字是{bot_name}。现在是{time_now}。
-你正在参与聊天，你需要搜集信息来回答问题，帮助你参与聊天。
-当前需要解答的问题：{question}
-已收集的信息：
-{collected_info}
-
-**工具说明：**
-- 如果涉及过往事件，或者查询某个过去可能提到过的概念，或者某段时间发生的事件。可以使用聊天记录查询工具查询过往事件
-- 如果涉及人物，可以使用人物信息查询工具查询人物信息
-- 如果遇到不熟悉的词语、缩写、黑话或网络用语，可以使用query_words工具查询其含义
-- 如果没有可靠信息，且查询时间充足，或者不确定查询类别，也可以使用lpmm知识库查询，作为辅助信息
-
-**思考**
-- 你可以对查询思路给出简短的思考：思考要简短，直接切入要点
-- 先思考当前信息是否足够回答问题
-- 如果信息不足，则需要使用tool查询信息，你必须给出使用什么工具进行查询
-- 如果当前已收集的信息足够或信息不足确定无法找到答案，你必须调用found_answer工具结束查询
-""",
-        name="react_head",
-    )
-
-    # 额外，如果最后一轮迭代：ReAct Agent prompt（使用function calling，要求先思考再行动）
-    Prompt(
-        """你的名字是{bot_name}。现在是{time_now}。
-你正在参与聊天，你需要根据搜集到的信息判断问题是否可以回答问题。
-
-当前问题：{question}
-已收集的信息：
-{collected_info}
-
-分析：
-- 当前信息是否足够回答问题？
-- **如果信息足够且能找到明确答案**，在思考中直接给出答案，格式为：found_answer(answer="你的答案内容")
-- **如果信息不足或无法找到答案**，在思考中给出：not_enough_info(reason="信息不足或无法找到答案的原因")
-
-**重要规则：**
-- 必须严格使用检索到的信息回答问题，不要编造信息
-- 答案必须精简，不要过多解释
-- **只有在检索到明确、具体的答案时，才使用found_answer**
-- **如果信息不足、无法确定、找不到相关信息，必须使用not_enough_info，不要使用found_answer**
-- 答案必须给出，格式为 found_answer(answer="...") 或 not_enough_info(reason="...")。
-""",
-        name="final",
-    )
 
 
 def _log_conversation_messages(
@@ -409,11 +314,11 @@ async def _react_agent_solve_question(
                     """从文本中解析JSON格式的found_answer，返回(found_answer, answer)元组，如果未找到则返回(None, None)"""
                     if not text:
                         return None, None
-                    
+
                     try:
                         # 尝试提取JSON对象（可能包含在代码块中或直接是JSON）
                         json_text = text.strip()
-                        
+
                         # 如果包含代码块标记，提取JSON部分
                         if "```json" in json_text:
                             start = json_text.find("```json") + 7
@@ -425,10 +330,10 @@ async def _react_agent_solve_question(
                             end = json_text.find("```", start)
                             if end != -1:
                                 json_text = json_text[start:end].strip()
-                        
+
                         # 尝试解析JSON
                         data = json.loads(json_text)
-                        
+
                         # 检查是否包含found_answer字段
                         if isinstance(data, dict) and "found_answer" in data:
                             found_answer = bool(data.get("found_answer", False))
@@ -438,20 +343,20 @@ async def _react_agent_solve_question(
                         # 如果JSON解析失败，尝试在文本中查找JSON对象
                         try:
                             # 查找第一个 { 和最后一个 } 之间的内容（更健壮的JSON提取）
-                            first_brace = text.find('{')
+                            first_brace = text.find("{")
                             if first_brace != -1:
                                 # 从第一个 { 开始，找到匹配的 }
                                 brace_count = 0
                                 json_end = -1
                                 for i in range(first_brace, len(text)):
-                                    if text[i] == '{':
+                                    if text[i] == "{":
                                         brace_count += 1
-                                    elif text[i] == '}':
+                                    elif text[i] == "}":
                                         brace_count -= 1
                                         if brace_count == 0:
                                             json_end = i + 1
                                             break
-                                
+
                                 if json_end != -1:
                                     json_text = text[first_brace:json_end]
                                     data = json.loads(json_text)
@@ -461,9 +366,9 @@ async def _react_agent_solve_question(
                                         return found_answer, answer
                         except (json.JSONDecodeError, ValueError, TypeError):
                             pass
-                    
+
                     return None, None
-                
+
                 # 尝试从文本中解析found_answer函数调用
                 def parse_found_answer_from_text(text: str):
                     """从文本中解析found_answer函数调用，返回answer字符串，如果未找到则返回None
@@ -480,14 +385,14 @@ async def _react_agent_solve_question(
 
                     # 解析answer参数（字符串，使用extract_quoted_content）
                     answer = extract_quoted_content(text, "found_answer", "answer")
-                    
+
                     # 如果answer存在（即使是空字符串），也返回它（空字符串表示未找到答案）
                     return answer
 
                 # 首先尝试解析JSON格式
                 parsed_found_answer_json, parsed_answer_json = parse_json_found_answer(response)
                 is_json_format = parsed_found_answer_json is not None
-                
+
                 # 如果JSON解析成功，使用JSON结果
                 if is_json_format:
                     parsed_answer = parsed_answer_json
@@ -524,9 +429,7 @@ async def _react_agent_solve_question(
                         return True, parsed_answer, thinking_steps, False
                     else:
                         # 未找到答案，直接退出查询
-                        step["actions"].append(
-                            {"action_type": "found_answer", "action_params": {"answer": ""}}
-                        )
+                        step["actions"].append({"action_type": "found_answer", "action_params": {"answer": ""}})
                         step["observations"] = [f"检测到found_answer{format_type}调用，未找到答案"]
                         thinking_steps.append(step)
                         logger.info(
@@ -543,9 +446,7 @@ async def _react_agent_solve_question(
 
                 # 如果没有检测到found_answer格式，记录思考过程，继续下一轮迭代
                 step["observations"] = [f"思考完成，但未调用工具。响应: {response}"]
-                logger.info(
-                    f"{react_log_prefix}第 {iteration + 1} 次迭代 思考完成但未调用工具: {response}"
-                )
+                logger.info(f"{react_log_prefix}第 {iteration + 1} 次迭代 思考完成但未调用工具: {response}")
                 collected_info += f"思考: {response}"
             else:
                 logger.warning(f"{react_log_prefix}第 {iteration + 1} 次迭代 无工具调用且无响应")
@@ -591,9 +492,7 @@ async def _react_agent_solve_question(
                     step["actions"].append({"action_type": "found_answer", "action_params": {"answer": ""}})
                     step["observations"] = ["检测到found_answer工具调用，未找到答案"]
                     thinking_steps.append(step)
-                    logger.info(
-                        f"{react_log_prefix}第 {iteration + 1} 次迭代 通过found_answer工具判断未找到答案"
-                    )
+                    logger.info(f"{react_log_prefix}第 {iteration + 1} 次迭代 通过found_answer工具判断未找到答案")
 
                     _log_conversation_messages(
                         conversation_messages,
@@ -639,9 +538,7 @@ async def _react_agent_solve_question(
                         return f"查询{tool_name_str}({param_str})的结果：{observation}"
                     except Exception as e:
                         error_msg = f"工具执行失败: {str(e)}"
-                        logger.error(
-                            f"{react_log_prefix}第 {iter_num + 1} 次迭代 工具 {tool_name_str} {error_msg}"
-                        )
+                        logger.error(f"{react_log_prefix}第 {iter_num + 1} 次迭代 工具 {tool_name_str} {error_msg}")
                         return f"查询{tool_name_str}失败: {error_msg}"
 
                 tool_tasks.append(execute_single_tool(tool, tool_params, tool_name, iteration))
@@ -661,9 +558,7 @@ async def _react_agent_solve_question(
             for i, (tool_call_item, observation) in enumerate(zip(tool_calls, observations, strict=False)):
                 if isinstance(observation, Exception):
                     observation = f"工具执行异常: {str(observation)}"
-                    logger.error(
-                        f"{react_log_prefix}第 {iteration + 1} 次迭代 工具 {i + 1} 执行异常: {observation}"
-                    )
+                    logger.error(f"{react_log_prefix}第 {iteration + 1} 次迭代 工具 {i + 1} 执行异常: {observation}")
 
                 observation_text = observation if isinstance(observation, str) else str(observation)
                 stripped_observation = observation_text.strip()
@@ -1049,7 +944,7 @@ async def _process_single_question(
     if not question or not question.strip():
         logger.debug("问题为空，跳过查询")
         return None
-    
+
     # logger.info(f"开始处理问题: {question}")
 
     _cleanup_stale_not_found_thinking_back()
@@ -1146,7 +1041,7 @@ async def build_memory_retrieval_prompt(
 
         # 第一步：生成问题或使用 Planner 提供的问题
         single_question: Optional[str] = None
-        
+
         # 如果 planner_question 配置开启，只使用 Planner 提供的问题，不使用旧模式
         if global_config.memory.planner_question:
             if question and isinstance(question, str) and question.strip():

@@ -168,10 +168,10 @@ class WebUIServer:
 
             # 导入本地聊天室路由
             from src.webui.chat_routes import router as chat_router
-            
+
             # 导入规划器监控路由
             from src.webui.api.planner import router as planner_router
-            
+
             # 导入回复器监控路由
             from src.webui.api.replier import router as replier_router
 
@@ -209,9 +209,9 @@ class WebUIServer:
         self._server = UvicornServer(config=config)
 
         logger.info("🌐 WebUI 服务器启动中...")
-        
+
         # 根据地址类型显示正确的访问地址
-        if ':' in self.host:
+        if ":" in self.host:
             # IPv6 地址需要用方括号包裹
             logger.info(f"🌐 访问地址: http://[{self.host}]:{self.port}")
             if self.host == "::":
@@ -245,7 +245,7 @@ class WebUIServer:
         import socket
 
         # 判断使用 IPv4 还是 IPv6
-        if ':' in self.host:
+        if ":" in self.host:
             # IPv6 地址
             family = socket.AF_INET6
             test_host = self.host if self.host != "::" else "::1"
@@ -289,6 +289,7 @@ def get_webui_server() -> WebUIServer:
     if _webui_server is None:
         # 从环境变量读取
         import os
+
         host = os.getenv("WEBUI_HOST", "127.0.0.1")
         port = int(os.getenv("WEBUI_PORT", "8001"))
         _webui_server = WebUIServer(host=host, port=port)

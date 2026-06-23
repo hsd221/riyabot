@@ -328,7 +328,7 @@ class ExpressionConfig(ConfigBase):
 
     expression_self_reflect: bool = False
     """是否启用自动表达优化"""
-    
+
     expression_manual_reflect: bool = False
     """是否启用手动表达优化"""
 
@@ -362,7 +362,6 @@ class ExpressionConfig(ConfigBase):
     当设置为 true 时，只有 checked=True 且 rejected=False 的表达方式才会被选择
     当设置为 false 时，保留旧的筛选原则（仅排除 rejected=True 的表达方式）
     """
-
 
     expression_auto_check_interval: int = 3600
     """
@@ -654,7 +653,7 @@ class TelemetryConfig(ConfigBase):
 @dataclass
 class WebUIConfig(ConfigBase):
     """WebUI配置类
-    
+
     注意: host 和 port 配置已移至环境变量 WEBUI_HOST 和 WEBUI_PORT
     """
 

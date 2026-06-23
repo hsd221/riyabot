@@ -38,10 +38,7 @@ def normalize_prompt_name(name: str) -> str:
 
     # 校验名称安全性
     if not SAFE_SEGMENT_PATTERN.match(name):
-        raise ValueError(
-            f"提示词名称 '{name}' 包含不安全字符，"
-            f"仅允许字母、数字、下划线、点和连字符"
-        )
+        raise ValueError(f"提示词名称 '{name}' 包含不安全字符，仅允许字母、数字、下划线、点和连字符")
 
     return name
 

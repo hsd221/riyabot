@@ -380,9 +380,7 @@ class EmojiManager:
         self._scan_task = None
 
         self.vlm = LLMRequest(model_set=model_config.model_task_config.vlm, request_type="emoji.see")
-        self.llm_emotion_judge = LLMRequest(
-            model_set=model_config.model_task_config.utils, request_type="emoji"
-        )  
+        self.llm_emotion_judge = LLMRequest(model_set=model_config.model_task_config.utils, request_type="emoji")
 
         self.emoji_num = 0
         self.emoji_num_max = global_config.emoji.max_reg_num

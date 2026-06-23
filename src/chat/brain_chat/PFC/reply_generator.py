@@ -12,6 +12,7 @@ from src.common.prompt_loader import load_prompt_section
 
 logger = get_logger("reply_generator")
 
+
 class ReplyGenerator:
     """回复生成器"""
 
@@ -31,7 +32,7 @@ class ReplyGenerator:
     def _get_personality_prompt(self) -> str:
         """获取个性提示信息"""
         prompt_personality = global_config.personality.personality
-        
+
         # 检查是否需要随机替换为状态
         if (
             global_config.personality.states
@@ -39,7 +40,7 @@ class ReplyGenerator:
             and random.random() < global_config.personality.state_probability
         ):
             prompt_personality = random.choice(global_config.personality.states)
-        
+
         bot_name = global_config.BOT_NICKNAME
         return f"你的名字是{bot_name},你{prompt_personality};"
 
@@ -135,7 +136,8 @@ class ReplyGenerator:
         # --- 选择并格式化 Prompt ---
         if action_type == "send_new_message":
             prompt = load_prompt_section(
-                "pfc_reply_generation", "send_new_message",
+                "pfc_reply_generation",
+                "send_new_message",
                 persona_text=persona_text,
                 goals_str=goals_str,
                 chat_history_text=chat_history_text,
@@ -144,7 +146,8 @@ class ReplyGenerator:
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_SEND_NEW_MESSAGE (追问生成)")
         elif action_type == "say_goodbye":  # 处理告别动作
             prompt = load_prompt_section(
-                "pfc_reply_generation", "farewell",
+                "pfc_reply_generation",
+                "farewell",
                 persona_text=persona_text,
                 goals_str=goals_str,
                 chat_history_text=chat_history_text,
@@ -153,7 +156,8 @@ class ReplyGenerator:
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_FAREWELL (告别语生成)")
         else:  # 默认使用 direct_reply 的 prompt (包括 'direct_reply' 或其他未明确处理的类型)
             prompt = load_prompt_section(
-                "pfc_reply_generation", "direct_reply",
+                "pfc_reply_generation",
+                "direct_reply",
                 persona_text=persona_text,
                 goals_str=goals_str,
                 chat_history_text=chat_history_text,

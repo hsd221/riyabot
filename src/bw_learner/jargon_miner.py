@@ -11,7 +11,7 @@ from src.common.database.database_model import Jargon
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import model_config, global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
+from src.chat.utils.prompt_builder import global_prompt_manager
 from src.bw_learner.learner_utils import (
     parse_chat_id_list,
     chat_id_list_contains,
@@ -71,72 +71,6 @@ def _is_single_char_jargon(content: str) -> bool:
 # 现在请输出：
 # """
 #     Prompt(prompt_str, "extract_jargon_prompt")
-
-
-def _init_inference_prompts() -> None:
-    """初始化含义推断相关的prompt"""
-    # Prompt 1: 基于raw_content和content推断
-    prompt1_str = """
-**词条内容**
-{content}
-**词条出现的上下文。其中的{bot_name}的发言内容是你自己的发言**
-{raw_content_list}
-{previous_meaning_section}
-
-请根据上下文，推断"{content}"这个词条的含义。
-- 如果这是一个黑话、俚语或网络用语，请推断其含义
-- 如果含义明确（常规词汇），也请说明
-- {bot_name} 的发言内容可能包含错误，请不要参考其发言内容
-- 如果上下文信息不足，无法推断含义，请设置 no_info 为 true
-{previous_meaning_instruction}
-
-以 JSON 格式输出：
-{{
-  "meaning": "详细含义说明（包含使用场景、来源、具体解释等）",
-  "no_info": false
-}}
-注意：如果信息不足无法推断，请设置 "no_info": true，此时 meaning 可以为空字符串
-"""
-    Prompt(prompt1_str, "jargon_inference_with_context")
-
-    # Prompt 2: 仅基于content推断
-    prompt2_str = """
-**词条内容**
-{content}
-
-请仅根据这个词条本身，推断其含义。
-- 如果这是一个黑话、俚语或网络用语，请推断其含义
-- 如果含义明确（常规词汇），也请说明
-
-以 JSON 格式输出：
-{{
-  "meaning": "详细含义说明（包含使用场景、来源、具体解释等）"
-}}
-"""
-    Prompt(prompt2_str, "jargon_inference_content_only")
-
-    # Prompt 3: 比较两个推断结果
-    prompt3_str = """
-**推断结果1（基于上下文）**
-{inference1}
-
-**推断结果2（仅基于词条）**
-{inference2}
-
-请比较这两个推断结果，判断它们是否相同或类似。
-- 如果两个推断结果的"含义"相同或类似，说明这个词条不是黑话（含义明确）
-- 如果两个推断结果有差异，说明这个词条可能是黑话（需要上下文才能理解）
-
-以 JSON 格式输出：
-{{
-  "is_similar": true/false,
-  "reason": "判断理由"
-}}
-"""
-    Prompt(prompt3_str, "jargon_compare_inference")
-
-
-_init_inference_prompts()
 
 
 def _should_infer_meaning(jargon_obj: Jargon) -> bool:
@@ -449,9 +383,7 @@ class JargonMiner:
             traceback.print_exc()
 
     async def process_extracted_entries(
-        self, 
-        entries: List[Dict[str, List[str]]],
-        person_name_filter: Optional[Callable[[str], bool]] = None
+        self, entries: List[Dict[str, List[str]]], person_name_filter: Optional[Callable[[str], bool]] = None
     ) -> None:
         """
         处理已提取的黑话条目（从 expression_learner 路由过来的）
@@ -468,14 +400,14 @@ class JargonMiner:
             merged_entries: OrderedDict[str, Dict[str, List[str]]] = OrderedDict()
             for entry in entries:
                 content_key = entry["content"]
-                
+
                 # 检查是否包含人物名称
                 # logger.info(f"process_extracted_entries 检查是否包含人物名称: {content_key}")
                 # logger.info(f"person_name_filter: {person_name_filter}")
                 if person_name_filter and person_name_filter(content_key):
                     logger.info(f"process_extracted_entries 跳过包含人物名称的黑话: {content_key}")
                     continue
-                
+
                 raw_list = entry.get("raw_content", []) or []
                 if content_key in merged_entries:
                     merged_entries[content_key]["raw_content"].extend(raw_list)

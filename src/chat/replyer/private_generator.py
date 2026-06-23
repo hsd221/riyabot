@@ -659,7 +659,7 @@ class PrivateReplyer:
             timestamp_mode="relative",
             read_mark=0.0,
             show_actions=True,
-            long_time_notice=True
+            long_time_notice=True,
         )
 
         message_list_before_short = get_raw_msg_before_timestamp_with_chat(
@@ -728,7 +728,13 @@ class PrivateReplyer:
             self._time_and_run_task(self.build_personality_prompt(), "personality_prompt"),
             self._time_and_run_task(
                 build_memory_retrieval_prompt(
-                    chat_talking_prompt_short, sender, target, self.chat_stream, think_level=1, unknown_words=unknown_words, question=question
+                    chat_talking_prompt_short,
+                    sender,
+                    target,
+                    self.chat_stream,
+                    think_level=1,
+                    unknown_words=unknown_words,
+                    question=question,
                 ),
                 "memory_retrieval",
             ),

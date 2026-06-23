@@ -278,7 +278,7 @@ class LLMRequest:
             raise RuntimeError("没有可用的模型可供选择。所有模型均已尝试失败。")
 
         strategy = self.model_for_task.selection_strategy.lower()
-        
+
         if strategy == "random":
             # 随机选择策略
             selected_model_name = random.choice(list(available_models.keys()))
@@ -295,7 +295,7 @@ class LLMRequest:
                 available_models,
                 key=lambda k: available_models[k][0] + available_models[k][1] * 300 + available_models[k][2] * 1000,
             )
-        
+
         model_info = model_config.get_model_info(selected_model_name)
         api_provider = model_config.get_provider(model_info.api_provider)
         force_new_client = self.request_type == "embedding"

@@ -55,9 +55,7 @@ class PromptManager:
         """
         self._reload_if_changed()
         if name not in self._prompts:
-            raise KeyError(
-                f"提示词 '{name}' 未找到，可用提示词: {list(self._prompts.keys())}"
-            )
+            raise KeyError(f"提示词 '{name}' 未找到，可用提示词: {list(self._prompts.keys())}")
         return self._prompts[name]
 
     def format_prompt(self, name: str, **kwargs) -> str:
@@ -77,9 +75,7 @@ class PromptManager:
         """检测缓存修订号是否变化，如有变化则自动重载所有提示词"""
         current = get_prompt_cache_revision()
         if current != self._cache_revision:
-            logger.info(
-                f"检测到提示词缓存修订号变化 ({self._cache_revision} → {current})，正在重载..."
-            )
+            logger.info(f"检测到提示词缓存修订号变化 ({self._cache_revision} → {current})，正在重载...")
             self.load_prompts()
 
 

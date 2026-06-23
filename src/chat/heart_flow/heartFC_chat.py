@@ -547,7 +547,9 @@ class HeartFChatting:
             )
             need_reply = new_message_count >= random.randint(2, 3) or time.time() - self.last_read_time > 90
             if need_reply:
-                logger.info(f"{self.log_prefix} 从思考到回复，共有{new_message_count}条新消息，使用引用回复，或者上次回复时间超过90秒")
+                logger.info(
+                    f"{self.log_prefix} 从思考到回复，共有{new_message_count}条新消息，使用引用回复，或者上次回复时间超过90秒"
+                )
 
         reply_text = ""
         first_replied = False
@@ -665,7 +667,7 @@ class HeartFChatting:
                                         cleaned_uw.append(s)
                             if cleaned_uw:
                                 unknown_words = cleaned_uw
-                        
+
                         # 从 Planner 的 action_data 中提取 quote_message 参数
                         qm = action_planner_info.action_data.get("quote")
                         if qm is not None:
@@ -676,7 +678,7 @@ class HeartFChatting:
                                 quote_message = qm.lower() in ("true", "1", "yes")
                             elif isinstance(qm, (int, float)):
                                 quote_message = bool(qm)
-                                
+
                         logger.info(f"{self.log_prefix} {qm}引用回复设置: {quote_message}")
 
                     success, llm_response = await generator_api.generate_reply(

@@ -253,7 +253,7 @@ async def test_memory_retrieval(
         包含测试结果的字典
     """
     print("\n" + "=" * 80)
-    print(f"[测试] 记忆检索测试")
+    print("[测试] 记忆检索测试")
     print(f"[问题] {question}")
     print("=" * 80)
     
@@ -284,7 +284,7 @@ async def test_memory_retrieval(
     
     timeout = global_config.memory.agent_timeout_seconds
     
-    print(f"\n[配置]")
+    print("\n[配置]")
     print(f"  最大迭代次数: {max_iterations}")
     print(f"  超时时间: {timeout}秒")
     print(f"  聊天ID: {chat_id}")
@@ -321,17 +321,17 @@ async def test_memory_retrieval(
     
     # 输出结果
     print(f"\n[检索完成] {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    print(f"\n[结果]")
+    print("\n[结果]")
     print(f"  是否找到答案: {'是' if found_answer else '否'}")
     if found_answer and answer:
         print(f"  答案: {answer}")
     else:
-        print(f"  答案: (未找到答案)")
+        print("  答案: (未找到答案)")
     print(f"  是否超时: {'是' if is_timeout else '否'}")
     print(f"  迭代次数: {len(thinking_steps)}")
     print(f"  总耗时: {elapsed_time:.2f}秒")
     
-    print(f"\n[Token使用情况]")
+    print("\n[Token使用情况]")
     print(f"  总请求数: {token_usage['request_count']}")
     print(f"  总Prompt Tokens: {token_usage['total_prompt_tokens']:,}")
     print(f"  总Completion Tokens: {token_usage['total_completion_tokens']:,}")
@@ -339,7 +339,7 @@ async def test_memory_retrieval(
     print(f"  总成本: ${token_usage['total_cost']:.6f}")
     
     if token_usage['model_usage']:
-        print(f"\n[按模型统计]")
+        print("\n[按模型统计]")
         for model_name, usage in token_usage['model_usage'].items():
             print(f"  {model_name}:")
             print(f"    请求数: {usage['request_count']}")
@@ -348,7 +348,7 @@ async def test_memory_retrieval(
             print(f"    总Tokens: {usage['total_tokens']:,}")
             print(f"    成本: ${usage['cost']:.6f}")
     
-    print(f"\n[迭代详情]")
+    print("\n[迭代详情]")
     print(format_thinking_steps(thinking_steps))
     
     print("\n" + "=" * 80)

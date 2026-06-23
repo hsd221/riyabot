@@ -169,7 +169,11 @@ class DefaultReplyer:
                 # 统一输出所有日志信息，使用try-except确保即使某个步骤出错也能输出
                 try:
                     # 1. 输出回复准备日志
-                    timing_log_str = f"回复准备: {'; '.join(timing_logs)}; {almost_zero_str} <0.1s" if timing_logs or almost_zero_str else "回复准备: 无计时信息"
+                    timing_log_str = (
+                        f"回复准备: {'; '.join(timing_logs)}; {almost_zero_str} <0.1s"
+                        if timing_logs or almost_zero_str
+                        else "回复准备: 无计时信息"
+                    )
                     logger.info(timing_log_str)
                     # 2. 输出Prompt日志
                     if global_config.debug.show_replyer_prompt:
@@ -228,7 +232,11 @@ class DefaultReplyer:
                 # 即使LLM生成失败，也尝试输出已收集的日志信息
                 try:
                     # 1. 输出回复准备日志
-                    timing_log_str = f"回复准备: {'; '.join(timing_logs)}; {almost_zero_str} <0.1s" if timing_logs or almost_zero_str else "回复准备: 无计时信息"
+                    timing_log_str = (
+                        f"回复准备: {'; '.join(timing_logs)}; {almost_zero_str} <0.1s"
+                        if timing_logs or almost_zero_str
+                        else "回复准备: 无计时信息"
+                    )
                     logger.info(timing_log_str)
                     # 2. 输出Prompt日志
                     if global_config.debug.show_replyer_prompt:
@@ -863,7 +871,13 @@ class DefaultReplyer:
             self._time_and_run_task(self.build_personality_prompt(), "personality_prompt"),
             self._time_and_run_task(
                 build_memory_retrieval_prompt(
-                    chat_talking_prompt_short, sender, target, self.chat_stream, think_level=think_level, unknown_words=unknown_words, question=question
+                    chat_talking_prompt_short,
+                    sender,
+                    target,
+                    self.chat_stream,
+                    think_level=think_level,
+                    unknown_words=unknown_words,
+                    question=question,
                 ),
                 "memory_retrieval",
             ),
@@ -937,7 +951,6 @@ class DefaultReplyer:
         else:
             reply_target_block = ""
 
-
         if message_list_before_now_long:
             latest_msgs = message_list_before_now_long[-int(global_config.chat.max_context_size) :]
             dialogue_prompt = build_readable_messages(
@@ -971,28 +984,33 @@ class DefaultReplyer:
                 # 兜底：即使 multiple_reply_style 配置异常也不影响正常回复
                 reply_style = global_config.personality.reply_style
 
-        return await global_prompt_manager.format_prompt(
-            prompt_name,
-            expression_habits_block=expression_habits_block,
-            tool_info_block=tool_info,
-            bot_name=global_config.bot.nickname,
-            knowledge_prompt=prompt_info,
-            # relation_info_block=relation_info,
-            extra_info_block=extra_info_block,
-            jargon_explanation=jargon_explanation,
-            identity=personality_prompt,
-            action_descriptions=actions_info,
-            sender_name=sender,
-            dialogue_prompt=dialogue_prompt,
-            time_block=time_block,
-            reply_target_block=reply_target_block,
-            reply_style=reply_style,
-            keywords_reaction_prompt=keywords_reaction_prompt,
-            moderation_prompt=moderation_prompt_block,
-            memory_retrieval=memory_retrieval,
-            chat_prompt=chat_prompt_block,
-            planner_reasoning=planner_reasoning,
-        ), selected_expressions, timing_logs, almost_zero_str
+        return (
+            await global_prompt_manager.format_prompt(
+                prompt_name,
+                expression_habits_block=expression_habits_block,
+                tool_info_block=tool_info,
+                bot_name=global_config.bot.nickname,
+                knowledge_prompt=prompt_info,
+                # relation_info_block=relation_info,
+                extra_info_block=extra_info_block,
+                jargon_explanation=jargon_explanation,
+                identity=personality_prompt,
+                action_descriptions=actions_info,
+                sender_name=sender,
+                dialogue_prompt=dialogue_prompt,
+                time_block=time_block,
+                reply_target_block=reply_target_block,
+                reply_style=reply_style,
+                keywords_reaction_prompt=keywords_reaction_prompt,
+                moderation_prompt=moderation_prompt_block,
+                memory_retrieval=memory_retrieval,
+                chat_prompt=chat_prompt_block,
+                planner_reasoning=planner_reasoning,
+            ),
+            selected_expressions,
+            timing_logs,
+            almost_zero_str,
+        )
 
     async def build_prompt_rewrite_context(
         self,
