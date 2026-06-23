@@ -120,6 +120,75 @@ def list_prompt_templates() -> list[str]:
     return sorted(p.stem for p in PROMPTS_ROOT.glob(f"*{PROMPT_EXTENSION}"))
 
 
+# 多段模板解析：用于合并 prompt 文件中的分节标记
+SECTION_MARKER = re.compile(r"^###SECTION:\s*(\S+)\s*$")
+END_SECTION_MARKER = "###END_SECTION###"
+
+
+def parse_prompt_sections(template: str) -> dict[str, str]:
+    """解析多段 .prompt 文件，提取所有命名段
+
+    段格式：
+        ###SECTION: section_name
+        {template text with {variables}}
+        ###END_SECTION###
+
+    Args:
+        template: 完整文件内容
+
+    Returns:
+        段名到模板文本的映射字典
+    """
+    sections: dict[str, str] = {}
+    current_name: str | None = None
+    current_lines: list[str] = []
+
+    for line in template.split("\n"):
+        m = SECTION_MARKER.match(line)
+        if m:
+            if current_name is not None:
+                sections[current_name] = "\n".join(current_lines).strip()
+            current_name = m.group(1)
+            current_lines = []
+            continue
+        if line.strip() == END_SECTION_MARKER:
+            if current_name is not None:
+                sections[current_name] = "\n".join(current_lines).strip()
+            current_name = None
+            current_lines = []
+            continue
+        if current_name is not None:
+            current_lines.append(line)
+
+    if current_name is not None:
+        sections[current_name] = "\n".join(current_lines).strip()
+
+    return sections
+
+
+def load_prompt_section(name: str, section: str, **kwargs) -> str:
+    """加载多段模板中的指定段并格式化
+
+    等价于 parse_prompt_sections(load_prompt_template(name))[section].format(**kwargs)
+
+    Args:
+        name: 提示词名称
+        section: 段名
+        **kwargs: 格式化参数
+
+    Returns:
+        格式化后的字符串
+
+    Raises:
+        KeyError: 指定段不存在
+    """
+    template = load_prompt_template(name)
+    sections = parse_prompt_sections(template)
+    if section not in sections:
+        raise KeyError(f"段 '{section}' 不存在于提示词 '{name}' 中（可用段: {list(sections.keys())}）")
+    return sections[section].format(**kwargs)
+
+
 def get_prompt_cache_revision() -> int:
     """获取当前缓存修订号
 
