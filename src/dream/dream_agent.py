@@ -77,7 +77,7 @@ def init_dream_prompts() -> None:
 请不要在没有先写出思考的情况下直接调用工具。
 只输出你的思考内容或工具调用结果，由系统负责真正执行工具调用。
 """,
-        name="dream_react_head_prompt",
+        name="dream_react_head",
     )
 
 
@@ -282,7 +282,7 @@ async def run_dream_agent_once(
     time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
     head_prompt = await global_prompt_manager.format_prompt(
-        "dream_react_head_prompt",
+        "dream_react_head",
         bot_name=bot_name,
         time_now=time_now,
         chat_id=chat_id,

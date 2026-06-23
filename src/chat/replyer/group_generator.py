@@ -32,10 +32,8 @@ from src.plugin_system.base.component_types import ActionInfo, EventType
 from src.plugin_system.apis import llm_api
 
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
-from src.memory_system.memory_retrieval import init_memory_retrieval_prompt, build_memory_retrieval_prompt
+from src.memory_system.memory_retrieval import build_memory_retrieval_prompt
 from src.bw_learner.jargon_explainer import explain_jargon_in_context, retrieve_concepts_with_jargon
-
-init_memory_retrieval_prompt()
 
 
 logger = get_logger("replyer")

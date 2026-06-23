@@ -83,7 +83,7 @@ def init_prompt() -> None:
 
 现在请你输出 JSON：
 """
-    Prompt(learn_style_prompt, "learn_style_prompt")
+    Prompt(learn_style_prompt, "learn_style")
 
 
 class ExpressionLearner:
@@ -123,7 +123,7 @@ class ExpressionLearner:
         random_msg_str: str = await build_anonymous_messages(random_msg, show_ids=True)
 
         prompt: str = await global_prompt_manager.format_prompt(
-            "learn_style_prompt",
+            "learn_style",
             bot_name=global_config.bot.nickname,
             chat_str=random_msg_str,
         )

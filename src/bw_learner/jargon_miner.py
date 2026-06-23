@@ -97,7 +97,7 @@ def _init_inference_prompts() -> None:
 }}
 注意：如果信息不足无法推断，请设置 "no_info": true，此时 meaning 可以为空字符串
 """
-    Prompt(prompt1_str, "jargon_inference_with_context_prompt")
+    Prompt(prompt1_str, "jargon_inference_with_context")
 
     # Prompt 2: 仅基于content推断
     prompt2_str = """
@@ -113,7 +113,7 @@ def _init_inference_prompts() -> None:
   "meaning": "详细含义说明（包含使用场景、来源、具体解释等）"
 }}
 """
-    Prompt(prompt2_str, "jargon_inference_content_only_prompt")
+    Prompt(prompt2_str, "jargon_inference_content_only")
 
     # Prompt 3: 比较两个推断结果
     prompt3_str = """
@@ -133,7 +133,7 @@ def _init_inference_prompts() -> None:
   "reason": "判断理由"
 }}
 """
-    Prompt(prompt3_str, "jargon_compare_inference_prompt")
+    Prompt(prompt3_str, "jargon_compare_inference")
 
 
 _init_inference_prompts()
@@ -291,7 +291,7 @@ class JargonMiner:
                 )
 
             prompt1 = await global_prompt_manager.format_prompt(
-                "jargon_inference_with_context_prompt",
+                "jargon_inference_with_context",
                 content=content,
                 bot_name=global_config.bot.nickname,
                 raw_content_list=raw_content_text,
@@ -332,7 +332,7 @@ class JargonMiner:
 
             # 步骤2: 仅基于content推断
             prompt2 = await global_prompt_manager.format_prompt(
-                "jargon_inference_content_only_prompt",
+                "jargon_inference_content_only",
                 content=content,
             )
 
@@ -375,7 +375,7 @@ class JargonMiner:
 
             # 步骤3: 比较两个推断结果
             prompt3 = await global_prompt_manager.format_prompt(
-                "jargon_compare_inference_prompt",
+                "jargon_compare_inference",
                 inference1=json.dumps(inference1, ensure_ascii=False),
                 inference2=json.dumps(inference2, ensure_ascii=False),
             )

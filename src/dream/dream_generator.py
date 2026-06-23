@@ -62,7 +62,7 @@ def init_dream_summary_prompt() -> None:
 {dream_styles}
 请直接输出梦境内容，不要添加其他说明：
 """,
-        name="dream_summary_prompt",
+        name="dream_summary",
     )
 
 
@@ -165,7 +165,7 @@ async def generate_dream_summary(
 
         # 使用 Prompt 管理器格式化梦境生成 prompt
         dream_prompt = await global_prompt_manager.format_prompt(
-            "dream_summary_prompt",
+            "dream_summary",
             chat_id=chat_id,
             total_iterations=total_iterations,
             time_cost=time_cost,
@@ -237,6 +237,3 @@ async def generate_dream_summary(
 
     except Exception as e:
         logger.error(f"[dream][梦境总结] 生成梦境总结失败: {e}", exc_info=True)
-
-
-init_dream_summary_prompt()

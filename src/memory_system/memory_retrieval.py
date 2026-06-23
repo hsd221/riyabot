@@ -86,7 +86,7 @@ def init_memory_retrieval_prompt():
 ```
 请只输出JSON对象，不要输出其他内容：
 """,
-        name="memory_retrieval_question_prompt",
+        name="question",
     )
 
     # 第二步：ReAct Agent prompt（使用function calling，要求先思考再行动）
@@ -109,7 +109,7 @@ def init_memory_retrieval_prompt():
 - 如果信息不足，则需要使用tool查询信息，你必须给出使用什么工具进行查询
 - 如果当前已收集的信息足够或信息不足确定无法找到答案，你必须调用found_answer工具结束查询
 """,
-        name="memory_retrieval_react_prompt_head",
+        name="react_head",
     )
 
     # 额外，如果最后一轮迭代：ReAct Agent prompt（使用function calling，要求先思考再行动）
@@ -133,7 +133,7 @@ def init_memory_retrieval_prompt():
 - **如果信息不足、无法确定、找不到相关信息，必须使用not_enough_info，不要使用found_answer**
 - 答案必须给出，格式为 found_answer(answer="...") 或 not_enough_info(reason="...")。
 """,
-        name="memory_retrieval_react_final_prompt",
+        name="final",
     )
 
 
@@ -321,7 +321,7 @@ async def _react_agent_solve_question(
             # 第一次构建，使用初始的collected_info（即initial_info）
             initial_collected_info = initial_info if initial_info else ""
             first_head_prompt = await global_prompt_manager.format_prompt(
-                "memory_retrieval_react_prompt_head",
+                "react_head",
                 bot_name=bot_name,
                 time_now=time_now,
                 question=question,
@@ -766,7 +766,7 @@ async def _react_agent_solve_question(
 
         # 执行最终评估
         evaluation_prompt = await global_prompt_manager.format_prompt(
-            "memory_retrieval_react_final_prompt",
+            "final",
             bot_name=bot_name,
             time_now=time_now,
             question=question,
@@ -1162,7 +1162,7 @@ async def build_memory_retrieval_prompt(
         else:
             # planner_question 关闭，使用旧模式：LLM 生成问题
             question_prompt = await global_prompt_manager.format_prompt(
-                "memory_retrieval_question_prompt",
+                "question",
                 bot_name=bot_name,
                 time_now=time_now,
                 chat_history=message,

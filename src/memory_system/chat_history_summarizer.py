@@ -60,7 +60,7 @@ def init_prompt():
   ...
 ]
 """
-    Prompt(topic_analysis_prompt, "hippo_topic_analysis_prompt")
+    Prompt(topic_analysis_prompt, "hippo_topic_analysis")
 
     topic_summary_prompt = """
 请基于以下话题，对聊天记录片段进行概括，提取以下信息：
@@ -88,7 +88,7 @@ def init_prompt():
 
 请直接返回JSON，不要包含其他内容。
 """
-    Prompt(topic_summary_prompt, "hippo_topic_summary_prompt")
+    Prompt(topic_summary_prompt, "hippo_topic_summary")
 
 
 @dataclass
@@ -705,7 +705,7 @@ class ChatHistorySummarizer:
         messages_block = "\n".join(numbered_lines)
 
         prompt = await global_prompt_manager.format_prompt(
-            "hippo_topic_analysis_prompt",
+            "hippo_topic_analysis",
             history_topics_block=history_topics_block,
             messages_block=messages_block,
         )
@@ -843,7 +843,7 @@ class ChatHistorySummarizer:
             tuple[bool, List[str], str, List[str]]: (是否成功, 关键词列表, 概括, 关键信息列表)
         """
         prompt = await global_prompt_manager.format_prompt(
-            "hippo_topic_summary_prompt",
+            "hippo_topic_summary",
             topic=topic,
             original_text=original_text,
         )

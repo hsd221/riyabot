@@ -33,7 +33,7 @@ def _init_explainer_prompts() -> None:
 - 输出格式要自然，适合作为回复参考信息
 请输出概括后的黑话解释（直接输出一段平文本，不要标题，无特殊格式或markdown格式，不要使用JSON格式）：
 """
-    Prompt(summarize_prompt_str, "jargon_explainer_summarize_prompt")
+    Prompt(summarize_prompt_str, "jargon_explainer_summarize")
 
 
 _init_explainer_prompts()
@@ -223,7 +223,7 @@ class JargonExplainer:
 
         # 使用LLM概括黑话解释
         summarize_prompt = await global_prompt_manager.format_prompt(
-            "jargon_explainer_summarize_prompt",
+            "jargon_explainer_summarize",
             chat_context=chat_context,
             jargon_explanations=explanations_text,
         )

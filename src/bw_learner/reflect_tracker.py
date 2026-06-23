@@ -59,7 +59,7 @@ class ReflectTracker:
 }}
 ```
 """
-        Prompt(judge_prompt, "reflect_judge_prompt")
+        Prompt(judge_prompt, "reflect_judge")
 
     async def trigger_tracker(self) -> bool:
         """
@@ -104,7 +104,7 @@ class ReflectTracker:
         # LLM Judge
         try:
             prompt = await global_prompt_manager.format_prompt(
-                "reflect_judge_prompt",
+                "reflect_judge",
                 situation=self.expression.situation,
                 style=self.expression.style,
                 context_block=context_block,

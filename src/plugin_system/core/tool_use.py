@@ -28,11 +28,8 @@ def init_tool_executor_prompt():
 
 If you need to use tools, please directly call the corresponding tool function. If you do not need to use any tool, simply output "No tool needed".
 """
-    Prompt(tool_executor_prompt, "tool_executor_prompt")
+    Prompt(tool_executor_prompt, "tool_executor")
 
-
-# 初始化提示词
-init_tool_executor_prompt()
 
 
 class ToolExecutor:
@@ -110,7 +107,7 @@ class ToolExecutor:
 
         # 构建工具调用提示词
         prompt = await global_prompt_manager.format_prompt(
-            "tool_executor_prompt",
+            "tool_executor",
             target_message=target_message,
             chat_history=chat_history,
             sender=sender,
