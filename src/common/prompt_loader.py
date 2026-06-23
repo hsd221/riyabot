@@ -1,0 +1,129 @@
+"""提示词文件加载器：文件I/O + LRU 缓存层
+
+提供从 prompts/ 目录加载 .prompt 文件的基础能力，
+支持缓存清除（热重载触发）和名称校验。
+"""
+
+import re
+from pathlib import Path
+from functools import lru_cache
+
+# 项目 prompts 目录根路径
+PROMPTS_ROOT = Path(__file__).resolve().parents[2] / "prompts"
+PROMPT_EXTENSION = ".prompt"
+
+# 安全名称模式：仅允许字母、数字、下划线、点、连字符
+SAFE_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+# 缓存修订号：每次 clear_prompt_cache() 调用时递增，
+# prompt_manager 通过轮询此值感知缓存变化并触发重载
+_PROMPT_CACHE_REVISION = 0
+
+
+def normalize_prompt_name(name: str) -> str:
+    """规范化提示词名称：去除扩展名后缀，校验安全性
+
+    Args:
+        name: 原始名称（可能包含 .prompt 后缀）
+
+    Returns:
+        规范化后的名称（无后缀）
+
+    Raises:
+        ValueError: 名称包含不安全字符
+    """
+    # 去除 .prompt 后缀（如果存在）
+    if name.endswith(PROMPT_EXTENSION):
+        name = name[: -len(PROMPT_EXTENSION)]
+
+    # 校验名称安全性
+    if not SAFE_SEGMENT_PATTERN.match(name):
+        raise ValueError(
+            f"提示词名称 '{name}' 包含不安全字符，"
+            f"仅允许字母、数字、下划线、点和连字符"
+        )
+
+    return name
+
+
+@lru_cache(maxsize=128)
+def _read_prompt_file(filepath: Path, cache_revision: int) -> str:
+    """读取提示词文件内容（LRU 缓存）
+
+    Args:
+        filepath: .prompt 文件的完整路径
+        cache_revision: 当前缓存修订号，用于缓存失效
+
+    Returns:
+        文件内容字符串
+    """
+    return filepath.read_text(encoding="utf-8")
+
+
+def load_prompt_template(name: str) -> str:
+    """加载指定名称的提示词模板
+
+    构建文件路径为 PROMPTS_ROOT / f"{name}.prompt"，读取并返回原始模板字符串。
+
+    Args:
+        name: 提示词名称（不含 .prompt 后缀）
+
+    Returns:
+        模板原始字符串
+
+    Raises:
+        ValueError: 名称校验失败
+        FileNotFoundError: 提示词文件不存在
+    """
+    safe_name = normalize_prompt_name(name)
+    filepath = PROMPTS_ROOT / f"{safe_name}{PROMPT_EXTENSION}"
+    return _read_prompt_file(filepath, _PROMPT_CACHE_REVISION)
+
+
+def load_prompt(name: str, **kwargs) -> str:
+    """加载并格式化提示词（便捷入口）
+
+    等价于 load_prompt_template(name).format(**kwargs)
+
+    Args:
+        name: 提示词名称
+        **kwargs: 格式化参数
+
+    Returns:
+        格式化后的字符串
+    """
+    template = load_prompt_template(name)
+    return template.format(**kwargs)
+
+
+def clear_prompt_cache() -> None:
+    """清除缓存并递增修订号
+
+    调用后：
+    1. _PROMPT_CACHE_REVISION 递增
+    2. _read_prompt_file 的 LRU 缓存被清空
+    3. prompt_manager 下次 get_prompt() 时会检测到修订号变化并重载
+    """
+    global _PROMPT_CACHE_REVISION
+    _PROMPT_CACHE_REVISION += 1
+    _read_prompt_file.cache_clear()
+
+
+def list_prompt_templates() -> list[str]:
+    """列出 prompts/ 目录下所有可用的提示词模板名称
+
+    Returns:
+        提示词名称列表（不含 .prompt 后缀，按名称排序）
+    """
+    if not PROMPTS_ROOT.exists():
+        return []
+    return sorted(p.stem for p in PROMPTS_ROOT.glob(f"*{PROMPT_EXTENSION}"))
+
+
+def get_prompt_cache_revision() -> int:
+    """获取当前缓存修订号
+
+    Returns:
+        当前修订号
+    """
+    return _PROMPT_CACHE_REVISION
