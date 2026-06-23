@@ -9,97 +9,12 @@ from .pfc_utils import get_items_from_json
 from .observation_info import ObservationInfo
 from .conversation_info import ConversationInfo
 from src.chat.utils.chat_message_builder import build_readable_messages
+from src.common.prompt_loader import load_prompt_section
 
 
 logger = get_logger("pfc_action_planner")
 
 
-# --- 定义 Prompt 模板 ---
-
-# Prompt(1): 首次回复或非连续回复时的决策 Prompt
-PROMPT_INITIAL_REPLY = """{persona_text}。现在你在参与一场QQ私聊，请根据以下【所有信息】审慎且灵活的决策下一步行动，可以回复，可以倾听，可以调取知识，甚至可以屏蔽对方：
-
-【当前对话目标】
-{goals_str}
-{knowledge_info_str}
-
-【最近行动历史概要】
-{action_history_summary}
-【上一次行动的详细情况和结果】
-{last_action_context}
-【时间和超时提示】
-{time_since_last_bot_message_info}{timeout_context}
-【最近的对话记录】(包括你已成功发送的消息 和 新收到的消息)
-{chat_history_text}
-
-------
-可选行动类型以及解释：
-fetch_knowledge: 需要调取知识或记忆，当需要专业知识或特定信息时选择，对方若提到你不太认识的人名或实体也可以尝试选择
-listening: 倾听对方发言，当你认为对方话才说到一半，发言明显未结束时选择
-direct_reply: 直接回复对方
-rethink_goal: 思考一个对话目标，当你觉得目前对话需要目标，或当前目标不再适用，或话题卡住时选择。注意私聊的环境是灵活的，有可能需要经常选择
-end_conversation: 结束对话，对方长时间没回复或者当你觉得对话告一段落时可以选择
-block_and_ignore: 更加极端的结束对话方式，直接结束对话并在一段时间内无视对方所有发言（屏蔽），当对话让你感到十分不适，或你遭到各类骚扰时选择
-
-请以JSON格式输出你的决策：
-{{
-    "action": "选择的行动类型 (必须是上面列表中的一个)",
-    "reason": "选择该行动的详细原因 (必须有解释你是如何根据“上一次行动结果”、“对话记录”和自身设定人设做出合理判断的)"
-}}
-
-注意：请严格按照JSON格式输出，不要包含任何其他内容。"""
-
-# Prompt(2): 上一次成功回复后，决定继续发言时的决策 Prompt
-PROMPT_FOLLOW_UP = """{persona_text}。现在你在参与一场QQ私聊，刚刚你已经回复了对方，请根据以下【所有信息】审慎且灵活的决策下一步行动，可以继续发送新消息，可以等待，可以倾听，可以调取知识，甚至可以屏蔽对方： 
-
-【当前对话目标】
-{goals_str}
-{knowledge_info_str}
-
-【最近行动历史概要】
-{action_history_summary}
-【上一次行动的详细情况和结果】
-{last_action_context}
-【时间和超时提示】
-{time_since_last_bot_message_info}{timeout_context} 
-【最近的对话记录】(包括你已成功发送的消息 和 新收到的消息)
-{chat_history_text}
-
-------
-可选行动类型以及解释：
-fetch_knowledge: 需要调取知识，当需要专业知识或特定信息时选择，对方若提到你不太认识的人名或实体也可以尝试选择
-wait: 暂时不说话，留给对方交互空间，等待对方回复（尤其是在你刚发言后、或上次发言因重复、发言过多被拒时、或不确定做什么时，这是不错的选择）
-listening: 倾听对方发言（虽然你刚发过言，但如果对方立刻回复且明显话没说完，可以选择这个）
-send_new_message: 发送一条新消息继续对话，允许适当的追问、补充、深入话题，或开启相关新话题。**但是避免在因重复被拒后立即使用，也不要在对方没有回复的情况下过多的“消息轰炸”或重复发言**
-rethink_goal: 思考一个对话目标，当你觉得目前对话需要目标，或当前目标不再适用，或话题卡住时选择。注意私聊的环境是灵活的，有可能需要经常选择
-end_conversation: 结束对话，对方长时间没回复或者当你觉得对话告一段落时可以选择
-block_and_ignore: 更加极端的结束对话方式，直接结束对话并在一段时间内无视对方所有发言（屏蔽），当对话让你感到十分不适，或你遭到各类骚扰时选择
-
-请以JSON格式输出你的决策：
-{{
-    "action": "选择的行动类型 (必须是上面列表中的一个)",
-    "reason": "选择该行动的详细原因 (必须有解释你是如何根据“上一次行动结果”、“对话记录”和自身设定人设做出合理判断的。请说明你为什么选择继续发言而不是等待，以及打算发送什么类型的新消息连续发言，必须记录已经发言了几次)"
-}}
-
-注意：请严格按照JSON格式输出，不要包含任何其他内容。"""
-
-# 新增：Prompt(3): 决定是否在结束对话前发送告别语
-PROMPT_END_DECISION = """{persona_text}。刚刚你决定结束一场 QQ 私聊。
-
-【你们之前的聊天记录】
-{chat_history_text}
-
-你觉得你们的对话已经完整结束了吗？有时候，在对话自然结束后再说点什么可能会有点奇怪，但有时也可能需要一条简短的消息来圆满结束。
-如果觉得确实有必要再发一条简短、自然、符合你人设的告别消息（比如 "好，下次再聊~" 或 "嗯，先这样吧"），就输出 "yes"。
-如果觉得当前状态下直接结束对话更好，没有必要再发消息，就输出 "no"。
-
-请以 JSON 格式输出你的选择：
-{{
-    "say_bye": "yes/no",
-    "reason": "选择 yes 或 no 的原因和内心想法 (简要说明)"
-}}
-
-注意：请严格按照 JSON 格式输出，不要包含任何其他内容。"""
 
 
 # ActionPlanner 类定义，顶格
@@ -383,25 +298,33 @@ class ActionPlanner:
                         last_action_context += f"- 该行动当前状态: {status}\n"
                         # self.last_successful_action_type = None # 非完成状态，清除记录
 
-        # --- 选择 Prompt ---
+        # --- 选择并格式化 Prompt ---
         if last_successful_reply_action in ["direct_reply", "send_new_message"]:
-            prompt_template = PROMPT_FOLLOW_UP
+            prompt = load_prompt_section(
+                "pfc_action_decision", "follow_up",
+                persona_text=persona_text,
+                goals_str=goals_str if goals_str.strip() else "- 目前没有明确对话目标，请考虑设定一个。",
+                action_history_summary=action_history_summary,
+                last_action_context=last_action_context,
+                time_since_last_bot_message_info=time_since_last_bot_message_info,
+                timeout_context=timeout_context,
+                chat_history_text=chat_history_text if chat_history_text.strip() else "还没有聊天记录。",
+                knowledge_info_str=knowledge_info_str,
+            )
             logger.debug(f"[私聊][{self.private_name}]使用 PROMPT_FOLLOW_UP (追问决策)")
         else:
-            prompt_template = PROMPT_INITIAL_REPLY
+            prompt = load_prompt_section(
+                "pfc_action_decision", "initial_reply",
+                persona_text=persona_text,
+                goals_str=goals_str if goals_str.strip() else "- 目前没有明确对话目标，请考虑设定一个。",
+                action_history_summary=action_history_summary,
+                last_action_context=last_action_context,
+                time_since_last_bot_message_info=time_since_last_bot_message_info,
+                timeout_context=timeout_context,
+                chat_history_text=chat_history_text if chat_history_text.strip() else "还没有聊天记录。",
+                knowledge_info_str=knowledge_info_str,
+            )
             logger.debug(f"[私聊][{self.private_name}]使用 PROMPT_INITIAL_REPLY (首次/非连续回复决策)")
-
-        # --- 格式化最终的 Prompt ---
-        prompt = prompt_template.format(
-            persona_text=persona_text,
-            goals_str=goals_str if goals_str.strip() else "- 目前没有明确对话目标，请考虑设定一个。",
-            action_history_summary=action_history_summary,
-            last_action_context=last_action_context,
-            time_since_last_bot_message_info=time_since_last_bot_message_info,
-            timeout_context=timeout_context,
-            chat_history_text=chat_history_text if chat_history_text.strip() else "还没有聊天记录。",
-            knowledge_info_str=knowledge_info_str,
-        )
 
         logger.debug(f"[私聊][{self.private_name}]发送到LLM的最终提示词:\n------\n{prompt}\n------")
         try:
@@ -424,10 +347,11 @@ class ActionPlanner:
             if initial_action == "end_conversation":
                 logger.info(f"[私聊][{self.private_name}]初步规划结束对话，进入告别决策...")
 
-                # 使用新的 PROMPT_END_DECISION
-                end_decision_prompt = PROMPT_END_DECISION.format(
-                    persona_text=persona_text,  # 复用之前的 persona_text
-                    chat_history_text=chat_history_text,  # 复用之前的 chat_history_text
+                # 使用 end_decision section
+                end_decision_prompt = load_prompt_section(
+                    "pfc_action_decision", "end_decision",
+                    persona_text=persona_text,
+                    chat_history_text=chat_history_text,
                 )
 
                 logger.debug(

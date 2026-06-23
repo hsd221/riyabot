@@ -1,5 +1,6 @@
 from typing import List, Tuple, TYPE_CHECKING
 from src.common.logger import get_module_logger
+from src.common.prompt_loader import load_prompt
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config
 import random
@@ -123,38 +124,7 @@ class GoalAnalyzer:
         for action in action_history_list:
             action_history_text += f"{action}\n"
 
-        prompt = f"""{persona_text}。现在你在参与一场QQ聊天，请分析以下聊天记录，并根据你的性格特征确定多个明确的对话目标。
-这些目标应该反映出对话的不同方面和意图。
-
-{action_history_text}
-当前对话目标：
-{goals_str}
-
-聊天记录：
-{chat_history_text}
-
-请分析当前对话并确定最适合的对话目标。你可以：
-1. 保持现有目标不变
-2. 修改现有目标
-3. 添加新目标
-4. 删除不再相关的目标
-5. 如果你想结束对话，请设置一个目标，目标goal为"结束对话"，原因reasoning为你希望结束对话
-
-请以JSON数组格式输出当前的所有对话目标，每个目标包含以下字段：
-1. goal: 对话目标（简短的一句话）
-2. reasoning: 对话原因，为什么设定这个目标（简要解释）
-
-输出格式示例：
-[
-{{
-    "goal": "回答用户关于Python编程的具体问题",
-    "reasoning": "用户提出了关于Python的技术问题，需要专业且准确的解答"
-}},
-{{
-    "goal": "回答用户关于python安装的具体问题",
-    "reasoning": "用户提出了关于Python的技术问题，需要专业且准确的解答"
-}}
-]"""
+        prompt = load_prompt("pfc_goal_analyzer", persona_text=persona_text, action_history_text=action_history_text, goals_str=goals_str, chat_history_text=chat_history_text)
 
         logger.debug(f"[私聊][{self.private_name}]发送到LLM的提示词: {prompt}")
         try:
@@ -250,24 +220,7 @@ class GoalAnalyzer:
         # ===> Persona 文本构建结束 <===
 
         # --- 修改 Prompt 字符串，使用 persona_text ---
-        prompt = f"""{persona_text}。现在你在参与一场QQ聊天，
-        当前对话目标：{goal}
-        产生该对话目标的原因：{reasoning}
-        
-        请分析以下聊天记录，并根据你的性格特征评估该目标是否已经达到，或者你是否希望停止该次对话。
-        聊天记录：
-        {chat_history_text}
-        请以JSON格式输出，包含以下字段：
-        1. goal_achieved: 对话目标是否已经达到（true/false）
-        2. stop_conversation: 是否希望停止该次对话（true/false）
-        3. reason: 为什么希望停止该次对话（简要解释）   
-
-输出格式示例：
-{{
-    "goal_achieved": true,
-    "stop_conversation": false,
-    "reason": "虽然目标已达成，但对话仍然有继续的价值"
-}}"""
+        prompt = load_prompt("pfc_goal_analyzer_assess", persona_text=persona_text, goal=goal, reasoning=reasoning, chat_history_text=chat_history_text)
 
         try:
             content, _ = await self.llm.generate_response_async(prompt)

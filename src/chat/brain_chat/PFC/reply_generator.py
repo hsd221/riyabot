@@ -8,79 +8,9 @@ from .reply_checker import ReplyChecker
 from .observation_info import ObservationInfo
 from .conversation_info import ConversationInfo
 from src.chat.utils.chat_message_builder import build_readable_messages
+from src.common.prompt_loader import load_prompt_section
 
 logger = get_logger("reply_generator")
-
-# --- 定义 Prompt 模板 ---
-
-# Prompt for direct_reply (首次回复)
-PROMPT_DIRECT_REPLY = """{persona_text}。现在你在参与一场QQ私聊，请根据以下信息生成一条回复：
-
-当前对话目标：{goals_str}
-
-{knowledge_info_str}
-
-最近的聊天记录：
-{chat_history_text}
-
-
-请根据上述信息，结合聊天记录，回复对方。该回复应该：
-1. 符合对话目标，以"你"的角度发言（不要自己与自己对话！）
-2. 符合你的性格特征和身份细节
-3. 通俗易懂，自然流畅，像正常聊天一样，简短（通常20字以内，除非特殊情况）
-4. 可以适当利用相关知识，但不要生硬引用
-5. 自然、得体，结合聊天记录逻辑合理，且没有重复表达同质内容
-
-请注意把握聊天内容，不要回复的太有条理，可以有个性。请分清"你"和对方说的话，不要把"你"说的话当做对方说的话，这是你自己说的话。
-可以回复得自然随意自然一些，就像真人一样，注意把握聊天内容，整体风格可以平和、简短，不要刻意突出自身学科背景，不要说你说过的话，可以简短，多简短都可以，但是避免冗长。
-请你注意不要输出多余内容(包括前后缀，冒号和引号，括号，表情等)，只输出回复内容。
-不要输出多余内容(包括前后缀，冒号和引号，括号，表情包，at或 @等 )。
-
-请直接输出回复内容，不需要任何额外格式。"""
-
-# Prompt for send_new_message (追问/补充)
-PROMPT_SEND_NEW_MESSAGE = """{persona_text}。现在你在参与一场QQ私聊，**刚刚你已经发送了一条或多条消息**，现在请根据以下信息再发一条新消息： 
-
-当前对话目标：{goals_str}
-
-{knowledge_info_str}
-
-最近的聊天记录：
-{chat_history_text}
-
-
-请根据上述信息，结合聊天记录，继续发一条新消息（例如对之前消息的补充，深入话题，或追问等等）。该消息应该： 
-1. 符合对话目标，以"你"的角度发言（不要自己与自己对话！）
-2. 符合你的性格特征和身份细节
-3. 通俗易懂，自然流畅，像正常聊天一样，简短（通常20字以内，除非特殊情况）
-4. 可以适当利用相关知识，但不要生硬引用
-5. 跟之前你发的消息自然的衔接，逻辑合理，且没有重复表达同质内容或部分重叠内容
-
-请注意把握聊天内容，不用太有条理，可以有个性。请分清"你"和对方说的话，不要把"你"说的话当做对方说的话，这是你自己说的话。
-这条消息可以自然随意自然一些，就像真人一样，注意把握聊天内容，整体风格可以平和、简短，不要刻意突出自身学科背景，不要说你说过的话，可以简短，多简短都可以，但是避免冗长。
-请你注意不要输出多余内容(包括前后缀，冒号和引号，括号，表情等)，只输出消息内容。
-不要输出多余内容(包括前后缀，冒号和引号，括号，表情包，at或 @等 )。
-
-请直接输出回复内容，不需要任何额外格式。"""
-
-# Prompt for say_goodbye (告别语生成)
-PROMPT_FAREWELL = """{persona_text}。你在参与一场 QQ 私聊，现在对话似乎已经结束，你决定再发一条最后的消息来圆满结束。
-
-最近的聊天记录：
-{chat_history_text}
-
-请根据上述信息，结合聊天记录，构思一条**简短、自然、符合你人设**的最后的消息。
-这条消息应该：
-1. 从你自己的角度发言。
-2. 符合你的性格特征和身份细节。
-3. 通俗易懂，自然流畅，通常很简短。
-4. 自然地为这场对话画上句号，避免开启新话题或显得冗长、刻意。
-
-请像真人一样随意自然，**简洁是关键**。
-不要输出多余内容（包括前后缀、冒号、引号、括号、表情包、at或@等）。
-
-请直接输出最终的告别消息内容，不需要任何额外格式。"""
-
 
 class ReplyGenerator:
     """回复生成器"""
@@ -202,24 +132,34 @@ class ReplyGenerator:
         # 构建 Persona 文本 (persona_text)
         persona_text = f"你的名字是{self.name}，{self.personality_info}。"
 
-        # --- 选择 Prompt ---
+        # --- 选择并格式化 Prompt ---
         if action_type == "send_new_message":
-            prompt_template = PROMPT_SEND_NEW_MESSAGE
+            prompt = load_prompt_section(
+                "pfc_reply_generation", "send_new_message",
+                persona_text=persona_text,
+                goals_str=goals_str,
+                chat_history_text=chat_history_text,
+                knowledge_info_str=knowledge_info_str,
+            )
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_SEND_NEW_MESSAGE (追问生成)")
         elif action_type == "say_goodbye":  # 处理告别动作
-            prompt_template = PROMPT_FAREWELL
+            prompt = load_prompt_section(
+                "pfc_reply_generation", "farewell",
+                persona_text=persona_text,
+                goals_str=goals_str,
+                chat_history_text=chat_history_text,
+                knowledge_info_str=knowledge_info_str,
+            )
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_FAREWELL (告别语生成)")
         else:  # 默认使用 direct_reply 的 prompt (包括 'direct_reply' 或其他未明确处理的类型)
-            prompt_template = PROMPT_DIRECT_REPLY
+            prompt = load_prompt_section(
+                "pfc_reply_generation", "direct_reply",
+                persona_text=persona_text,
+                goals_str=goals_str,
+                chat_history_text=chat_history_text,
+                knowledge_info_str=knowledge_info_str,
+            )
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_DIRECT_REPLY (首次/非连续回复生成)")
-
-        # --- 格式化最终的 Prompt ---
-        prompt = prompt_template.format(
-            persona_text=persona_text,
-            goals_str=goals_str,
-            chat_history_text=chat_history_text,
-            knowledge_info_str=knowledge_info_str,
-        )
 
         # --- 调用 LLM 生成 ---
         logger.debug(f"[私聊][{self.private_name}]发送到LLM的生成提示词:\n------\n{prompt}\n------")
