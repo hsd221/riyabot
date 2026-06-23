@@ -144,6 +144,28 @@ class PromptManager:
 global_prompt_manager = PromptManager()
 
 
+def init_external_prompts() -> int:
+    """从外部 .prompt 文件系统同步提示词到旧的 PromptManager 兼容层
+
+    调用后，global_prompt_manager 将包含所有外部化提示词的 Prompt 对象，
+    使现有代码中通过 global_prompt_manager.format_prompt() 的调用无需修改。
+
+    Returns:
+        成功同步的提示词数量
+    """
+    from src.common.prompt_manager import prompt_manager as new_pm
+
+    if not new_pm._loaded:
+        new_pm.load_prompts()
+    count = 0
+    for name, template in new_pm._prompts.items():
+        if name not in global_prompt_manager._prompts:
+            Prompt(template, name=name)
+            count += 1
+    logger.info(f"从外部文件同步了 {count} 个提示词到兼容层")
+    return count
+
+
 class Prompt(str):
     # 临时标记，作为类常量
     _TEMP_LEFT_BRACE = "__ESCAPED_LEFT_BRACE__"

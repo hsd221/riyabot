@@ -12,6 +12,7 @@ from src.chat.message_receive.chat_stream import get_chat_manager
 from src.config.config import global_config
 from src.chat.message_receive.bot import chat_bot
 from src.common.logger import get_logger
+from src.common.prompt_manager import prompt_manager
 from src.common.server import get_global_server, Server
 from src.chat.knowledge import lpmm_start_up
 from rich.traceback import install
@@ -81,6 +82,9 @@ class MainSystem:
     async def _init_components(self):
         """初始化其他组件"""
         init_start_time = time.time()
+
+        prompt_manager.load_prompts()
+        logger.info(f"已加载 {len(prompt_manager._prompts)} 个外部提示词模板")
 
         # 添加在线时间统计任务
         await async_task_manager.add_task(OnlineTimeRecordTask())
