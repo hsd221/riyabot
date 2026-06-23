@@ -32,15 +32,9 @@ from src.person_info.person_info import Person, is_person_known
 from src.plugin_system.base.component_types import ActionInfo, EventType
 from src.plugin_system.apis import llm_api
 
-from src.chat.replyer.prompt.lpmm_prompt import init_lpmm_prompt
-from src.chat.replyer.prompt.replyer_private_prompt import init_replyer_private_prompt
-from src.chat.replyer.prompt.rewrite_prompt import init_rewrite_prompt
 from src.memory_system.memory_retrieval import init_memory_retrieval_prompt, build_memory_retrieval_prompt
 from src.bw_learner.jargon_explainer import explain_jargon_in_context
 
-init_lpmm_prompt()
-init_replyer_private_prompt()
-init_rewrite_prompt()
 init_memory_retrieval_prompt()
 
 
@@ -938,8 +932,8 @@ class PrivateReplyer:
         chat_target_name = "对方"
         if self.chat_target_info:
             chat_target_name = self.chat_target_info.person_name or self.chat_target_info.user_nickname or "对方"
-        chat_target_1 = await global_prompt_manager.format_prompt("chat_target_private1", sender_name=chat_target_name)
-        chat_target_2 = await global_prompt_manager.format_prompt("chat_target_private2", sender_name=chat_target_name)
+        chat_target_1 = f"你正在和{chat_target_name}聊天，这是你们之前聊的内容："
+        chat_target_2 = f"和{chat_target_name}聊天"
 
         template_name = "default_expressor_prompt"
 

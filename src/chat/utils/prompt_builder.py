@@ -147,6 +147,9 @@ global_prompt_manager = PromptManager()
 def init_external_prompts() -> int:
     """从外部 .prompt 文件系统同步提示词到旧的 PromptManager 兼容层
 
+    支持分节文件（###SECTION: name / ###END_SECTION###）：每个分节作为独立 Prompt 注册，
+    使用分节名称。非分节文件使用文件名注册。
+
     调用后，global_prompt_manager 将包含所有外部化提示词的 Prompt 对象，
     使现有代码中通过 global_prompt_manager.format_prompt() 的调用无需修改。
 
@@ -154,12 +157,19 @@ def init_external_prompts() -> int:
         成功同步的提示词数量
     """
     from src.common.prompt_manager import prompt_manager as new_pm
+    from src.common.prompt_loader import parse_prompt_sections
 
     if not new_pm._loaded:
         new_pm.load_prompts()
     count = 0
     for name, template in new_pm._prompts.items():
-        if name not in global_prompt_manager._prompts:
+        sections = parse_prompt_sections(template)
+        if sections:
+            for section_name, section_template in sections.items():
+                if section_name not in global_prompt_manager._prompts:
+                    Prompt(section_template, name=section_name)
+                    count += 1
+        elif name not in global_prompt_manager._prompts:
             Prompt(template, name=name)
             count += 1
     logger.info(f"从外部文件同步了 {count} 个提示词到兼容层")

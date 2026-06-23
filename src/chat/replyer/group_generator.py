@@ -32,15 +32,9 @@ from src.plugin_system.base.component_types import ActionInfo, EventType
 from src.plugin_system.apis import llm_api
 
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
-from src.chat.replyer.prompt.lpmm_prompt import init_lpmm_prompt
-from src.chat.replyer.prompt.replyer_prompt import init_replyer_prompt
-from src.chat.replyer.prompt.rewrite_prompt import init_rewrite_prompt
 from src.memory_system.memory_retrieval import init_memory_retrieval_prompt, build_memory_retrieval_prompt
 from src.bw_learner.jargon_explainer import explain_jargon_in_context, retrieve_concepts_with_jargon
 
-init_lpmm_prompt()
-init_replyer_prompt()
-init_rewrite_prompt()
 init_memory_retrieval_prompt()
 
 
@@ -1070,8 +1064,8 @@ class DefaultReplyer:
         else:
             reply_target_block = ""
 
-        chat_target_1 = await global_prompt_manager.get_prompt_async("chat_target_group1")
-        chat_target_2 = await global_prompt_manager.get_prompt_async("chat_target_group2")
+        chat_target_1 = "你正在qq群里聊天，下面是群里正在聊的内容:"
+        chat_target_2 = "正在群里聊天"
 
         template_name = "default_expressor_prompt"
 
