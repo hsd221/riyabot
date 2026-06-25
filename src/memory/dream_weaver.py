@@ -297,7 +297,9 @@ class DreamWeaver:
 def _validate_insights(insights: list[Any]) -> list[dict[str, Any]]:
     """过滤并校验洞见列表
 
-    只保留包含 'insight' 键的有效条目。
+    保留满足以下条件的条目:
+      - 包含 'insight' 键且内容有实际文本（不只标点/空白）
+      - noise_sources（如有）是正整数列表
 
     Args:
         insights: 原始解析结果
@@ -307,6 +309,14 @@ def _validate_insights(insights: list[Any]) -> list[dict[str, Any]]:
     """
     valid: list[dict[str, Any]] = []
     for item in insights:
-        if isinstance(item, dict) and "insight" in item:
-            valid.append(item)
+        if not isinstance(item, dict) or "insight" not in item:
+            continue
+        insight_text = str(item.get("insight", "")).strip()
+        if not insight_text or not any(c.isalpha() for c in insight_text):
+            logger.debug(f"洞见语义校验失败: 无有效文本 | insight={insight_text!r}")
+            continue
+        sources = item.get("noise_sources", [])
+        if not isinstance(sources, list) or not all(isinstance(s, int) and s > 0 for s in sources):
+            item["noise_sources"] = []
+        valid.append(item)
     return valid

@@ -334,3 +334,4 @@ actionlint
 adapter/
 :memory:_write_ops.jsonl
 .omo/
+stress_results.json

@@ -152,10 +152,58 @@ class MemoryAtom:
 
 # ── 时间工具函数 ──────────────────────────────────────────────
 
+# 时间表示约定：
+#   - 内存层（dataclass / 计算）统一使用 Unix 时间戳 float
+#   - 持久层（Peewee ORM）使用 DateTimeField，通过 to_datetime() 转换
+#   - 避免混用 datetime.now() 和 time.time()
+
 
 def _now() -> float:
-    """获取当前时间戳"""
+    """获取当前 Unix 时间戳（float，秒）"""
     return datetime.now().timestamp()
+
+
+def to_timestamp(value: object) -> float:
+    """将多种时间表示统一转为 Unix 时间戳 float
+
+    兼容:
+      - datetime 对象（Peewee DateTimeField 返回值）
+      - float / int（原生时间戳）
+      - ISO 格式字符串（'2024-01-01T00:00:00'）
+      - None（返回当前时间）
+
+    Args:
+        value: 任意时间表示
+
+    Returns:
+        Unix 时间戳（float）
+    """
+    if value is None:
+        return _now()
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).timestamp()
+        except (ValueError, TypeError):
+            return _now()
+    return _now()
+
+
+def to_datetime(ts: float | None) -> datetime:
+    """将 Unix 时间戳（秒）转换为 datetime 对象
+
+    Args:
+        ts: Unix 时间戳，None 时返回当前时间
+
+    Returns:
+        datetime 对象
+    """
+    if ts is not None:
+        return datetime.fromtimestamp(ts)
+    return datetime.now()
 
 
 def days_since(timestamp: float, current_time: Optional[float] = None) -> float:

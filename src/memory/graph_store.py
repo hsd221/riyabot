@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from src.common.logger import get_logger
 from src.memory.schema import GraphEdge, GraphEntry, GraphNode, memory_db
+from src.memory.types import EntitySearchResult, NeighborResult
 
 logger = get_logger("memory.graph")
 
@@ -121,12 +122,14 @@ class GraphStore:
         self,
         label_pattern: str,
         node_type: Optional[str] = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         """按 label LIKE 模式搜索节点
 
         Args:
             label_pattern: SQL LIKE 模式（如 "%量子%"）
             node_type: 可选类型过滤
+            limit: 最大返回节点数（默认 100）
 
         Returns:
             list[dict]: 匹配的节点字典列表
@@ -137,7 +140,7 @@ class GraphStore:
                 conditions.append(GraphNode.node_type == node_type)
 
             with self.db:
-                query = GraphNode.select().where(*conditions)
+                query = GraphNode.select().where(*conditions).limit(limit)
                 return [self._node_to_dict(n) for n in query]
         except Exception as e:
             logger.error(
@@ -351,7 +354,7 @@ class GraphStore:
     # 图遍历操作
     # ------------------------------------------------------------------
 
-    def get_neighbors(self, node_id: str, depth: int = 1) -> list[dict]:
+    def get_neighbors(self, node_id: str, depth: int = 1) -> list[NeighborResult]:
         """BFS 遍历获取邻居节点
 
         Args:
@@ -359,14 +362,11 @@ class GraphStore:
             depth: 遍历深度，1 表示只获取直接邻居，2 表示获取两度连接
 
         Returns:
-            list[dict]: 邻居节点列表，每项包含：
-                - node: 节点数据字典
-                - edge_predicate: 到达该节点经过的边谓词
-                - depth: 距起始节点的距离
+            list[NeighborResult]: 邻居节点列表
         """
         try:
             visited: set[str] = {node_id}
-            results: list[dict[str, Any]] = []
+            results: list[NeighborResult] = []
             queue: list[tuple[str, str | None, int]] = [(node_id, None, 0)]
 
             while queue:
@@ -477,7 +477,7 @@ class GraphStore:
             )
             return []
 
-    def search_by_entity(self, entity_name: str, top_k: int = 10) -> list[dict]:
+    def search_by_entity(self, entity_name: str, top_k: int = 10) -> list[EntitySearchResult]:
         """模糊搜索实体节点，返回节点及其关联的边和三元组
 
         Args:
@@ -485,16 +485,13 @@ class GraphStore:
             top_k: 最大返回节点数
 
         Returns:
-            list[dict]: 匹配结果列表，每项包含：
-                - node: 节点字典
-                - edges: 节点关联边列表
-                - entries: 关联的三元组条目列表
+            list[EntitySearchResult]: 匹配结果列表
         """
         try:
             with self.db:
                 nodes = GraphNode.select().where(GraphNode.label ** f"%{entity_name}%").limit(top_k)
 
-                results: list[dict[str, Any]] = []
+                results: list[EntitySearchResult] = []
                 for node in nodes:
                     node_dict = self._node_to_dict(node)
                     sid = str(node.id)
@@ -576,6 +573,7 @@ class GraphStore:
         subject: Optional[str] = None,
         predicate: Optional[str] = None,
         obj: Optional[str] = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         """按 SPO 任意组合搜索三元组
 
@@ -583,6 +581,7 @@ class GraphStore:
             subject: 主语（LIKE 匹配）
             predicate: 谓词（精确匹配）
             obj: 宾语（LIKE 匹配）
+            limit: 最大返回条目数（默认 100）
 
         Returns:
             list[dict]: 匹配的三元组字典列表
@@ -598,9 +597,9 @@ class GraphStore:
 
             with self.db:
                 if conditions:
-                    query = GraphEntry.select().where(*conditions)
+                    query = GraphEntry.select().where(*conditions).limit(limit)
                 else:
-                    query = GraphEntry.select()
+                    query = GraphEntry.select().limit(limit)
                 return [self._entry_to_dict(e) for e in query]
         except Exception as e:
             logger.error(

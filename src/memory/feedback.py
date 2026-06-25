@@ -25,7 +25,7 @@ import time
 from typing import Any
 
 from src.common.logger import get_logger
-from src.memory.atom import MemoryAtom, AtomType, DecayType, reinforce_memory
+from src.memory.atom import MemoryAtom, AtomType, DecayType, reinforce_memory, to_timestamp
 from src.memory.store import MemoryStore
 
 logger = get_logger("memory.feedback")
@@ -214,26 +214,6 @@ class ReinforcementTracker:
 
     # ── 内部工具 ────────────────────────────────────────────────
 
-    @staticmethod
-    def _to_timestamp(value: Any) -> float:
-        """将多种时间表示统一转为 Unix 时间戳（float）
-
-        兼容 Peewee DateTimeField（返回 datetime）、
-        ISO 格式字符串、以及原始 float/int。
-        """
-        if value is None:
-            return time.time()
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, datetime.datetime):
-            return value.timestamp()
-        if isinstance(value, str):
-            try:
-                return datetime.datetime.fromisoformat(value).timestamp()
-            except (ValueError, TypeError):
-                return time.time()
-        return time.time()
-
     @classmethod
     def _dict_to_atom(cls, data: dict[str, Any]) -> MemoryAtom:
         """将 store.get_atom() 返回的 dict 转为 MemoryAtom dataclass
@@ -264,10 +244,10 @@ class ReinforcementTracker:
             importance=float(data.get("importance", 0.5)),
             confidence=float(data.get("confidence", 0.5)),
             weight=float(data.get("weight", 0.5)),
-            created_at=cls._to_timestamp(data.get("created_at")),
-            last_accessed_at=cls._to_timestamp(data.get("last_accessed_at")),
+            created_at=to_timestamp(data.get("created_at")),
+            last_accessed_at=to_timestamp(data.get("last_accessed_at")),
             last_reinforced_at=(
-                cls._to_timestamp(data["last_reinforced_at"]) if data.get("last_reinforced_at") is not None else None
+                to_timestamp(data["last_reinforced_at"]) if data.get("last_reinforced_at") is not None else None
             ),
             ttl_days=float(data.get("ttl_days", 7)),
             decay_type=DecayType(data.get("decay_type", "exponential")),

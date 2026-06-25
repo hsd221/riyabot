@@ -75,9 +75,15 @@ class Person:
         group_id: str = "",
         group_nick_name: str = "",
     ):
-        """注册新用户 — 桩实现，不做任何持久化"""
-        logger.debug(f"[STUB] register_person: {platform=}, {user_id=}, {nickname=}")
-        return cls(platform=platform, user_id=user_id, person_name=nickname or user_id)
+        """注册新用户 — 桩实现，入 known 集合但不做持久化"""
+        person = cls(platform=platform, user_id=user_id, person_name=nickname or user_id)
+        _KNOWN_PERSONS.add(person.person_id)
+        logger.debug(
+            "[STUB] register_person: %s (known_count=%d)",
+            person.person_id,
+            len(_KNOWN_PERSONS),
+        )
+        return person
 
     async def build_relationship(self, chat_content: str = "", info_type: str = "") -> str:
         """构建关系信息 — 桩实现"""
@@ -91,13 +97,23 @@ class Person:
         return f"Person(person_id={self.person_id}, platform={self.platform}, user_id={self.user_id})"
 
 
+_KNOWN_PERSONS: set[str] = set()
+
+
 def is_person_known(
     person_id: str | None = None,
     user_id: str | None = None,
     platform: str | None = None,
     person_name: str | None = None,
 ) -> bool:
-    """检查用户是否已知 — 桩实现，默认返回 True"""
+    """检查用户是否已知
+
+    桩实现：如果 person_id 已通过 register_person 注册则返回 True，
+    否则默认返回 True 保持向后兼容。
+    接入用户画像系统后替换为真实查询。
+    """
+    if person_id and person_id in _KNOWN_PERSONS:
+        return True
     return True
 
 

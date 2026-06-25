@@ -32,6 +32,7 @@ from src.memory.atom import (
     DecayType,
     get_fade_level,
     update_weight,
+    to_datetime,
 )
 from src.memory.graph_store import GraphStore
 from src.memory.store import MemoryStore
@@ -41,6 +42,7 @@ from src.memory.schema import (
     SemanticDetail as SemanticDetailModel,
     MemoryAtom as MemoryAtomModel,
 )
+from src.memory.types import AtomDict
 from src.memory.write_ops import WriteOpLogger, OpType, WriteOperation
 from src.memory.embedding_utils import generate_embedding, generate_query_embedding
 
@@ -73,7 +75,7 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def rank_atoms(atoms: list[dict], query_embedding: Optional[list[float]] = None) -> list[dict]:
+def rank_atoms(atoms: list[AtomDict], query_embedding: Optional[list[float]] = None) -> list[AtomDict]:
     """基于权重 + 可选相似度进行综合排序
 
     当提供 query_embedding 时，final_score = weight × cosine_similarity；
@@ -95,20 +97,6 @@ def rank_atoms(atoms: list[dict], query_embedding: Optional[list[float]] = None)
             similarity = 1.0
         atom["final_score"] = weight * similarity
     return sorted(atoms, key=lambda a: a["final_score"], reverse=True)
-
-
-def _to_datetime(ts: Optional[float]) -> _dt.datetime:
-    """将 Unix 时间戳（秒）转换为 datetime 对象
-
-    Args:
-        ts: Unix 时间戳，None 时返回当前时间
-
-    Returns:
-        datetime 对象
-    """
-    if ts is not None:
-        return _dt.datetime.fromtimestamp(ts)
-    return _dt.datetime.now()
 
 
 def _convert_decay_type(val: Any) -> str:
@@ -219,10 +207,10 @@ class PrivacyFilter:
 
     @staticmethod
     def filter_atoms(
-        atoms: list[dict],
+        atoms: list[AtomDict],
         target_scene: str,
         target_scope: str,
-    ) -> list[dict]:
+    ) -> list[AtomDict]:
         """按隐私级别过滤记忆原子
 
         Args:
@@ -234,7 +222,7 @@ class PrivacyFilter:
             过滤后的原子字典列表
         """
         total = len(atoms)
-        filtered: list[dict] = []
+        filtered: list[AtomDict] = []
         for atom in atoms:
             if PrivacyFilter._can_access(atom, target_scene, target_scope):
                 filtered.append(atom)
@@ -255,7 +243,7 @@ class PrivacyFilter:
         return filtered
 
     @staticmethod
-    def _can_access(atom: dict, target_scene: str, target_scope: str) -> bool:
+    def _can_access(atom: AtomDict, target_scene: str, target_scope: str) -> bool:
         """判断记忆原子在目标场景中是否可访问
 
         Args:
@@ -401,7 +389,7 @@ class MemoryWriter:
                 "sqlite",
                 atom_ids=[atom.atom_id],
                 payload={"atom": store_dict},
-            ) as op:
+            ):
                 await self.store.insert_atom(store_dict)
         except Exception as e:
             logger.error(f"写入记忆原子到 SQLite 失败: {atom.atom_id}, {e}")
@@ -427,7 +415,7 @@ class MemoryWriter:
                     OpType.INSERT_ATOM,
                     "qdrant",
                     atom_ids=[atom.atom_id],
-                ) as op:
+                ):
                     await self._upsert_qdrant(atom)
             except Exception as e:
                 logger.warning(f"Qdrant 写入失败（已写入 SQLite）: {atom.atom_id}, {e}")
@@ -476,7 +464,8 @@ class MemoryWriter:
                         OpType.BATCH_INSERT,
                         "sqlite",
                         atom_ids=[atom.atom_id],
-                    ) as op:
+                        payload={"atom": store_dict},
+                    ):
                         await self.store.insert_atom(store_dict)
                     atom_ids.append(atom.atom_id)
 
@@ -550,7 +539,7 @@ class MemoryWriter:
                     except (ValueError, TypeError):
                         continue
                 elif isinstance(value, (int, float)):
-                    value = _to_datetime(value)
+                    value = to_datetime(value)
             store_updates[key] = value
 
         try:
@@ -560,7 +549,7 @@ class MemoryWriter:
                 "sqlite",
                 atom_ids=[atom_id],
                 payload={"updates": store_updates},
-            ) as op:
+            ):
                 success = await self.store.update_atom(atom_id, store_updates)
                 if not success:
                     logger.warning(f"更新记忆原子返回 False: {atom_id}")
@@ -658,8 +647,8 @@ class MemoryWriter:
             "importance": atom.importance,
             "confidence": atom.confidence,
             "weight": atom.weight,
-            "created_at": _to_datetime(atom.created_at),
-            "last_accessed_at": _to_datetime(atom.last_accessed_at),
+            "created_at": to_datetime(atom.created_at),
+            "last_accessed_at": to_datetime(atom.last_accessed_at),
             "ttl_days": int(atom.ttl_days),
             "decay_type": _convert_decay_type(atom.decay_type),
             "reinforcement_count": atom.reinforcement_count,
@@ -679,7 +668,7 @@ class MemoryWriter:
 
         # last_reinforced_at: 有值则转换，无值让 store 用默认值
         if atom.last_reinforced_at is not None:
-            data["last_reinforced_at"] = _to_datetime(atom.last_reinforced_at)
+            data["last_reinforced_at"] = to_datetime(atom.last_reinforced_at)
 
         return data
 
@@ -748,7 +737,7 @@ class MemoryWriter:
                     id=atom_id,
                     defaults={
                         "atom": atom_id,
-                        "event_time": (_to_datetime(detail.event_time) if detail.event_time else None),
+                        "event_time": (to_datetime(detail.event_time) if detail.event_time else None),
                         "participants": (
                             json.dumps(detail.participants, ensure_ascii=False) if detail.participants else None
                         ),
@@ -1564,7 +1553,7 @@ class MemoryRetriever:
             # 另一场景
             other_scene = "private_chat" if target_scene == "group_chat" else "group_chat"
 
-            cross_candidates: list[dict] = []
+            cross_candidates: list[AtomDict] = []
 
             # 1. 从另一场景检索记忆
             other_atoms = await self.retrieve_by_scene(
@@ -1587,7 +1576,7 @@ class MemoryRetriever:
 
             # 3. 按 atom_id 去重
             seen: set[str] = set()
-            unique: list[dict] = []
+            unique: list[AtomDict] = []
             for atom in cross_candidates:
                 aid = atom.get("atom_id", "")
                 if aid and aid not in seen:
@@ -1730,7 +1719,7 @@ class MemoryRetriever:
         return weight * similarity
 
     @staticmethod
-    def _format_atoms_for_prompt(atoms: list[dict]) -> str:
+    def _format_atoms_for_prompt(atoms: list[AtomDict]) -> str:
         """将检索结果格式化为 LLM prompt 用的文本块
 
         每条记忆占一行，格式: [记忆{N}][{褪色等级}] {内容}
