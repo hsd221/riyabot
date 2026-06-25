@@ -403,7 +403,8 @@ class MemoryWriter:
                 payload={"atom": store_dict},
             ) as op:
                 await self.store.insert_atom(store_dict)
-                self.op_logger.mark_completed(op.op_id)
+                if self.op_logger:
+                            self.op_logger.mark_completed(op.op_id)
         except Exception as e:
             logger.error(f"写入记忆原子到 SQLite 失败: {atom.atom_id}, {e}")
             raise
@@ -430,7 +431,8 @@ class MemoryWriter:
                     atom_ids=[atom.atom_id],
                 ) as op:
                     await self._upsert_qdrant(atom)
-                    self.op_logger.mark_completed(op.op_id)
+                    if self.op_logger:
+                            self.op_logger.mark_completed(op.op_id)
             except Exception as e:
                 logger.warning(f"Qdrant 写入失败（已写入 SQLite）: {atom.atom_id}, {e}")
 
@@ -480,7 +482,8 @@ class MemoryWriter:
                         atom_ids=[atom.atom_id],
                     ) as op:
                         await self.store.insert_atom(store_dict)
-                        self.op_logger.mark_completed(op.op_id)
+                        if self.op_logger:
+                            self.op_logger.mark_completed(op.op_id)
                     atom_ids.append(atom.atom_id)
 
                     # 生成 embedding（如果尚未设置）
@@ -566,7 +569,8 @@ class MemoryWriter:
             ) as op:
                 success = await self.store.update_atom(atom_id, store_updates)
                 if success:
-                    self.op_logger.mark_completed(op.op_id)
+                    if self.op_logger:
+                            self.op_logger.mark_completed(op.op_id)
                 else:
                     logger.warning(f"更新记忆原子返回 False: {atom_id}")
         except Exception as e:

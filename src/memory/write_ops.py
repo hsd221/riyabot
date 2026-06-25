@@ -672,17 +672,20 @@ class WriteOperation:
 
     async def __aenter__(self) -> WriteOp:
         """进入上下文：记录操作并标记为进行中"""
-        self.logger.log_op(self.op)
-        self.logger.mark_started(self.op.op_id)
+        if self.logger is not None:
+            self.logger.log_op(self.op)
+            self.logger.mark_started(self.op.op_id)
         return self.op
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         """退出上下文：根据异常情况标记完成或失败"""
-        if exc_type is None:
-            self.logger.mark_completed(self.op.op_id)
-        else:
-            error_msg = f"{exc_type.__name__}: {exc_val}" if exc_val else str(exc_type)
-            self.logger.mark_failed(self.op.op_id, error_msg)
+        if self.logger is not None:
+            if exc_type is None:
+                self.logger.mark_completed(self.op.op_id)
+            else:
+                error_msg = f"{exc_type.__name__}: {exc_val}" if exc_val else str(exc_type)
+                self.logger.mark_failed(self.op.op_id, error_msg)
+        if exc_type is not None:
             return False  # 不吞异常，继续向上传播
         return True
 
