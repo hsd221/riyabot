@@ -281,6 +281,34 @@ class MemoryConfig(ConfigBase):
     - False: 沿用旧模式，使用 LLM 生成问题
     """
 
+    # ------------------------------------------------------------------
+    # 存储配置（可通过 bot_config.toml [memory] 段覆盖 MemoryStoreConfig 默认值）
+    # ------------------------------------------------------------------
+
+    sqlite_path: str = "data/memory.db"
+    """SQLite 数据库文件路径"""
+
+    qdrant_url: str = ""
+    """Qdrant 服务器 URL，为空字符串时使用本地嵌入模式"""
+
+    qdrant_api_key: Optional[str] = field(default=None, repr=False)
+    """Qdrant API 密钥（可选，空字符串等价于 None）"""
+
+    qdrant_local_path: str = "data/qdrant"
+    """Qdrant 本地模式数据目录"""
+
+    embedding_dimension: int = 1024
+    """嵌入向量维度，应与 LLM 的 embedding 模型输出维度一致"""
+
+    collection_name_atoms: str = "memory_atoms"
+    """记忆原子 Qdrant 集合名称"""
+
+    collection_name_graph: str = "graph_entries"
+    """图条目 Qdrant 集合名称"""
+
+    vector_batch_size: int = 100
+    """向量批量写入大小"""
+
     def __post_init__(self):
         """验证配置值"""
         if self.max_agent_iterations < 1:

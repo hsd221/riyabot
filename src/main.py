@@ -123,8 +123,16 @@ class MainSystem:
         try:
             from src.memory import MemoryStore, MemoryStoreConfig
 
+            mc = global_config.memory
             memory_config = MemoryStoreConfig(
-                sqlite_path="data/memory.db",
+                sqlite_path=mc.sqlite_path,
+                qdrant_url=mc.qdrant_url,
+                qdrant_api_key=mc.qdrant_api_key or None,
+                qdrant_local_path=mc.qdrant_local_path,
+                embedding_dimension=mc.embedding_dimension,
+                collection_name_atoms=mc.collection_name_atoms,
+                collection_name_graph=mc.collection_name_graph,
+                vector_batch_size=mc.vector_batch_size,
             )
             store = MemoryStore(memory_config)
             await store.initialize()
@@ -140,11 +148,24 @@ class MainSystem:
             except Exception as e:
                 logger.warning(f"记忆遗忘扫描任务注册失败: {e}")
 
+            # 创建写操作日志记录器（供编码管线和一致性协调任务共享）
+            memory_op_logger = None
+            try:
+                from src.memory.write_ops import WriteOpLogger
+
+                memory_op_logger = WriteOpLogger(
+                    db_path=memory_config.sqlite_path,
+                    max_entries=5000,
+                )
+                logger.info("记忆写操作日志记录器已初始化")
+            except Exception as e:
+                logger.warning(f"记忆写操作日志记录器初始化失败: {e}")
+
             # 启动编码管线（连接 Layer 2 → Layer 3）
             try:
                 from src.memory.encoding_pipeline import EncodingPipeline, EncodingTask
 
-                pipeline = EncodingPipeline(store)
+                pipeline = EncodingPipeline(store, op_logger=memory_op_logger)
                 await async_task_manager.add_task(EncodingTask(pipeline, interval=300))
                 logger.info("编码管线已注册（300 秒间隔）")
             except Exception as e:
@@ -169,6 +190,23 @@ class MainSystem:
                 logger.info(f"梦境维护任务已注册（{dream_config.interval_minutes} 分钟间隔）")
             except Exception as e:
                 logger.warning(f"梦境维护任务注册失败: {e}")
+
+            # 启动双写一致性协调任务
+            if memory_op_logger is not None:
+                try:
+                    from src.memory.reconciliation import ReconciliationTask
+
+                    recon_task = ReconciliationTask(
+                        store=store,
+                        op_logger=memory_op_logger,
+                        interval=120,
+                    )
+                    await async_task_manager.add_task(recon_task)
+                    logger.info("双写一致性协调任务已注册（120 秒间隔）")
+                except Exception as e:
+                    logger.warning(f"双写一致性协调任务注册失败: {e}")
+            else:
+                logger.warning("写操作日志记录器不可用，跳过双写一致性协调任务")
         except Exception as e:
             logger.warning(f"记忆存储初始化失败（不影响主系统运行）: {e}")
 
