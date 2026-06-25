@@ -1,11 +1,11 @@
 """
-Atom-to-atom association network — explicit association edges between memory atoms.
+原子到原子关联网络 — 记忆原子之间的显式关联边。
 
-Creates and manages direct edges between memory atoms for:
-- CO_OCCURRENCE: atoms sharing >= 2 entities in temporal proximity
-- CAUSAL: atom where atom_a entities are contained in atom_b entities
-- SEQUENTIAL: atoms from same stream_id within 60 seconds
-- DREAM_DISCOVERED: discovered by the Dream Weaver agent
+创建和管理记忆原子之间的直接关联边，用于：
+- CO_OCCURRENCE：在时间上接近且共享 >= 2 个实体的原子
+- CAUSAL：atom_a 的实体被包含在 atom_b 的实体中的原子对
+- SEQUENTIAL：60 秒内来自同一 stream_id 的原子
+- DREAM_DISCOVERED：由 Dream Weaver 代理发现的关联
 """
 
 import datetime
@@ -18,9 +18,12 @@ from src.memory.schema import AtomAssociationModel, memory_db
 
 logger = get_logger("memory.association")
 
+# 关联权重增量强化系数（每次 evidence 累加时的增长速率）
+_WEIGHT_GROWTH_RATE: float = 0.1
+
 
 class AssociationType(str, Enum):
-    """Types of atom-to-atom associations."""
+    """原子到原子关联的类型。"""
 
     CO_OCCURRENCE = "co_occurrence"
     CAUSAL = "causal"
@@ -30,15 +33,15 @@ class AssociationType(str, Enum):
 
 @dataclass
 class AtomAssociation:
-    """Association between two memory atoms.
+    """两个记忆原子之间的关联。
 
-    Attributes:
-        atom_a_id: First atom ID (lexicographically smaller)
-        atom_b_id: Second atom ID (lexicographically larger)
-        association_type: Type of association
-        weight: Association strength 0-1
-        evidence_count: How many times this association has been reinforced
-        created_at: When the association was first created
+    属性：
+        atom_a_id：第一个原子 ID（字典序较小）
+        atom_b_id：第二个原子 ID（字典序较大）
+        association_type：关联类型
+        weight：关联强度 0-1
+        evidence_count：该关联被强化的次数
+        created_at：关联首次创建的时间
     """
 
     atom_a_id: str
@@ -50,20 +53,20 @@ class AtomAssociation:
 
 
 class AtomAssociationStore:
-    """Store for atom-to-atom association edges.
+    """原子到原子关联边的存储。
 
-    Provides CRUD, rules-based batch building, chain traversal (BFS),
-    and weak-edge pruning. All operations use the shared memory.db.
+    提供 CRUD、基于规则的批量构建、链遍历（BFS）、
+    以及弱边清理功能。所有操作使用共享的 memory.db。
     """
 
     def __init__(self) -> None:
         self.db = memory_db
-        # Auto-create table (idempotent)
+        # 自动创建表（幂等）
         with self.db:
             self.db.create_tables([AtomAssociationModel], safe=True)
 
     # ------------------------------------------------------------------
-    # CRUD
+    # CRUD 操作
     # ------------------------------------------------------------------
 
     def add_association(
@@ -73,10 +76,9 @@ class AtomAssociationStore:
         assoc_type: AssociationType,
         weight: float,
     ) -> None:
-        """Upsert: create or increment evidence_count + boost weight.
+        """Upsert：创建或增加 evidence_count 并提升权重。
 
-        Atom IDs are normalized by lexicographic order so that
-        (a, b) and (b, a) map to the same row.
+        原子 ID 通过字典序归一化，确保 (a, b) 和 (b, a) 映射到同一行。
         """
         if atom_a_id > atom_b_id:
             atom_a_id, atom_b_id = atom_b_id, atom_a_id
@@ -90,7 +92,7 @@ class AtomAssociationStore:
                 )
                 if existing:
                     existing.evidence_count += 1
-                    existing.weight = existing.weight + (1.0 - existing.weight) * 0.1
+                    existing.weight = existing.weight + (1.0 - existing.weight) * _WEIGHT_GROWTH_RATE
                     existing.save()
                 else:
                     AtomAssociationModel.create(
@@ -104,7 +106,7 @@ class AtomAssociationStore:
             logger.error("添加关联失败: %s <-> %s: %s", atom_a_id, atom_b_id, e)
 
     def get_associations(self, atom_id: str) -> list[dict[str, Any]]:
-        """Return all associations for a given atom (both directions)."""
+        """返回指定原子的所有关联（双向）。"""
         try:
             with self.db:
                 query = AtomAssociationModel.select().where(
@@ -121,7 +123,7 @@ class AtomAssociationStore:
         atom_b_id: str,
         assoc_type: AssociationType,
     ) -> bool:
-        """Delete a specific association."""
+        """删除指定的关联。"""
         if atom_a_id > atom_b_id:
             atom_a_id, atom_b_id = atom_b_id, atom_a_id
         try:
@@ -141,7 +143,7 @@ class AtomAssociationStore:
             return False
 
     # ------------------------------------------------------------------
-    # Chain traversal (BFS)
+    # 链遍历（BFS）
     # ------------------------------------------------------------------
 
     def get_chain(
@@ -149,10 +151,10 @@ class AtomAssociationStore:
         atom_id: str,
         max_depth: int = 2,
     ) -> list[dict[str, Any]]:
-        """BFS walk along associations, return ordered related atoms.
+        """沿关联进行 BFS 遍历，返回排序后的相关原子。
 
-        Returns:
-            list[dict] — each with keys: atom_id, association_type, weight, depth
+        返回：
+            list[dict] — 每个字典包含键：atom_id、association_type、weight、depth
         """
         try:
             visited: set[str] = {atom_id}
@@ -190,7 +192,7 @@ class AtomAssociationStore:
             return []
 
     # ------------------------------------------------------------------
-    # Rules-based batch builder
+    # 基于规则的批量构建
     # ------------------------------------------------------------------
 
     def build_from_batch(
@@ -198,25 +200,25 @@ class AtomAssociationStore:
         atoms: list[Any],
         stream_map: Optional[dict[str, str]] = None,
     ) -> int:
-        """Rules-based association builder for newly written atoms.
+        """基于规则的关联构建器，用于新写入的原子。
 
-        Rules applied (in order for each unordered pair):
-        1. CO_OCCURRENCE — atoms sharing >= 2 entities:
-           weight = entity_jaccard * 0.7
-        2. CAUSAL — entity containment (one atom's entities all
-           appear in the other's, and sets differ):
-           weight = 0.6
-        3. SEQUENTIAL — same stream_id within 60 seconds:
-           weight = 1.0 - (time_gap / 60)
+        应用的规则（对每个无序对按顺序检查）：
+        1. CO_OCCURRENCE — 共享 >= 2 个实体的原子：
+           权重 = entity_jaccard * 0.7
+        2. CAUSAL — 实体包含关系（一个原子的所有实体都出现在
+           另一个中，且集合不同）：
+           权重 = 0.6
+        3. SEQUENTIAL — 60 秒内同一 stream_id：
+           权重 = 1.0 - (time_gap / 60)
 
-        Args:
-            atoms: list of MemoryAtom dataclass objects (or any duck-typed
-                   objects with .atom_id, .entities, .created_at attrs).
-            stream_map: optional dict mapping atom_id -> stream_id for
-                        sequential detection.
+        参数：
+            atoms: MemoryAtom 数据类对象列表（或任何具有 .atom_id、
+                   .entities、.created_at 属性的鸭子类型对象）
+            stream_map: 可选的 dict，将 atom_id 映射到 stream_id，
+                        用于顺序检测
 
-        Returns:
-            Number of associations created.
+        返回：
+            创建的关联数量
         """
         count = 0
         n = len(atoms)
@@ -228,7 +230,7 @@ class AtomAssociationStore:
                 set_a = set(a.entities) if a.entities else set()
                 set_b = set(b.entities) if b.entities else set()
 
-                # -- CO_OCCURRENCE --
+                # -- 共现（CO_OCCURRENCE）--
                 if len(set_a) >= 2 and len(set_b) >= 2:
                     common = set_a & set_b
                     if len(common) >= 2:
@@ -242,7 +244,7 @@ class AtomAssociationStore:
                         )
                         count += 1
 
-                # -- CAUSAL: entity containment --
+                # -- 因果（CAUSAL）：实体包含 --
                 if set_a and set_b and set_a != set_b:
                     if set_a.issubset(set_b):
                         self.add_association(
@@ -261,7 +263,7 @@ class AtomAssociationStore:
                         )
                         count += 1
 
-                # -- SEQUENTIAL: same stream within 60s --
+                # -- 顺序（SEQUENTIAL）：60s 内同一流 --
                 if stream_map:
                     a_stream = stream_map.get(a.atom_id)
                     b_stream = stream_map.get(b.atom_id)
@@ -286,17 +288,17 @@ class AtomAssociationStore:
         return count
 
     # ------------------------------------------------------------------
-    # Maintenance
+    # 维护
     # ------------------------------------------------------------------
 
     def prune_weak(self, threshold: float = 0.1) -> int:
-        """Remove all associations below a weight threshold.
+        """移除权重低于阈值的所有关联。
 
-        Args:
-            threshold: minimum weight to keep (default 0.1).
+        参数：
+            threshold：保留的最低权重（默认 0.1）。
 
-        Returns:
-            Number of deleted rows.
+        返回：
+            删除的行数。
         """
         try:
             with self.db:
@@ -309,7 +311,7 @@ class AtomAssociationStore:
             return 0
 
     def count(self) -> int:
-        """Return total number of associations in the store."""
+        """返回存储中的关联总数。"""
         try:
             with self.db:
                 return AtomAssociationModel.select().count()
@@ -318,7 +320,7 @@ class AtomAssociationStore:
             return 0
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # 内部辅助方法
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -335,9 +337,9 @@ class AtomAssociationStore:
 
     @staticmethod
     def _resolve_ts(ts: Any) -> Optional[float]:
-        """Normalise a timestamp to float (seconds since epoch).
+        """将时间戳归一化为 float（自 epoch 以来的秒数）。
 
-        Accepts float, int, or datetime.
+        接受 float、int 或 datetime 类型。
         """
         if ts is None:
             return None

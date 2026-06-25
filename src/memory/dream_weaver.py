@@ -21,10 +21,14 @@ from src.memory.store import MemoryStore
 
 logger = get_logger("memory.weaver")
 
+# 单次编织最少需要素材条目数（不足则跳过）
+_MIN_WEAVE_ENTRIES: int = 10
 # 单次编织最多处理的噪声条目数
 _MAX_WEAVE_ENTRIES: int = 20
 # 提示词中单条噪声内容的最大字符数，用于控制总提示词长度
 _MAX_CONTENT_CHARS: int = 80
+# 梦呓洞见默认置信度
+_DEFAULT_INSIGHT_CONFIDENCE: float = 0.4
 
 
 class DreamWeaver:
@@ -78,10 +82,11 @@ class DreamWeaver:
             logger.debug("梦呓编织: 无可用噪声素材，跳过")
             return []
 
-        if len(entries) < 10:
+        if len(entries) < _MIN_WEAVE_ENTRIES:
             logger.info(
-                "梦呓编织: 噪声素材不足 (%d < 10)，跳过",
+                "梦呓编织: 噪声素材不足 (%d < %d)，跳过",
                 len(entries),
+                _MIN_WEAVE_ENTRIES,
             )
             return []
 
@@ -120,10 +125,10 @@ class DreamWeaver:
                         content=insight["insight"],
                         source_atoms=json.dumps(source_atom_ids, ensure_ascii=False),
                         agent_name="dream_weaver",
-                        confidence=0.4,
+                        confidence=_DEFAULT_INSIGHT_CONFIDENCE,
                     )
                 saved_insights.append(insight)
-            except (KeyError, IndexError, Exception) as e:
+            except Exception as e:
                 logger.warning("梦呓编织: 写入 InsightPool 失败: %s", e)
 
         logger.info("梦呓编织: 生成 %d 条洞见", len(saved_insights))
