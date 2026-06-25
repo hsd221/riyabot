@@ -33,6 +33,7 @@ from src.memory.atom import (
     get_fade_level,
     update_weight,
 )
+from src.memory.graph_store import GraphStore
 from src.memory.store import MemoryStore
 from src.memory.schema import (
     memory_db,
@@ -41,6 +42,7 @@ from src.memory.schema import (
     MemoryAtom as MemoryAtomModel,
 )
 from src.memory.write_ops import WriteOpLogger, OpType, WriteOperation
+from src.memory.embedding_utils import generate_embedding, generate_query_embedding
 
 logger = get_logger("memory.layer3")
 
@@ -412,7 +414,13 @@ class MemoryWriter:
         if semantic_detail is not None:
             await self._write_semantic_detail(atom.atom_id, semantic_detail)
 
-        # 5. 同步到 Qdrant（如果有 embedding）
+        # 5. 生成 embedding（如果尚未设置）
+        if not atom.embedding:
+            embedding_vector = await generate_embedding(atom.content)
+            if embedding_vector:
+                atom.embedding = embedding_vector
+
+        # 6. 同步到 Qdrant（如果有 embedding）
         if atom.embedding:
             try:
                 async with WriteOperation(
@@ -474,6 +482,12 @@ class MemoryWriter:
                         await self.store.insert_atom(store_dict)
                         self.op_logger.mark_completed(op.op_id)
                     atom_ids.append(atom.atom_id)
+
+                    # 生成 embedding（如果尚未设置）
+                    if not atom.embedding:
+                        emb_vec = await generate_embedding(atom.content)
+                        if emb_vec:
+                            atom.embedding = emb_vec
 
                     # 独立写入 Qdrant
                     if atom.embedding:
@@ -558,6 +572,38 @@ class MemoryWriter:
         except Exception as e:
             logger.error(f"更新记忆原子失败: {atom_id}, {e}")
             return None
+
+        # 同步到 Qdrant
+        try:
+            if "content" in store_updates:
+                # 内容变更：重新生成 embedding 并全量 upsert
+                embedding_vector = await generate_embedding(store_updates.get("content") or merged.get("content", ""))
+                if embedding_vector:
+                    qdrant_payload = {
+                        "atom_id": atom_id,
+                        "atom_type": _convert_atom_type(merged.get("atom_type", "factual")),
+                        "weight": merged.get("weight", 0.5),
+                        "importance": merged.get("importance", 0.5),
+                        "confidence": merged.get("confidence", 0.5),
+                        "status": merged.get("status", "active"),
+                        "source_scene": merged.get("source_scene", "chat"),
+                        "privacy_level": merged.get("privacy_level", "context_sensitive"),
+                    }
+                    await self.store.qdrant.upsert_atom_vector(
+                        point_id=atom_id,
+                        vector=embedding_vector,
+                        payload=qdrant_payload,
+                    )
+            else:
+                # 非内容字段变更：仅更新 Qdrant payload
+                qdrant_updates = {}
+                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene"):
+                    if key in store_updates:
+                        qdrant_updates[key] = store_updates[key]
+                if qdrant_updates:
+                    await self.store.qdrant.set_atom_payload(atom_id, qdrant_updates)
+        except Exception as e:
+            logger.warning(f"Qdrant 同步失败 (update_atom): {atom_id}, {e}")
 
         return await self.store.get_atom(atom_id)
 
@@ -756,19 +802,22 @@ class MemoryRetriever:
     所有检索结果均按 weight × similarity 综合评分排序。
     """
 
-    def __init__(self, store: MemoryStore):
+    def __init__(self, store: MemoryStore, graph_store: Optional[GraphStore] = None):
         """初始化检索器
 
         Args:
             store: MemoryStore 实例（承载 SQLite + Qdrant）
+            graph_store: GraphStore 实例（可选，用于图谱关联扩展）
         """
         self.store = store
+        self.graph_store = graph_store
 
     # ── 向量检索 ───────────────────────────────────────────
 
     async def retrieve_by_vector(
         self,
-        query_embedding: list[float],
+        query_embedding: Optional[list[float]] = None,
+        query_text: str = "",
         filters: Optional[dict[str, Any]] = None,
         top_k: int = 10,
         min_weight: float = 0.0,
@@ -779,7 +828,8 @@ class MemoryRetriever:
         以 weight × similarity 综合评分重排后返回。
 
         Args:
-            query_embedding: 查询向量
+            query_embedding: 查询向量（可选，与 query_text 二选一）
+            query_text: 查询文本（可选，自动生成 embedding 后检索）
             filters: Qdrant 过滤条件（如 {"source_scene": "group_chat"}）
             top_k: 最终返回数量
             min_weight: 最低权重阈值
@@ -787,6 +837,19 @@ class MemoryRetriever:
         Returns:
             检索结果字典列表，每项含原子全部字段 + final_score + similarity_score
         """
+        # 0. 自动生成 query embedding
+        if query_embedding is None:
+            if query_text:
+                query_embedding = await generate_query_embedding(query_text)
+            if query_embedding is None:
+                logger.debug("向量检索: 无 query_embedding，回退到关键词检索")
+                kw_query = (filters or {}).get("keyword", query_text)
+                return await self.keyword_search(
+                    query=kw_query,
+                    filters=filters,
+                    limit=top_k,
+                )
+
         # 1. Qdrant 检索（oversample 2x）
         oversample_limit = top_k * 2
         qdrant_results = await self.store.search_similar(
@@ -1109,17 +1172,23 @@ class MemoryRetriever:
         user_id: Optional[str] = None,
         max_atoms: int = 5,
         max_chars: int = 2000,
+        include_sensory_tags: bool = True,
+        enable_association_expansion: bool = True,
     ) -> tuple[str, list[str]]:
         """获取回复上下文同时返回 atom_ids — 与 get_context_for_reply() 逻辑一致
 
         与 get_context_for_reply() 相同的检索策略，但额外返回被检索到的 atom_id 列表，
         供后续反馈系统（reinforce_memory 等）使用。
+        如果启用了感官标签增强，自动从 EpisodicDetail 加载感官/情绪/时间信息并注入前缀。
+        如果启用了关联扩展，自动追加关联记忆。
 
         Args:
             stream_id: 聊天流 ID（group_id 或 private chat id）
             user_id: 用户 ID（可选，用于个性化检索）
             max_atoms: 最大返回记忆条数
             max_chars: 返回文本的最大字符数
+            include_sensory_tags: 是否在格式化中插入感官/情绪/时间标签前缀（默认 True）
+            enable_association_expansion: 是否启用关联扩展（默认 True）
 
         Returns:
             tuple[str, list[str]]: (格式化后的记忆文本块, 检索到的 atom_id 列表)
@@ -1165,14 +1234,103 @@ class MemoryRetriever:
         # 5. 按 final_score 排序
         filtered.sort(key=lambda a: a.get("final_score", 0.0), reverse=True)
 
-        # 6. 取 top-N 并收集 atom_ids
+        # 6. 感官标签增强（从 EpisodicDetail 表加载并注入前缀到 content）
         top_atoms = filtered[:max_atoms]
+        if include_sensory_tags:
+            try:
+                episodic_atom_ids_sensory = [
+                    a.get("atom_id", "") for a in top_atoms if a.get("atom_type") == "episodic"
+                ]
+                if episodic_atom_ids_sensory:
+                    with memory_db:
+                        detail_rows = EpisodicDetailModel.select().where(
+                            EpisodicDetailModel.atom.in_(episodic_atom_ids_sensory)
+                        )
+                        tag_map: dict[str, list[str]] = {}
+                        for row in detail_rows:
+                            aids = row.atom
+                            try:
+                                sensory = json.loads(row.sensory_tags) if row.sensory_tags else []
+                            except (json.JSONDecodeError, TypeError):
+                                sensory = []
+                            emotional = [t for t in sensory if t.startswith("emotional:")]
+                            other = [t for t in sensory if not t.startswith("emotional:")]
+                            prefixes: list[str] = []
+                            if emotional:
+                                labels = [e.split(":", 1)[1] for e in emotional]
+                                prefixes.append(f"[情感: {'/'.join(labels)}]")
+                            if other:
+                                prefixes.append(f"[感官: {'/'.join(other)}]")
+                            if row.temporal_context:
+                                prefixes.append(f"[时间: {row.temporal_context}]")
+                            if prefixes:
+                                tag_map[aids] = prefixes
+
+                    for atom in top_atoms:
+                        aid = atom.get("atom_id", "")
+                        prefixes = tag_map.get(aid)
+                        if prefixes:
+                            prefix_str = " ".join(prefixes)
+                            orig_content = atom.get("content", "")
+                            atom["content"] = f"{prefix_str} {orig_content}"
+            except Exception as e:
+                logger.warning("感官标签增强失败 (get_context_for_reply_with_ids): %s", e)
+
+        # 7. 取 top-N 并收集 atom_ids
         atom_ids: list[str] = [a.get("atom_id", "") for a in top_atoms if a.get("atom_id")]
 
-        # 7. 格式化 & 截断
+        # 8. 格式化 & 截断
         formatted = self._format_atoms_for_prompt(top_atoms)
         if len(formatted) > max_chars:
             formatted = formatted[:max_chars].rsplit("\n", 1)[0]
+
+        # 9. 关联扩展
+        if enable_association_expansion and top_atoms:
+            try:
+                expanded = await self._expand_with_associations(top_atoms, max_depth=2)
+                if expanded:
+                    existing_ids = {a.get("atom_id", "") for a in top_atoms}
+                    assoc_lines: list[str] = []
+                    for i, atom in enumerate(expanded, 1):
+                        aid = atom.get("atom_id", "")
+                        if aid and aid not in existing_ids:
+                            content = atom.get("content", "")
+                            assoc_lines.append(f"[关联记忆{i}] {content}")
+
+                    if assoc_lines:
+                        assoc_text = "\n" + "\n".join(assoc_lines)
+                        remaining = max_chars - len(formatted)
+                        if remaining > 0:
+                            if len(assoc_text) > remaining:
+                                assoc_text = assoc_text[:remaining].rsplit("\n", 1)[0]
+                            formatted += assoc_text
+            except Exception as e:
+                logger.warning("关联扩展失败 (get_context_for_reply_with_ids): %s", e)
+
+        # 10. 图谱关联扩展
+        if self.graph_store is not None and enable_association_expansion and top_atoms:
+            try:
+                graph_expanded = await self._expand_with_graph(atom_ids, max_depth=1)
+                if graph_expanded:
+                    existing_ids = set(atom_ids)
+                    graph_lines: list[str] = []
+                    for atom in graph_expanded:
+                        aid = atom.get("atom_id", "")
+                        if aid and aid not in existing_ids:
+                            content = atom.get("content", "")
+                            graph_lines.append(f"[关联实体] {content}")
+                            existing_ids.add(aid)
+                            atom_ids.append(aid)
+
+                    if graph_lines:
+                        graph_text = "\n" + "\n".join(graph_lines)
+                        remaining = max_chars - len(formatted)
+                        if remaining > 0:
+                            if len(graph_text) > remaining:
+                                graph_text = graph_text[:remaining].rsplit("\n", 1)[0]
+                            formatted += graph_text
+            except Exception as e:
+                logger.warning("图谱关联扩展失败 (get_context_for_reply_with_ids): %s", e)
 
         logger.info(
             "构建带ID的记忆检索上下文",
@@ -1326,6 +1484,47 @@ class MemoryRetriever:
             return []
         except Exception as e:
             logger.warning("关联扩展失败: %s", e)
+            return []
+
+    # ── 图谱关联扩展 ────────────────────────────────────────
+
+    async def _expand_with_graph(
+        self,
+        atom_ids: list[str],
+        max_depth: int = 1,
+    ) -> list[dict[str, Any]]:
+        """通过图谱 BFS 遍历扩展关联记忆原子
+
+        对每个 atom_id 调用 graph_store.get_related_atoms() 获取图结构中的
+        关联原子 ID，批量加载完整数据后返回。
+
+        Args:
+            atom_ids: 基准原子 ID 列表
+            max_depth: 图遍历最大深度
+
+        Returns:
+            关联原子的完整数据列表（已去重、已过滤掉基准原子）
+        """
+        if not self.graph_store or not atom_ids:
+            return []
+
+        try:
+            base_set: set[str] = set(atom_ids)
+            related_ids: set[str] = set()
+
+            for aid in atom_ids:
+                ids = self.graph_store.get_related_atoms(aid, max_depth=max_depth)
+                related_ids.update(ids)
+
+            # 移除基准原子自身
+            new_ids = list(related_ids - base_set)
+            if not new_ids:
+                return []
+
+            # 批量加载完整数据（非 atom_id 的值会被 _fetch_atoms_by_ids 静默忽略）
+            return await self._fetch_atoms_by_ids(new_ids)
+        except Exception as e:
+            logger.warning("图谱关联扩展失败: %s", e)
             return []
 
     # ── 跨场景检索 ──────────────────────────────────────────

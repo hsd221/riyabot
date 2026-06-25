@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Any, Callable, Optional
 
 from src.common.logger import get_logger
+from src.memory.embedding_utils import generate_embedding
 
 logger = get_logger("memory.write_ops")
 
@@ -487,13 +488,47 @@ class WriteOpLogger:
             atom = op.payload.get("atom")
             if atom is None:
                 raise ValueError("INSERT_ATOM payload 缺少 atom 字段")
-            await store.insert_atom(atom)
+            atom_id = await store.insert_atom(atom)
+            # 生成 embedding 并同步到 Qdrant
+            if atom_id:
+                try:
+                    content = atom.get("content", "")
+                    if content:
+                        embedding = await generate_embedding(content)
+                        if embedding:
+                            await store.qdrant.upsert_atom_vector(
+                                point_id=atom_id,
+                                vector=embedding,
+                                payload={
+                                    "atom_id": atom_id,
+                                    "atom_type": atom.get("atom_type", "factual"),
+                                    "weight": atom.get("weight", 0.5),
+                                    "importance": atom.get("importance", 0.5),
+                                    "confidence": atom.get("confidence", 0.5),
+                                    "status": atom.get("status", "active"),
+                                    "source_scene": atom.get("source_scene", "chat"),
+                                    "privacy_level": atom.get("privacy_level", "context_sensitive"),
+                                },
+                            )
+                except Exception as e:
+                    logger.warning("Qdrant 同步失败 (INSERT_ATOM replay): %s", e)
 
         elif op.op_type == OpType.UPDATE_ATOM:
             if not op.atom_ids:
                 raise ValueError("UPDATE_ATOM 需要 atom_ids")
             updates = op.payload.get("updates", {})
             await store.update_atom(op.atom_ids[0], updates)
+            # 同步到 Qdrant
+            try:
+                atom_id = op.atom_ids[0]
+                qdrant_updates = {}
+                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene"):
+                    if key in updates:
+                        qdrant_updates[key] = updates[key]
+                if qdrant_updates:
+                    await store.qdrant.set_atom_payload(atom_id, qdrant_updates)
+            except Exception as e:
+                logger.warning("Qdrant 同步失败 (UPDATE_ATOM replay): %s", e)
 
         elif op.op_type == OpType.DELETE_ATOM:
             if not op.atom_ids:

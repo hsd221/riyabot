@@ -196,6 +196,13 @@ class ForgettingManager:
                         MemoryAtomModel.update(weight=new_weight).where(
                             MemoryAtomModel.atom_id == atom_model.atom_id
                         ).execute()
+                        try:
+                            await self._store.qdrant.set_atom_payload(
+                                atom_model.atom_id,
+                                {"weight": new_weight},
+                            )
+                        except Exception:
+                            pass  # Qdrant 同步是尽力而为的最佳操作
                         count += 1
 
                     if idx % 10 == 0:
@@ -243,6 +250,10 @@ class ForgettingManager:
                     self._archive_one(atom_model)
                     atom_model.status = "archived"
                     atom_model.save()
+                    try:
+                        await self._store.qdrant.delete_atom_vector(atom_model.atom_id)
+                    except Exception:
+                        pass  # Qdrant 同步是尽力而为的最佳操作
                     count += 1
                 except Exception as e:
                     logger.error(f"归档原子失败 ({atom_model.atom_id}): {e}")

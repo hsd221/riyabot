@@ -29,8 +29,6 @@ from src.memory.schema import (
     MemoryAtom as MemoryAtomModel,
     DreamRun,
     GraphEdge,
-    GraphEntry,
-    GraphNode,
     NoisePool,
     SemanticDetail as SemanticDetailModel,
     memory_db,
@@ -349,6 +347,13 @@ class DreamTask(AsyncTask):
                         MemoryAtomModel.update(weight=updated.weight).where(
                             MemoryAtomModel.atom_id == atom_model.atom_id
                         ).execute()
+                        try:
+                            await self._store.qdrant.set_atom_payload(
+                                atom_model.atom_id,
+                                {"weight": updated.weight},
+                            )
+                        except Exception:
+                            pass  # Qdrant 同步是尽力而为的最佳操作
                         count += 1
 
                     except Exception as e:
@@ -405,6 +410,10 @@ class DreamTask(AsyncTask):
         edges_created = 0
         entries_created = 0
 
+        if self._graph_store is None:
+            logger.debug("GraphStore 不可用，跳过图谱构建")
+            return 0, 0
+
         try:
             with memory_db:
                 top_atoms = list(
@@ -430,57 +439,53 @@ class DreamTask(AsyncTask):
                             pass
                     atom_entities[atom_model.atom_id] = entities
 
-                # 为每个 unique 实体创建 GraphNode
+                # 为每个 unique 实体创建/获取 GraphNode，并缓存 node_id
                 all_entities = set()
                 for ent_list in atom_entities.values():
                     all_entities.update(ent_list)
 
+                entity_node_map: dict[str, int] = {}
                 for entity in all_entities:
-                    GraphNode.get_or_create(
-                        node_type="entity",
-                        label=entity,
-                        defaults={"properties": "{}"},
-                    )
+                    nid = self._graph_store.find_or_create_node("entity", entity)
+                    entity_node_map[entity] = nid
 
                 # 对同一原子中的实体对创建 GraphEdge
                 for ent_list in atom_entities.values():
                     if len(ent_list) < 2:
                         continue
-                    node_map: dict[str, int] = {}
-                    for entity in ent_list:
-                        node = GraphNode.get_or_none(GraphNode.label == entity)
-                        if node is not None:
-                            node_map[entity] = node.id
+                    node_ids = [entity_node_map[e] for e in ent_list if e in entity_node_map]
 
-                    node_ids = list(node_map.values())
                     for i in range(len(node_ids)):
                         for j in range(i + 1, len(node_ids)):
-                            _, created = GraphEdge.get_or_create(
-                                source_node_id=node_ids[i],
-                                target_node_id=node_ids[j],
-                                predicate="related_to",
-                                defaults={"confidence": 0.6},
-                            )
-                            if created:
+                            if not self._graph_store.edge_exists(node_ids[i], node_ids[j], "related_to"):
+                                self._graph_store.add_edge(node_ids[i], node_ids[j], "related_to", confidence=0.6)
                                 edges_created += 1
 
                 # 从 SemanticDetail 提取 SPO 三元组
-                atom_ids = [a.atom_id for a in top_atoms]
-                details = SemanticDetailModel.select().where(SemanticDetailModel.atom.in_(atom_ids))
+                atom_ids_entries = [a.atom_id for a in top_atoms]
+                details = SemanticDetailModel.select().where(SemanticDetailModel.atom.in_(atom_ids_entries))
 
                 for detail in details:
                     if not detail.attr_name or not detail.attr_value:
                         continue
-                    _, created = GraphEntry.get_or_create(
+                    # 精确匹配检查避免重复
+                    existing = self._graph_store.search_entries(
                         subject=detail.attr_category,
                         predicate=detail.attr_name,
-                        object=detail.attr_value,
-                        defaults={
-                            "evidence": f"atom:{detail.atom}",
-                            "confidence": 0.7,
-                        },
+                        obj=detail.attr_value,
                     )
-                    if created:
+                    # search_entries 的 subject/obj 使用 LIKE 匹配，需二次精确过滤
+                    exact_match = [
+                        e for e in existing if e["subject"] == detail.attr_category and e["object"] == detail.attr_value
+                    ]
+                    if not exact_match:
+                        self._graph_store.add_entry(
+                            subject=detail.attr_category,
+                            predicate=detail.attr_name,
+                            obj=detail.attr_value,
+                            evidence=f"atom:{detail.atom}",
+                            confidence=0.7,
+                        )
                         entries_created += 1
 
         except Exception as e:
@@ -721,6 +726,8 @@ class DreamTask(AsyncTask):
                 insight_count = len(insights)
                 if insight_count > 0:
                     logger.info(f"月度恍然大悟: 发现 {insight_count} 条跨域洞察")
+            except ImportError:
+                logger.debug("InsightEngine 不可用，跳过月度恍然大悟")
             except Exception as ie:
                 logger.warning("月度恍然大悟阶段异常（降级处理）: %s", ie)
 

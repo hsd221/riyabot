@@ -738,6 +738,7 @@ class PrivateReplyer:
                     think_level=1,
                     unknown_words=unknown_words,
                     question=question,
+                    user_id=user_id,
                 ),
                 "memory_retrieval",
             ),

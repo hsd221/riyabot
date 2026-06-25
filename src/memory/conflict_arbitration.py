@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.common.logger import get_logger
+from src.memory.embedding_utils import generate_embedding
 from src.memory.schema import ConflictObservation, SemanticDetail, memory_db
 from src.memory.store import MemoryStore
 
@@ -421,12 +422,14 @@ class ConflictArbiter:
         try:
             if decision == ConflictDecision.KEEP_A:
                 await self.store.update_atom(b_id, {"status": "archived"})
+                await self.store.qdrant.delete_atom_vector(b_id)
 
             elif decision == ConflictDecision.KEEP_B:
                 await self.store.update_atom(a_id, {"status": "archived"})
+                await self.store.qdrant.delete_atom_vector(a_id)
 
             elif decision == ConflictDecision.MERGE and resolution.merged_content:
-                # 合并到原子 A
+                # 合并到原子 A：内容变更，重新生成 embedding
                 await self.store.update_atom(
                     a_id,
                     {
@@ -434,7 +437,31 @@ class ConflictArbiter:
                         "confidence": min(1.0, await self._get_confidence(a_id) + 0.05),
                     },
                 )
+                try:
+                    atom_a = await self.store.get_atom(a_id)
+                    if atom_a:
+                        embedding = await generate_embedding(resolution.merged_content)
+                        if embedding:
+                            await self.store.qdrant.upsert_atom_vector(
+                                point_id=a_id,
+                                vector=embedding,
+                                payload={
+                                    "atom_id": a_id,
+                                    "atom_type": atom_a.get("atom_type", "factual"),
+                                    "weight": atom_a.get("weight", 0.5),
+                                    "importance": atom_a.get("importance", 0.5),
+                                    "confidence": atom_a.get("confidence", 0.5),
+                                    "status": atom_a.get("status", "active"),
+                                    "source_scene": atom_a.get("source_scene", "chat"),
+                                    "privacy_level": atom_a.get("privacy_level", "context_sensitive"),
+                                },
+                            )
+                except Exception as e:
+                    logger.warning("Qdrant 同步失败 (MERGE A): %s", e)
+
+                # 归档原子 B
                 await self.store.update_atom(b_id, {"status": "archived"})
+                await self.store.qdrant.delete_atom_vector(b_id)
 
             elif decision == ConflictDecision.BOTH:
                 impact = resolution.confidence_impact or 0.1
@@ -444,6 +471,7 @@ class ConflictArbiter:
                         current_conf = atom.get("confidence") or 0.5
                         new_conf = max(0.0, min(1.0, current_conf * (1.0 - impact)))
                         await self.store.update_atom(atom_id, {"confidence": new_conf})
+                        await self.store.qdrant.set_atom_payload(atom_id, {"confidence": new_conf})
 
         except Exception as e:
             logger.error("应用仲裁结果失败: %s", e, exc_info=True)

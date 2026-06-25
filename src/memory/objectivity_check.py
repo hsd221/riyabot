@@ -285,6 +285,11 @@ class ObjectivityChecker:
         is_noise = await self.filter_noise(atom)
         if is_noise:
             logger.warning("客观性校验: 噪声过滤拒绝", atom_id=atom.atom_id, atom_type=atom.atom_type.value)
+            await self.record_noise(
+                content=atom.content,
+                source_scene=atom.source_scene or "chat",
+                significance=1.0 - atom.importance,
+            )
             return CheckResult(
                 passed=False,
                 atom=atom,

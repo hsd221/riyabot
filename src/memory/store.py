@@ -352,6 +352,32 @@ class QdrantManager:
             logger.error(f"Qdrant 删除原子向量失败 ({point_id}): {e}")
             return False
 
+    async def set_atom_payload(self, point_id: str, payload: dict[str, Any]) -> bool:
+        """更新 Qdrant 中记忆原子的 payload 字段（不改变向量）
+
+        用于权重、状态、置信度等非内容字段的增量更新，
+        无需重新生成 embedding。
+
+        Args:
+            point_id: 原子 ID
+            payload: 要设置/更新的字段字典
+
+        Returns:
+            bool: 是否成功
+        """
+        if not self._available or not self._client:
+            return False
+        try:
+            self._client.set_payload(
+                collection_name=self.config.collection_name_atoms,
+                payload=payload,
+                points=[hash(point_id) % (2**63)],
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Qdrant 设置原子 payload 失败 ({point_id}): {e}")
+            return False
+
     async def delete_graph_vector(self, entry_id: str) -> bool:
         """删除指定图条目的向量"""
         if not self._available or not self._client:

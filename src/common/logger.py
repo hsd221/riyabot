@@ -543,6 +543,7 @@ MODULE_COLORS = {
     "memory.graph": "\033[38;5;34m",
     "memory.dream": "\033[38;5;34m",
     "memory.trace": "\033[38;5;34m",
+    "memory.embedding": "\033[38;5;34m",
     "memory.conflict": "\033[38;5;34m",
     "memory.association": "\033[38;5;34m",
     "memory.weaver": "\033[38;5;35m",

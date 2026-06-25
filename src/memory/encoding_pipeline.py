@@ -222,12 +222,13 @@ class EncodingPipeline:
                                 try:
                                     conflict.new_atom_id = atom.atom_id
                                     await checker.record_conflict(conflict)
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.warning("记录冲突失败: %s", exc, exc_info=True)
                         except ImportError:
                             pass
                         except Exception as exc:
                             logger.warning("客观性校验异常: %s", exc)
+                            continue
 
                         if episodic_detail and episodic_detail.sensory_tags:
                             logger.debug(

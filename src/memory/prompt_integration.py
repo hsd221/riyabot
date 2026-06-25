@@ -20,6 +20,7 @@ async def build_memory_retrieval_prompt(
     unknown_words: Optional[list[str]] = None,
     question: Optional[str] = None,
     user_id: Optional[str] = None,
+    graph_store: Optional[Any] = None,
 ) -> tuple[str, list[str]]:
     """从新记忆系统检索相关上下文，用于 LLM prompt 拼接
 
@@ -43,7 +44,7 @@ async def build_memory_retrieval_prompt(
         from src.memory.layer3_retrieval import MemoryRetriever
 
         store = get_memory_store()
-        retriever = MemoryRetriever(store)
+        retriever = MemoryRetriever(store, graph_store=graph_store)
 
         stream_id: str = chat_stream.stream_id if hasattr(chat_stream, "stream_id") else ""
         if not stream_id:

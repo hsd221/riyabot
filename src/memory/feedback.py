@@ -175,6 +175,22 @@ class ReinforcementTracker:
         if updates_list:
             await self.store.update_atoms_batch(updates_list)
 
+            # 同步到 Qdrant：更新每个原子的 payload 字段
+            for atom_id, updates in updates_list:
+                try:
+                    qdrant_updates = {}
+                    for key in ("weight", "reinforcement_count", "last_reinforced_at", "last_accessed_at"):
+                        if key in updates:
+                            val = updates[key]
+                            # datetime 对象转为 ISO 字符串（Qdrant payload 需 JSON 可序列化）
+                            if hasattr(val, "isoformat"):
+                                val = val.isoformat()
+                            qdrant_updates[key] = val
+                    if qdrant_updates:
+                        await self.store.qdrant.set_atom_payload(atom_id, qdrant_updates)
+                except Exception as e:
+                    logger.warning("Qdrant 同步失败 (reinforcement): %s", e)
+
         duration_ms = (time.time() - t0) * 1000
         logger.info(
             "强化反馈完成: atom_count=%d, updated=%d, not_found=%d, duration_ms=%.1f",
