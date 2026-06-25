@@ -34,6 +34,7 @@ from src.memory.layer2_encoder import BatchEncoder
 from src.memory.layer3_retrieval import MemoryWriter
 from src.memory.store import MemoryStore
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
+from src.memory.write_ops import WriteOpLogger
 
 logger = get_logger("memory.encoding")
 
@@ -69,6 +70,7 @@ class EncodingPipeline:
         store: MemoryStore,
         trigger_count: int = 10,
         trigger_seconds: int = 300,
+        op_logger: Optional[WriteOpLogger] = None,
     ) -> None:
         """初始化编码管线
 
@@ -76,13 +78,14 @@ class EncodingPipeline:
             store: MemoryStore 实例
             trigger_count: 累积多少条消息后触发编码（默认 10）
             trigger_seconds: 距离上次触发超过多少秒后强制触发（默认 300）
+            op_logger: WriteOpLogger 实例，用于写操作追踪和一致性协调
         """
         self.encoder = BatchEncoder(
             store=store,
             trigger_count=trigger_count,
             trigger_seconds=trigger_seconds,
         )
-        self.writer = MemoryWriter(store)
+        self.writer = MemoryWriter(store, op_logger=op_logger)
         self.trace_recorder: Optional[TraceChainRecorder] = None
 
         global _encoding_pipeline

@@ -6,11 +6,12 @@
 import datetime
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from src.common.logger import get_logger
-from src.memory.schema import MemoryAtom, memory_db
+from src.memory.schema import MemoryAtom, initialize_database, memory_db
+from src.memory.types import PayloadSchemaField
 
 logger = get_logger("memory.store")
 
@@ -36,16 +37,47 @@ except ImportError:
 
 @dataclass
 class MemoryStoreConfig:
-    """记忆存储配置"""
+    """记忆存储配置
+
+    这些默认值作为 fallback 使用，生产环境值通过 global_config.memory 注入。
+    """
 
     sqlite_path: str = "data/memory.db"
-    qdrant_url: str = ""  # 空字符串=本地嵌入模式，设置 URL=服务器/云模式
-    qdrant_api_key: Optional[str] = None
-    qdrant_local_path: str = "data/qdrant"  # 本地模式数据目录
+    """SQLite 数据库文件路径"""
+
+    qdrant_url: str = ""
+    """Qdrant 服务器 URL（空字符串=本地嵌入模式，设置 URL=服务器/云模式）"""
+
+    qdrant_api_key: Optional[str] = field(default=None, repr=False)
+    """Qdrant API 密钥（可选，repr=False 避免日志泄露）"""
+
+    qdrant_local_path: str = "data/qdrant"
+    """Qdrant 本地模式数据目录"""
+
     embedding_dimension: int = 1024
+    """嵌入向量维度"""
+
     collection_name_atoms: str = "memory_atoms"
+    """记忆原子 Qdrant 集合名称"""
+
     collection_name_graph: str = "graph_entries"
+    """图条目 Qdrant 集合名称"""
+
     vector_batch_size: int = 100
+    """向量批量写入大小"""
+
+    def __repr__(self) -> str:
+        """返回配置字符串（隐藏敏感字段）"""
+        masked_key = "***" if self.qdrant_api_key else None
+        return (
+            f"MemoryStoreConfig(sqlite_path={self.sqlite_path!r}, "
+            f"qdrant_url={self.qdrant_url!r}, "
+            f"qdrant_api_key={masked_key}, "
+            f"qdrant_local_path={self.qdrant_local_path!r}, "
+            f"embedding_dimension={self.embedding_dimension}, "
+            f"collection_name_atoms={self.collection_name_atoms!r}, "
+            f"vector_batch_size={self.vector_batch_size})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +149,7 @@ class QdrantManager:
     # -- 集合管理 -----------------------------------------------------------
 
     @staticmethod
-    def _atoms_payload_schema() -> list[dict]:
+    def _atoms_payload_schema() -> list[PayloadSchemaField]:
         """memory_atoms 集合的 payload 字段 schema"""
         return [
             {"name": "atom_id", "type": "keyword"},
@@ -133,7 +165,7 @@ class QdrantManager:
         ]
 
     @staticmethod
-    def _graph_payload_schema() -> list[dict]:
+    def _graph_payload_schema() -> list[PayloadSchemaField]:
         """graph_entries 集合的 payload 字段 schema"""
         return [
             {"name": "entry_id", "type": "keyword"},
@@ -143,7 +175,7 @@ class QdrantManager:
             {"name": "confidence", "type": "float"},
         ]
 
-    async def _ensure_collection(self, collection_name: str, payload_schema: list[dict]) -> None:
+    async def _ensure_collection(self, collection_name: str, payload_schema: list[PayloadSchemaField]) -> None:
         """确保集合存在，不存在则创建"""
         if not self._available or not self._client:
             return
@@ -190,7 +222,7 @@ class QdrantManager:
                 collection_name=self.config.collection_name_atoms,
                 points=[
                     qdrant_models.PointStruct(
-                        id=hash(point_id) % (2**63),
+                        id=point_id,
                         vector=vector,
                         payload=payload,
                     )
@@ -215,7 +247,7 @@ class QdrantManager:
                 collection_name=self.config.collection_name_graph,
                 points=[
                     qdrant_models.PointStruct(
-                        id=hash(point_id) % (2**63),
+                        id=point_id,
                         vector=vector,
                         payload=payload,
                     )
@@ -240,7 +272,7 @@ class QdrantManager:
         try:
             point_structs = [
                 qdrant_models.PointStruct(
-                    id=hash(pid) % (2**63),
+                    id=pid,
                     vector=vec,
                     payload=pl,
                 )
@@ -345,7 +377,7 @@ class QdrantManager:
         try:
             self._client.delete(
                 collection_name=self.config.collection_name_atoms,
-                points_selector=qdrant_models.PointIdsList(points=[hash(point_id) % (2**63)]),
+                points_selector=qdrant_models.PointIdsList(points=[point_id]),
             )
             return True
         except Exception as e:
@@ -371,7 +403,7 @@ class QdrantManager:
             self._client.set_payload(
                 collection_name=self.config.collection_name_atoms,
                 payload=payload,
-                points=[hash(point_id) % (2**63)],
+                points=[point_id],
             )
             return True
         except Exception as e:
@@ -385,7 +417,7 @@ class QdrantManager:
         try:
             self._client.delete(
                 collection_name=self.config.collection_name_graph,
-                points_selector=qdrant_models.PointIdsList(points=[hash(entry_id) % (2**63)]),
+                points_selector=qdrant_models.PointIdsList(points=[entry_id]),
             )
             return True
         except Exception as e:
@@ -461,8 +493,11 @@ class MemoryStore:
         return cls._instance
 
     async def initialize(self) -> None:
-        """异步初始化：连接 Qdrant"""
+        """异步初始化：确保数据库表存在 + 连接 Qdrant"""
+        # 确保 SQLite 数据库表已创建（从 schema 模块级自动初始化移至此处）
+        initialize_database()
         await self.qdrant.initialize()
+        self._initialized = True
         logger.info("MemoryStore 初始化完成")
 
     async def close(self) -> None:

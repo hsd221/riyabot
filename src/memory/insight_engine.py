@@ -21,6 +21,7 @@ from src.memory.schema import (
     memory_db,
 )
 from src.memory.store import MemoryStore
+from src.memory.types import InsightItem
 from src.memory.user_profile import ProfileStore
 
 logger = get_logger("memory.insight")
@@ -56,13 +57,13 @@ class InsightEngine:
 
     # ── 主入口 ──────────────────────────────────────────────────────────
 
-    async def generate_monthly_insights(self) -> list[dict]:
+    async def generate_monthly_insights(self) -> list[InsightItem]:
         """运行所有 4 种跨域扫描，产出洞察列表
 
         Returns:
-            list[dict]: 洞察条目列表，每项含 content / source_atoms / confidence
+            list[InsightItem]: 洞察条目列表
         """
-        all_insights: list[dict] = []
+        all_insights: list[InsightItem] = []
 
         try:
             insights_1 = self._scan_atomic_patterns()
@@ -112,13 +113,13 @@ class InsightEngine:
 
     # ── Scan 1: 原子模式发现 ────────────────────────────────────────────
 
-    def _scan_atomic_patterns(self) -> list[dict]:
+    def _scan_atomic_patterns(self) -> list[InsightItem]:
         """扫描 1 — 原子模式发现
 
         查询所有活跃原子，按类型分组检查分布偏差；
         查找跨 3+ 类型出现的多面实体。
         """
-        insights: list[dict] = []
+        insights: list[InsightItem] = []
 
         with memory_db:
             all_active = list(MemoryAtomModel.select().where(MemoryAtomModel.status == "active"))
@@ -198,12 +199,12 @@ class InsightEngine:
 
     # ── Scan 2: 画像演化检测 ────────────────────────────────────────────
 
-    def _scan_profile_evolution(self) -> list[dict]:
+    def _scan_profile_evolution(self) -> list[InsightItem]:
         """扫描 2 — 画像演化检测
 
         查看所有 UserProfile 的情绪历史轨迹和风格演变。
         """
-        insights: list[dict] = []
+        insights: list[InsightItem] = []
 
         user_ids = self._profile_store.list_profiles()
         if not user_ids:
@@ -272,12 +273,12 @@ class InsightEngine:
 
     # ── Scan 3: 关联网络分析 ───────────────────────────────────────────
 
-    def _scan_association_network(self) -> list[dict]:
+    def _scan_association_network(self) -> list[InsightItem]:
         """扫描 3 — 关联网络分析
 
         分析 AtomAssociation 记录，寻找 hub 原子和密集子图。
         """
-        insights: list[dict] = []
+        insights: list[InsightItem] = []
 
         with memory_db:
             associations = list(AtomAssociationModel.select())
@@ -332,13 +333,13 @@ class InsightEngine:
 
     # ── Scan 4: 梦境洞见综合 ───────────────────────────────────────────
 
-    def _scan_dream_synthesis(self) -> list[dict]:
+    def _scan_dream_synthesis(self) -> list[InsightItem]:
         """扫描 4 — 梦境洞见综合
 
         收集最近 30 天 DreamWeaver 产生的洞见，检查反复出现
         的主题/情绪，合成元洞见。
         """
-        insights: list[dict] = []
+        insights: list[InsightItem] = []
 
         cutoff = datetime.now() - timedelta(days=30)
 

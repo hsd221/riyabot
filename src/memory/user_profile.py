@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from src.memory.types import MoodEntry
+
 from peewee import (
     CharField,
     DateTimeField,
@@ -79,7 +81,7 @@ class UserProfile:
     preferences: dict[str, str] = field(default_factory=dict)
     facts: dict[str, str] = field(default_factory=dict)
     stats: dict[str, Any] = field(default_factory=dict)
-    mood_history: list[dict] = field(default_factory=list)
+    mood_history: list[MoodEntry] = field(default_factory=list)
     impression: str = ""
     expression_style: str = ""
     expression_patterns: dict[str, Any] = field(default_factory=dict)

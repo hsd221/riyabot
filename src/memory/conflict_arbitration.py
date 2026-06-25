@@ -23,6 +23,7 @@ from src.common.logger import get_logger
 from src.memory.embedding_utils import generate_embedding
 from src.memory.schema import ConflictObservation, SemanticDetail, memory_db
 from src.memory.store import MemoryStore
+from src.memory.types import AtomDict
 
 logger = get_logger("memory.conflict")
 
@@ -219,8 +220,8 @@ class ConflictArbiter:
 
     async def _evidence_based_arbitrate(
         self,
-        atom_a: dict,
-        atom_b: dict,
+        atom_a: AtomDict,
+        atom_b: AtomDict,
     ) -> Resolution:
         """基于证据的启发式仲裁
 
@@ -327,7 +328,7 @@ class ConflictArbiter:
     # ── 合并判定 ───────────────────────────────────────────────────────────
 
     @staticmethod
-    def _can_merge(atom_a: dict, atom_b: dict) -> bool:
+    def _can_merge(atom_a: AtomDict, atom_b: AtomDict) -> bool:
         """判断两个原子是否可以合并
 
         合并条件：
@@ -356,7 +357,7 @@ class ConflictArbiter:
         return True
 
     @staticmethod
-    def _merge_atoms(atom_a: dict, atom_b: dict) -> str:
+    def _merge_atoms(atom_a: AtomDict, atom_b: AtomDict) -> str:
         """合并两个原子的内容
 
         策略：以较长内容为主，附加较短内容中的补充信息。

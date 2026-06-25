@@ -26,6 +26,7 @@ from typing import Any, Callable, Optional
 
 from src.common.logger import get_logger
 from src.memory.embedding_utils import generate_embedding
+from src.memory.types import RollbackAction
 
 logger = get_logger("memory.write_ops")
 
@@ -82,7 +83,7 @@ class WriteOp:
     completed_at: Optional[float] = None
     error_message: Optional[str] = None
     retry_count: int = 0
-    rollback_actions: list[dict] = dataclasses.field(default_factory=list)
+    rollback_actions: list[RollbackAction] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为 JSON 可序列化的字典"""
@@ -223,11 +224,27 @@ class WriteOpLogger:
             n += 1
 
         new_path = f"{base}.{n}"
-        os.rename(self.log_file, new_path)
+        try:
+            os.rename(self.log_file, new_path)
+        except OSError as e:
+            logger.warning(
+                "write_ops 日志轮转失败（保留原文件继续写入）",
+                extra={"error": str(e), "path": self.log_file},
+            )
+            # 轮转失败时不中断，继续写入原文件
+            return
         # 创建新空文件
-        with open(self.log_file, "w", encoding="utf-8") as f:
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            with open(self.log_file, "w", encoding="utf-8") as f:
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError as e:
+            logger.warning(
+                "write_ops 日志轮转后创建新文件失败",
+                extra={"error": str(e), "path": self.log_file},
+            )
+            # 如果新文件创建失败但重命名已成功，日志已写入 .{n} 文件
+            # 下次调用 _check_rotate 时会再次尝试
 
         logger.info(
             "write_ops 日志轮转",
@@ -295,6 +312,8 @@ class WriteOpLogger:
                 os.fsync(f.fileno())
             finally:
                 self._release_lock(f)
+        # 每次追加后尝试裁剪，防止累积过多已完成记录
+        self._auto_trim()
 
     def _update_op(self, op_id: str, **updates: Any) -> Optional[WriteOp]:
         """更新指定操作的状态字段（读-改-写模式）
@@ -425,6 +444,41 @@ class WriteOpLogger:
                 return op
         return None
 
+    def get_inconsistent_ops(self) -> list[tuple[WriteOp, WriteOp]]:
+        """查找所有不一致的写操作对（一侧成功、一侧失败）
+
+        遍历日志，寻找针对同一组 atom_ids 和 op_type 但 target 不同的操作对：
+        例如 INSERT_ATOM 的 SQLite 写入成功但 Qdrant 写入失败。
+        只有一侧成功、另一侧失败时才会被识别为不一致。
+
+        Returns:
+            不一致的操作对列表，每对为 (成功侧操作, 失败侧操作)
+        """
+        ops = self._read_all_ops()
+        # 只关注终态操作（completed / failed）
+        completed = [op for op in ops if op.status == OpStatus.COMPLETED]
+        failed = [op for op in ops if op.status == OpStatus.FAILED]
+        inconsistent: list[tuple[WriteOp, WriteOp]] = []
+
+        # 使用 (op_type, frozenset(atom_ids)) 作为键进行关联
+        for failed_op in failed:
+            if not failed_op.atom_ids:
+                continue
+            key = (failed_op.op_type.value, frozenset(failed_op.atom_ids))
+            for completed_op in completed:
+                if completed_op.op_type.value != key[0]:
+                    continue
+                if frozenset(completed_op.atom_ids) != key[1]:
+                    continue
+                if completed_op.target == failed_op.target:
+                    # 同一 target 的 completed/failed 不是跨存储不一致
+                    continue
+                # 找到匹配对：SQLite vs Qdrant 一侧成功一侧失败
+                inconsistent.append((completed_op, failed_op))
+                break
+
+        return inconsistent
+
     # ── 恢复机制 ─────────────────────────────────────────────
 
     async def replay_failed_ops(self, store) -> list[str]:
@@ -533,13 +587,97 @@ class WriteOpLogger:
         elif op.op_type == OpType.DELETE_ATOM:
             if not op.atom_ids:
                 raise ValueError("DELETE_ATOM 需要 atom_ids")
-            await store.delete_atom(op.atom_ids[0])
+            atom_id = op.atom_ids[0]
+            # 先尝试 SQLite 删除（Qdrant 侧由 store.delete_atom 处理）
+            await store.delete_atom(atom_id)
+            # 额外显式清理 Qdrant：处理 SQLite 已删除但 Qdrant 残留的孤魂向量
+            # store.delete_atom 仅在 SQLite rows > 0 时会调用 Qdrant 删除，
+            # 若 SQLite 记录已被其他路径删除，需此处兜底
+            try:
+                await store.qdrant.delete_atom_vector(atom_id)
+            except Exception as e:
+                logger.warning("Qdrant 向量删除失败 (DELETE_ATOM replay): %s", e)
 
         elif op.op_type == OpType.BATCH_INSERT:
-            atoms = op.payload.get("atoms", [])
-            if not atoms:
-                raise ValueError("BATCH_INSERT payload 缺少 atoms 字段")
-            await store.batch_insert(atoms)
+            # 从 payload 读取原子数据（由 MemoryWriter.batch_write 存入，使用 "atom" 键）
+            atoms = []
+            single_atom = op.payload.get("atom")
+            if single_atom:
+                atoms = [single_atom]
+            else:
+                atoms = op.payload.get("atoms", [])  # 兼容旧格式
+            if atoms:
+                # 有完整数据：重新插入 SQLite 并同步 Qdrant
+                inserted_atom_ids: list[str] = []
+                qdrant_points: list[tuple[str, list[float], dict[str, Any]]] = []
+                for atom_data in atoms:
+                    try:
+                        atom_id = atom_data.get("atom_id", "")
+                        if not atom_id:
+                            continue
+                        await store.insert_atom(atom_data)
+                        inserted_atom_ids.append(atom_id)
+                        # 尝试生成 embedding 并准备 Qdrant upsert
+                        content = atom_data.get("content", "")
+                        if content:
+                            embedding = await generate_embedding(content)
+                            if embedding:
+                                qdrant_points.append(
+                                    (
+                                        atom_id,
+                                        embedding,
+                                        {
+                                            "atom_id": atom_id,
+                                            "atom_type": atom_data.get("atom_type", "factual"),
+                                            "weight": atom_data.get("weight", 0.5),
+                                            "importance": atom_data.get("importance", 0.5),
+                                            "confidence": atom_data.get("confidence", 0.5),
+                                            "status": atom_data.get("status", "active"),
+                                            "source_scene": atom_data.get("source_scene", "chat"),
+                                            "privacy_level": atom_data.get("privacy_level", "context_sensitive"),
+                                        },
+                                    )
+                                )
+                    except Exception as e:
+                        logger.warning("BATCH_INSERT replay 插入原子失败 (%s): %s", atom_data.get("atom_id", "?"), e)
+                if qdrant_points:
+                    try:
+                        await store.qdrant.batch_upsert_atom_vectors(qdrant_points)
+                    except Exception as e:
+                        logger.warning("BATCH_INSERT replay Qdrant 批量同步失败: %s", e)
+            else:
+                # 无 payload 数据：尝试从 SQLite 按 atom_ids 读取，仅补 Qdrant
+                logger.warning("BATCH_INSERT replay payload 缺少 atoms 字段，尝试从 SQLite 兜底")
+                for aid in op.atom_ids:
+                    try:
+                        existing = await store.get_atom(aid)
+                        if existing and existing.get("content"):
+                            embedding = await generate_embedding(existing["content"])
+                            if embedding:
+                                payload = {
+                                    "atom_id": aid,
+                                    "atom_type": existing.get("atom_type", "factual"),
+                                    "weight": existing.get("weight", 0.5),
+                                    "importance": existing.get("importance", 0.5),
+                                    "confidence": existing.get("confidence", 0.5),
+                                    "status": existing.get("status", "active"),
+                                    "source_scene": existing.get("source_scene", "chat"),
+                                    "privacy_level": existing.get("privacy_level", "context_sensitive"),
+                                }
+                                try:
+                                    await store.qdrant.upsert_atom_vector(
+                                        point_id=aid,
+                                        vector=embedding,
+                                        payload=payload,
+                                    )
+                                except Exception as e_inner:
+                                    logger.warning(
+                                        "BATCH_INSERT replay Qdrant upsert 失败 (%s): %s",
+                                        aid,
+                                        e_inner,
+                                    )
+                    except Exception as e:
+                        logger.warning("BATCH_INSERT replay 读取原子失败 (%s): %s", aid, e)
 
         elif op.op_type == OpType.DREAM_CONSOLE:
             # 梦境巩固重放 — 记录到日志，由梦境系统自行处理一致性
