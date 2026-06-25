@@ -351,6 +351,14 @@ def _ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_memory_atoms_weight ON memory_atoms(weight)",
         ),
         (
+            "idx_memory_atoms_type_status_weight",
+            "CREATE INDEX IF NOT EXISTS idx_memory_atoms_type_status_weight ON memory_atoms(atom_type, status, weight)",
+        ),
+        (
+            "idx_memory_atoms_created_status",
+            "CREATE INDEX IF NOT EXISTS idx_memory_atoms_created_status ON memory_atoms(created_at, status)",
+        ),
+        (
             "idx_raw_archive_stream_ts",
             "CREATE INDEX IF NOT EXISTS idx_raw_archive_stream_ts ON raw_message_archive(stream_id, timestamp)",
         ),
@@ -387,7 +395,3 @@ def initialize_database():
         logger.info("记忆数据库初始化完成")
     except Exception as e:
         logger.exception(f"记忆数据库初始化失败: {e}")
-
-
-# 模块加载时自动初始化
-initialize_database()
