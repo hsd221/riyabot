@@ -125,7 +125,6 @@ class MainSystem:
 
             memory_config = MemoryStoreConfig(
                 sqlite_path="data/memory.db",
-                qdrant_url="http://localhost:6333",
             )
             store = MemoryStore(memory_config)
             await store.initialize()
