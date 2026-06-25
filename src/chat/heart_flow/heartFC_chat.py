@@ -21,7 +21,7 @@ from src.chat.heart_flow.frequency_control import frequency_control_manager
 from src.bw_learner.reflect_tracker import reflect_tracker_manager
 from src.bw_learner.expression_reflector import expression_reflector_manager
 from src.bw_learner.message_recorder import extract_and_distribute_messages
-from src.person_info.person_info import Person
+from src.common.person_stub import Person
 from src.plugin_system.base.component_types import EventType, ActionInfo
 from src.plugin_system.core import events_manager
 from src.plugin_system.apis import generator_api, send_api, message_api, database_api
@@ -30,7 +30,17 @@ from src.chat.utils.chat_message_builder import (
     get_raw_msg_before_timestamp_with_chat,
 )
 from src.chat.utils.utils import record_replyer_action_temp
-from src.memory_system.chat_history_summarizer import ChatHistorySummarizer
+
+# 新记忆系统 — 原始消息归档 + 话题摘要
+try:
+    from src.memory.layer0_archive import MessageArchiver as _MessageArchiver
+    from src.memory.layer1_summarizer import GroupTopicSummarizer as _GroupTopicSummarizer
+
+    _HAS_MEMORY_ARCHIVE = True
+except ImportError:
+    _MessageArchiver = None  # type: ignore
+    _GroupTopicSummarizer = None  # type: ignore
+    _HAS_MEMORY_ARCHIVE = False
 
 if TYPE_CHECKING:
     from src.common.data_models.database_data_model import DatabaseMessages
@@ -111,8 +121,9 @@ class HeartFChatting:
         # 跟踪连续 no_reply 次数，用于动态调整阈值
         self.consecutive_no_reply_count = 0
 
-        # 聊天内容概括器
-        self.chat_history_summarizer = ChatHistorySummarizer(chat_id=self.stream_id)
+        # 新记忆系统 — 原始消息归档器 + 话题摘要器
+        self.message_archiver = _MessageArchiver() if _HAS_MEMORY_ARCHIVE else None
+        self.topic_summarizer = _GroupTopicSummarizer() if _HAS_MEMORY_ARCHIVE else None
 
     async def start(self):
         """检查是否需要启动主循环，如果未激活则启动。"""
@@ -129,8 +140,7 @@ class HeartFChatting:
             self._loop_task = asyncio.create_task(self._main_chat_loop())
             self._loop_task.add_done_callback(self._handle_loop_completion)
 
-            # 启动聊天内容概括器的后台定期检查循环
-            await self.chat_history_summarizer.start()
+            # 记忆系统无需后台启动循环（消息归档在 _observe 中触发）
 
             logger.info(f"{self.log_prefix} HeartFChatting 启动完成")
 
@@ -297,6 +307,19 @@ class HeartFChatting:
             recent_messages_list = []
         _reply_text = ""  # 初始化reply_text变量，避免UnboundLocalError
 
+        # ── 未闭合话题恢复（跨轮衔接）──
+        _restored_topics: list[dict] = []
+        try:
+            from src.memory.layer1_summarizer import UnclosedTopicBridge
+
+            _bridge = UnclosedTopicBridge()
+            _rt = _bridge.restore_topics(self.stream_id)
+            if _rt:
+                _restored_topics = _rt
+                logger.info(f"{self.log_prefix} 恢复 {len(_rt)} 个未闭合话题")
+        except Exception:
+            pass
+
         # -------------------------------------------------------------------------
         # ReflectTracker Check
         # 在每次回复前检查一次上下文，看是否有反思问题得到了解答
@@ -317,11 +340,9 @@ class HeartFChatting:
             # 在 replyer 执行时触发，统一管理时间窗口，避免重复获取消息
             asyncio.create_task(extract_and_distribute_messages(self.stream_id))
 
-            # 添加curious检测任务 - 检测聊天记录中的矛盾、冲突或需要提问的内容
-            # asyncio.create_task(check_and_make_question(self.stream_id))
-            # 添加聊天内容概括任务 - 累积、打包和压缩聊天记录
-            # 注意：后台循环已在start()中启动，这里作为额外触发点，在有思考时立即处理
-            # asyncio.create_task(self.chat_history_summarizer.process())
+            # 异步归档原始消息到第0层
+            if self.message_archiver is not None and recent_messages_list:
+                asyncio.create_task(self._archive_recent_messages(recent_messages_list))
 
             cycle_timers, thinking_id = self.start_cycle()
             logger.info(
@@ -352,6 +373,15 @@ class HeartFChatting:
                 truncate=True,
                 show_actions=True,
             )
+
+            # 注入未闭合话题到 Prompt 上下文
+            if _restored_topics:
+                _lines = ["[上一轮未结束的话题]"]
+                for _t in _restored_topics:
+                    _name = _t.get("topic_name", "未知")
+                    _summary = _t.get("summary", "")
+                    _lines.append(f"  - {_name}: {_summary}")
+                chat_content_block = "\n".join(_lines) + "\n" + chat_content_block
 
             prompt_info = await self.action_planner.build_planner_prompt(
                 is_group_chat=is_group_chat,
@@ -452,6 +482,92 @@ class HeartFChatting:
             else:
                 await asyncio.sleep(0.1)
             return True
+
+    async def _archive_recent_messages(self, messages: list["DatabaseMessages"]) -> None:
+        """将 recent_messages_list 归档到第0层原始消息表
+
+        异步 fire-and-forget 任务，不影响主聊天循环。
+        DatabaseMessages 与 MessageArchiver 的 duck-typing 不完全兼容，
+        此处适配后调用 archiver 归档。
+        """
+        if self.message_archiver is None:
+            return
+        import copy
+
+        for msg in messages:
+            try:
+                # 适配 DatabaseMessages → archiver 期望的 duck-typing 接口
+                adapted = copy.copy(msg)
+                adapted.stream_id = msg.chat_id  # chat_id → stream_id
+                adapted.content = msg.processed_plain_text  # processed_plain_text → content
+                adapted.timestamp = msg.time  # time → timestamp
+                await self.message_archiver.archive_group_message(adapted)
+            except Exception as e:
+                logger.warning(f"消息归档失败: {e}")
+                continue
+
+        # 同时更新话题摘要
+        if self.topic_summarizer is not None:
+            for msg in messages:
+                try:
+                    self.topic_summarizer.add_message(
+                        stream_id=self.stream_id,
+                        message_text=msg.processed_plain_text or "",
+                        user_id=msg.user_id,
+                        timestamp=msg.time,
+                    )
+                except Exception:
+                    continue
+
+        # 送入编码管线（Layer 2 缓冲区）
+        try:
+            from src.memory.encoding_pipeline import get_encoding_pipeline
+
+            pipeline = get_encoding_pipeline()
+            if pipeline is not None:
+                for msg in messages:
+                    try:
+                        await pipeline.ingest(
+                            stream_id=self.stream_id,
+                            user_id=msg.user_id,
+                            speaker=msg.user_nickname or msg.user_id,
+                            content=msg.processed_plain_text or "",
+                            timestamp=msg.time,
+                            stream_type="group_chat",
+                        )
+                    except Exception:
+                        continue
+        except ImportError:
+            pass
+
+        # ── 保存未闭合话题（跨轮衔接）──
+        try:
+            from src.memory.layer1_summarizer import UnclosedTopicBridge
+
+            _bridge = UnclosedTopicBridge()
+            if self.topic_summarizer is not None:
+                _topics = self.topic_summarizer.get_topic_summaries(self.stream_id)
+                if _topics:
+                    _bridge.save_unclosed_topics(self.stream_id, _topics)
+        except Exception:
+            pass
+
+        # ── 表达学习桥接（异步更新用户表达画像）──
+        try:
+            from src.memory.expression_bridge import ExpressionBridge
+            from src.memory.user_profile import ProfileStore
+
+            _expr_bridge = ExpressionBridge(ProfileStore())
+            _user_msgs: dict[str, list[str]] = {}
+            for _msg in messages:
+                _uid = _msg.user_id
+                _txt = _msg.processed_plain_text or ""
+                if _uid and _txt.strip():
+                    _user_msgs.setdefault(_uid, []).append(_txt)
+            for _uid, _txts in _user_msgs.items():
+                _expr_bridge.update_expression_profile(_uid, _txts)
+        except Exception:
+            pass
 
     async def _main_chat_loop(self):
         """主循环，持续进行计划并可能回复消息，直到被外部取消。"""
@@ -621,18 +737,7 @@ class HeartFChatting:
                     self.consecutive_no_reply_count = 0
 
                     reason = action_planner_info.reasoning or ""
-                    # 根据 think_mode 配置决定 think_level 的值
-                    think_mode = global_config.chat.think_mode
-                    if think_mode == "default":
-                        think_level = 0
-                    elif think_mode == "deep":
-                        think_level = 1
-                    elif think_mode == "dynamic":
-                        # dynamic 模式：从 planner 返回的 action_data 中获取
-                        think_level = action_planner_info.action_data.get("think_level", 1)
-                    else:
-                        # 默认使用 default 模式
-                        think_level = 0
+                    think_level = 1
                     # 使用 action_reasoning（planner 的整体思考理由）作为 reply_reason
                     planner_reasoning = action_planner_info.action_reasoning or reason
 
@@ -714,6 +819,25 @@ class HeartFChatting:
                         quote_message=quote_message,
                     )
                     self.last_active_time = time.time()
+
+                    try:
+                        atom_ids = getattr(llm_response, "retrieved_atom_ids", None) or []
+                        if atom_ids and reply_text:
+                            from src.memory.feedback import ReinforcementTracker
+                            from src.memory.store import MemoryStore
+
+                            store = MemoryStore.get_instance()
+                            tracker = ReinforcementTracker(store)
+                            atom_data_list = await asyncio.gather(*[store.get_atom(aid) for aid in atom_ids])
+                            atoms = [ReinforcementTracker._dict_to_atom(d) for d in atom_data_list if d is not None]
+                            if atoms:
+                                usage = tracker.analyze_reply_for_memory_usage(reply_text, atoms)
+                                for aid, level in usage.items():
+                                    await tracker.apply_reinforcement([aid], level)
+                                logger.debug(f"{self.log_prefix} 记忆强化反馈: {len(usage)} 个原子已处理")
+                    except Exception as e:
+                        logger.debug(f"{self.log_prefix} 记忆反馈跳过: {e}")
+
                     return {
                         "action_type": "reply",
                         "success": True,

@@ -111,14 +111,6 @@ class ChatConfig(ConfigBase):
     时间区间支持跨夜，例如 "23:00-02:00"。
     """
 
-    think_mode: Literal["classic", "deep", "dynamic"] = "classic"
-    """
-    思考模式配置
-    - classic: 默认think_level为0（轻量回复，不需要思考和回忆）
-    - deep: 默认think_level为1（深度回复，需要进行回忆和思考）
-    - dynamic: think_level由planner动态给出（根据planner返回的think_level决定）
-    """
-
     plan_reply_log_max_per_chat: int = 1024
     """每个聊天流最大保存的Plan/Reply日志数量，超过此数量时会自动删除最老的日志"""
 
@@ -763,7 +755,7 @@ class MaimMessageConfig(ConfigBase):
 
 @dataclass
 class LPMMKnowledgeConfig(ConfigBase):
-    """LPMM知识库配置类"""
+    """LPMM知识库配置类（已废弃 — 等待新记忆系统替代）"""
 
     enable: bool = True
     """是否启用LPMM知识库"""

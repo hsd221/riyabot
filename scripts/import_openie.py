@@ -12,11 +12,17 @@ from time import sleep
 from typing import Optional
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.chat.knowledge.embedding_store import EmbeddingManager
-from src.chat.knowledge.open_ie import OpenIE
-from src.chat.knowledge.kg_manager import KGManager
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
+try:
+    from src.chat.knowledge.embedding_store import EmbeddingManager  # type: ignore
+    from src.chat.knowledge.open_ie import OpenIE  # type: ignore
+    from src.chat.knowledge.kg_manager import KGManager  # type: ignore
+except ModuleNotFoundError:
+    EmbeddingManager = None  # type: ignore
+    OpenIE = None  # type: ignore
+    KGManager = None  # type: ignore
 from src.common.logger import get_logger
-from src.chat.knowledge.utils.hash import get_sha256
+from src.common.knowledge_utils.hash import get_sha256
 
 
 # 添加项目根目录到 sys.path

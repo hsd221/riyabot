@@ -270,29 +270,6 @@ class OnlineTime(BaseModel):
         table_name = "online_time"
 
 
-class PersonInfo(BaseModel):
-    """
-    用于存储个人信息数据的模型。
-    """
-
-    is_known = BooleanField(default=False)  # 是否已认识
-    person_id = TextField(unique=True, index=True)  # 个人唯一ID
-    person_name = TextField(null=True)  # 个人名称 (允许为空)
-    name_reason = TextField(null=True)  # 名称设定的原因
-    platform = TextField()  # 平台
-    user_id = TextField(index=True)  # 用户ID
-    nickname = TextField(null=True)  # 用户昵称
-    group_nick_name = TextField(null=True)  # 群昵称列表 (JSON格式，存储 [{"group_id": str, "group_nick_name": str}])
-    memory_points = TextField(null=True)  # 个人印象的点
-    know_times = FloatField(null=True)  # 认识时间 (时间戳)
-    know_since = FloatField(null=True)  # 首次印象总结时间
-    last_know = FloatField(null=True)  # 最后一次印象总结时间
-
-    class Meta:
-        # database = db # 继承自 BaseModel
-        table_name = "person_info"
-
-
 class GroupInfo(BaseModel):
     """
     用于存储群组信息数据的模型。
@@ -376,24 +353,6 @@ class ChatHistory(BaseModel):
         table_name = "chat_history"
 
 
-class ThinkingBack(BaseModel):
-    """
-    用于存储记忆检索思考过程的模型
-    """
-
-    chat_id = TextField(index=True)  # 聊天ID
-    question = TextField()  # 提出的问题
-    context = TextField(null=True)  # 上下文信息
-    found_answer = BooleanField(default=False)  # 是否找到答案
-    answer = TextField(null=True)  # 答案内容
-    thinking_steps = TextField(null=True)  # 思考步骤（JSON格式）
-    create_time = DoubleField()  # 创建时间
-    update_time = DoubleField()  # 更新时间
-
-    class Meta:
-        table_name = "thinking_back"
-
-
 MODELS = [
     ChatStreams,
     LLMUsage,
@@ -403,12 +362,10 @@ MODELS = [
     ImageDescriptions,
     EmojiDescriptionCache,
     OnlineTime,
-    PersonInfo,
     Expression,
     ActionRecords,
     Jargon,
     ChatHistory,
-    ThinkingBack,
 ]
 
 

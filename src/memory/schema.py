@@ -1,0 +1,393 @@
+"""记忆系统数据库模型 — Peewee ORM 定义
+
+所有记忆相关的数据库模型定义，使用独立的 memory.db 数据库。
+"""
+
+import datetime
+import os
+
+from peewee import (
+    Model,
+    SqliteDatabase,
+    TextField,
+    FloatField,
+    IntegerField,
+    DateTimeField,
+    AutoField,
+    DoubleField,
+)
+
+from src.common.logger import get_logger
+
+logger = get_logger("memory.schema")
+
+# ---------------------------------------------------------------------------
+# 数据库连接 — 独立的 memory.db，与主 MaiBot.db 分离
+# ---------------------------------------------------------------------------
+
+_ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_DB_DIR = os.path.join(_ROOT_PATH, "data")
+_MEMORY_DB_FILE = os.path.join(_DB_DIR, "memory.db")
+
+os.makedirs(_DB_DIR, exist_ok=True)
+
+memory_db = SqliteDatabase(
+    _MEMORY_DB_FILE,
+    pragmas={
+        "journal_mode": "wal",
+        "cache_size": -64 * 1000,
+        "foreign_keys": 1,
+        "ignore_check_constraints": 0,
+        "synchronous": 0,
+        "busy_timeout": 1000,
+    },
+)
+
+
+class BaseModel(Model):
+    """记忆系统基础模型，所有模型继承自此"""
+
+    class Meta:
+        database = memory_db
+
+
+# ---------------------------------------------------------------------------
+# 1. 记忆原子主表
+# ---------------------------------------------------------------------------
+
+
+class MemoryAtom(BaseModel):
+    """记忆原子主表 — 所有类型记忆的通用基础字段"""
+
+    atom_id = TextField(primary_key=True)  # 原子唯一 ID（UUID）
+    atom_type = TextField(index=True)  # 类型: episodic/factual/relational/preference/planned
+    content = TextField()  # 原子内容（客观事实描述）
+    entities = TextField(null=True)  # 涉及的实体列表 JSON
+    importance = FloatField(default=0.5)  # 重要性评分 0-1
+    confidence = FloatField(default=0.5)  # 置信度 0-1
+    weight = FloatField(default=0.5)  # 当前权重（综合重要性、衰减、激活）
+    created_at = DateTimeField(default=datetime.datetime.now)  # 创建时间
+    last_accessed_at = DateTimeField(default=datetime.datetime.now)  # 最后访问时间
+    last_reinforced_at = DateTimeField(default=datetime.datetime.now)  # 最后强化时间
+    ttl_days = IntegerField(default=7)  # TTL（天）
+    decay_type = TextField(default="exponential")  # 衰减类型: linear/exponential/step
+    reinforcement_count = IntegerField(default=0)  # 强化次数
+    source_scene = TextField(default="chat")  # 来源场景: chat/private/dream
+    privacy_level = TextField(default="public")  # 隐私级别: public/context_sensitive/private
+    trace_chain_id = TextField(null=True)  # 追溯链 ID
+    status = TextField(default="active")  # 状态: active/archived/forgotten
+    embedding_id = TextField(null=True)  # Qdrant point ID
+
+    class Meta:
+        table_name = "memory_atoms"
+
+
+# ---------------------------------------------------------------------------
+# 2. 情景记忆扩展表
+# ---------------------------------------------------------------------------
+
+
+class EpisodicDetail(BaseModel):
+    """情景记忆扩展表 — 与 MemoryAtom 1:1 关系"""
+
+    id = TextField(primary_key=True)  # 同 atom_id
+    atom = TextField(index=True)  # FK → MemoryAtom.atom_id
+    event_time = DateTimeField(null=True)  # 事件发生时间
+    participants = TextField(null=True)  # 参与者列表 JSON
+    emotion_tags = TextField(null=True)  # 情绪标签 JSON
+    sensory_tags = TextField(null=True)  # 感官标签 JSON
+    temporal_context = TextField(null=True)  # 时间语境描述（如"深夜"）
+
+    class Meta:
+        table_name = "episodic_details"
+
+
+# ---------------------------------------------------------------------------
+# 3. 语义记忆扩展表
+# ---------------------------------------------------------------------------
+
+
+class SemanticDetail(BaseModel):
+    """语义记忆扩展表 — 与 MemoryAtom 1:1 关系"""
+
+    id = TextField(primary_key=True)  # 同 atom_id
+    atom = TextField(index=True)  # FK → MemoryAtom.atom_id
+    attr_category = TextField()  # 属性分类
+    attr_name = TextField()  # 属性名
+    attr_value = TextField()  # 属性值
+    evidence_list = TextField(null=True)  # 证据列表 JSON
+    evidence_counter = IntegerField(default=0)  # 证据计数器
+
+    class Meta:
+        table_name = "semantic_details"
+
+
+# ---------------------------------------------------------------------------
+# 4. 记忆追溯链表
+# ---------------------------------------------------------------------------
+
+
+class MemoryTraceChain(BaseModel):
+    """记忆追溯链表 — 记录记忆原子从原始数据到入库的完整加工路径"""
+
+    id = AutoField()
+    atom_id = TextField(index=True)  # FK → MemoryAtom.atom_id
+    step_number = IntegerField()  # 步骤序号
+    agent_name = TextField()  # Agent 名称
+    operation_type = TextField()  # 操作类型: extract/transform/verify/merge
+    input_source = TextField(null=True)  # 输入来源（文本摘要）
+    output_summary = TextField(null=True)  # 输出摘要
+    confidence_decay = FloatField(default=1.0)  # 置信度衰减因子
+    timestamp = DateTimeField(default=datetime.datetime.now)  # 操作时间
+
+    class Meta:
+        table_name = "memory_trace_chain"
+
+
+# ---------------------------------------------------------------------------
+# 5. 原始消息归档表
+# ---------------------------------------------------------------------------
+
+
+class RawMessageArchive(BaseModel):
+    """原始消息归档表 — 供梦境系统回放使用"""
+
+    id = AutoField()
+    stream_id = TextField(index=True)  # 聊天流 ID
+    message_id = TextField(index=True)  # 原始消息 ID
+    user_id = TextField()  # 用户 ID
+    content = TextField()  # 消息内容
+    timestamp = DoubleField()  # 消息时间戳
+    chat_type = TextField()  # 聊天类型: group/private
+
+    class Meta:
+        table_name = "raw_message_archive"
+
+
+# ---------------------------------------------------------------------------
+# 6. 冲突观察区
+# ---------------------------------------------------------------------------
+
+
+class ConflictObservation(BaseModel):
+    """冲突观察区 — 待仲裁的矛盾记忆"""
+
+    id = AutoField()
+    atom_a_id = TextField(index=True)  # FK → MemoryAtom.atom_id
+    atom_b_id = TextField(index=True)  # FK → MemoryAtom.atom_id
+    conflict_type = TextField()  # 冲突类型
+    description = TextField()  # 冲突描述
+    status = TextField(default="pending")  # 状态: pending/resolved/ignored
+    created_at = DateTimeField(default=datetime.datetime.now)  # 发现时间
+
+    class Meta:
+        table_name = "conflict_observations"
+
+
+# ---------------------------------------------------------------------------
+# 7. 噪声池
+# ---------------------------------------------------------------------------
+
+
+class NoisePool(BaseModel):
+    """噪声池 — 低显著性信息，7天保留期"""
+
+    id = AutoField()
+    content = TextField()  # 内容
+    source_scene = TextField(default="chat")  # 来源场景
+    significance = FloatField(default=0.0)  # 显著性评分
+    created_at = DateTimeField(default=datetime.datetime.now)  # 创建时间
+    ttl_days = IntegerField(default=7)  # 保留天数
+
+    class Meta:
+        table_name = "noise_pool"
+
+
+# ---------------------------------------------------------------------------
+# 8. 洞见池
+# ---------------------------------------------------------------------------
+
+
+class InsightPool(BaseModel):
+    """洞见池 — 梦境编织者等产出的洞见记忆"""
+
+    id = AutoField()
+    content = TextField()  # 洞见内容
+    source_atoms = TextField(null=True)  # 来源原子 ID 列表 JSON
+    agent_name = TextField()  # 产出 Agent 名称
+    confidence = FloatField(default=0.5)  # 置信度
+    created_at = DateTimeField(default=datetime.datetime.now)  # 创建时间
+
+    class Meta:
+        table_name = "insight_pool"
+
+
+# ---------------------------------------------------------------------------
+# 9-11. 图记忆相关表
+# ---------------------------------------------------------------------------
+
+
+class GraphNode(BaseModel):
+    """图记忆节点表"""
+
+    id = AutoField()
+    node_type = TextField()  # 节点类型
+    label = TextField(index=True)  # 节点标签
+    properties = TextField(null=True)  # 属性 JSON
+
+    class Meta:
+        table_name = "graph_nodes"
+
+
+class GraphEdge(BaseModel):
+    """图记忆边表"""
+
+    id = AutoField()
+    source_node_id = TextField(index=True)  # FK → GraphNode.id
+    target_node_id = TextField(index=True)  # FK → GraphNode.id
+    predicate = TextField()  # 关系谓词
+    confidence = FloatField(default=0.5)  # 置信度
+
+    class Meta:
+        table_name = "graph_edges"
+
+
+class GraphEntry(BaseModel):
+    """图记忆条目表 — 三元组 + 原文证据"""
+
+    id = AutoField()
+    subject = TextField(index=True)  # 主语
+    predicate = TextField()  # 谓词
+    object = TextField()  # 宾语
+    evidence = TextField(null=True)  # 原文证据
+    confidence = FloatField(default=0.5)  # 置信度
+
+    class Meta:
+        table_name = "graph_entries"
+
+
+# ---------------------------------------------------------------------------
+# 12. 原子关联表
+# ---------------------------------------------------------------------------
+
+
+class AtomAssociationModel(BaseModel):
+    """原子关联表 — 记忆原子之间的显式关联边
+
+    记录原子之间的直接关联关系，支持共现、因果、时序、梦境发现四种类型。
+    每条关联记录包含权重和证据计数，支持增量更新。
+    """
+
+    id = AutoField()
+    atom_a_id = TextField(index=True)  # FK → MemoryAtom.atom_id
+    atom_b_id = TextField(index=True)  # FK → MemoryAtom.atom_id
+    association_type = TextField()  # 关联类型: co_occurrence/causal/sequential/dream_discovered
+    weight = FloatField(default=0.5)  # 关联强度 0-1
+    evidence_count = IntegerField(default=1)  # 证据计数，每次 upsert 递增
+    created_at = DateTimeField(default=datetime.datetime.now)  # 创建时间
+
+    class Meta:
+        table_name = "atom_associations"
+        indexes = (
+            (("atom_a_id", "atom_b_id", "association_type"), True),  # unique composite
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13. 梦境运行记录
+# ---------------------------------------------------------------------------
+
+
+class DreamRun(BaseModel):
+    """梦境运行记录表"""
+
+    id = AutoField()
+    run_type = TextField()  # 运行类型: daily/weekly/monthly
+    start_time = DateTimeField()  # 开始时间
+    end_time = DateTimeField(null=True)  # 结束时间
+    status = TextField(default="running")  # 状态: running/completed/failed
+    atoms_processed = IntegerField(default=0)  # 处理的原子数
+    atoms_created = IntegerField(default=0)  # 创建的原子数
+    summary = TextField(null=True)  # 运行摘要
+
+    class Meta:
+        table_name = "dream_runs"
+
+
+# ---------------------------------------------------------------------------
+# 模型注册表 & 自动建表
+# ---------------------------------------------------------------------------
+
+MODELS = [
+    MemoryAtom,
+    EpisodicDetail,
+    SemanticDetail,
+    MemoryTraceChain,
+    RawMessageArchive,
+    ConflictObservation,
+    NoisePool,
+    InsightPool,
+    GraphNode,
+    GraphEdge,
+    GraphEntry,
+    AtomAssociationModel,
+    DreamRun,
+]
+
+
+def _ensure_indexes():
+    """创建常用查询索引（幂等，CREATE INDEX IF NOT EXISTS）
+
+    针对 MemoryAtomModel、RawMessageArchiveModel、ConflictObservation
+    的高频查询模式添加复合索引，避免全表扫描。
+    """
+    index_defs: list[tuple[str, str]] = [
+        (
+            "idx_memory_atoms_status_weight",
+            "CREATE INDEX IF NOT EXISTS idx_memory_atoms_status_weight ON memory_atoms(status, weight)",
+        ),
+        (
+            "idx_memory_atoms_weight",
+            "CREATE INDEX IF NOT EXISTS idx_memory_atoms_weight ON memory_atoms(weight)",
+        ),
+        (
+            "idx_raw_archive_stream_ts",
+            "CREATE INDEX IF NOT EXISTS idx_raw_archive_stream_ts ON raw_message_archive(stream_id, timestamp)",
+        ),
+        (
+            "idx_conflict_status_created",
+            "CREATE INDEX IF NOT EXISTS idx_conflict_status_created ON conflict_observations(status, created_at)",
+        ),
+    ]
+    for idx_name, ddl in index_defs:
+        try:
+            memory_db.execute_sql(ddl)
+        except Exception as e:
+            logger.warning("创建索引 %s 失败: %s", idx_name, e)
+
+
+def create_tables():
+    """创建所有记忆数据库表，同时创建附加索引"""
+    with memory_db:
+        memory_db.create_tables(MODELS)
+        _ensure_indexes()
+    logger.info(f"记忆数据库表已创建: {_MEMORY_DB_FILE}")
+
+
+def initialize_database():
+    """初始化记忆数据库，自动创建缺失的表，并确保索引存在"""
+    try:
+        with memory_db:
+            for model in MODELS:
+                if not memory_db.table_exists(model):
+                    logger.warning(f"记忆表 '{model._meta.table_name}' 未找到，正在创建...")
+                    memory_db.create_tables([model])
+                    logger.info(f"记忆表 '{model._meta.table_name}' 创建成功")
+            _ensure_indexes()
+        logger.info("记忆数据库初始化完成")
+    except Exception as e:
+        logger.exception(f"记忆数据库初始化失败: {e}")
+
+
+# 模块加载时自动初始化
+initialize_database()

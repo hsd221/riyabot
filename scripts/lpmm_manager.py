@@ -406,7 +406,12 @@ def _interactive_build_test_args() -> List[str]:
 
 def _run_embedding_helper() -> None:
     """嵌入模型迁移辅助：展示当前配置，并安全归档 embedding_model_test.json。"""
-    from src.chat.knowledge.embedding_store import EMBEDDING_TEST_FILE  # type: ignore
+    # LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
+    try:
+        from src.chat.knowledge.embedding_store import EMBEDDING_TEST_FILE  # type: ignore
+    except ModuleNotFoundError:
+        print("LPMM 知识库已移除，嵌入辅助功能不可用")
+        return
 
     # 1. 读取当前配置中的嵌入维度与模型信息
     current_dim = getattr(getattr(global_config, "lpmm_knowledge", None), "embedding_dimension", None)

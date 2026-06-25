@@ -14,7 +14,6 @@ from src.chat.message_receive.bot import chat_bot
 from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
 from src.common.server import get_global_server, Server
-from src.chat.knowledge import lpmm_start_up
 from rich.traceback import install
 
 # from src.api.main import start_api_server
@@ -24,7 +23,6 @@ from src.plugin_system.core.plugin_manager import plugin_manager
 
 # 导入消息API和traceback模块
 from src.common.message import get_global_api
-from src.dream.dream_agent import start_dream_scheduler
 from src.bw_learner.expression_auto_check_task import ExpressionAutoCheckTask
 
 # 插件系统现在使用统一的插件加载器
@@ -108,9 +106,6 @@ class MainSystem:
         # start_api_server()
         # logger.info("API服务器启动成功")
 
-        # 启动LPMM
-        lpmm_start_up()
-
         # 加载所有actions，包括默认的和插件的
         plugin_manager.load_all_plugins()
 
@@ -123,6 +118,60 @@ class MainSystem:
         asyncio.create_task(get_chat_manager()._auto_save_task())
 
         logger.info("聊天管理器初始化成功")
+
+        # 初始化记忆存储
+        try:
+            from src.memory import MemoryStore, MemoryStoreConfig
+
+            memory_config = MemoryStoreConfig(
+                sqlite_path="data/memory.db",
+                qdrant_url="http://localhost:6333",
+            )
+            store = MemoryStore(memory_config)
+            await store.initialize()
+            logger.info("记忆存储初始化完成")
+
+            # 启动记忆遗忘定期扫描
+            try:
+                from src.memory.forgetting import ForgettingManager, ForgettingSweepTask
+
+                forgetting_manager = ForgettingManager(store)
+                await async_task_manager.add_task(ForgettingSweepTask(forgetting_manager))
+                logger.info("记忆遗忘扫描任务已注册（3600 秒间隔）")
+            except Exception as e:
+                logger.warning(f"记忆遗忘扫描任务注册失败: {e}")
+
+            # 启动编码管线（连接 Layer 2 → Layer 3）
+            try:
+                from src.memory.encoding_pipeline import EncodingPipeline, EncodingTask
+
+                pipeline = EncodingPipeline(store)
+                await async_task_manager.add_task(EncodingTask(pipeline, interval=300))
+                logger.info("编码管线已注册（300 秒间隔）")
+            except Exception as e:
+                logger.warning(f"编码管线注册失败: {e}")
+
+            # 启动梦境维护任务
+            try:
+                from src.memory.dream_agent import DreamTask
+                from src.memory.dream_weaver import DreamWeaver
+                from src.memory.graph_store import GraphStore
+
+                graph_store = GraphStore()
+                dream_weaver = DreamWeaver(store=store)
+                dream_task = DreamTask(
+                    store=store,
+                    forgetting_manager=forgetting_manager,
+                    graph_store=graph_store,
+                    dream_weaver=dream_weaver,
+                )
+                await async_task_manager.add_task(dream_task)
+                dream_config = global_config.dream
+                logger.info(f"梦境维护任务已注册（{dream_config.interval_minutes} 分钟间隔）")
+            except Exception as e:
+                logger.warning(f"梦境维护任务注册失败: {e}")
+        except Exception as e:
+            logger.warning(f"记忆存储初始化失败（不影响主系统运行）: {e}")
 
         # await asyncio.sleep(0.5) #防止logger输出飞了
 
@@ -148,7 +197,6 @@ class MainSystem:
         try:
             tasks = [
                 get_emoji_manager().start_periodic_check_register(),
-                start_dream_scheduler(),
                 self.app.run(),
                 self.server.run(),
             ]

@@ -5,8 +5,13 @@ from typing import Set
 # 保证可以导入 src.*
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.chat.knowledge.embedding_store import EmbeddingManager
-from src.chat.knowledge.kg_manager import KGManager
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
+try:
+    from src.chat.knowledge.embedding_store import EmbeddingManager  # type: ignore
+    from src.chat.knowledge.kg_manager import KGManager  # type: ignore
+except ModuleNotFoundError:
+    EmbeddingManager = None  # type: ignore
+    KGManager = None  # type: ignore
 from src.common.logger import get_logger
 
 logger = get_logger("inspect_lpmm_global")

@@ -16,7 +16,7 @@ maibot/
 │   ├── chat/             # ★ Largest subsystem (21k lines) — see src/chat/AGENTS.md
 │   ├── plugin_system/    # Plugin SDK v2 — see src/plugin_system/AGENTS.md
 │   ├── webui/            # FastAPI WebUI backend — see src/webui/AGENTS.md
-│   ├── common/           # Infra: server, DB, logger, data models — see src/common/AGENTS.md
+│   ├── common/           # Infra: server, DB, logger, data models, prompt loader/manager — see src/common/AGENTS.md
 │   ├── config/           # global_config singleton from TOML; typed dataclasses
 │   ├── llm_models/       # LLM client abstraction (OpenAI + Gemini)
 │   ├── memory_system/    # Memory retrieval + chat history summarization
@@ -25,6 +25,7 @@ maibot/
 │   ├── person_info/      # User/group profile management
 │   ├── manager/          # async_task_manager, local_store_manager
 │   └── plugins/built_in/ # 4 built-in plugins (emoji/tts/knowledge/plugin_mgmt)
+├── prompts/              # 37 个外部 .prompt 文件（LLM 提示词模板）
 ├── webui/                # ★ React+Vite frontend — see webui/AGENTS.md
 ├── plugins/              # External user plugins (each needs _manifest.json)
 ├── config/               # Runtime TOML configs (gitignored)
@@ -51,6 +52,8 @@ maibot/
 | LLM usage stats | `src/chat/utils/statistic.py` | 2307 lines incl. 900-line HTML report |
 | Emoji system | `src/chat/emoji_system/emoji_manager.py` | Singleton via get_emoji_manager() |
 | Memory retrieval | `src/memory_system/memory_retrieval.py` | 1288 lines |
+| Prompt management | `src/common/prompt_manager.py` + `src/common/prompt_loader.py` | 3-tier system: file I/O → manager → compatibility layer |
+| Prompt templates | `prompts/` | 37 个外部 .prompt 文件（LLM 提示词模板），支持 ###SECTION 分节 |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -93,6 +96,54 @@ maibot/
 - **Runner/Worker**: bot.py is both — Runner (daemon, monitors exit code 42) and Worker (MAIBOT_WORKER_PROCESS=1 env var).
 - **Two FastAPI servers**: internal API (127.0.0.1:8080) + WebUI (0.0.0.0:8001), independent.
 - **WebUI version dual-track**: `webui/src/lib/version.ts` = Dashboard version (0.11.7 Beta); MaiBot backend version (0.12.2) hardcoded in frontend JS. `pyproject.toml` version (0.11.6) is yet another value, not kept in sync with releases.
+
+## PROMPT LOADING SYSTEM
+
+3-tier architecture for external prompt file management, added in a 10-commit refactor (Phases 0-4):
+
+```
+prompts/*.prompt                          # Source: 37 个外部 .prompt 模板文件
+    │
+    ▼ [load_prompt_template / load_prompt_section]
+src/common/prompt_loader.py               # Layer 1: 文件 I/O + LRU 缓存 + 修订号
+    │  - load_prompt_template(name)       #   读取单文件，LRU 缓存 (maxsize=128)
+    │  - clear_prompt_cache()             #   清缓存 + 递增修订号 → 触发热重载
+    │  - parse_prompt_sections(template)  #   解析 ###SECTION: name → ###END_SECTION### 分节
+    │  - load_prompt_section(name, sec)   #   加载指定分节模板
+    │  - list_prompt_templates()          #   列出所有可用 .prompt 文件
+    │
+    ▼ [prompt_manager.load_prompts() / get_prompt() / format_prompt()]
+src/common/prompt_manager.py              # Layer 2: 单例管理器，全量加载 + 热重载
+    │  - PromptManager 单例               #   一次性加载所有 .prompt 到内存
+    │  - _reload_if_changed()             #   轮询缓存修订号 → 自动触发重载
+    │  - safe_get_prompt(default=...)     #   降级兜底，文件缺失时不抛异常
+    │  - reload_prompts()                 #   强制重载全部提示词
+    │
+    ▼ [init_external_prompts()]
+src/chat/utils/prompt_builder.py          # Layer 3: 兼容层，同步到旧 global_prompt_manager
+    │  - 分节文件：每个 ###SECTION 注册为独立 Prompt
+    │  - 非分节文件：按文件名注册
+    │  - 旧代码通过 global_prompt_manager.format_prompt() 无感迁移
+    │
+    ▼ 消费端
+src/chat/**/*.py                          # 通过 prompt_manager / global_prompt_manager / 直接 load_prompt_section 获取提示词
+src/memory_system/**/*.py
+src/dream/**/*.py
+```
+
+### 启动流程
+1. `main.py:_init_components()` → `prompt_manager.load_prompts()`（Layer 2 全量加载）
+2. 紧接调用 `init_external_prompts()`（Layer 3 同步到兼容层）
+3. 后续运行时：`prompt_manager.get_prompt()` 自动检测修订号变化进行热重载
+
+### 多段模板（分节）格式
+`.prompt` 文件支持用 `###SECTION:` 标记分节，每节独立注册为单独的提示词：
+```
+###SECTION: section_name
+{template text with {variables}}
+###END_SECTION###
+```
+通过 `load_prompt_section("file_name", "section_name")` 或 `global_prompt_manager.format_prompt("section_name")` 读取。
 
 ## COMMANDS
 ```bash

@@ -27,13 +27,13 @@ from src.bw_learner.expression_selector import expression_selector
 from src.plugin_system.apis.message_api import translate_pid_to_description
 
 # from src.memory_system.memory_activator import MemoryActivator
-from src.person_info.person_info import Person
+from src.common.person_stub import Person
 from src.plugin_system.base.component_types import ActionInfo, EventType
 from src.plugin_system.apis import llm_api
 
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
-from src.memory_system.memory_retrieval import build_memory_retrieval_prompt
 from src.bw_learner.jargon_explainer import explain_jargon_in_context, retrieve_concepts_with_jargon
+from src.memory.prompt_integration import build_memory_retrieval_prompt
 
 
 logger = get_logger("replyer")
@@ -49,6 +49,8 @@ class DefaultReplyer:
         self.chat_stream = chat_stream
         self.is_group_chat, self.chat_target_info = get_chat_type_and_target_info(self.chat_stream.stream_id)
         self.heart_fc_sender = UniversalMessageSender()
+        # 记忆反馈系统：存储最近一次检索到的记忆原子 ID，供外部反馈回路使用
+        self._last_retrieved_atom_ids: list[str] = []
 
         from src.plugin_system.core.tool_use import ToolExecutor  # 延迟导入ToolExecutor，不然会循环依赖
 
@@ -114,6 +116,7 @@ class DefaultReplyer:
             prompt_duration_ms = (time.perf_counter() - prompt_start) * 1000
             llm_response.prompt = prompt
             llm_response.selected_expressions = selected_expressions
+            llm_response.retrieved_atom_ids = self._last_retrieved_atom_ids
             llm_response.timing = {
                 "prompt_ms": round(prompt_duration_ms or 0.0, 2),
                 "overall_ms": None,  # 占位，稍后写入
@@ -878,6 +881,7 @@ class DefaultReplyer:
                     think_level=think_level,
                     unknown_words=unknown_words,
                     question=question,
+                    user_id=user_id,
                 ),
                 "memory_retrieval",
             ),
@@ -920,7 +924,12 @@ class DefaultReplyer:
         prompt_info: str = results_dict["prompt_info"]  # 直接使用格式化后的结果
         actions_info: str = results_dict["actions_info"]
         personality_prompt: str = results_dict["personality_prompt"]
-        memory_retrieval: str = results_dict["memory_retrieval"]
+        memory_retrieval_result = results_dict["memory_retrieval"]
+        if isinstance(memory_retrieval_result, tuple) and len(memory_retrieval_result) == 2:
+            memory_retrieval, self._last_retrieved_atom_ids = memory_retrieval_result
+        else:
+            memory_retrieval = memory_retrieval_result if isinstance(memory_retrieval_result, str) else ""
+            self._last_retrieved_atom_ids = []
         keywords_reaction_prompt = await self.build_keywords_reaction_prompt(target)
         jargon_explanation: str = results_dict.get("jargon_explanation") or ""
         planner_reasoning = f"你的想法是：{reply_reason}"

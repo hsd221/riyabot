@@ -18,7 +18,7 @@ from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.heart_flow.hfc_utils import CycleDetail
 from src.bw_learner.expression_learner import expression_learner_manager
 from src.bw_learner.message_recorder import extract_and_distribute_messages
-from src.person_info.person_info import Person
+from src.common.person_stub import Person
 from src.plugin_system.base.component_types import EventType, ActionInfo
 from src.plugin_system.core import events_manager
 from src.plugin_system.apis import generator_api, send_api, message_api, database_api
@@ -26,6 +26,17 @@ from src.chat.utils.chat_message_builder import (
     build_readable_messages_with_id,
     get_raw_msg_before_timestamp_with_chat,
 )
+
+# 新记忆系统 — 原始消息归档 + 话题摘要（私聊用）
+try:
+    from src.memory.layer0_archive import MessageArchiver as _MessageArchiver
+    from src.memory.layer1_summarizer import PrivateChatSummarizer as _PrivateChatSummarizer
+
+    _HAS_MEMORY_ARCHIVE = True
+except ImportError:
+    _MessageArchiver = None  # type: ignore
+    _PrivateChatSummarizer = None  # type: ignore
+    _HAS_MEMORY_ARCHIVE = False
 
 if TYPE_CHECKING:
     from src.common.data_models.database_data_model import DatabaseMessages
@@ -100,6 +111,10 @@ class BrainChatting:
 
         # 最近一次是否成功进行了 reply，用于选择 BrainPlanner 的 Prompt
         self._last_successful_reply: bool = False
+
+        # 新记忆系统 — 原始消息归档器 + 话题摘要器（私聊用）
+        self.message_archiver = _MessageArchiver() if _HAS_MEMORY_ARCHIVE else None
+        self.topic_summarizer = _PrivateChatSummarizer() if _HAS_MEMORY_ARCHIVE else None
 
     async def start(self):
         """检查是否需要启动主循环，如果未激活则启动。"""
@@ -251,6 +266,19 @@ class BrainChatting:
             recent_messages_list = []
         _reply_text = ""  # 初始化reply_text变量，避免UnboundLocalError
 
+        # ── 未闭合话题恢复（跨轮衔接）──
+        _restored_topics: list[dict] = []
+        try:
+            from src.memory.layer1_summarizer import UnclosedTopicBridge
+
+            _bridge = UnclosedTopicBridge()
+            _rt = _bridge.restore_topics(self.stream_id)
+            if _rt:
+                _restored_topics = _rt
+                logger.info(f"{self.log_prefix} 恢复 {len(_rt)} 个未闭合话题")
+        except Exception:
+            pass
+
         # -------------------------------------------------------------------------
         # ReflectTracker Check
         # 在每次回复前检查一次上下文，看是否有反思问题得到了解答
@@ -277,6 +305,10 @@ class BrainChatting:
             # 通过 MessageRecorder 统一提取消息并分发给 expression_learner 和 jargon_miner
             # 在 replyer 执行时触发，统一管理时间窗口，避免重复获取消息
             asyncio.create_task(extract_and_distribute_messages(self.stream_id))
+
+            # 异步归档原始消息到第0层
+            if self.message_archiver is not None and recent_messages_list:
+                asyncio.create_task(self._archive_recent_messages(recent_messages_list))
 
             cycle_timers, thinking_id = self.start_cycle()
             logger.info(f"{self.log_prefix} 开始第{self._cycle_counter}次思考")
@@ -307,6 +339,15 @@ class BrainChatting:
                 truncate=True,
                 show_actions=True,
             )
+
+            # 注入未闭合话题到 Prompt 上下文
+            if _restored_topics:
+                _lines = ["[上一轮未结束的话题]"]
+                for _t in _restored_topics:
+                    _name = _t.get("topic_name", "未知")
+                    _summary = _t.get("summary", "")
+                    _lines.append(f"  - {_name}: {_summary}")
+                chat_content_block = "\n".join(_lines) + "\n" + chat_content_block
 
             prompt_info = await self.action_planner.build_planner_prompt(
                 chat_target_info=chat_target_info,
@@ -407,6 +448,112 @@ class BrainChatting:
             # 如果选择了 complete_talk，返回 False 停止循环
             # 否则返回 True，继续下一次思考迭代
             return should_continue
+
+    async def _archive_recent_messages(self, messages: list["DatabaseMessages"]) -> None:
+        """将最近消息归档到第0层原始消息表
+
+        异步 fire-and-forget 任务，不影响主聊天循环。
+        DatabaseMessages 与 MessageArchiver 的 duck-typing 不完全兼容，
+        此处适配后调用 archiver 归档。
+        """
+        if self.message_archiver is None:
+            return
+        import copy
+
+        for msg in messages:
+            try:
+                # 适配 DatabaseMessages → archiver 期望的 duck-typing 接口
+                adapted = copy.copy(msg)
+                adapted.stream_id = msg.chat_id  # chat_id → stream_id
+                adapted.content = msg.processed_plain_text  # processed_plain_text → content
+                adapted.timestamp = msg.time  # time → timestamp
+                await self.message_archiver.archive_private_message(adapted)
+            except Exception as e:
+                logger.warning(f"消息归档失败: {e}")
+                continue
+
+        # 同时更新话题摘要
+        if self.topic_summarizer is not None:
+            for msg in messages:
+                try:
+                    self.topic_summarizer.add_message(
+                        stream_id=self.stream_id,
+                        message_text=msg.processed_plain_text or "",
+                        user_id=msg.user_id,
+                        timestamp=msg.time,
+                    )
+                except Exception:
+                    continue
+
+        # 送入编码管线（Layer 2 缓冲区）
+        try:
+            from src.memory.encoding_pipeline import get_encoding_pipeline
+
+            pipeline = get_encoding_pipeline()
+            if pipeline is not None:
+                for msg in messages:
+                    try:
+                        await pipeline.ingest(
+                            stream_id=self.stream_id,
+                            user_id=msg.user_id,
+                            speaker=msg.user_nickname or msg.user_id,
+                            content=msg.processed_plain_text or "",
+                            timestamp=msg.time,
+                            stream_type="private_chat",
+                        )
+                    except Exception:
+                        continue
+        except ImportError:
+            pass
+
+        # ── 保存未闭合话题（跨轮衔接）──
+        try:
+            from src.memory.layer1_summarizer import UnclosedTopicBridge
+
+            _bridge = UnclosedTopicBridge()
+            if self.topic_summarizer is not None:
+                # 群聊话题摘要器 → get_topic_summaries
+                if hasattr(self.topic_summarizer, "get_topic_summaries"):
+                    _topics = self.topic_summarizer.get_topic_summaries(self.stream_id)
+                    if _topics:
+                        _bridge.save_unclosed_topics(self.stream_id, _topics)
+                # 私聊渐进式摘要器 → get_summary_data
+                elif hasattr(self.topic_summarizer, "get_summary_data"):
+                    _sd = self.topic_summarizer.get_summary_data(self.stream_id)
+                    if _sd:
+                        _bridge.save_unclosed_topics(
+                            self.stream_id,
+                            [
+                                {
+                                    "topic_id": "private_summary",
+                                    "keywords": _sd.get("key_topics", []),
+                                    "key_points": [_sd.get("content", "")],
+                                    "participant_count": 2,
+                                    "message_count": _sd.get("exchange_count", 0),
+                                    "last_updated": time.time(),
+                                    "is_closed": False,
+                                },
+                            ],
+                        )
+        except Exception:
+            pass
+
+        # ── 表达学习桥接（异步更新用户表达画像）──
+        try:
+            from src.memory.expression_bridge import ExpressionBridge
+            from src.memory.user_profile import ProfileStore
+
+            _expr_bridge = ExpressionBridge(ProfileStore())
+            _user_msgs: dict[str, list[str]] = {}
+            for _msg in messages:
+                _uid = _msg.user_id
+                _txt = _msg.processed_plain_text or ""
+                if _uid and _txt.strip():
+                    _user_msgs.setdefault(_uid, []).append(_txt)
+            for _uid, _txts in _user_msgs.items():
+                _expr_bridge.update_expression_profile(_uid, _txts)
+        except Exception:
+            pass
 
     async def _main_chat_loop(self):
         """主循环，持续进行计划并可能回复消息，直到被外部取消。"""
@@ -656,6 +803,25 @@ class BrainChatting:
                     )
                     # 标记这次循环已经成功进行了回复
                     self._last_successful_reply = True
+
+                    try:
+                        atom_ids = getattr(llm_response, "retrieved_atom_ids", None) or []
+                        if atom_ids and reply_text:
+                            from src.memory.feedback import ReinforcementTracker
+                            from src.memory.store import MemoryStore
+
+                            store = MemoryStore.get_instance()
+                            tracker = ReinforcementTracker(store)
+                            atom_data_list = await asyncio.gather(*[store.get_atom(aid) for aid in atom_ids])
+                            atoms = [ReinforcementTracker._dict_to_atom(d) for d in atom_data_list if d is not None]
+                            if atoms:
+                                usage = tracker.analyze_reply_for_memory_usage(reply_text, atoms)
+                                for aid, level in usage.items():
+                                    await tracker.apply_reinforcement([aid], level)
+                                logger.debug(f"{self.log_prefix} 记忆强化反馈: {len(usage)} 个原子已处理")
+                    except Exception as e:
+                        logger.debug(f"{self.log_prefix} 记忆反馈跳过: {e}")
+
                     return {
                         "action_type": "reply",
                         "success": True,

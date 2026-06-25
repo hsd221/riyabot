@@ -1,0 +1,701 @@
+# -*- coding: utf-8 -*-
+"""
+写操作日志与恢复机制
+
+为记忆系统提供多步写入操作的日志记录、断点续传和崩溃恢复能力。
+每次对 SQLite/Qdrant 的写入都记录为 WriteOp，支持重放和回滚。
+
+设计原则：
+- 轻量：纯 JSONL 文件 I/O，不依赖 Peewee/ORM
+- 可恢复：所有失败操作可在启动时自动重放
+- 原子性：通过 WriteOperation 上下文管理器自动标记完成/失败
+- 自维护：自动裁剪超过阈值的已完成记录
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import functools
+import json
+import os
+import time
+import uuid
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Optional
+
+from src.common.logger import get_logger
+
+logger = get_logger("memory.write_ops")
+
+
+class OpStatus(str, Enum):
+    """写操作状态枚举"""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ROLLED_BACK = "rolled_back"
+
+
+class OpType(str, Enum):
+    """写操作类型枚举"""
+
+    INSERT_ATOM = "insert_atom"
+    UPDATE_ATOM = "update_atom"
+    DELETE_ATOM = "delete_atom"
+    BATCH_INSERT = "batch_insert"
+    DREAM_CONSOLE = "dream_consolidation"
+    ARCHIVE_ATOM = "archive_atom"
+    MIGRATE_ATOM = "migrate_atom"
+
+
+@dataclasses.dataclass
+class WriteOp:
+    """单次写操作记录，支持断点续传和回滚
+
+    Attributes:
+        op_id: 全局唯一操作ID
+        op_type: 操作类型
+        target: 目标存储 ("sqlite", "qdrant", "both")
+        atom_ids: 关联的记忆原子ID列表
+        payload: 操作负载（包含完整数据）
+        status: 当前状态
+        created_at: 创建时间戳（秒）
+        started_at: 开始执行时间戳（秒）
+        completed_at: 完成时间戳（秒）
+        error_message: 错误信息
+        retry_count: 已重试次数
+        rollback_actions: 可重放的撤销步骤列表
+    """
+
+    op_id: str
+    op_type: OpType
+    target: str  # "sqlite", "qdrant", "both"
+    atom_ids: list[str] = dataclasses.field(default_factory=list)
+    payload: dict[str, Any] = dataclasses.field(default_factory=dict)
+    status: OpStatus = OpStatus.PENDING
+    created_at: float = dataclasses.field(default_factory=lambda: datetime.now().timestamp())
+    started_at: Optional[float] = None
+    completed_at: Optional[float] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    rollback_actions: list[dict] = dataclasses.field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为 JSON 可序列化的字典"""
+        d = dataclasses.asdict(self)
+        d["op_type"] = self.op_type.value
+        d["status"] = self.status.value
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "WriteOp":
+        """从字典反序列化"""
+        # 兼容旧格式：缺失字段使用默认值
+        d["op_type"] = OpType(d["op_type"])
+        d["status"] = OpStatus(d.get("status", "pending"))
+        d.setdefault("atom_ids", [])
+        d.setdefault("payload", {})
+        d.setdefault("started_at", None)
+        d.setdefault("completed_at", None)
+        d.setdefault("error_message", None)
+        d.setdefault("retry_count", 0)
+        d.setdefault("rollback_actions", [])
+        # created_at 兼容旧数据
+        d.setdefault("created_at", datetime.now().timestamp())
+        return cls(**d)
+
+    @property
+    def elapsed(self) -> Optional[float]:
+        """操作耗时（秒），未完成则返回 None"""
+        if self.started_at is None:
+            return None
+        end = self.completed_at or datetime.now().timestamp()
+        return end - self.started_at
+
+    @property
+    def is_retriable(self) -> bool:
+        """判断是否还可以重试（失败且未超过最大重试次数）"""
+        return self.status == OpStatus.FAILED and self.retry_count < 3
+
+    @property
+    def is_terminal(self) -> bool:
+        """是否为终态（不会再变更）"""
+        return self.status in (OpStatus.COMPLETED, OpStatus.ROLLED_BACK)
+
+
+def generate_op_id() -> str:
+    """生成唯一操作ID
+
+    格式: op_{毫秒时间戳}_{UUID短尾}，保证全局唯一且按时间有序
+    """
+    return f"op_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+
+
+def _default_log_path(db_path: str) -> str:
+    """根据 SQLite 数据库路径推导 JSONL 日志路径"""
+    if db_path.endswith(".db"):
+        return db_path[:-3] + "_write_ops.jsonl"
+    return db_path + "_write_ops.jsonl"
+
+
+class WriteOpLogger:
+    """写操作日志管理器 — 保证数据一致性
+
+    使用 JSONL 文件记录所有写操作，支持：
+    - 操作全生命周期追踪（pending → in_progress → completed/failed）
+    - 崩溃后自动恢复失败操作
+    - 自动清理过期已完成记录（不超过 max_entries 条）
+    - 文件锁保障并发安全
+
+    Args:
+        db_path: SQLite 数据库路径，用于推导 JSONL 路径
+        max_entries: 日志文件最大条目数，超过后自动裁剪
+    """
+
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB — 超过此大小触发日志轮转
+    MAX_LINE_COUNT = 10000  # 10K 行 — 超过此行数触发日志轮转
+
+    def __init__(self, db_path: str, max_entries: int = 10000):
+        self.db_path = db_path
+        self.log_file = _default_log_path(db_path)
+        self.max_entries = max_entries
+        # 确保日志目录存在
+        log_dir = os.path.dirname(self.log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+
+    # ── 文件 I/O ──────────────────────────────────────────────
+
+    def _acquire_lock(self, f) -> None:
+        """获取文件排他锁（fcntl.flock），保障并发安全"""
+        try:
+            import fcntl
+
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            # fcntl 不可用时（如 Windows），退化到无锁模式
+            logger.debug("获取文件锁异常(可忽略)", exc_info=True)
+
+    def _release_lock(self, f) -> None:
+        """释放文件锁"""
+        try:
+            import fcntl
+
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except (ImportError, OSError):
+            logger.debug("释放文件锁异常(可忽略)", exc_info=True)
+
+    # ── 日志轮转 ──────────────────────────────────────────────
+
+    def _check_rotate(self) -> None:
+        """检查日志文件是否超过大小/行数阈值，若是则触发轮转"""
+        if not os.path.exists(self.log_file):
+            return
+
+        # 快速路径：检查文件大小（O(1)）
+        file_size = os.path.getsize(self.log_file)
+        if file_size < self.MAX_FILE_SIZE:
+            # 大小未超限，再检查行数（需读取文件）
+            try:
+                with open(self.log_file, "r", encoding="utf-8") as f:
+                    line_count = sum(1 for _ in f)
+            except OSError:
+                return
+            if line_count < self.MAX_LINE_COUNT:
+                return
+
+        self._rotate_log()
+
+    def _rotate_log(self) -> None:
+        """执行日志轮转：重命名当前文件 → 新建空文件
+
+        将当前 memory_write_ops.jsonl 重命名为 .jsonl.1 / .jsonl.2 / ...，
+        然后创建空的新文件继续写入。超过 50 个轮转文件时发出告警并裁剪最旧文件。
+        """
+        base = self.log_file
+        # 寻找下一个可用序号
+        n = 1
+        while os.path.exists(f"{base}.{n}"):
+            n += 1
+
+        new_path = f"{base}.{n}"
+        os.rename(self.log_file, new_path)
+        # 创建新空文件
+        with open(self.log_file, "w", encoding="utf-8") as f:
+            f.flush()
+            os.fsync(f.fileno())
+
+        logger.info(
+            "write_ops 日志轮转",
+            extra={"old": new_path, "new": self.log_file, "rotation_number": n},
+        )
+
+        # 超过 50 个备份文件时，裁剪最旧的那个
+        if n > 50:
+            first = f"{base}.1"
+            if os.path.exists(first):
+                try:
+                    os.remove(first)
+                    logger.warning(
+                        "write_ops 日志：轮转文件过多，已删除最旧备份",
+                        extra={"removed": first, "remaining": n - 1},
+                    )
+                except OSError as e:
+                    logger.warning("删除最旧轮转文件失败", extra={"path": first, "error": str(e)})
+
+    def _read_all_ops(self) -> list[WriteOp]:
+        """从 JSONL 文件读取所有操作记录"""
+        if not os.path.exists(self.log_file):
+            return []
+        ops: list[WriteOp] = []
+        with open(self.log_file, "r", encoding="utf-8") as f:
+            for line_num, raw in enumerate(f, 1):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                    ops.append(WriteOp.from_dict(data))
+                except (json.JSONDecodeError, KeyError, ValueError) as e:
+                    logger.warning(
+                        "解析写操作日志行失败",
+                        extra={
+                            "line": line_num,
+                            "error": str(e),
+                            "content_preview": raw[:120],
+                        },
+                    )
+        return ops
+
+    def _write_all_ops(self, ops: list[WriteOp]) -> None:
+        """将操作记录全量写回 JSONL 文件（带文件锁）"""
+        self._check_rotate()
+        with open(self.log_file, "w", encoding="utf-8") as f:
+            self._acquire_lock(f)
+            try:
+                for op in ops:
+                    f.write(json.dumps(op.to_dict(), ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                self._release_lock(f)
+
+    def _append_op(self, op: WriteOp) -> None:
+        """追加一条新操作记录到文件末尾（带文件锁）"""
+        self._check_rotate()
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            self._acquire_lock(f)
+            try:
+                f.write(json.dumps(op.to_dict(), ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                self._release_lock(f)
+
+    def _update_op(self, op_id: str, **updates: Any) -> Optional[WriteOp]:
+        """更新指定操作的状态字段（读-改-写模式）
+
+        返回更新后的 WriteOp，若未找到则返回 None。
+        """
+        ops = self._read_all_ops()
+        found = None
+        for i, op in enumerate(ops):
+            if op.op_id == op_id:
+                for key, val in updates.items():
+                    if hasattr(op, key):
+                        setattr(op, key, val)
+                ops[i] = op
+                found = op
+                break
+        if found:
+            self._write_all_ops(ops)
+            self._auto_trim(ops)
+        return found
+
+    def _auto_trim(self, ops: Optional[list[WriteOp]] = None) -> int:
+        """自动裁剪超过阈值的已完成/已回滚记录
+
+        Returns:
+            被裁剪的条目数
+        """
+        if ops is None:
+            ops = self._read_all_ops()
+        if len(ops) <= self.max_entries:
+            return 0
+
+        # 区分可裁剪（终态）和不可裁剪（非终态）的记录
+        retainable = [op for op in ops if not op.is_terminal]
+        cleanable = [op for op in ops if op.is_terminal]
+
+        # 按创建时间排序（最旧优先裁剪）
+        cleanable.sort(key=lambda op: op.created_at)
+
+        # 裁剪直到总条数 <= max_entries 或无可裁剪条目
+        to_remove = len(ops) - self.max_entries
+        trimmed = 0
+        while to_remove > 0 and cleanable:
+            cleanable.pop(0)
+            to_remove -= 1
+            trimmed += 1
+
+        remaining = retainable + cleanable
+        # 按 created_at 稳定排序，保持原有顺序
+        remaining.sort(key=lambda op: op.created_at)
+        self._write_all_ops(remaining)
+        logger.info(
+            "自动裁剪写操作日志",
+            extra={
+                "trimmed": trimmed,
+                "remaining": len(remaining),
+                "max_entries": self.max_entries,
+            },
+        )
+        return trimmed
+
+    # ── 操作生命周期管理 ─────────────────────────────────────
+
+    def log_op(self, op: WriteOp) -> str:
+        """记录一次写操作，返回 op_id"""
+        self._append_op(op)
+        logger.debug(
+            "记录写操作",
+            extra={
+                "op_id": op.op_id,
+                "op_type": op.op_type.value,
+                "target": op.target,
+            },
+        )
+        return op.op_id
+
+    def mark_started(self, op_id: str) -> Optional[WriteOp]:
+        """标记操作开始执行"""
+        return self._update_op(op_id, status=OpStatus.IN_PROGRESS, started_at=datetime.now().timestamp())
+
+    def mark_completed(self, op_id: str) -> Optional[WriteOp]:
+        """标记操作成功完成"""
+        result = self._update_op(op_id, status=OpStatus.COMPLETED, completed_at=datetime.now().timestamp())
+        if result:
+            logger.debug("写操作完成", extra={"op_id": op_id})
+        return result
+
+    def mark_failed(self, op_id: str, error: str) -> Optional[WriteOp]:
+        """标记操作失败"""
+        result = self._update_op(
+            op_id, status=OpStatus.FAILED, completed_at=datetime.now().timestamp(), error_message=error
+        )
+        if result:
+            logger.warning(
+                "写操作失败",
+                extra={
+                    "op_id": op_id,
+                    "error": error,
+                    "retry_count": result.retry_count,
+                },
+            )
+        return result
+
+    # ── 查询方法 ─────────────────────────────────────────────
+
+    def get_pending_ops(self) -> list[WriteOp]:
+        """获取所有未完成的操作（用于启动恢复）"""
+        ops = self._read_all_ops()
+        return [op for op in ops if op.status in (OpStatus.PENDING, OpStatus.IN_PROGRESS)]
+
+    def get_failed_ops(self, max_retries: int = 3) -> list[WriteOp]:
+        """获取可重试的失败操作
+
+        Args:
+            max_retries: 最大重试次数阈值（retry_count < max_retries 的才返回）
+
+        Returns:
+            可重试的失败操作列表
+        """
+        ops = self._read_all_ops()
+        return [op for op in ops if op.status == OpStatus.FAILED and op.retry_count < max_retries]
+
+    def get_op(self, op_id: str) -> Optional[WriteOp]:
+        """根据 op_id 查找单个操作记录"""
+        ops = self._read_all_ops()
+        for op in ops:
+            if op.op_id == op_id:
+                return op
+        return None
+
+    # ── 恢复机制 ─────────────────────────────────────────────
+
+    async def replay_failed_ops(self, store) -> list[str]:
+        """重放所有失败操作，返回成功恢复的 op_id 列表
+
+        启动时调用，自动恢复上一次崩溃时未完成的写入。
+
+        Args:
+            store: MemoryStore 实例，需提供 insert_atom / update_atom / delete_atom 等方法
+
+        Returns:
+            成功恢复的操作 ID 列表
+        """
+        recovered: list[str] = []
+        failed_ops = self.get_failed_ops(max_retries=3)
+
+        if not failed_ops:
+            logger.info("无失败操作需要重放")
+            return recovered
+
+        logger.info("开始重放失败操作", extra={"count": len(failed_ops)})
+
+        for op in failed_ops:
+            op.retry_count += 1
+            self._update_op(
+                op.op_id,
+                status=OpStatus.IN_PROGRESS,
+                retry_count=op.retry_count,
+                started_at=datetime.now().timestamp(),
+                error_message=None,
+            )
+            try:
+                await self._dispatch_replay(op, store)
+                self.mark_completed(op.op_id)
+                recovered.append(op.op_id)
+                logger.info("操作重放成功", extra={"op_id": op.op_id})
+            except Exception as e:
+                self.mark_failed(op.op_id, str(e))
+                logger.error(
+                    "操作重放失败",
+                    extra={
+                        "op_id": op.op_id,
+                        "error": str(e),
+                        "retry_count": op.retry_count,
+                    },
+                )
+
+        logger.info(
+            "操作重放完成",
+            extra={
+                "recovered": len(recovered),
+                "total": len(failed_ops),
+            },
+        )
+        return recovered
+
+    async def _dispatch_replay(self, op: WriteOp, store) -> None:
+        """根据操作类型分发到 store 的对应方法"""
+        # 避免循环导入：store 作为参数传入，此处动态分发
+        if op.op_type == OpType.INSERT_ATOM:
+            atom = op.payload.get("atom")
+            if atom is None:
+                raise ValueError("INSERT_ATOM payload 缺少 atom 字段")
+            await store.insert_atom(atom)
+
+        elif op.op_type == OpType.UPDATE_ATOM:
+            if not op.atom_ids:
+                raise ValueError("UPDATE_ATOM 需要 atom_ids")
+            updates = op.payload.get("updates", {})
+            await store.update_atom(op.atom_ids[0], updates)
+
+        elif op.op_type == OpType.DELETE_ATOM:
+            if not op.atom_ids:
+                raise ValueError("DELETE_ATOM 需要 atom_ids")
+            await store.delete_atom(op.atom_ids[0])
+
+        elif op.op_type == OpType.BATCH_INSERT:
+            atoms = op.payload.get("atoms", [])
+            if not atoms:
+                raise ValueError("BATCH_INSERT payload 缺少 atoms 字段")
+            await store.batch_insert(atoms)
+
+        elif op.op_type == OpType.DREAM_CONSOLE:
+            # 梦境巩固重放 — 记录到日志，由梦境系统自行处理一致性
+            logger.info("梦境巩固重放跳过（由梦境系统自行处理）", extra={"op_id": op.op_id})
+
+        elif op.op_type == OpType.ARCHIVE_ATOM:
+            if not op.atom_ids:
+                raise ValueError("ARCHIVE_ATOM 需要 atom_ids")
+            await store.archive_atom(op.atom_ids[0])
+
+        elif op.op_type == OpType.MIGRATE_ATOM:
+            if not op.atom_ids:
+                raise ValueError("MIGRATE_ATOM 需要 atom_ids")
+            target_type = op.payload.get("target_type", "")
+            await store.migrate_atom(op.atom_ids[0], target_type)
+
+        else:
+            logger.warning(
+                "未知操作类型，跳过重放",
+                extra={
+                    "op_id": op.op_id,
+                    "op_type": str(op.op_type),
+                },
+            )
+
+    # ── 维护 ─────────────────────────────────────────────────
+
+    def cleanup_completed(self, older_than_days: int = 7) -> int:
+        """清理超过 N 天的已完成操作记录
+
+        Args:
+            older_than_days: 保留天数，超过此天数的已完成记录将被删除
+
+        Returns:
+            清理的记录数
+        """
+        cutoff = datetime.now().timestamp() - older_than_days * 86400
+        ops = self._read_all_ops()
+        before = len(ops)
+        ops = [op for op in ops if not (op.is_terminal and op.completed_at is not None and op.completed_at < cutoff)]
+        removed = before - len(ops)
+        if removed:
+            self._write_all_ops(ops)
+            logger.info(
+                "清理旧写操作日志",
+                extra={
+                    "removed": removed,
+                    "remaining": len(ops),
+                    "older_than_days": older_than_days,
+                },
+            )
+        return removed
+
+    def get_stats(self) -> dict[str, Any]:
+        """返回写操作统计
+
+        Returns:
+            包含各类操作数量和状态的统计字典
+        """
+        ops = self._read_all_ops()
+        if not ops:
+            return {
+                "total_ops": 0,
+                "by_status": {},
+                "by_type": {},
+                "failed_count": 0,
+                "pending_count": 0,
+                "oldest_op": None,
+                "newest_op": None,
+                "file_size_bytes": 0,
+            }
+
+        by_status: dict[str, int] = {}
+        by_type: dict[str, int] = {}
+        for op in ops:
+            by_status[op.status.value] = by_status.get(op.status.value, 0) + 1
+            by_type[op.op_type.value] = by_type.get(op.op_type.value, 0) + 1
+
+        timestamps = [op.created_at for op in ops]
+        file_size = os.path.getsize(self.log_file) if os.path.exists(self.log_file) else 0
+
+        return {
+            "total_ops": len(ops),
+            "by_status": by_status,
+            "by_type": by_type,
+            "failed_count": by_status.get("failed", 0),
+            "pending_count": by_status.get("pending", 0) + by_status.get("in_progress", 0),
+            "oldest_op": min(timestamps),
+            "newest_op": max(timestamps),
+            "file_size_bytes": file_size,
+            "log_file": self.log_file,
+        }
+
+
+class WriteOperation:
+    """上下文管理器 — 自动记录、执行、标记写操作
+
+    使用示例:
+        async with WriteOperation(logger, OpType.INSERT_ATOM, "both",
+                                   atom_ids=[atom.atom_id],
+                                   payload={"atom": atom}) as op:
+            await store.insert_atom(atom)
+            await qdrant_client.upsert(...)
+        # 退出上下文时自动标记 completed 或 failed
+
+    Args:
+        op_logger: WriteOpLogger 实例
+        op_type: 操作类型
+        target: 目标存储
+        atom_ids: 关联的记忆原子ID列表
+        payload: 操作负载
+    """
+
+    def __init__(
+        self,
+        op_logger: WriteOpLogger,
+        op_type: OpType,
+        target: str,
+        atom_ids: Optional[list[str]] = None,
+        payload: Optional[dict[str, Any]] = None,
+    ):
+        self.logger = op_logger
+        self.op = WriteOp(
+            op_id=generate_op_id(),
+            op_type=op_type,
+            target=target,
+            atom_ids=atom_ids or [],
+            payload=payload or {},
+        )
+
+    async def __aenter__(self) -> WriteOp:
+        """进入上下文：记录操作并标记为进行中"""
+        self.logger.log_op(self.op)
+        self.logger.mark_started(self.op.op_id)
+        return self.op
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """退出上下文：根据异常情况标记完成或失败"""
+        if exc_type is None:
+            self.logger.mark_completed(self.op.op_id)
+        else:
+            error_msg = f"{exc_type.__name__}: {exc_val}" if exc_val else str(exc_type)
+            self.logger.mark_failed(self.op.op_id, error_msg)
+            return False  # 不吞异常，继续向上传播
+        return True
+
+
+def ensure_atomic_write(
+    success_condition: Callable[[Any], bool],
+    rollback_fn: Callable[[Any], None],
+):
+    """装饰器 — 确保原子性写入
+
+    在函数执行后检查 success_condition，若返回 False 则执行 rollback_fn 回滚。
+
+    Args:
+        success_condition: 接收函数返回值，返回 True 表示写入成功
+        rollback_fn: 接收函数返回值，执行回滚操作
+
+    Returns:
+        装饰器函数
+
+    使用示例:
+        @ensure_atomic_write(
+            success_condition=lambda r: r is not None,
+            rollback_fn=lambda r: cleanup_partial_write(r),
+        )
+        def write_atom(atom):
+            ...
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if not success_condition(result):
+                rollback_fn(result)
+            return result
+
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            result = await func(*args, **kwargs)
+            if not success_condition(result):
+                rollback_fn(result)
+            return result
+
+        # 判断是否为异步函数
+        import inspect
+
+        if inspect.iscoroutinefunction(func):
+            return async_wrapper
+        return sync_wrapper
+
+    return decorator

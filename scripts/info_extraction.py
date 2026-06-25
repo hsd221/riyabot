@@ -15,9 +15,14 @@ from rich.progress import Progress  # 替换为 rich 进度条
 
 from src.common.logger import get_logger
 
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
 # from src.chat.knowledge.lpmmconfig import global_config
-from src.chat.knowledge.ie_process import info_extract_from_str
-from src.chat.knowledge.open_ie import OpenIE
+try:
+    from src.chat.knowledge.ie_process import info_extract_from_str  # type: ignore
+    from src.chat.knowledge.open_ie import OpenIE  # type: ignore
+except ModuleNotFoundError:
+    info_extract_from_str = None
+    OpenIE = None
 from rich.progress import (
     BarColumn,
     TimeElapsedColumn,
