@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, FileText, Server, Boxes, Smile, MessageSquare, UserCircle, FileSearch, BarChart3, Package, Settings, Home, Hash } from 'lucide-react'
+import { Search, FileText, Server, Boxes, Smile, MessageSquare, UserCircle, FileSearch, Package, Settings, Home, Hash, BrainCircuit, Sliders, MessageCircle, Globe } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   Dialog,
@@ -82,11 +82,18 @@ const searchItems: SearchItem[] = [
     category: '资源',
   },
   {
-    icon: BarChart3,
-    title: '统计信息',
-    description: '查看使用统计',
-    path: '/statistics',
-    category: '监控',
+    icon: BrainCircuit,
+    title: '记忆系统概览',
+    description: '查看记忆原子、梦境运行和洞见',
+    path: '/resource/memory',
+    category: '资源',
+  },
+  {
+    icon: Sliders,
+    title: '麦麦适配器配置',
+    description: '配置适配器连接参数',
+    path: '/config/adapter',
+    category: '配置',
   },
   {
     icon: Package,
@@ -94,6 +101,27 @@ const searchItems: SearchItem[] = [
     description: '浏览和安装插件',
     path: '/plugins',
     category: '扩展',
+  },
+  {
+    icon: Sliders,
+    title: '插件配置',
+    description: '管理已安装插件的配置',
+    path: '/plugin-config',
+    category: '扩展',
+  },
+  {
+    icon: Globe,
+    title: '插件镜像源',
+    description: '配置插件下载镜像源',
+    path: '/plugin-mirrors',
+    category: '扩展',
+  },
+  {
+    icon: MessageCircle,
+    title: '本地聊天室',
+    description: '在 WebUI 中与麦麦对话',
+    path: '/chat',
+    category: '监控',
   },
   {
     icon: FileSearch,

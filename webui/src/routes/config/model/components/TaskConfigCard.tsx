@@ -11,7 +11,7 @@ import type { TaskConfig } from '../types'
 interface TaskConfigCardProps {
   title: string
   description: string
-  taskConfig: TaskConfig
+  taskConfig: TaskConfig | undefined
   modelNames: string[]
   onChange: (field: keyof TaskConfig, value: string[] | number) => void
   hideTemperature?: boolean
@@ -46,7 +46,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           <Label>模型列表</Label>
           <MultiSelect
             options={modelNames.map((name) => ({ label: name, value: name }))}
-            selected={taskConfig.model_list || []}
+            selected={taskConfig?.model_list || []}
             onChange={handleModelChange}
             placeholder="选择模型..."
             emptyText="暂无可用模型"
@@ -64,7 +64,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                   step="0.1"
                   min="0"
                   max="1"
-                  value={taskConfig.temperature ?? 0.3}
+                  value={taskConfig?.temperature ?? 0.3}
                   onChange={(e) => {
                     const value = parseFloat(e.target.value)
                     if (!isNaN(value) && value >= 0 && value <= 1) {
@@ -75,7 +75,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 />
               </div>
               <Slider
-                value={[taskConfig.temperature ?? 0.3]}
+                value={[taskConfig?.temperature ?? 0.3]}
                 onValueChange={(values) => onChange('temperature', values[0])}
                 min={0}
                 max={1}
@@ -92,7 +92,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                 type="number"
                 step="1"
                 min="1"
-                value={taskConfig.max_tokens ?? 1024}
+                value={taskConfig?.max_tokens ?? 1024}
                 onChange={(e) => onChange('max_tokens', parseInt(e.target.value))}
               />
             </div>
@@ -109,7 +109,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
             type="number"
             step="1"
             min="1"
-            value={taskConfig.slow_threshold ?? 15}
+            value={taskConfig?.slow_threshold ?? 15}
             onChange={(e) => {
               const value = parseInt(e.target.value)
               if (!isNaN(value) && value >= 1) {

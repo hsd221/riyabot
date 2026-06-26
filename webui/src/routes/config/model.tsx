@@ -60,6 +60,7 @@ import { TaskConfigCard, Pagination, ModelTable, ModelCardList } from './model/c
 import { useModelTour, useModelFetcher, useModelAutoSave } from './model/hooks'
 
 export function ModelConfigPage() {
+  const DEFAULT_TASK: TaskConfig = { model_list: [], max_tokens: 1024, temperature: 0.3, slow_threshold: 15 }
   const [models, setModels] = useState<ModelInfo[]>([])
   const [providers, setProviders] = useState<string[]>([])
   const [providerConfigs, setProviderConfigs] = useState<ProviderConfig[]>([])
@@ -121,7 +122,24 @@ export function ModelConfigPage() {
       setProviders(providerList.map((p) => p.name))
       setProviderConfigs(providerList)
       
-      setTaskConfig((config.model_task_config as ModelTaskConfig) || null)
+      const rawTaskConfig = (config.model_task_config as Record<string, unknown> | null) || null
+      if (rawTaskConfig) {
+        setTaskConfig({
+          ...rawTaskConfig,
+          utils: rawTaskConfig.utils || { ...DEFAULT_TASK },
+          utils_small: rawTaskConfig.utils_small || { ...DEFAULT_TASK },
+          tool_use: rawTaskConfig.tool_use || { ...DEFAULT_TASK },
+          replyer: rawTaskConfig.replyer || { ...DEFAULT_TASK },
+          planner: rawTaskConfig.planner || { ...DEFAULT_TASK },
+          vlm: rawTaskConfig.vlm || { ...DEFAULT_TASK },
+          voice: rawTaskConfig.voice || { ...DEFAULT_TASK },
+          embedding: rawTaskConfig.embedding || { ...DEFAULT_TASK },
+          memory_encoder: rawTaskConfig.memory_encoder || { ...DEFAULT_TASK },
+          memory_weaver: rawTaskConfig.memory_weaver || { ...DEFAULT_TASK },
+        } as ModelTaskConfig)
+      } else {
+        setTaskConfig(null)
+      }
       setHasUnsavedChanges(false)
       initialLoadRef.current = false
     } catch (error) {
@@ -374,9 +392,8 @@ export function ModelConfigPage() {
         vlm: { ...taskConfig.vlm, model_list: updateModelList(taskConfig.vlm?.model_list || []) },
         voice: { ...taskConfig.voice, model_list: updateModelList(taskConfig.voice?.model_list || []) },
         embedding: { ...taskConfig.embedding, model_list: updateModelList(taskConfig.embedding?.model_list || []) },
-        lpmm_entity_extract: { ...taskConfig.lpmm_entity_extract, model_list: updateModelList(taskConfig.lpmm_entity_extract?.model_list || []) },
-        lpmm_rdf_build: { ...taskConfig.lpmm_rdf_build, model_list: updateModelList(taskConfig.lpmm_rdf_build?.model_list || []) },
-        lpmm_qa: { ...taskConfig.lpmm_qa, model_list: updateModelList(taskConfig.lpmm_qa?.model_list || []) },
+        memory_encoder: { ...(taskConfig.memory_encoder || {}), model_list: updateModelList(taskConfig.memory_encoder?.model_list || []) },
+        memory_weaver: { ...(taskConfig.memory_weaver || {}), model_list: updateModelList(taskConfig.memory_weaver?.model_list || []) },
       })
     }
 
@@ -527,9 +544,8 @@ export function ModelConfigPage() {
       taskConfig.vlm?.model_list || [],
       taskConfig.voice?.model_list || [],
       taskConfig.embedding?.model_list || [],
-      taskConfig.lpmm_entity_extract?.model_list || [],
-      taskConfig.lpmm_rdf_build?.model_list || [],
-      taskConfig.lpmm_qa?.model_list || [],
+      taskConfig.memory_encoder?.model_list || [],
+      taskConfig.memory_weaver?.model_list || [],
     ]
     
     return allTaskLists.some(list => list.includes(modelName))
@@ -723,7 +739,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="组件模型 (utils)"
                 description="用于表情包、取名、关系、情绪变化等组件"
-                taskConfig={taskConfig.utils}
+                taskConfig={taskConfig.utils || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('utils', field, value)}
                 dataTour="task-model-select"
@@ -733,7 +749,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="组件小模型 (utils_small)"
                 description="消耗量较大的组件，建议使用速度较快的小模型"
-                taskConfig={taskConfig.utils_small}
+                taskConfig={taskConfig.utils_small || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('utils_small', field, value)}
               />
@@ -742,7 +758,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="工具调用模型 (tool_use)"
                 description="需要使用支持工具调用的模型"
-                taskConfig={taskConfig.tool_use}
+                taskConfig={taskConfig.tool_use || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('tool_use', field, value)}
               />
@@ -751,7 +767,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="首要回复模型 (replyer)"
                 description="用于表达器和表达方式学习"
-                taskConfig={taskConfig.replyer}
+                taskConfig={taskConfig.replyer || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('replyer', field, value)}
               />
@@ -760,7 +776,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="决策模型 (planner)"
                 description="负责决定麦麦该什么时候回复"
-                taskConfig={taskConfig.planner}
+                taskConfig={taskConfig.planner || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('planner', field, value)}
               />
@@ -769,7 +785,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="图像识别模型 (vlm)"
                 description="视觉语言模型"
-                taskConfig={taskConfig.vlm}
+                taskConfig={taskConfig.vlm || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('vlm', field, value)}
                 hideTemperature
@@ -779,7 +795,7 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="语音识别模型 (voice)"
                 description="语音转文字"
-                taskConfig={taskConfig.voice}
+                taskConfig={taskConfig.voice || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('voice', field, value)}
                 hideTemperature
@@ -790,45 +806,31 @@ export function ModelConfigPage() {
               <TaskConfigCard
                 title="嵌入模型 (embedding)"
                 description="用于向量化"
-                taskConfig={taskConfig.embedding}
+                taskConfig={taskConfig.embedding || DEFAULT_TASK}
                 modelNames={modelNames}
                 onChange={(field, value) => updateTaskConfig('embedding', field, value)}
                 hideTemperature
                 hideMaxTokens
               />
 
-              {/* LPMM 相关任务 */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">LPMM 知识库模型</h3>
-                
-                <TaskConfigCard
-                  title="实体提取模型 (lpmm_entity_extract)"
-                  description="从文本中提取实体"
-                  taskConfig={taskConfig.lpmm_entity_extract}
-                  modelNames={modelNames}
-                  onChange={(field, value) =>
-                    updateTaskConfig('lpmm_entity_extract', field, value)
-                  }
-                />
+              {/* Memory Encoder 任务 */}
+              <TaskConfigCard
+                title="记忆编码模型 (memory_encoder)"
+                description="用于记忆系统的 LLM 编码（消息提取、结构化）"
+                taskConfig={taskConfig.memory_encoder || DEFAULT_TASK}
+                modelNames={modelNames}
+                onChange={(field, value) => updateTaskConfig('memory_encoder', field, value)}
+              />
 
-                <TaskConfigCard
-                  title="RDF 构建模型 (lpmm_rdf_build)"
-                  description="构建知识图谱"
-                  taskConfig={taskConfig.lpmm_rdf_build}
-                  modelNames={modelNames}
-                  onChange={(field, value) =>
-                    updateTaskConfig('lpmm_rdf_build', field, value)
-                  }
-                />
+              {/* Memory Weaver 任务 */}
+              <TaskConfigCard
+                title="梦境编织模型 (memory_weaver)"
+                description="用于梦境系统的洞察生成（跨域模式发现）"
+                taskConfig={taskConfig.memory_weaver || DEFAULT_TASK}
+                modelNames={modelNames}
+                onChange={(field, value) => updateTaskConfig('memory_weaver', field, value)}
+              />
 
-                <TaskConfigCard
-                  title="问答模型 (lpmm_qa)"
-                  description="知识库问答"
-                  taskConfig={taskConfig.lpmm_qa}
-                  modelNames={modelNames}
-                  onChange={(field, value) => updateTaskConfig('lpmm_qa', field, value)}
-                />
-              </div>
             </div>
           )}
         </TabsContent>
