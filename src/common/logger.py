@@ -524,6 +524,32 @@ MODULE_COLORS = {
     "relationship_fetcher": "\033[38;5;170m",  # 浅紫色
     "relationship_builder": "\033[38;5;93m",  # 浅蓝色
     "conflict_tracker": "\033[38;5;82m",  # 柔和的粉色，不显眼但保持粉色系
+    # 记忆子系统
+    "memory.atom": "\033[38;5;34m",
+    "memory.store": "\033[38;5;34m",
+    "memory.schema": "\033[38;5;34m",
+    "memory.write_ops": "\033[38;5;34m",
+    "memory.layer0": "\033[38;5;34m",
+    "memory.layer1": "\033[38;5;34m",
+    "memory.layer2": "\033[38;5;34m",
+    "memory.layer3": "\033[38;5;34m",
+    "memory.bm25": "\033[38;5;34m",
+    "memory.objectivity": "\033[38;5;34m",
+    "memory.encoding": "\033[38;5;34m",
+    "memory.forgetting": "\033[38;5;34m",
+    "memory.prompt": "\033[38;5;34m",
+    "memory.profile": "\033[38;5;34m",
+    "memory.feedback": "\033[38;5;34m",
+    "memory.graph": "\033[38;5;34m",
+    "memory.dream": "\033[38;5;34m",
+    "memory.trace": "\033[38;5;34m",
+    "memory.embedding": "\033[38;5;34m",
+    "memory.conflict": "\033[38;5;34m",
+    "memory.association": "\033[38;5;34m",
+    "memory.weaver": "\033[38;5;35m",
+    "memory.expression": "\033[38;5;36m",  # 青色
+    "memory.insight": "\033[37m",  # 白色
+    "memory.inspiration": "\033[38;5;33m",  # 蓝色 — 噪声回收
 }
 
 # 定义模块别名映射 - 将真实的logger名称映射到显示的别名
@@ -556,6 +582,30 @@ MODULE_ALIASES = {
     "config": "配置",
     "main": "主程序",
     "chat_history_summarizer": "聊天概括器",
+    "memory.atom": "记忆原子",
+    "memory.store": "记忆存储",
+    "memory.schema": "记忆库",
+    "memory.write_ops": "记忆写日志",
+    "memory.layer0": "归档",
+    "memory.layer1": "摘要",
+    "memory.layer2": "编码",
+    "memory.layer3": "检索",
+    "memory.bm25": "BM25",
+    "memory.objectivity": "校验",
+    "memory.encoding": "编码管线",
+    "memory.forgetting": "遗忘",
+    "memory.prompt": "记忆提示",
+    "memory.profile": "记忆画像",
+    "memory.feedback": "记忆强化",
+    "memory.graph": "记忆图谱",
+    "memory.dream": "梦境维护",
+    "memory.trace": "记忆追溯",
+    "memory.conflict": "冲突仲裁",
+    "memory.association": "记忆关联",
+    "memory.weaver": "梦呓编织",
+    "memory.expression": "表达学习",
+    "memory.insight": "恍然大悟",
+    "memory.inspiration": "噪声回收",
 }
 
 RESET_COLOR = "\033[0m"

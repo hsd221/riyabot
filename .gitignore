@@ -331,3 +331,7 @@ interested_rates.txt
 MaiBot.code-workspace
 *.lock
 actionlint
+adapter/
+:memory:_write_ops.jsonl
+.omo/
+stress_results.json

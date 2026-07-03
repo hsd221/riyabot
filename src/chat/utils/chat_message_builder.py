@@ -12,7 +12,7 @@ from src.common.data_models.database_data_model import DatabaseMessages, Databas
 from src.common.data_models.message_data_model import MessageAndActionModel
 from src.common.database.database_model import ActionRecords
 from src.common.database.database_model import Images
-from src.person_info.person_info import Person, get_person_id
+from src.common.person_stub import Person, get_person_id
 from src.chat.utils.utils import translate_timestamp_to_human_readable, assign_message_ids, is_bot_self
 
 install(extra_lines=3)

@@ -233,7 +233,7 @@ async def _send_message(message: MessageSending, show_log=True) -> bool:
             return False
 
         try:
-            send_result = await get_global_api().send_message(message)
+            await get_global_api().send_message(message)
             # if send_result:
             if show_log:
                 logger.info(f"已将消息  '{message_preview}'  发往平台'{message.message_info.platform}'")

@@ -126,11 +126,11 @@ class ModelTaskConfig(ConfigBase):
     embedding: TaskConfig
     """嵌入模型配置"""
 
-    lpmm_entity_extract: TaskConfig
-    """LPMM实体提取模型配置"""
+    memory_encoder: TaskConfig = field(default_factory=TaskConfig)
+    """记忆编码模型配置"""
 
-    lpmm_rdf_build: TaskConfig
-    """LPMM RDF构建模型配置"""
+    memory_weaver: TaskConfig = field(default_factory=TaskConfig)
+    """梦境编织模型配置"""
 
     def get_task(self, task_name: str) -> TaskConfig:
         """获取指定任务的配置"""

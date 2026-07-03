@@ -15,9 +15,14 @@ from rich.progress import Progress  # 替换为 rich 进度条
 
 from src.common.logger import get_logger
 
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
 # from src.chat.knowledge.lpmmconfig import global_config
-from src.chat.knowledge.ie_process import info_extract_from_str
-from src.chat.knowledge.open_ie import OpenIE
+try:
+    from src.chat.knowledge.ie_process import info_extract_from_str  # type: ignore
+    from src.chat.knowledge.open_ie import OpenIE  # type: ignore
+except ModuleNotFoundError:
+    info_extract_from_str = None
+    OpenIE = None
 from rich.progress import (
     BarColumn,
     TimeElapsedColumn,
@@ -123,9 +128,7 @@ def _run(non_interactive: bool = False) -> None:  # sourcery skip: comprehension
     ensure_dirs()  # 确保目录存在
     # 新增用户确认提示
     if non_interactive:
-        logger.warning(
-            "当前处于非交互模式，将跳过费用与时长确认提示，直接开始进行实体提取操作。"
-        )
+        logger.warning("当前处于非交互模式，将跳过费用与时长确认提示，直接开始进行实体提取操作。")
     else:
         print("=== 重要操作确认，请认真阅读以下内容哦 ===")
         print("实体提取操作将会花费较多api余额和时间，建议在空闲时段执行。")

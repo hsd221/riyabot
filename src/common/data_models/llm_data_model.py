@@ -20,3 +20,4 @@ class LLMGenerationDataModel(BaseDataModel):
     timing: Optional[Dict[str, Any]] = None
     processed_output: Optional[List[str]] = None
     timing_logs: Optional[List[str]] = None
+    retrieved_atom_ids: Optional[List[str]] = None

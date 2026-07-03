@@ -17,10 +17,15 @@ except Exception:
 # 确保能找到 src 包
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.chat.knowledge.embedding_store import EmbeddingManager
-from src.chat.knowledge.kg_manager import KGManager
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
+try:
+    from src.chat.knowledge.embedding_store import EmbeddingManager  # type: ignore
+    from src.chat.knowledge.kg_manager import KGManager  # type: ignore
+except ModuleNotFoundError:
+    EmbeddingManager = None  # type: ignore
+    KGManager = None  # type: ignore
 from src.common.logger import get_logger
-from src.chat.knowledge.utils.hash import get_sha256
+from src.common.knowledge_utils.hash import get_sha256
 
 logger = get_logger("delete_lpmm_items")
 
@@ -171,7 +176,9 @@ def main():
             sys.exit(1)
 
         if not args.raw_index:
-            logger.info(f"{raw_path} 共解析出 {len(paragraphs)} 个段落，请通过 --raw-index 指定要删除的段落，例如 --raw-index 1,3")
+            logger.info(
+                f"{raw_path} 共解析出 {len(paragraphs)} 个段落，请通过 --raw-index 指定要删除的段落，例如 --raw-index 1,3"
+            )
             sys.exit(1)
 
         # 解析索引列表（1-based）

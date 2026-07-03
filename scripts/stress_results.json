@@ -1,0 +1,227 @@
+{
+  "timestamp": "2026-06-24T16:20:36.308433+00:00",
+  "summary": {
+    "total_tests": 6,
+    "passed": 6,
+    "failed": 0,
+    "total_duration_sec": 72.439,
+    "final_rss_mib": 514.54
+  },
+  "tests": [
+    {
+      "test_name": "bulk_ingestion",
+      "passed": true,
+      "duration_ms": 1493,
+      "metrics": {
+        "atoms_requested": 50,
+        "atoms_created": 50,
+        "atoms_per_second": 33.49,
+        "avg_latency_ms": 29.713,
+        "max_latency_ms": 39.178,
+        "p99_latency_ms": 39.178,
+        "rss_before_mib": 513.59,
+        "rss_after_mib": 513.55,
+        "rss_delta_mib": -0.03,
+        "duration_sec": 1.493
+      },
+      "errors": []
+    },
+    {
+      "test_name": "sustained_load",
+      "passed": true,
+      "duration_ms": 30889,
+      "metrics": {
+        "duration_sec": 30.889,
+        "atoms_written": 129,
+        "total_atoms": 179,
+        "active_atoms": 179,
+        "archived_or_forgotten": 0,
+        "weight_distribution": {
+          "0-0.1": 0,
+          "0.1-0.3": 30,
+          "0.3-0.7": 131,
+          "0.7-1.0": 18
+        },
+        "memory_snapshots": [
+          {
+            "t_sec": 5.38,
+            "rss_mib": 513.55,
+            "atoms": 77,
+            "written_so_far": 27
+          },
+          {
+            "t_sec": 10.12,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 98
+          },
+          {
+            "t_sec": 10.85,
+            "rss_mib": 513.62,
+            "atoms": 101,
+            "written_so_far": 51
+          },
+          {
+            "t_sec": 10.85,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 101
+          },
+          {
+            "t_sec": 11.57,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 104
+          },
+          {
+            "t_sec": 15.89,
+            "rss_mib": 513.62,
+            "atoms": 122,
+            "written_so_far": 72
+          },
+          {
+            "t_sec": 20.25,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 140
+          },
+          {
+            "t_sec": 21.05,
+            "rss_mib": 513.62,
+            "atoms": 143,
+            "written_so_far": 93
+          },
+          {
+            "t_sec": 21.05,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 143
+          },
+          {
+            "t_sec": 21.85,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 146
+          },
+          {
+            "t_sec": 26.41,
+            "rss_mib": 513.62,
+            "atoms": 164,
+            "written_so_far": 114
+          },
+          {
+            "t_sec": 30.26,
+            "event": "sweep",
+            "rss_mib": 513.62,
+            "atoms": 179
+          }
+        ],
+        "final_rss_mib": 513.62,
+        "sweep_result": {
+          "decayed": 93,
+          "archived": 0,
+          "deleted": 0
+        },
+        "atoms_per_minute": 347.7
+      },
+      "errors": []
+    },
+    {
+      "test_name": "burst_spike",
+      "passed": true,
+      "duration_ms": 16096,
+      "metrics": {
+        "duration_sec": 16.096,
+        "rounds": 2,
+        "burst_size": 30,
+        "total_atoms_written": 60,
+        "total_atoms_stored": 239,
+        "avg_latency_ms": 101.282,
+        "p99_latency_ms": 167.837,
+        "rounds_detail": [
+          {
+            "round": 1,
+            "duration_sec": 2.817,
+            "atoms_per_sec": 10.65,
+            "rss_delta_mib": 0.0,
+            "rss_after_mib": 513.62,
+            "atoms_after": 209
+          },
+          {
+            "round": 2,
+            "duration_sec": 3.265,
+            "atoms_per_sec": 9.19,
+            "rss_delta_mib": 0.0,
+            "rss_after_mib": 513.62,
+            "atoms_after": 239
+          }
+        ],
+        "final_rss_mib": 513.62
+      },
+      "errors": []
+    },
+    {
+      "test_name": "concurrent_rw",
+      "passed": true,
+      "duration_ms": 13210,
+      "metrics": {
+        "duration_sec": 13.21,
+        "writers": 2,
+        "readers": 2,
+        "rounds": 50,
+        "total_written": 100,
+        "total_read_attempts": 100,
+        "successful_reads": 100,
+        "stored_count": 339,
+        "atom_loss": 0,
+        "writer_errors": 0,
+        "profile_issues": 0,
+        "final_rss_mib": 513.62
+      },
+      "errors": []
+    },
+    {
+      "test_name": "crash_recovery",
+      "passed": [
+        "a5754553-d5a5-4acc-aada-7fbd4bea096e",
+        "d93ac75d-c716-4e87-bec0-4d380e5ef651",
+        "98ea4236-d244-417b-8e4d-7834c059d769",
+        "5a129029-f87c-47d3-b237-e237b46c4252",
+        "e01c0f55-3c7a-4ee8-b0fb-c4aa3398b410"
+      ],
+      "duration_ms": 3675,
+      "metrics": {
+        "duration_sec": 3.675,
+        "atoms_written": 20,
+        "fake_pending_ops": 5,
+        "recovered_from_log": 5,
+        "real_atoms_found": 20,
+        "count_before_recovery": 359,
+        "count_after_recovery": 364,
+        "remaining_pending": 0,
+        "remaining_failed": 0,
+        "duplicates_detected": 0,
+        "final_rss_mib": 513.65
+      },
+      "errors": []
+    },
+    {
+      "test_name": "real_data_load",
+      "passed": true,
+      "duration_ms": 186,
+      "metrics": {
+        "total_messages_loaded": 120181,
+        "unique_senders": 201,
+        "earliest_ts": 1772734052000,
+        "latest_ts": 1782314733000,
+        "time_range_days": 110.89,
+        "total_chars": 1723356,
+        "avg_msg_length": 14.3,
+        "max_msg_length": 4438,
+        "image_or_video_leaks": 0,
+        "all_timestamps_valid": true
+      },
+      "errors": []
+    }
+  ]
+}

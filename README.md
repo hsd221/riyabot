@@ -58,7 +58,7 @@ MaiBot 不仅仅是一个机器人，她致力于成为一个活跃在 QQ 群聊
 
 ## 🔥 更新和安装
 
-> **最新版本: v0.12.2** ([📄 更新日志](changelogs/changelog.md))
+> **最新版本: v0.13.0** ([📄 更新日志](changelogs/changelog.md))
 
 - **下载**: 前往 [Release](https://github.com/MaiM-with-u/MaiBot/releases/) 页面下载最新版本
 - **启动器**: [Mailauncher](https://github.com/MaiM-with-u/mailauncher/releases/) (仅支持 MacOS, 早期开发中)

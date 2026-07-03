@@ -3,7 +3,7 @@ from pathlib import Path
 import sys  # 新增系统模块导入
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.chat.knowledge.utils.hash import get_sha256
+from src.common.knowledge_utils.hash import get_sha256
 from src.common.logger import get_logger
 
 logger = get_logger("lpmm")

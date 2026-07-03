@@ -12,7 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, C
 from pydantic import BaseModel
 
 from src.common.logger import get_logger
-from src.common.database.database_model import Messages, PersonInfo
+from src.common.database.database_model import Messages
 from src.config.config import global_config
 from src.chat.message_receive.bot import chat_bot
 from src.webui.auth import verify_auth_token_from_cookie_or_header
@@ -286,29 +286,8 @@ async def get_chat_history(
 
 @router.get("/platforms")
 async def get_available_platforms(_auth: bool = Depends(require_auth)):
-    """获取可用平台列表
-
-    从 PersonInfo 表中获取所有已知的平台
-    """
-    try:
-        from peewee import fn
-
-        # 查询所有不同的平台
-        platforms = (
-            PersonInfo.select(PersonInfo.platform, fn.COUNT(PersonInfo.id).alias("count"))
-            .group_by(PersonInfo.platform)
-            .order_by(fn.COUNT(PersonInfo.id).desc())
-        )
-
-        result = []
-        for p in platforms:
-            if p.platform:  # 排除空平台
-                result.append({"platform": p.platform, "count": p.count})
-
-        return {"success": True, "platforms": result}
-    except Exception as e:
-        logger.error(f"获取平台列表失败: {e}")
-        return {"success": False, "error": str(e), "platforms": []}
+    """获取可用平台列表（用户画像功能已迁移，返回空列表）"""
+    return {"success": True, "platforms": []}
 
 
 @router.get("/persons")
@@ -318,49 +297,8 @@ async def get_persons_by_platform(
     limit: int = Query(default=50, ge=1, le=200),
     _auth: bool = Depends(require_auth),
 ):
-    """获取指定平台的用户列表
-
-    Args:
-        platform: 平台名称（如 qq, discord 等）
-        search: 搜索关键词（匹配昵称、用户名、user_id）
-        limit: 返回数量限制
-    """
-    try:
-        # 构建查询
-        query = PersonInfo.select().where(PersonInfo.platform == platform)
-
-        # 搜索过滤
-        if search:
-            query = query.where(
-                (PersonInfo.person_name.contains(search))
-                | (PersonInfo.nickname.contains(search))
-                | (PersonInfo.user_id.contains(search))
-            )
-
-        # 按最后交互时间排序，优先显示活跃用户
-        from peewee import Case
-
-        query = query.order_by(Case(None, [(PersonInfo.last_know.is_null(), 1)], 0), PersonInfo.last_know.desc())
-        query = query.limit(limit)
-
-        result = []
-        for person in query:
-            result.append(
-                {
-                    "person_id": person.person_id,
-                    "user_id": person.user_id,
-                    "person_name": person.person_name,
-                    "nickname": person.nickname,
-                    "is_known": person.is_known,
-                    "platform": person.platform,
-                    "display_name": person.person_name or person.nickname or person.user_id,
-                }
-            )
-
-        return {"success": True, "persons": result, "total": len(result)}
-    except Exception as e:
-        logger.error(f"获取用户列表失败: {e}")
-        return {"success": False, "error": str(e), "persons": []}
+    """获取指定平台的用户列表（用户画像功能已迁移，返回空列表）"""
+    return {"success": True, "persons": [], "total": 0}
 
 
 @router.delete("/history")
@@ -450,26 +388,10 @@ async def websocket_chat(
     current_virtual_config: Optional[VirtualIdentityConfig] = None
 
     # 如果 URL 参数中提供了虚拟身份信息，自动配置
+    # 注意：用户画像功能已迁移，无法通过 PersonInfo DB 查询用户信息
+    # 虚拟身份模式设置请通过 WebSocket 消息 set_virtual_identity 进行（需提供完整用户信息）
     if platform and person_id:
-        try:
-            person = PersonInfo.get_or_none(PersonInfo.person_id == person_id)
-            if person:
-                # 使用前端传递的 group_id，如果没有则生成一个稳定的
-                virtual_group_id = group_id or f"{VIRTUAL_GROUP_ID_PREFIX}{platform}_{person.user_id}"
-                current_virtual_config = VirtualIdentityConfig(
-                    enabled=True,
-                    platform=person.platform,
-                    person_id=person.person_id,
-                    user_id=person.user_id,
-                    user_nickname=person.person_name or person.nickname or person.user_id,
-                    group_id=virtual_group_id,
-                    group_name=group_name or "WebUI虚拟群聊",
-                )
-                logger.info(
-                    f"虚拟身份模式已通过 URL 参数激活: {current_virtual_config.user_nickname} @ {current_virtual_config.platform}, group_id={virtual_group_id}"
-                )
-        except Exception as e:
-            logger.warning(f"通过 URL 参数配置虚拟身份失败: {e}")
+        logger.warning("URL 参数虚拟身份配置不可用：用户画像功能已迁移。请通过 set_virtual_identity 消息设置。")
 
     await chat_manager.connect(websocket, session_id, user_id)
 
@@ -643,19 +565,16 @@ async def websocket_chat(
                         )
                         continue
 
-                    # 获取用户信息
+                    # 使用请求中的用户数据（用户画像功能已迁移，不再查询 DB）
+                    # 前端需提供完整的 person_id, platform, user_nickname 等信息
                     try:
-                        person = PersonInfo.get_or_none(PersonInfo.person_id == virtual_data.get("person_id"))
-                        if not person:
-                            await chat_manager.send_message(
-                                session_id,
-                                {
-                                    "type": "error",
-                                    "content": f"找不到用户: {virtual_data.get('person_id')}",
-                                    "timestamp": time.time(),
-                                },
-                            )
-                            continue
+                        virtual_person_id = virtual_data.get("person_id", "")
+                        virtual_platform = virtual_data.get("platform", "")
+                        virtual_user_id = virtual_data.get("user_id", virtual_person_id)
+                        virtual_nickname = virtual_data.get(
+                            "user_nickname",
+                            virtual_data.get("nickname", virtual_person_id),
+                        )
 
                         # 生成虚拟群 ID
                         custom_group_id = virtual_data.get("group_id")
@@ -666,10 +585,10 @@ async def websocket_chat(
 
                         current_virtual_config = VirtualIdentityConfig(
                             enabled=True,
-                            platform=person.platform,
-                            person_id=person.person_id,
-                            user_id=person.user_id,
-                            user_nickname=person.person_name or person.nickname or person.user_id,
+                            platform=virtual_platform,
+                            person_id=virtual_person_id,
+                            user_id=virtual_user_id,
+                            user_nickname=virtual_nickname,
                             group_id=group_id,
                             group_name=virtual_data.get("group_name", "WebUI虚拟群聊"),
                         )

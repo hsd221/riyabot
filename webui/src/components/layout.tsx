@@ -1,4 +1,4 @@
-import { Menu, Moon, Sun, ChevronLeft, Home, Settings, LogOut, FileText, Server, Boxes, Smile, MessageSquare, UserCircle, FileSearch, Package, BookOpen, Search, Sliders, Network, Hash } from 'lucide-react'
+import { Menu, Moon, Sun, ChevronLeft, Home, Settings, LogOut, FileText, Server, Boxes, Smile, MessageSquare, UserCircle, FileSearch, Package, BookOpen, Search, Sliders, Hash, BrainCircuit } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Link, useMatchRoute } from '@tanstack/react-router'
 import { useTheme, toggleThemeWithTransition } from './use-theme'
@@ -90,7 +90,7 @@ export function Layout({ children }: LayoutProps) {
         { icon: MessageSquare, label: '表达方式管理', path: '/resource/expression' },
         { icon: Hash, label: '黑话管理', path: '/resource/jargon' },
         { icon: UserCircle, label: '人物信息管理', path: '/resource/person' },
-        { icon: Network, label: '知识库图谱可视化', path: '/resource/knowledge-graph' },
+        { icon: BrainCircuit, label: '记忆系统概览', path: '/resource/memory' },
       ],
     },
     {

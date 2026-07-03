@@ -9,7 +9,7 @@
 
 from typing import Any
 from src.common.logger import get_logger
-from src.person_info.person_info import Person
+from src.common.person_stub import Person
 
 logger = get_logger("person_api")
 

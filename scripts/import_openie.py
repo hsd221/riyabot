@@ -12,11 +12,17 @@ from time import sleep
 from typing import Optional
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.chat.knowledge.embedding_store import EmbeddingManager
-from src.chat.knowledge.open_ie import OpenIE
-from src.chat.knowledge.kg_manager import KGManager
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
+try:
+    from src.chat.knowledge.embedding_store import EmbeddingManager  # type: ignore
+    from src.chat.knowledge.open_ie import OpenIE  # type: ignore
+    from src.chat.knowledge.kg_manager import KGManager  # type: ignore
+except ModuleNotFoundError:
+    EmbeddingManager = None  # type: ignore
+    OpenIE = None  # type: ignore
+    KGManager = None  # type: ignore
 from src.common.logger import get_logger
-from src.chat.knowledge.utils.hash import get_sha256
+from src.common.knowledge_utils.hash import get_sha256
 
 
 # 添加项目根目录到 sys.path
@@ -134,9 +140,7 @@ def handle_import_openie(
         # 在非交互模式下，不再询问用户，而是直接报错终止
         logger.info(f"\n检测到非法文段，共{len(missing_idxs)}条。")
         if non_interactive:
-            logger.error(
-                "检测到非法文段且当前处于非交互模式，无法询问是否删除非法文段，导入终止。"
-            )
+            logger.error("检测到非法文段且当前处于非交互模式，无法询问是否删除非法文段，导入终止。")
             sys.exit(1)
         logger.info("\n是否删除所有非法文段后继续导入？(y/n): ", end="")
         user_choice = input().strip().lower()
@@ -189,9 +193,7 @@ def handle_import_openie(
 async def main_async(non_interactive: bool = False) -> bool:  # sourcery skip: dict-comprehension
     # 新增确认提示
     if non_interactive:
-        logger.warning(
-            "当前处于非交互模式，将跳过导入开销确认提示，直接开始执行 OpenIE 导入。"
-        )
+        logger.warning("当前处于非交互模式，将跳过导入开销确认提示，直接开始执行 OpenIE 导入。")
     else:
         print("=== 重要操作确认 ===")
         print("OpenIE导入时会大量发送请求，可能会撞到请求速度上限，请注意选用的模型")
@@ -261,10 +263,7 @@ async def main_async(non_interactive: bool = False) -> bool:  # sourcery skip: d
 def main(argv: Optional[list[str]] = None) -> None:
     """主函数 - 解析参数并运行异步主流程。"""
     parser = argparse.ArgumentParser(
-        description=(
-            "OpenIE 导入脚本：读取 data/openie 中的 OpenIE JSON 批次，"
-            "将其导入到 LPMM 的向量库与知识图中。"
-        )
+        description=("OpenIE 导入脚本：读取 data/openie 中的 OpenIE JSON 批次，将其导入到 LPMM 的向量库与知识图中。")
     )
     parser.add_argument(
         "--non-interactive",

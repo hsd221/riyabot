@@ -13,7 +13,7 @@ import { EmojiManagementPage } from './routes/resource/emoji'
 import { ExpressionManagementPage } from './routes/resource/expression'
 import { JargonManagementPage } from './routes/resource/jargon'
 import { PersonManagementPage } from './routes/person'
-import { KnowledgeGraphPage } from './routes/resource/knowledge-graph'
+import { MemoryPage } from './routes/resource/memory'
 import { LogViewerPage } from './routes/logs'
 import { PluginsPage } from './routes/plugins'
 import { PluginConfigPage } from './routes/plugin-config'
@@ -122,18 +122,18 @@ const personManagementRoute = createRoute({
   component: PersonManagementPage,
 })
 
+// 资源管理路由 - 记忆系统可视化
+const memoryRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/resource/memory',
+  component: MemoryPage,
+})
+
 // 资源管理路由 - 黑话管理
 const jargonManagementRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/resource/jargon',
   component: JargonManagementPage,
-})
-
-// 资源管理路由 - 知识库图谱可视化
-const knowledgeGraphRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: '/resource/knowledge-graph',
-  component: KnowledgeGraphPage,
 })
 
 // 日志查看器路由
@@ -213,7 +213,7 @@ const routeTree = rootRoute.addChildren([
     expressionManagementRoute,
     jargonManagementRoute,
     personManagementRoute,
-    knowledgeGraphRoute,
+    memoryRoute,
     pluginsRoute,
     pluginConfigRoute,
     pluginMirrorsRoute,

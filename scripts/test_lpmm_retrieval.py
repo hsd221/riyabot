@@ -18,8 +18,17 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.common.logger import get_logger
 from src.config.config import global_config
-from src.chat.knowledge import lpmm_start_up
-from src.memory_system.retrieval_tools.query_lpmm_knowledge import query_lpmm_knowledge
+
+# LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
+try:
+    from src.chat.knowledge import lpmm_start_up  # type: ignore
+except ModuleNotFoundError:
+    lpmm_start_up = None
+# memory_system 也已移除
+try:
+    from src.memory_system.retrieval_tools.query_lpmm_knowledge import query_lpmm_knowledge  # type: ignore
+except ModuleNotFoundError:
+    query_lpmm_knowledge = None
 
 logger = get_logger("test_lpmm_retrieval")
 

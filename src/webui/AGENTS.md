@@ -17,7 +17,7 @@ webui/
 ├── chat_routes.py       # Chat endpoints
 ├── config_routes.py     # Bot/model config CRUD
 ├── model_routes.py      # Model provider management
-├── knowledge_routes.py  # LPMM knowledge endpoints
+├── knowledge_routes.py  # [已移除] LPMM knowledge endpoints — 返回空占位
 ├── emoji_routes.py      # Emoji management (1311 lines)
 ├── plugin_routes.py     # Plugin management (2060 lines)
 ├── annual_report_routes.py  # Statistics report (938 lines)

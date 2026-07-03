@@ -63,26 +63,15 @@ export const TASK_CONFIGS = [
     hideTemperature: true,
     hideMaxTokens: true,
   },
-] as const
-
-/**
- * LPMM 任务配置信息
- */
-export const LPMM_TASK_CONFIGS = [
   {
-    key: 'lpmm_entity_extract' as const,
-    title: '实体提取模型 (lpmm_entity_extract)',
-    description: '从文本中提取实体',
+    key: 'memory_encoder' as const,
+    title: '记忆编码模型 (memory_encoder)',
+    description: '用于记忆系统的 LLM 编码（消息提取、结构化）',
   },
   {
-    key: 'lpmm_rdf_build' as const,
-    title: 'RDF 构建模型 (lpmm_rdf_build)',
-    description: '构建知识图谱',
-  },
-  {
-    key: 'lpmm_qa' as const,
-    title: '问答模型 (lpmm_qa)',
-    description: '知识库问答',
+    key: 'memory_weaver' as const,
+    title: '梦境编织模型 (memory_weaver)',
+    description: '用于梦境系统的洞察生成（跨域模式发现）',
   },
 ] as const
 

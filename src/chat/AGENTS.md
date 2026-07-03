@@ -11,7 +11,7 @@ chat/
 ├── brain_chat/          # Private chat: BrainChatting (803 lines) + BrainPlanner
 ├── brain_chat/PFC/      # ★ Prefrontal Cortex state machine (16 files, literal brain metaphor)
 ├── replyer/             # LLM reply gen: group_generator (1251) + private_generator (1116)
-├── knowledge/           # LPMM knowledge base: FAISS + KG + QA retrieval (9 files)
+├── knowledge/           # [已移除] LPMM knowledge base — 等待新记忆系统
 ├── emoji_system/        # EmojiManager singleton (1154 lines): registration + LLM tagging
 ├── utils/               # statistic.py (2307!), chat_message_builder (1085), utils (986)
 └── logger/              # PlanReplyLogger: disk logs for LLM plan/reply traces
@@ -25,7 +25,7 @@ chat/
 | Reply text generation | `replyer/group_generator.py` / `private_generator.py` |
 | Action selection (private) | `PFC/action_planner.py` (2 prompt templates: initial + follow-up) |
 | Goal setting | `PFC/pfc.py` (GoalAnalyzer, max 3 concurrent goals) |
-| Knowledge retrieval | `knowledge/qa_manager.py` + `PFC/pfc_KnowledgeFetcher.py` |
+| Knowledge retrieval | `PFC/pfc_KnowledgeFetcher.py`（LPMM 已移除，返回空占位） |
 | Message context building | `utils/chat_message_builder.py` |
 | LLM usage stats / HTML report | `utils/statistic.py` (900-line inline HTML template) |
 
@@ -38,7 +38,7 @@ chat/
 | ActionPlanner | Premotor cortex | `PFC/action_planner.py` |
 | ReplyGenerator | Broca's area | `PFC/reply_generator.py` |
 | ReplyChecker | ACC (error monitor) | `PFC/reply_checker.py` |
-| KnowledgeFetcher | Hippocampus | `PFC/pfc_KnowledgeFetcher.py` |
+| KnowledgeFetcher | [已移除] LPMM + Hippocampus | `PFC/pfc_KnowledgeFetcher.py`（返回空占位） |
 | Waiter | Attention | `PFC/waiter.py` (300s timeout, 5s poll) |
 | Conversation | Global coordinator | `PFC/conversation.py` (701 lines) |
 

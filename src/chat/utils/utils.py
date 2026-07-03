@@ -15,7 +15,7 @@ from src.config.config import global_config, model_config
 from src.chat.message_receive.message import MessageRecv
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.llm_models.utils_model import LLMRequest
-from src.person_info.person_info import Person
+from src.common.person_stub import Person
 from .typo_generator import ChineseTypoGenerator
 
 if TYPE_CHECKING:
