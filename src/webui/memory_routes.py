@@ -7,12 +7,22 @@ from fastapi import APIRouter, Cookie, Header, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 from src.common.logger import get_logger
-from src.memory.schema import MemoryAtom, DreamRun, InsightPool, NoisePool
+from src.config.config import global_config
+from src.memory.schema import (
+    MemoryAtom,
+    DreamRun,
+    InsightPool,
+    NoisePool,
+    configure_memory_database,
+    initialize_database,
+    memory_db,
+)
 from .auth import verify_auth_token_from_cookie_or_header
 
 logger = get_logger("webui.memory")
 
 router = APIRouter(prefix="/memory", tags=["Memory"])
+_memory_db_ready_path: Optional[str] = None
 
 
 def require_auth(
@@ -21,6 +31,22 @@ def require_auth(
 ) -> bool:
     """认证依赖：验证用户是否已登录"""
     return verify_auth_token_from_cookie_or_header(maibot_session, authorization)
+
+
+def _ensure_memory_database_ready() -> None:
+    """确保记忆数据库表结构已初始化，兼容 WebUI 单独访问场景。"""
+    global _memory_db_ready_path
+
+    sqlite_path = getattr(global_config.memory, "sqlite_path", None)
+    if sqlite_path:
+        configure_memory_database(sqlite_path)
+
+    current_path = str(memory_db.database)
+    if _memory_db_ready_path == current_path:
+        return
+
+    initialize_database()
+    _memory_db_ready_path = current_path
 
 
 # ==================== Response Models ====================
@@ -206,6 +232,7 @@ def _noise_to_dict(noise: NoisePool) -> dict:
 async def get_memory_stats(_auth: bool = Depends(require_auth)):
     """获取记忆系统统计信息"""
     try:
+        _ensure_memory_database_ready()
         total_atoms = MemoryAtom.select().count()
         active_atoms = MemoryAtom.select().where(MemoryAtom.status == "active").count()
 
@@ -242,6 +269,7 @@ async def get_memory_atoms(
 ):
     """获取记忆原子列表"""
     try:
+        _ensure_memory_database_ready()
         conditions = []
         if atom_type:
             conditions.append(MemoryAtom.atom_type == atom_type)
@@ -275,6 +303,7 @@ async def get_memory_atom_detail(
 ):
     """获取记忆原子详情"""
     try:
+        _ensure_memory_database_ready()
         atom = MemoryAtom.get_or_none(MemoryAtom.atom_id == atom_id)
         if not atom:
             raise HTTPException(status_code=404, detail="记忆原子不存在")
@@ -294,6 +323,7 @@ async def get_dream_runs(
 ):
     """获取梦境运行记录列表"""
     try:
+        _ensure_memory_database_ready()
         total = DreamRun.select().count()
         items = (
             DreamRun.select()
@@ -319,6 +349,7 @@ async def get_insights(
 ):
     """获取洞见列表"""
     try:
+        _ensure_memory_database_ready()
         total = InsightPool.select().count()
         items = (
             InsightPool.select()
@@ -344,6 +375,7 @@ async def get_noise_pool(
 ):
     """获取噪声池列表"""
     try:
+        _ensure_memory_database_ready()
         total = NoisePool.select().count()
         items = (
             NoisePool.select()

@@ -1,6 +1,5 @@
 import os
 import sys
-from typing import Set
 
 # 保证可以导入 src.*
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -37,7 +36,7 @@ def main() -> None:
     # KG 统计
     nodes = kg.graph.get_node_list()
     edges = kg.graph.get_edge_list()
-    node_set: Set[str] = set(nodes)
+    set(nodes)
 
     para_nodes = [n for n in nodes if n.startswith("paragraph-")]
     ent_nodes = [n for n in nodes if n.startswith("entity-")]
@@ -73,4 +72,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

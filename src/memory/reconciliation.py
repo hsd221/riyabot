@@ -236,6 +236,7 @@ class ReconciliationTask(AsyncTask):
                     "confidence": atom_data.get("confidence", 0.5),
                     "status": atom_data.get("status", "active"),
                     "source_scene": atom_data.get("source_scene", "chat"),
+                    "source_id": atom_data.get("source_id"),
                     "privacy_level": atom_data.get("privacy_level", "context_sensitive"),
                 },
             )

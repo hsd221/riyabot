@@ -501,6 +501,8 @@ class HeartFChatting:
                 adapted.stream_id = msg.chat_id  # chat_id → stream_id
                 adapted.content = msg.processed_plain_text  # processed_plain_text → content
                 adapted.timestamp = msg.time  # time → timestamp
+                adapted.user_id = msg.user_id  # archiver 需要
+                adapted.message_id = msg.message_id  # archiver 需要
                 await self.message_archiver.archive_group_message(adapted)
             except Exception as e:
                 logger.warning(f"消息归档失败: {e}")

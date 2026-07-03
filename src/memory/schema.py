@@ -28,20 +28,44 @@ logger = get_logger("memory.schema")
 _ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _DB_DIR = os.path.join(_ROOT_PATH, "data")
 _MEMORY_DB_FILE = os.path.join(_DB_DIR, "memory.db")
+_SQLITE_PRAGMAS = {
+    "journal_mode": "wal",
+    "cache_size": -64 * 1000,
+    "foreign_keys": 1,
+    "ignore_check_constraints": 0,
+    "synchronous": 0,
+    "busy_timeout": 1000,
+}
 
 os.makedirs(_DB_DIR, exist_ok=True)
 
 memory_db = SqliteDatabase(
     _MEMORY_DB_FILE,
-    pragmas={
-        "journal_mode": "wal",
-        "cache_size": -64 * 1000,
-        "foreign_keys": 1,
-        "ignore_check_constraints": 0,
-        "synchronous": 0,
-        "busy_timeout": 1000,
-    },
+    pragmas=_SQLITE_PRAGMAS,
 )
+
+
+def configure_memory_database(sqlite_path: str) -> None:
+    """按配置重设 memory_db 路径。"""
+    global _MEMORY_DB_FILE
+    if not sqlite_path:
+        return
+
+    resolved_path = sqlite_path
+    if not os.path.isabs(resolved_path):
+        resolved_path = os.path.join(_ROOT_PATH, resolved_path)
+    resolved_path = os.path.abspath(resolved_path)
+
+    current_path = os.path.abspath(memory_db.database)
+    if current_path == resolved_path:
+        return
+
+    os.makedirs(os.path.dirname(resolved_path), exist_ok=True)
+    if not memory_db.is_closed():
+        memory_db.close()
+    memory_db.init(resolved_path, pragmas=_SQLITE_PRAGMAS)
+    _MEMORY_DB_FILE = resolved_path
+    logger.info(f"记忆数据库路径已配置: {_MEMORY_DB_FILE}")
 
 
 class BaseModel(Model):
@@ -77,6 +101,7 @@ class MemoryAtom(BaseModel):
     trace_chain_id = TextField(null=True)  # 追溯链 ID
     status = TextField(default="active")  # 状态: active/archived/forgotten
     embedding_id = TextField(null=True)  # Qdrant point ID
+    source_id = TextField(null=True, index=True)  # 来源聊天流 ID（ChatStream.stream_id）
 
     class Meta:
         table_name = "memory_atoms"
@@ -359,6 +384,10 @@ def _ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_memory_atoms_created_status ON memory_atoms(created_at, status)",
         ),
         (
+            "idx_memory_atoms_source_scene_id",
+            "CREATE INDEX IF NOT EXISTS idx_memory_atoms_source_scene_id ON memory_atoms(source_scene, source_id, status, weight)",
+        ),
+        (
             "idx_raw_archive_stream_ts",
             "CREATE INDEX IF NOT EXISTS idx_raw_archive_stream_ts ON raw_message_archive(stream_id, timestamp)",
         ),
@@ -374,10 +403,25 @@ def _ensure_indexes():
             logger.warning("创建索引 %s 失败: %s", idx_name, e)
 
 
+def _ensure_columns():
+    """补齐已存在数据库缺失的新列。"""
+    try:
+        if not memory_db.table_exists(MemoryAtom):
+            return
+        rows = memory_db.execute_sql("PRAGMA table_info(memory_atoms)").fetchall()
+        columns = {row[1] for row in rows}
+        if "source_id" not in columns:
+            memory_db.execute_sql("ALTER TABLE memory_atoms ADD COLUMN source_id TEXT")
+            logger.info("记忆表 memory_atoms 已补充 source_id 列")
+    except Exception as e:
+        logger.warning("补齐记忆表字段失败: %s", e)
+
+
 def create_tables():
     """创建所有记忆数据库表，同时创建附加索引"""
     with memory_db:
-        memory_db.create_tables(MODELS)
+        memory_db.create_tables(MODELS, safe=True)
+        _ensure_columns()
         _ensure_indexes()
     logger.info(f"记忆数据库表已创建: {_MEMORY_DB_FILE}")
 
@@ -389,8 +433,9 @@ def initialize_database():
             for model in MODELS:
                 if not memory_db.table_exists(model):
                     logger.warning(f"记忆表 '{model._meta.table_name}' 未找到，正在创建...")
-                    memory_db.create_tables([model])
+                    memory_db.create_tables([model], safe=True)
                     logger.info(f"记忆表 '{model._meta.table_name}' 创建成功")
+            _ensure_columns()
             _ensure_indexes()
         logger.info("记忆数据库初始化完成")
     except Exception as e:

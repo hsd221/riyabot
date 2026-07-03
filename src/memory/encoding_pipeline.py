@@ -177,11 +177,14 @@ class EncodingPipeline:
                 stream_atoms_written = 0
                 for content, atom_type, detail in atoms:
                     try:
+                        buffer = self.encoder.get_buffer(stream_id)
+                        source_scene = buffer.stream_type if buffer is not None else "group_chat"
                         atom, semantic_detail, episodic_detail = self._build_atom(
                             content=content,
                             atom_type=atom_type,
                             detail=detail,
-                            source_scene=("private_chat" if "_private_" in str(stream_id) else "group_chat"),
+                            source_scene=source_scene,
+                            source_id=stream_id,
                         )
 
                         if self.trace_recorder is not None:
@@ -353,6 +356,7 @@ class EncodingPipeline:
         atom_type: AtomType,
         detail: dict[str, Any],
         source_scene: str,
+        source_id: str = "",
     ) -> tuple[MemoryAtomDC, Optional[SemanticDetail], Optional[EpisodicDetail]]:
         """从编码结果构建 MemoryAtom dataclass 及可选的扩展详情
 
@@ -388,6 +392,7 @@ class EncodingPipeline:
             ttl_days=DEFAULT_TTL.get(atom_type, 7),
             decay_type=DEFAULT_DECAY.get(atom_type, DecayType.EXPONENTIAL),
             source_scene=source_scene,
+            source_id=source_id or None,
             privacy_level="context_sensitive",
             status="active",
             embedding=None,

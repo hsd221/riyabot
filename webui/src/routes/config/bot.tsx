@@ -4,7 +4,6 @@ import {
   PersonalitySection,
   ChatSection,
   VoiceSection,
-  LPMMSection,
   LogSection,
   DebugSection,
   MaimMessageSection,
@@ -44,7 +43,6 @@ import type {
   MemoryConfig,
   ToolConfig,
   VoiceConfig,
-  LPMMKnowledgeConfig,
   KeywordReactionConfig,
   ResponsePostProcessConfig,
   ChineseTypoConfig,
@@ -86,7 +84,6 @@ export function BotConfigPage() {
   const [memoryConfig, setMemoryConfig] = useState<MemoryConfig | null>(null)
   const [toolConfig, setToolConfig] = useState<ToolConfig | null>(null)
   const [voiceConfig, setVoiceConfig] = useState<VoiceConfig | null>(null)
-  const [lpmmConfig, setLpmmConfig] = useState<LPMMKnowledgeConfig | null>(null)
   const [keywordReactionConfig, setKeywordReactionConfig] = useState<KeywordReactionConfig | null>(null)
   const [responsePostProcessConfig, setResponsePostProcessConfig] = useState<ResponsePostProcessConfig | null>(null)
   const [chineseTypoConfig, setChineseTypoConfig] = useState<ChineseTypoConfig | null>(null)
@@ -124,7 +121,6 @@ export function BotConfigPage() {
     setMemoryConfig(config.memory as MemoryConfig)
     setToolConfig(config.tool as ToolConfig)
     setVoiceConfig(config.voice as VoiceConfig)
-    setLpmmConfig(config.lpmm_knowledge as LPMMKnowledgeConfig)
     setKeywordReactionConfig(config.keyword_reaction as KeywordReactionConfig)
     setResponsePostProcessConfig(config.response_post_process as ResponsePostProcessConfig)
     setChineseTypoConfig(config.chinese_typo as ChineseTypoConfig)
@@ -150,7 +146,6 @@ export function BotConfigPage() {
       memory: memoryConfig,
       tool: toolConfig,
       voice: voiceConfig,
-      lpmm_knowledge: lpmmConfig,
       keyword_reaction: keywordReactionConfig,
       response_post_process: responsePostProcessConfig,
       chinese_typo: chineseTypoConfig,
@@ -163,7 +158,7 @@ export function BotConfigPage() {
   }, [
     botConfig, personalityConfig, chatConfig, expressionConfig,
     emojiConfig, memoryConfig, toolConfig,
-    voiceConfig, lpmmConfig, keywordReactionConfig, responsePostProcessConfig,
+    voiceConfig, keywordReactionConfig, responsePostProcessConfig,
     chineseTypoConfig, responseSplitterConfig, logConfig, debugConfig,
     maimMessageConfig, telemetryConfig
   ])
@@ -228,7 +223,6 @@ export function BotConfigPage() {
   useConfigAutoSave(memoryConfig, 'memory', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(toolConfig, 'tool', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(lpmmConfig, 'lpmm_knowledge', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(keywordReactionConfig, 'keyword_reaction', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(responsePostProcessConfig, 'response_post_process', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(chineseTypoConfig, 'chinese_typo', initialLoadRef.current, triggerAutoSave)
@@ -531,7 +525,6 @@ export function BotConfigPage() {
             <TabsTrigger value="features" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">功能</TabsTrigger>
             <TabsTrigger value="processing" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">处理</TabsTrigger>
             <TabsTrigger value="voice" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">语音</TabsTrigger>
-            <TabsTrigger value="lpmm" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">知识库</TabsTrigger>
             <TabsTrigger value="other" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">其他</TabsTrigger>
           </TabsList>
           {/* 基本信息 */}
@@ -591,11 +584,6 @@ export function BotConfigPage() {
         {/* 语音配置 */}
         <TabsContent value="voice" className="space-y-4">
           {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
-        </TabsContent>
-
-        {/* 知识库配置 */}
-        <TabsContent value="lpmm" className="space-y-4">
-          {lpmmConfig && <LPMMSection config={lpmmConfig} onChange={setLpmmConfig} />}
         </TabsContent>
 
         {/* 其他配置 */}

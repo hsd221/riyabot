@@ -479,6 +479,15 @@ class ObjectivityChecker:
         candidates: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
 
+        def in_same_scope(candidate: dict[str, Any]) -> bool:
+            candidate_scene = candidate.get("source_scene")
+            if atom.source_scene and candidate_scene and candidate_scene != atom.source_scene:
+                return False
+            candidate_source_id = candidate.get("source_id")
+            if atom.source_id and candidate_source_id and candidate_source_id != atom.source_id:
+                return False
+            return True
+
         # 按相同 atom_type 筛选
         if atom.atom_type and atom.atom_type.value:
             type_list = await self.store.list_atoms(
@@ -486,6 +495,8 @@ class ObjectivityChecker:
                 limit=_MAX_CONFLICT_CANDIDATES,
             )
             for c in type_list:
+                if not in_same_scope(c):
+                    continue
                 cid = c.get("atom_id", "")
                 if cid and cid not in seen_ids:
                     seen_ids.add(cid)
@@ -495,6 +506,8 @@ class ObjectivityChecker:
         if len(candidates) < _MAX_CONFLICT_CANDIDATES:
             recent = await self.store.list_atoms(limit=_MAX_RECENT_ATOMS)
             for c in recent:
+                if not in_same_scope(c):
+                    continue
                 cid = c.get("atom_id", "")
                 if cid and cid not in seen_ids:
                     seen_ids.add(cid)

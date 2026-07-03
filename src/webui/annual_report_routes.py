@@ -296,15 +296,13 @@ async def get_social_network(year: int = 2025) -> SocialNetworkData:
 
         # 4. 被@次数
         data.at_count = (
-            Messages.select()
-            .where((Messages.time >= start_ts) & (Messages.time <= end_ts) & (Messages.is_at == True))
-            .count()
+            Messages.select().where((Messages.time >= start_ts) & (Messages.time <= end_ts) & (Messages.is_at)).count()
         )
 
         # 5. 被提及次数
         data.mentioned_count = (
             Messages.select()
-            .where((Messages.time >= start_ts) & (Messages.time <= end_ts) & (Messages.is_mentioned == True))
+            .where((Messages.time >= start_ts) & (Messages.time <= end_ts) & (Messages.is_mentioned))
             .count()
         )
 
@@ -526,7 +524,7 @@ async def get_expression_vibe(year: int = 2025) -> ExpressionVibeData:
         # 1. 表情包之王 - 使用次数最多的表情包
         top_emoji_query = (
             Emoji.select(Emoji.id, Emoji.full_path, Emoji.description, Emoji.usage_count, Emoji.emoji_hash)
-            .where(Emoji.is_registered == True)
+            .where(Emoji.is_registered)
             .order_by(Emoji.usage_count.desc())
             .limit(5)
         )
@@ -571,7 +569,7 @@ async def get_expression_vibe(year: int = 2025) -> ExpressionVibeData:
             .where(
                 (Expression.last_active_time >= start_ts)
                 & (Expression.last_active_time <= end_ts)
-                & (Expression.rejected == True)
+                & (Expression.rejected)
             )
             .count()
         )
@@ -582,7 +580,7 @@ async def get_expression_vibe(year: int = 2025) -> ExpressionVibeData:
             .where(
                 (Expression.last_active_time >= start_ts)
                 & (Expression.last_active_time <= end_ts)
-                & (Expression.checked == True)
+                & (Expression.checked)
             )
             .count()
         )
@@ -626,7 +624,7 @@ async def get_expression_vibe(year: int = 2025) -> ExpressionVibeData:
         # 7. 处理的图片数量
         data.image_processed_count = (
             Messages.select()
-            .where((Messages.time >= start_ts) & (Messages.time <= end_ts) & (Messages.is_picid == True))
+            .where((Messages.time >= start_ts) & (Messages.time <= end_ts) & (Messages.is_picid))
             .count()
         )
 
@@ -767,12 +765,12 @@ async def get_achievements(year: int = 2025) -> AchievementData:
     try:
         # 1. 新学到的黑话数量
         # Jargon 表没有时间字段,统计全部已确认的黑话
-        data.new_jargon_count = Jargon.select().where(Jargon.is_jargon == True).count()
+        data.new_jargon_count = Jargon.select().where(Jargon.is_jargon).count()
 
         # 2. 代表性黑话示例
         jargon_samples = (
             Jargon.select(Jargon.content, Jargon.meaning, Jargon.count)
-            .where(Jargon.is_jargon == True)
+            .where(Jargon.is_jargon)
             .order_by(Jargon.count.desc())
             .limit(5)
         )

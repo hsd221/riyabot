@@ -41,7 +41,7 @@ logger = get_logger("memory.layer2")
 # ---------------------------------------------------------------------------
 
 # 未配置专用任务时的 fallback 任务名
-DEFAULT_ENCODING_TASK = "utils"
+DEFAULT_ENCODING_TASK = "memory_encoder"
 
 # 单次编码最大发送给 LLM 的消息数（超出则截取最近 N 条）
 MAX_MESSAGES_PER_BATCH = 30
@@ -636,8 +636,10 @@ class BatchEncoder:
         if not isinstance(detail, dict):
             detail = {}
 
-        # 按类型补充默认 detail
+        # 按类型补充默认 detail，并保留通用元数据供 EncodingPipeline 构建 MemoryAtom。
         detail = self._normalize_detail(atom_type, detail, entities)
+        detail["entities"] = entities
+        detail["importance"] = importance
 
         if not self._semantic_validate(content, atom_type, detail, entities):
             logger.debug(

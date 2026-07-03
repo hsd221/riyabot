@@ -180,16 +180,16 @@ model_list = ["bge-m3"]
 slow_threshold = 5.0
 selection_strategy = "random"           # 模型选择策略：balance（负载均衡）或 random（随机选择）
 
-# ------------LPMM知识库模型------------
+# ------------记忆系统模型------------
 
-[model_task_config.lpmm_entity_extract] # 实体提取模型
+[model_task_config.memory_encoder] # 记忆编码模型
 model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.2
 max_tokens = 800
 slow_threshold = 20.0
 selection_strategy = "random"           # 模型选择策略：balance（负载均衡）或 random（随机选择）
 
-[model_task_config.lpmm_rdf_build] # RDF构建模型
+[model_task_config.memory_weaver] # 梦境编织模型
 model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.2
 max_tokens = 800

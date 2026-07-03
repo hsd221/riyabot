@@ -50,6 +50,8 @@ async def build_memory_retrieval_prompt(
         if not stream_id:
             return "", []
 
+        scene_type = "group_chat" if getattr(chat_stream, "group_info", None) is not None else "private_chat"
+
         # 尽量提取当前 user_id（如果未显式传入）
         resolved_user_id: Optional[str] = user_id
         if resolved_user_id is None and hasattr(chat_stream, "user_info") and chat_stream.user_info is not None:
@@ -59,6 +61,7 @@ async def build_memory_retrieval_prompt(
         memory_context, atom_ids = await retriever.get_context_for_reply_with_ids(
             stream_id=stream_id,
             user_id=resolved_user_id,
+            scene_type=scene_type,
             max_atoms=5,
             max_chars=800,
         )
@@ -66,7 +69,6 @@ async def build_memory_retrieval_prompt(
         # 跨场景记忆检索（try/except 保护，不中断正常流程）
         cross_scene_text = ""
         try:
-            scene_type = "group_chat" if "group" in str(stream_id) else "private_chat"
             cross_scene_text = await retriever.get_cross_scene_context(
                 scene_type=scene_type,
                 stream_id=stream_id,

@@ -118,6 +118,7 @@ class MemoryAtom:
         decay_type: 衰减类型（linear/exponential/step）
         reinforcement_count: 强化次数
         source_scene: 来源场景（group_chat/private_chat/dream）
+        source_id: 来源聊天流 ID（ChatStream.stream_id）
         privacy_level: 隐私级别（public/context_sensitive/private）
         trace_chain_id: 追溯链ID，关联 memory_trace_chain 表
         status: 状态（active/archived/forgotten）
@@ -140,6 +141,7 @@ class MemoryAtom:
     decay_type: DecayType = DecayType.EXPONENTIAL
     reinforcement_count: int = 0
     source_scene: str = "unknown"
+    source_id: Optional[str] = None
     privacy_level: str = "context_sensitive"
     trace_chain_id: Optional[str] = None
     status: str = "active"
@@ -303,7 +305,8 @@ def compute_weight(
     decay_factor = compute_decay_factor(atom, current_time)
     activation_factor = min(2.0, 1.0 + atom.reinforcement_count * 0.1)
 
-    return base_weight * decay_factor * activation_factor * consolidation_factor
+    weight = base_weight * decay_factor * activation_factor * consolidation_factor
+    return max(0.0, min(1.0, weight))
 
 
 def update_weight(

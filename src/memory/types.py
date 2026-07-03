@@ -23,6 +23,7 @@ class AtomDict(TypedDict):
         decay_type: 衰减类型
         reinforcement_count: 强化次数
         source_scene: 来源场景
+        source_id: 来源聊天流 ID
         privacy_level: 隐私级别
         status: 原子状态
         fade_level: 褪色等级（仅检索结果）
@@ -45,6 +46,7 @@ class AtomDict(TypedDict):
     decay_type: str
     reinforcement_count: int
     source_scene: str
+    source_id: NotRequired[str | None]
     privacy_level: str
     status: str
     fade_level: str

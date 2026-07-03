@@ -71,22 +71,6 @@ export interface VoiceConfig {
   enable_asr: boolean
 }
 
-export interface LPMMKnowledgeConfig {
-  enable: boolean
-  lpmm_mode: string
-  rag_synonym_search_top_k: number
-  rag_synonym_threshold: number
-  info_extraction_workers: number
-  qa_relation_search_top_k: number
-  qa_relation_threshold: number
-  qa_paragraph_search_top_k: number
-  qa_paragraph_node_weight: number
-  qa_ent_filter_top_k: number
-  qa_ppr_damping: number
-  qa_res_top_k: number
-  embedding_dimension: number
-}
-
 export interface KeywordRule {
   keywords?: string[]
   regex?: string[]
@@ -136,7 +120,6 @@ export interface DebugConfig {
   show_jargon_prompt: boolean
   show_memory_prompt: boolean
   show_planner_prompt: boolean
-  show_lpmm_paragraph: boolean
 }
 
 export interface MaimMessageConfig {
@@ -166,7 +149,6 @@ export interface AllBotConfigs {
   memoryConfig: MemoryConfig | null
   toolConfig: ToolConfig | null
   voiceConfig: VoiceConfig | null
-  lpmmConfig: LPMMKnowledgeConfig | null
   keywordReactionConfig: KeywordReactionConfig | null
   responsePostProcessConfig: ResponsePostProcessConfig | null
   chineseTypoConfig: ChineseTypoConfig | null
@@ -189,7 +171,6 @@ export type ConfigSectionName =
   | 'memory'
   | 'tool'
   | 'voice'
-  | 'lpmm_knowledge'
   | 'keyword_reaction'
   | 'response_post_process'
   | 'chinese_typo'

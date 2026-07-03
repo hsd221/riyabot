@@ -10,6 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # LPMM 知识库已移除 — 此脚本需要更新以适配新记忆系统
 from src.common.knowledge_utils.hash import get_sha256
+
 try:
     from src.chat.knowledge.embedding_store import EmbeddingManager  # type: ignore
     from src.chat.knowledge.kg_manager import KGManager  # type: ignore

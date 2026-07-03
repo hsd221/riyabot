@@ -65,12 +65,16 @@ def suppress_logging() -> None:
     class _Quiet:
         def debug(self, *a, **kw):
             pass
+
         def info(self, *a, **kw):
             pass
+
         def warning(self, *a, **kw):
             pass
+
         def error(self, *a, **kw):
             pass
+
         def critical(self, *a, **kw):
             pass
 
@@ -142,19 +146,38 @@ _CHINESE_MESSAGES = [
 ]
 
 _USERS = [
-    "似君(Homo sapiens)", "没有名字有没名字", "hsd221",
-    "Alice", "Bob_the_Builder", "小A同学2024",
-    "wojiushiwo", "🐱喵喵侠", "⚡雷电法王",
-    "今天吃什么", "熬夜冠军🏆", "Genima",
-    "Elaina伊蕾娜", "木瓜是食草xyn", "巴巴哒捏",
-    "代码写不完了", "咖啡续命中", "摸鱼小能手",
-    "内卷之王", "躺平学博士", "被Bug选中的孩子",
+    "似君(Homo sapiens)",
+    "没有名字有没名字",
+    "hsd221",
+    "Alice",
+    "Bob_the_Builder",
+    "小A同学2024",
+    "wojiushiwo",
+    "🐱喵喵侠",
+    "⚡雷电法王",
+    "今天吃什么",
+    "熬夜冠军🏆",
+    "Genima",
+    "Elaina伊蕾娜",
+    "木瓜是食草xyn",
+    "巴巴哒捏",
+    "代码写不完了",
+    "咖啡续命中",
+    "摸鱼小能手",
+    "内卷之王",
+    "躺平学博士",
+    "被Bug选中的孩子",
 ]
 
 _STREAM_IDS = [
-    "group_100001", "group_100002", "group_100003",
-    "group_100004", "group_100005",
-    "private_200001", "private_200002", "private_200003",
+    "group_100001",
+    "group_100002",
+    "group_100003",
+    "group_100004",
+    "group_100005",
+    "private_200001",
+    "private_200002",
+    "private_200003",
 ]
 
 # PREFERENCE atoms need semantic_detail with attr_category/attr_name/attr_value
@@ -185,6 +208,7 @@ def _json_patch(self: Any, obj: Any) -> Any:
 
 json.JSONEncoder.default = _json_patch
 
+
 # ---------------------------------------------------------------------------
 # 内存 / 进程工具
 # ---------------------------------------------------------------------------
@@ -197,6 +221,7 @@ def _get_rss_mib() -> float:
     except (FileNotFoundError, OSError, IndexError, ValueError):
         pass
     import resource as _r
+
     try:
         usage = _r.getrusage(_r.RUSAGE_SELF)
         return usage.ru_maxrss / 1024.0
@@ -268,13 +293,15 @@ def _build_mock_atoms(count: int = 3) -> str:
         else:
             detail = {}
 
-        atoms.append({
-            "content": content,
-            "atom_type": atom_type,
-            "entities": entities,
-            "importance": importance,
-            "detail": detail,
-        })
+        atoms.append(
+            {
+                "content": content,
+                "atom_type": atom_type,
+                "entities": entities,
+                "importance": importance,
+                "detail": detail,
+            }
+        )
 
     _MOCK_LLM_ATOMS_CACHE.clear()
     _MOCK_LLM_ATOMS_CACHE.extend(atoms)
@@ -345,11 +372,16 @@ class BotE2EStressTest:
         # 1. DB + schema
         from src.memory.schema import memory_db
         from src.memory.schema import (
-            MemoryAtom as MemModel, EpisodicDetail as EpiModel,
-            SemanticDetail as SemModel, ConflictObservation as CoModel,
-            NoisePool as NoiModel, MemoryTraceChain as TrModel,
-            DreamRun as DrModel, GraphNode as GnModel,
-            GraphEdge as GeModel, GraphEntry as GeModel2,
+            MemoryAtom as MemModel,
+            EpisodicDetail as EpiModel,
+            SemanticDetail as SemModel,
+            ConflictObservation as CoModel,
+            NoisePool as NoiModel,
+            MemoryTraceChain as TrModel,
+            DreamRun as DrModel,
+            GraphNode as GnModel,
+            GraphEdge as GeModel,
+            GraphEntry as GeModel2,
             RawMessageArchive as RmaModel,
         )
 
@@ -366,8 +398,17 @@ class BotE2EStressTest:
         )
         memory_db.connect()
         models_to_create = [
-            MemModel, EpiModel, SemModel, CoModel, NoiModel,
-            TrModel, DrModel, GnModel, GeModel, GeModel2, RmaModel,
+            MemModel,
+            EpiModel,
+            SemModel,
+            CoModel,
+            NoiModel,
+            TrModel,
+            DrModel,
+            GnModel,
+            GeModel,
+            GeModel2,
+            RmaModel,
         ]
         for m in models_to_create:
             if not memory_db.table_exists(m._meta.table_name):
@@ -375,6 +416,7 @@ class BotE2EStressTest:
 
         # 2. MemoryStore
         from src.memory import MemoryStore, MemoryStoreConfig
+
         MemoryStore._instance = None
         config = MemoryStoreConfig(sqlite_path=self.db_path)
         self.store = MemoryStore(config)
@@ -382,18 +424,22 @@ class BotE2EStressTest:
 
         # 3. WriteOpLogger
         from src.memory.write_ops import WriteOpLogger
+
         self.op_logger = WriteOpLogger(db_path=self.db_path, max_entries=5000)
 
         # 4. MemoryWriter
         from src.memory.layer3_retrieval import MemoryWriter
+
         self.writer = MemoryWriter(self.store, op_logger=self.op_logger)
 
         # 5. MemoryRetriever
         from src.memory.layer3_retrieval import MemoryRetriever
+
         self.retriever = MemoryRetriever(self.store)
 
         # 6. ForgettingManager
         from src.memory.forgetting import ForgettingManager
+
         self.forgetting = ForgettingManager(
             self.store,
             archive_threshold=0.05,
@@ -403,15 +449,18 @@ class BotE2EStressTest:
 
         # 7. MessageArchiver
         from src.memory.layer0_archive import MessageArchiver
+
         self.archiver = MessageArchiver()
 
         # 8. ReinforcementTracker
         from src.memory.feedback import ReinforcementTracker
+
         self.tracker = ReinforcementTracker(self.store)
 
         # 9. EncodingPipeline (with mocked LLM)
         from src.memory.encoding_pipeline import EncodingPipeline
         from src.memory.layer2_encoder import BatchEncoder
+
         # Monkey-patch BatchEncoder._call_llm to avoid real LLM
         BatchEncoder._call_llm = _mock_call_llm
         self.pipeline = EncodingPipeline(
@@ -422,23 +471,28 @@ class BotE2EStressTest:
 
         # 10. TraceChainRecorder
         from src.memory.trace_chain import TraceChainRecorder
+
         self.trace_recorder = TraceChainRecorder()
         self.pipeline.set_trace_recorder(self.trace_recorder)
 
         # 11. ObjectivityChecker
         from src.memory.objectivity_check import ObjectivityChecker
+
         self.objectivity_checker = ObjectivityChecker(self.store)
 
         # 12. ConflictArbiter
         from src.memory.conflict_arbitration import ConflictArbiter
+
         self.arbiter = ConflictArbiter(self.store)
 
         # 13. GraphStore
         from src.memory.graph_store import GraphStore
+
         self.graph_store = GraphStore()
 
         # 14. ProfileStore + ProfileBuilder
         from src.memory.user_profile import ProfileStore, ProfileBuilder
+
         self.profile_store = ProfileStore()
         self.profile_builder = ProfileBuilder(self.profile_store)
 
@@ -454,6 +508,7 @@ class BotE2EStressTest:
     async def _atom_count(self) -> int:
         try:
             from src.memory.schema import MemoryAtom as M, memory_db
+
             with memory_db:
                 return M.select().count()
         except Exception:
@@ -533,6 +588,7 @@ class BotE2EStressTest:
             user_id = user
             content = msg_content
             timestamp = time.time()
+
         return FakeMessage()
 
     async def _archive_messages(self, count: int) -> int:
@@ -606,18 +662,18 @@ class BotE2EStressTest:
         try:
             # Get some atom IDs from DB
             from src.memory.schema import MemoryAtom as M, memory_db
+
             with memory_db:
                 ids = [a.atom_id for a in M.select(M.atom_id).limit(10)]
             if ids:
                 # Use random atom dataclass for analyze
                 from src.memory.atom import MemoryAtom as AD, AtomType
+
                 fake_atoms = [
                     AD(atom_id=aid, atom_type=AtomType.FACTUAL, content=random.choice(_CHINESE_MESSAGES))
                     for aid in ids[:5]
                 ]
-                usage = self.tracker.analyze_reply_for_memory_usage(
-                    random.choice(_CHINESE_MESSAGES), fake_atoms
-                )
+                usage = self.tracker.analyze_reply_for_memory_usage(random.choice(_CHINESE_MESSAGES), fake_atoms)
                 used_ids = [aid for aid, lv in usage.items() if lv != "none"]
                 if used_ids:
                     await self.tracker.apply_reinforcement(used_ids, level="normal")
@@ -634,6 +690,7 @@ class BotE2EStressTest:
             self.profile_builder.build_profile(user)
             # Update profile from a new atom
             from src.memory.atom import MemoryAtom as AD, AtomType, SemanticDetail
+
             atom = AD(
                 atom_id=f"profile_{int(time.time() * 1e6)}",
                 atom_type=AtomType.PREFERENCE,
@@ -657,6 +714,7 @@ class BotE2EStressTest:
     async def _test_graph_traversal(self) -> None:
         try:
             from src.memory.schema import GraphNode, memory_db
+
             with memory_db:
                 nodes = list(GraphNode.select().limit(5))
             for n in nodes[:3]:
@@ -671,6 +729,7 @@ class BotE2EStressTest:
     async def _test_trace_chain(self) -> None:
         try:
             from src.memory.schema import MemoryAtom as M, memory_db
+
             with memory_db:
                 ids = [a.atom_id for a in M.select(M.atom_id).limit(5)]
             for aid in ids[:3]:
@@ -684,13 +743,21 @@ class BotE2EStressTest:
     async def _test_dream_mimic(self) -> None:
         """Mimic DreamTask phases without idle check"""
         from src.memory.dream_agent import (
-            CONSOLIDATION_BATCH_SIZE, IMPORTANCE_MIN, WEIGHT_MAX, CONSOLIDATION_BOOST,
+            CONSOLIDATION_BATCH_SIZE,
+            IMPORTANCE_MIN,
+            WEIGHT_MAX,
+            CONSOLIDATION_BOOST,
             NOISE_TTL_DAYS,
         )
         from src.memory.atom import MemoryAtom as AD, AtomType, DecayType, apply_dream_consolidation
         from src.memory.schema import (
-            MemoryAtom as M, NoisePool, memory_db,
-            GraphNode, GraphEdge, GraphEntry, SemanticDetail as SemModel,
+            MemoryAtom as M,
+            NoisePool,
+            memory_db,
+            GraphNode,
+            GraphEdge,
+            GraphEntry,
+            SemanticDetail as SemModel,
         )
         from src.memory.dream_agent import GRAPH_ATOMS_LIMIT
         import datetime as dt
@@ -746,9 +813,7 @@ class BotE2EStressTest:
         try:
             with memory_db:
                 top_atoms = list(
-                    M.select().where(M.status == "active")
-                    .order_by(M.weight.desc())
-                    .limit(GRAPH_ATOMS_LIMIT)
+                    M.select().where(M.status == "active").order_by(M.weight.desc()).limit(GRAPH_ATOMS_LIMIT)
                 )
                 if top_atoms:
                     atom_entities: dict[str, list[str]] = {}
@@ -779,8 +844,10 @@ class BotE2EStressTest:
                         for i in range(len(nids)):
                             for j in range(i + 1, len(nids)):
                                 _, created = GraphEdge.get_or_create(
-                                    source_node_id=nids[i], target_node_id=nids[j],
-                                    predicate="related_to", defaults={"confidence": 0.6},
+                                    source_node_id=nids[i],
+                                    target_node_id=nids[j],
+                                    predicate="related_to",
+                                    defaults={"confidence": 0.6},
                                 )
                                 if created:
                                     edges_created += 1
@@ -790,7 +857,8 @@ class BotE2EStressTest:
                         if not detail.attr_name or not detail.attr_value:
                             continue
                         _, created = GraphEntry.get_or_create(
-                            subject=detail.attr_category, predicate=detail.attr_name,
+                            subject=detail.attr_category,
+                            predicate=detail.attr_name,
                             object=detail.attr_value,
                             defaults={"evidence": f"atom:{detail.atom}", "confidence": 0.7},
                         )
@@ -838,6 +906,7 @@ class BotE2EStressTest:
 
     async def _test_objectivity_check(self) -> None:
         from src.memory.atom import MemoryAtom as AD, AtomType
+
         try:
             atom = AD(
                 atom_id=f"obj_{int(time.time() * 1e6)}",
@@ -845,9 +914,7 @@ class BotE2EStressTest:
                 content=random.choice(_CHINESE_MESSAGES),
                 entities=[random.choice(_USERS)],
             )
-            await self.objectivity_checker.check_before_write(
-                atom, trace_recorder=self.trace_recorder
-            )
+            await self.objectivity_checker.check_before_write(atom, trace_recorder=self.trace_recorder)
         except Exception:
             self.error_count += 1
 
@@ -911,9 +978,11 @@ class BotE2EStressTest:
         print(f"[启动] 初始原子数={await self._atom_count()} RSS={_get_rss_mib():.1f}MiB", file=sys.stderr)
 
         # Print header
-        print(f"{'Time':>8s} {'Phase':>12s} {'Atoms':>6s} {'RSS':>7s} {'Growth':>7s} "
-              f"{'Wp50':>7s} {'Wp99':>7s} {'Rp50':>7s} {'Rp99':>7s} {'Err':>4s}",
-              file=sys.stderr)
+        print(
+            f"{'Time':>8s} {'Phase':>12s} {'Atoms':>6s} {'RSS':>7s} {'Growth':>7s} "
+            f"{'Wp50':>7s} {'Wp99':>7s} {'Rp50':>7s} {'Rp99':>7s} {'Err':>4s}",
+            file=sys.stderr,
+        )
         print("-" * 80, file=sys.stderr)
 
         # =====================================================================
@@ -950,11 +1019,14 @@ class BotE2EStressTest:
             if elapsed - last_checkpoint_time >= 60:
                 info = await self._checkpoint("ramp_up", elapsed)
                 self.metrics.snapshot(**info)
-                print(f"{info['elapsed_s']:>8.0f} {info['phase']:>12s} {info['atom_count']:>6d} "
-                      f"{info['rss_mib']:>7.1f} {info['rss_growth_pct']:>6.1f}% "
-                      f"{info['write_p50_ms']:>7.1f} {info['write_p99_ms']:>7.1f} "
-                      f"{info['retrieval_p50_ms']:>7.1f} {info['retrieval_p99_ms']:>7.1f} "
-                      f"{info['errors']:>4d}", file=sys.stderr)
+                print(
+                    f"{info['elapsed_s']:>8.0f} {info['phase']:>12s} {info['atom_count']:>6d} "
+                    f"{info['rss_mib']:>7.1f} {info['rss_growth_pct']:>6.1f}% "
+                    f"{info['write_p50_ms']:>7.1f} {info['write_p99_ms']:>7.1f} "
+                    f"{info['retrieval_p50_ms']:>7.1f} {info['retrieval_p99_ms']:>7.1f} "
+                    f"{info['errors']:>4d}",
+                    file=sys.stderr,
+                )
                 last_checkpoint_time = elapsed
 
             # Exercise various components intermittently
@@ -1011,11 +1083,14 @@ class BotE2EStressTest:
             if elapsed - last_checkpoint_time >= 60:
                 info = await self._checkpoint("sustained", elapsed)
                 self.metrics.snapshot(**info)
-                print(f"{info['elapsed_s']:>8.0f} {info['phase']:>12s} {info['atom_count']:>6d} "
-                      f"{info['rss_mib']:>7.1f} {info['rss_growth_pct']:>6.1f}% "
-                      f"{info['write_p50_ms']:>7.1f} {info['write_p99_ms']:>7.1f} "
-                      f"{info['retrieval_p50_ms']:>7.1f} {info['retrieval_p99_ms']:>7.1f} "
-                      f"{info['errors']:>4d}", file=sys.stderr)
+                print(
+                    f"{info['elapsed_s']:>8.0f} {info['phase']:>12s} {info['atom_count']:>6d} "
+                    f"{info['rss_mib']:>7.1f} {info['rss_growth_pct']:>6.1f}% "
+                    f"{info['write_p50_ms']:>7.1f} {info['write_p99_ms']:>7.1f} "
+                    f"{info['retrieval_p50_ms']:>7.1f} {info['retrieval_p99_ms']:>7.1f} "
+                    f"{info['errors']:>4d}",
+                    file=sys.stderr,
+                )
                 last_checkpoint_time = elapsed
 
             # Intermittent component exercise
@@ -1064,8 +1139,10 @@ class BotE2EStressTest:
             for _ in range(5):
                 await self._test_retrieval()
 
-            print(f"  Burst {burst_num + 1}: 50 atoms in {burst_duration:.2f}s | "
-                  f"Total atoms: {await self._atom_count()}", file=sys.stderr)
+            print(
+                f"  Burst {burst_num + 1}: 50 atoms in {burst_duration:.2f}s | Total atoms: {await self._atom_count()}",
+                file=sys.stderr,
+            )
 
             # 60s gap between bursts (or less for last burst)
             if burst_num < 2:
@@ -1124,11 +1201,14 @@ class BotE2EStressTest:
             if elapsed - last_checkpoint_time >= 60:
                 info = await self._checkpoint("cooldown", elapsed)
                 self.metrics.snapshot(**info)
-                print(f"{info['elapsed_s']:>8.0f} {info['phase']:>12s} {info['atom_count']:>6d} "
-                      f"{info['rss_mib']:>7.1f} {info['rss_growth_pct']:>6.1f}% "
-                      f"{info['write_p50_ms']:>7.1f} {info['write_p99_ms']:>7.1f} "
-                      f"{info['retrieval_p50_ms']:>7.1f} {info['retrieval_p99_ms']:>7.1f} "
-                      f"{info['errors']:>4d}", file=sys.stderr)
+                print(
+                    f"{info['elapsed_s']:>8.0f} {info['phase']:>12s} {info['atom_count']:>6d} "
+                    f"{info['rss_mib']:>7.1f} {info['rss_growth_pct']:>6.1f}% "
+                    f"{info['write_p50_ms']:>7.1f} {info['write_p99_ms']:>7.1f} "
+                    f"{info['retrieval_p50_ms']:>7.1f} {info['retrieval_p99_ms']:>7.1f} "
+                    f"{info['errors']:>4d}",
+                    file=sys.stderr,
+                )
                 last_checkpoint_time = elapsed
 
             # Dream mimic during cooldown
@@ -1155,14 +1235,10 @@ class BotE2EStressTest:
         self.metrics.write_csv()
 
         # ── Compute verdict ────────────────────────────────────────
-        verdict = await self._compute_verdict(
-            final_atom_count_after, total_elapsed, final_rss
-        )
+        verdict = await self._compute_verdict(final_atom_count_after, total_elapsed, final_rss)
         return verdict
 
-    async def _compute_verdict(
-        self, final_count: int, total_elapsed: float, final_rss: float
-    ) -> dict:
+    async def _compute_verdict(self, final_count: int, total_elapsed: float, final_rss: float) -> dict:
         """Compute pass/fail verdict"""
         failures: list[str] = []
 
@@ -1316,14 +1392,26 @@ async def main() -> int:
     print("=" * 60, file=sys.stderr)
     print(f"  Duration:   {verdict['total_elapsed_s']}s", file=sys.stderr)
     print(f"  Atoms:      {verdict['final_atom_count']}", file=sys.stderr)
-    print(f"  RSS:        {verdict['rss_baseline_mib']} → {verdict.get('max_rss_mib', 0)} MiB "
-          f"({verdict.get('rss_growth_pct', 0)}%)", file=sys.stderr)
-    print(f"  Writes:     {verdict.get('write_samples', 0)} samples, "
-          f"p50={verdict.get('write_p50_ms', 'N/A')}ms p99={verdict.get('write_p99_ms', 'N/A')}ms", file=sys.stderr)
-    print(f"  Retrievals: {verdict.get('retrieval_samples', 0)} samples, "
-          f"p50={verdict.get('retrieval_p50_ms', 'N/A')}ms p99={verdict.get('retrieval_p99_ms', 'N/A')}ms", file=sys.stderr)
-    print(f"  Sweeps:     {verdict.get('sweep_samples', 0)} samples, "
-          f"p50={verdict.get('sweep_p50_ms', 'N/A')}ms max={verdict.get('sweep_max_ms', 'N/A')}ms", file=sys.stderr)
+    print(
+        f"  RSS:        {verdict['rss_baseline_mib']} → {verdict.get('max_rss_mib', 0)} MiB "
+        f"({verdict.get('rss_growth_pct', 0)}%)",
+        file=sys.stderr,
+    )
+    print(
+        f"  Writes:     {verdict.get('write_samples', 0)} samples, "
+        f"p50={verdict.get('write_p50_ms', 'N/A')}ms p99={verdict.get('write_p99_ms', 'N/A')}ms",
+        file=sys.stderr,
+    )
+    print(
+        f"  Retrievals: {verdict.get('retrieval_samples', 0)} samples, "
+        f"p50={verdict.get('retrieval_p50_ms', 'N/A')}ms p99={verdict.get('retrieval_p99_ms', 'N/A')}ms",
+        file=sys.stderr,
+    )
+    print(
+        f"  Sweeps:     {verdict.get('sweep_samples', 0)} samples, "
+        f"p50={verdict.get('sweep_p50_ms', 'N/A')}ms max={verdict.get('sweep_max_ms', 'N/A')}ms",
+        file=sys.stderr,
+    )
     print(f"  Errors:     {verdict['total_errors']}", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
@@ -1332,4 +1420,5 @@ async def main() -> int:
 
 if __name__ == "__main__":
     import asyncio
+
     sys.exit(asyncio.run(main()))

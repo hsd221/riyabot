@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useCallback, useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import {
   Brain,
@@ -241,7 +241,7 @@ export function MemoryPage() {
   const [noiseLimit, setNoiseLimit] = useState(20)
   const [noiseOffset, setNoiseOffset] = useState(0)
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       setStatsLoading(true)
       setStatsError(null)
@@ -253,9 +253,9 @@ export function MemoryPage() {
     } finally {
       setStatsLoading(false)
     }
-  }
+  }, [])
 
-  const loadStatusCounts = async () => {
+  const loadStatusCounts = useCallback(async () => {
     try {
       setCountsLoading(true)
       const [archived, forgotten] = await Promise.all([
@@ -269,9 +269,9 @@ export function MemoryPage() {
     } finally {
       setCountsLoading(false)
     }
-  }
+  }, [])
 
-  const loadRecentDreams = async () => {
+  const loadRecentDreams = useCallback(async () => {
     try {
       setRecentDreamsLoading(true)
       const data = await fetchDreamRuns({ limit: 3 })
@@ -281,9 +281,9 @@ export function MemoryPage() {
     } finally {
       setRecentDreamsLoading(false)
     }
-  }
+  }, [])
 
-  const loadAtoms = async () => {
+  const loadAtoms = useCallback(async () => {
     try {
       setAtomsLoading(true)
       setAtomsError(null)
@@ -301,9 +301,9 @@ export function MemoryPage() {
     } finally {
       setAtomsLoading(false)
     }
-  }
+  }, [atomTypeFilter, atomStatusFilter, atomLimit, atomOffset])
 
-  const loadDreams = async () => {
+  const loadDreams = useCallback(async () => {
     try {
       setDreamsLoading(true)
       setDreamsError(null)
@@ -316,9 +316,9 @@ export function MemoryPage() {
     } finally {
       setDreamsLoading(false)
     }
-  }
+  }, [dreamLimit, dreamOffset])
 
-  const loadInsights = async () => {
+  const loadInsights = useCallback(async () => {
     try {
       setInsightsLoading(true)
       setInsightsError(null)
@@ -331,9 +331,9 @@ export function MemoryPage() {
     } finally {
       setInsightsLoading(false)
     }
-  }
+  }, [insightLimit, insightOffset])
 
-  const loadNoise = async () => {
+  const loadNoise = useCallback(async () => {
     try {
       setNoiseLoading(true)
       setNoiseError(null)
@@ -346,29 +346,29 @@ export function MemoryPage() {
     } finally {
       setNoiseLoading(false)
     }
-  }
+  }, [noiseLimit, noiseOffset])
 
   useEffect(() => {
     loadStats()
     loadStatusCounts()
     loadRecentDreams()
-  }, [])
+  }, [loadStats, loadStatusCounts, loadRecentDreams])
 
   useEffect(() => {
     loadAtoms()
-  }, [atomTypeFilter, atomStatusFilter, atomLimit, atomOffset])
+  }, [loadAtoms])
 
   useEffect(() => {
     loadDreams()
-  }, [dreamLimit, dreamOffset])
+  }, [loadDreams])
 
   useEffect(() => {
     loadInsights()
-  }, [insightLimit, insightOffset])
+  }, [loadInsights])
 
   useEffect(() => {
     loadNoise()
-  }, [noiseLimit, noiseOffset])
+  }, [loadNoise])
 
   const handleAtomRowClick = async (atom: AtomData) => {
     if (expandedAtomId === atom.atom_id) {
@@ -835,9 +835,8 @@ export function MemoryPage() {
                           </TableHeader>
                           <TableBody>
                             {atoms.map((atom) => (
-                              <>
+                              <Fragment key={atom.atom_id}>
                                 <TableRow
-                                  key={atom.atom_id}
                                   className="cursor-pointer hover:bg-accent/50"
                                   onClick={() => handleAtomRowClick(atom)}
                                 >
@@ -929,7 +928,7 @@ export function MemoryPage() {
                                     </TableCell>
                                   </TableRow>
                                 )}
-                              </>
+                              </Fragment>
                             ))}
                           </TableBody>
                         </Table>

@@ -10,10 +10,23 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from src.common.logger import get_logger
-from src.memory.schema import MemoryAtom, initialize_database, memory_db
+from src.memory.schema import (
+    AtomAssociationModel,
+    ConflictObservation,
+    EpisodicDetail,
+    MemoryAtom,
+    MemoryTraceChain,
+    RawMessageArchive,
+    SemanticDetail,
+    configure_memory_database,
+    initialize_database,
+    memory_db,
+)
 from src.memory.types import PayloadSchemaField
 
 logger = get_logger("memory.store")
+
+_QDRANT_POINT_NAMESPACE = uuid.UUID("8e9e1f74-2b30-4f33-8e9b-9b2c972a1a67")
 
 # ---------------------------------------------------------------------------
 # Qdrant 客户端导入（可选依赖）
@@ -100,6 +113,101 @@ class QdrantManager:
         if not self._available:
             logger.warning("qdrant-client 未安装，向量索引功能不可用。pip install qdrant-client")
 
+    @staticmethod
+    def _normalize_point_id(point_id: str | int) -> str | int:
+        """将业务 ID 转成 Qdrant 可接受的 point id。
+
+        Qdrant 只接受 UUID 字符串或无符号整数。默认生成的记忆 atom_id 已是 UUID，
+        这里保持原值以兼容已有索引；非 UUID 字符串使用 uuid5 做稳定映射。
+        """
+        if isinstance(point_id, int):
+            if 0 <= point_id <= 2**64 - 1:
+                return point_id
+            point_id = str(point_id)
+
+        value = str(point_id)
+        try:
+            return str(uuid.UUID(value))
+        except (TypeError, ValueError):
+            pass
+
+        if value.isdecimal():
+            try:
+                return int(value)
+            except ValueError:
+                pass
+
+        return str(uuid.uuid5(_QDRANT_POINT_NAMESPACE, value))
+
+    @staticmethod
+    def _payload_field_names(payload_schema: list[PayloadSchemaField]) -> set[str]:
+        return {field["name"] for field in payload_schema}
+
+    @staticmethod
+    def _build_filter(
+        filters: Optional[dict[str, Any]],
+        payload_schema: list[PayloadSchemaField],
+    ) -> Any:
+        """构建 Qdrant payload filter，忽略非 payload 控制字段。"""
+        if not filters or qdrant_models is None:
+            return None
+
+        allowed_fields = QdrantManager._payload_field_names(payload_schema)
+        conditions = []
+        for key, value in filters.items():
+            if key not in allowed_fields or value is None:
+                continue
+            if isinstance(value, (list, tuple, set)):
+                values = list(value)
+                if not values:
+                    continue
+                conditions.append(
+                    qdrant_models.FieldCondition(
+                        key=key,
+                        match=qdrant_models.MatchAny(any=values),
+                    )
+                )
+            else:
+                conditions.append(
+                    qdrant_models.FieldCondition(
+                        key=key,
+                        match=qdrant_models.MatchValue(value=value),
+                    )
+                )
+
+        if not conditions:
+            return None
+        return qdrant_models.Filter(must=conditions)
+
+    def _query_points(
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        qdrant_filter: Any = None,
+        limit: int = 10,
+    ) -> list[Any]:
+        """兼容新旧 qdrant-client 的向量查询 API。"""
+        if self._client is None:
+            return []
+        if hasattr(self._client, "search"):
+            return self._client.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                query_filter=qdrant_filter,
+                limit=limit,
+                with_payload=True,
+            )
+
+        response = self._client.query_points(
+            collection_name=collection_name,
+            query=query_vector,
+            query_filter=qdrant_filter,
+            limit=limit,
+            with_payload=True,
+        )
+        points = getattr(response, "points", response)
+        return list(points or [])
+
     async def initialize(self) -> None:
         """初始化 Qdrant 连接并确保集合存在
 
@@ -162,6 +270,7 @@ class QdrantManager:
             {"name": "status", "type": "keyword"},
             {"name": "privacy_level", "type": "keyword"},
             {"name": "source_scene", "type": "keyword"},
+            {"name": "source_id", "type": "keyword"},
         ]
 
     @staticmethod
@@ -215,14 +324,16 @@ class QdrantManager:
         payload: dict[str, Any],
     ) -> bool:
         """写入/更新记忆原子向量"""
-        if not self._available or not self._client:
+        if not self._available:
+            return True
+        if not self._client:
             return False
         try:
             self._client.upsert(
                 collection_name=self.config.collection_name_atoms,
                 points=[
                     qdrant_models.PointStruct(
-                        id=point_id,
+                        id=self._normalize_point_id(point_id),
                         vector=vector,
                         payload=payload,
                     )
@@ -240,14 +351,16 @@ class QdrantManager:
         payload: dict[str, Any],
     ) -> bool:
         """写入/更新图条目向量"""
-        if not self._available or not self._client:
+        if not self._available:
+            return True
+        if not self._client:
             return False
         try:
             self._client.upsert(
                 collection_name=self.config.collection_name_graph,
                 points=[
                     qdrant_models.PointStruct(
-                        id=point_id,
+                        id=self._normalize_point_id(point_id),
                         vector=vector,
                         payload=payload,
                     )
@@ -267,12 +380,14 @@ class QdrantManager:
         Returns:
             int: 成功写入的数量
         """
-        if not self._available or not self._client:
+        if not self._available:
+            return len(points)
+        if not self._client:
             return 0
         try:
             point_structs = [
                 qdrant_models.PointStruct(
-                    id=pid,
+                    id=self._normalize_point_id(pid),
                     vector=vec,
                     payload=pl,
                 )
@@ -309,24 +424,12 @@ class QdrantManager:
             return []
 
         try:
-            qdrant_filter = None
-            if filters:
-                conditions = []
-                for key, value in filters.items():
-                    conditions.append(
-                        qdrant_models.FieldCondition(
-                            key=key,
-                            match=qdrant_models.MatchValue(value=value),
-                        )
-                    )
-                qdrant_filter = qdrant_models.Filter(must=conditions)
-
-            results = self._client.search(
+            qdrant_filter = self._build_filter(filters, self._atoms_payload_schema())
+            results = self._query_points(
                 collection_name=self.config.collection_name_atoms,
                 query_vector=query_vector,
-                query_filter=qdrant_filter,
+                qdrant_filter=qdrant_filter,
                 limit=limit,
-                with_payload=True,
             )
             return [
                 {
@@ -350,11 +453,10 @@ class QdrantManager:
             return []
 
         try:
-            results = self._client.search(
+            results = self._query_points(
                 collection_name=self.config.collection_name_graph,
                 query_vector=query_vector,
                 limit=limit,
-                with_payload=True,
             )
             return [
                 {
@@ -372,12 +474,14 @@ class QdrantManager:
 
     async def delete_atom_vector(self, point_id: str) -> bool:
         """删除指定记忆原子的向量"""
-        if not self._available or not self._client:
+        if not self._available:
+            return True
+        if not self._client:
             return False
         try:
             self._client.delete(
                 collection_name=self.config.collection_name_atoms,
-                points_selector=qdrant_models.PointIdsList(points=[point_id]),
+                points_selector=qdrant_models.PointIdsList(points=[self._normalize_point_id(point_id)]),
             )
             return True
         except Exception as e:
@@ -397,13 +501,15 @@ class QdrantManager:
         Returns:
             bool: 是否成功
         """
-        if not self._available or not self._client:
+        if not self._available:
+            return True
+        if not self._client:
             return False
         try:
             self._client.set_payload(
                 collection_name=self.config.collection_name_atoms,
                 payload=payload,
-                points=[point_id],
+                points=[self._normalize_point_id(point_id)],
             )
             return True
         except Exception as e:
@@ -412,12 +518,14 @@ class QdrantManager:
 
     async def delete_graph_vector(self, entry_id: str) -> bool:
         """删除指定图条目的向量"""
-        if not self._available or not self._client:
+        if not self._available:
+            return True
+        if not self._client:
             return False
         try:
             self._client.delete(
                 collection_name=self.config.collection_name_graph,
-                points_selector=qdrant_models.PointIdsList(points=[entry_id]),
+                points_selector=qdrant_models.PointIdsList(points=[self._normalize_point_id(entry_id)]),
             )
             return True
         except Exception as e:
@@ -494,6 +602,9 @@ class MemoryStore:
 
     async def initialize(self) -> None:
         """异步初始化：确保数据库表存在 + 连接 Qdrant"""
+        # 仅当用户显式改了 sqlite_path 时重设 ORM 数据库路径；默认路径保持 schema.py 的绑定，避免破坏测试中的临时 DB 绑定。
+        if self.config.sqlite_path != MemoryStoreConfig.sqlite_path:
+            configure_memory_database(self.config.sqlite_path)
         # 确保 SQLite 数据库表已创建（从 schema 模块级自动初始化移至此处）
         initialize_database()
         await self.qdrant.initialize()
@@ -505,6 +616,8 @@ class MemoryStore:
         await self.qdrant.close()
         if not memory_db.is_closed():
             memory_db.close()
+        self._initialized = False
+        type(self)._instance = None
         logger.info("MemoryStore 已关闭")
 
     # -- 原子 CRUD ----------------------------------------------------------
@@ -518,8 +631,8 @@ class MemoryStore:
         Returns:
             str: 生成的 atom_id
         """
-        atom_id = str(uuid.uuid4())
-        atom_data.setdefault("atom_id", atom_id)
+        atom_id = str(atom_data.get("atom_id") or uuid.uuid4())
+        atom_data["atom_id"] = atom_id
         atom_data.setdefault("created_at", datetime.datetime.now())
         atom_data.setdefault("last_accessed_at", datetime.datetime.now())
         atom_data.setdefault("last_reinforced_at", datetime.datetime.now())
@@ -604,7 +717,16 @@ class MemoryStore:
             bool: 是否成功
         """
         try:
-            with memory_db:
+            with memory_db.atomic():
+                EpisodicDetail.delete().where(EpisodicDetail.atom == atom_id).execute()
+                SemanticDetail.delete().where(SemanticDetail.atom == atom_id).execute()
+                MemoryTraceChain.delete().where(MemoryTraceChain.atom_id == atom_id).execute()
+                ConflictObservation.delete().where(
+                    (ConflictObservation.atom_a_id == atom_id) | (ConflictObservation.atom_b_id == atom_id)
+                ).execute()
+                AtomAssociationModel.delete().where(
+                    (AtomAssociationModel.atom_a_id == atom_id) | (AtomAssociationModel.atom_b_id == atom_id)
+                ).execute()
                 query = MemoryAtom.delete().where(MemoryAtom.atom_id == atom_id)
                 rows = query.execute()
             if rows > 0:
@@ -613,6 +735,69 @@ class MemoryStore:
             return rows > 0
         except Exception as e:
             logger.error(f"删除记忆原子失败 ({atom_id}): {e}")
+            return False
+
+    async def archive_atom(self, atom_id: str) -> bool:
+        """归档记忆原子并从向量索引中移除。"""
+        try:
+            atom = MemoryAtom.get_or_none(MemoryAtom.atom_id == atom_id)
+            if atom is None:
+                logger.warning("归档记忆原子失败: 原子不存在", atom_id=atom_id)
+                return False
+
+            metadata: dict[str, Any] = {
+                "atom_id": atom.atom_id,
+                "atom_type": atom.atom_type,
+                "importance": atom.importance,
+                "confidence": atom.confidence,
+                "weight": atom.weight,
+                "source_scene": atom.source_scene,
+                "source_id": atom.source_id,
+                "privacy_level": atom.privacy_level,
+                "reinforcement_count": atom.reinforcement_count,
+                "ttl_days": atom.ttl_days,
+                "decay_type": atom.decay_type,
+                "trace_chain_id": atom.trace_chain_id,
+                "embedding_id": atom.embedding_id,
+            }
+            timestamp = atom.created_at.timestamp() if atom.created_at else datetime.datetime.now().timestamp()
+
+            with memory_db.atomic():
+                RawMessageArchive.create(
+                    stream_id=f"memory_archive_{atom.source_scene or 'unknown'}",
+                    message_id=atom.atom_id,
+                    user_id="system",
+                    content=json.dumps(
+                        {"content": atom.content, "metadata": metadata},
+                        ensure_ascii=False,
+                    ),
+                    timestamp=timestamp,
+                    chat_type=f"memory_archive_{atom.atom_type or 'unknown'}",
+                )
+                rows = MemoryAtom.update(status="archived").where(MemoryAtom.atom_id == atom_id).execute()
+
+            if rows > 0:
+                await self.qdrant.delete_atom_vector(atom_id)
+                logger.debug("记忆原子已归档", atom_id=atom_id)
+            return rows > 0
+        except Exception as e:
+            logger.error(f"归档记忆原子失败 ({atom_id}): {e}", exc_info=True)
+            return False
+
+    async def migrate_atom(self, atom_id: str, target_type: str) -> bool:
+        """迁移记忆原子的类型，并同步 Qdrant payload。"""
+        if not target_type:
+            logger.warning("迁移记忆原子失败: target_type 为空", atom_id=atom_id)
+            return False
+
+        try:
+            rows = MemoryAtom.update(atom_type=target_type).where(MemoryAtom.atom_id == atom_id).execute()
+            if rows > 0:
+                await self.qdrant.set_atom_payload(atom_id, {"atom_type": target_type})
+                logger.debug("记忆原子类型已迁移", atom_id=atom_id, target_type=target_type)
+            return rows > 0
+        except Exception as e:
+            logger.error(f"迁移记忆原子失败 ({atom_id} -> {target_type}): {e}", exc_info=True)
             return False
 
     async def get_atom(self, atom_id: str) -> Optional[dict[str, Any]]:
@@ -789,6 +974,7 @@ class MemoryStore:
             "decay_type": atom.decay_type,
             "reinforcement_count": atom.reinforcement_count,
             "source_scene": atom.source_scene,
+            "source_id": atom.source_id,
             "privacy_level": atom.privacy_level,
             "status": atom.status,
             "trace_chain_id": atom.trace_chain_id,

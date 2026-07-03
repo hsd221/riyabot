@@ -23,7 +23,7 @@ from src.memory.atom import (
     MemoryAtom as MemoryAtomDC,
     AtomType,
     DecayType,
-    compute_decay_factor,
+    compute_weight,
     get_fade_level,
 )
 from src.memory.schema import (
@@ -185,12 +185,12 @@ class ForgettingManager:
                         decay_type=decay_type,
                         reinforcement_count=atom_model.reinforcement_count or 0,
                         source_scene=atom_model.source_scene or "unknown",
+                        source_id=atom_model.source_id,
                         privacy_level=atom_model.privacy_level or "context_sensitive",
                         status=atom_model.status,
                     )
 
-                    decay_factor = compute_decay_factor(atom_dc, current_time=now_ts)
-                    new_weight = max(0.0, old_weight * decay_factor)
+                    new_weight = max(0.0, compute_weight(atom_dc, current_time=now_ts))
 
                     if not math.isclose(new_weight, old_weight, rel_tol=1e-6):
                         MemoryAtomModel.update(weight=new_weight).where(
@@ -286,6 +286,7 @@ class ForgettingManager:
             "confidence": atom.confidence,
             "weight": atom.weight,
             "source_scene": atom.source_scene,
+            "source_id": atom.source_id,
             "privacy_level": atom.privacy_level,
             "reinforcement_count": atom.reinforcement_count,
             "ttl_days": atom.ttl_days,
@@ -321,17 +322,19 @@ class ForgettingManager:
         count = 0
 
         with memory_db:
-            query = MemoryAtomModel.select().where(
-                MemoryAtomModel.weight < self.delete_threshold,
-            )
-            for atom_model in query:
-                try:
-                    atom_id = atom_model.atom_id
-                    await self._store.qdrant.delete_atom_vector(atom_id)
-                    atom_model.delete_instance()
+            atom_ids = [
+                atom.atom_id
+                for atom in MemoryAtomModel.select(MemoryAtomModel.atom_id).where(
+                    MemoryAtomModel.weight < self.delete_threshold,
+                )
+            ]
+
+        for atom_id in atom_ids:
+            try:
+                if await self._store.delete_atom(atom_id):
                     count += 1
-                except Exception as e:
-                    logger.error(f"硬删除原子失败 ({atom_model.atom_id}): {e}")
+            except Exception as e:
+                logger.error(f"硬删除原子失败 ({atom_id}): {e}")
 
         if count > 0:
             logger.info(f"清理: {count} 个原子已硬删除 (weight < {self.delete_threshold})")
@@ -363,10 +366,9 @@ class ForgettingManager:
                     continue
 
                 self._archive_one(atom_model)
-                await self._store.qdrant.delete_atom_vector(atom_id)
-                atom_model.delete_instance()
-                count += 1
-                logger.debug(f"强制遗忘: {atom_id}")
+                if await self._store.delete_atom(atom_id):
+                    count += 1
+                    logger.debug(f"强制遗忘: {atom_id}")
 
             except Exception as e:
                 logger.error(f"强制遗忘失败 ({atom_id}): {e}")

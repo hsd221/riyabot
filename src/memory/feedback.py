@@ -253,6 +253,7 @@ class ReinforcementTracker:
             decay_type=DecayType(data.get("decay_type", "exponential")),
             reinforcement_count=int(data.get("reinforcement_count", 0)),
             source_scene=str(data.get("source_scene", "chat")),
+            source_id=data.get("source_id"),
             privacy_level=str(data.get("privacy_level", "public")),
             trace_chain_id=data.get("trace_chain_id"),
             status=str(data.get("status", "active")),

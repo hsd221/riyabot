@@ -338,6 +338,7 @@ class DreamTask(AsyncTask):
                             decay_type=DecayType(atom_model.decay_type),
                             reinforcement_count=atom_model.reinforcement_count or 0,
                             source_scene=atom_model.source_scene or "unknown",
+                            source_id=atom_model.source_id,
                             privacy_level=atom_model.privacy_level or "context_sensitive",
                             status=atom_model.status,
                         )

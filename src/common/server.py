@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter
-from typing import Optional
+from fastapi import FastAPI, APIRouter, Body
+from typing import Annotated, Optional, Any
 from uvicorn import Config, Server as UvicornServer
 import asyncio
 import os
@@ -8,9 +8,32 @@ from rich.traceback import install
 install(extra_lines=3)
 
 
+# ---------------------------------------------------------------------------
+# 消息注入端点 — 供 E2E 测试模拟器使用，必须通过环境变量显式启用
+# ---------------------------------------------------------------------------
+
+def _register_inject_endpoint(app: FastAPI) -> None:
+    """向 FastAPI 实例注册 POST /message/inject 端点。"""
+    if any(getattr(route, "path", None) == "/message/inject" for route in app.routes):
+        return
+
+    @app.post("/message/inject")
+    async def inject_message(message: Annotated[dict[str, Any], Body()]):
+        """接收模拟器发送的消息 JSON，注入 bot 消息处理管线。"""
+        from src.chat.message_receive.bot import chat_bot
+
+        asyncio.create_task(chat_bot.message_process(message))
+        return {"status": "accepted"}
+
+
+# ---------------------------------------------------------------------------
+
+
 class Server:
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None, app_name: str = "MaiMCore"):
         self.app = FastAPI(title=app_name)
+        if os.environ.get("MAIBOT_ENABLE_INJECT_ENDPOINT") == "1":
+            _register_inject_endpoint(self.app)
         self._host: str = "127.0.0.1"
         self._port: int = 8080
         self._server: Optional[UvicornServer] = None

@@ -561,6 +561,7 @@ class WriteOpLogger:
                                     "confidence": atom.get("confidence", 0.5),
                                     "status": atom.get("status", "active"),
                                     "source_scene": atom.get("source_scene", "chat"),
+                                    "source_id": atom.get("source_id"),
                                     "privacy_level": atom.get("privacy_level", "context_sensitive"),
                                 },
                             )
@@ -576,7 +577,7 @@ class WriteOpLogger:
             try:
                 atom_id = op.atom_ids[0]
                 qdrant_updates = {}
-                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene"):
+                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene", "source_id"):
                     if key in updates:
                         qdrant_updates[key] = updates[key]
                 if qdrant_updates:
@@ -634,6 +635,7 @@ class WriteOpLogger:
                                             "confidence": atom_data.get("confidence", 0.5),
                                             "status": atom_data.get("status", "active"),
                                             "source_scene": atom_data.get("source_scene", "chat"),
+                                            "source_id": atom_data.get("source_id"),
                                             "privacy_level": atom_data.get("privacy_level", "context_sensitive"),
                                         },
                                     )
@@ -662,6 +664,7 @@ class WriteOpLogger:
                                     "confidence": existing.get("confidence", 0.5),
                                     "status": existing.get("status", "active"),
                                     "source_scene": existing.get("source_scene", "chat"),
+                                    "source_id": existing.get("source_id"),
                                     "privacy_level": existing.get("privacy_level", "context_sensitive"),
                                 }
                                 try:
@@ -686,13 +689,15 @@ class WriteOpLogger:
         elif op.op_type == OpType.ARCHIVE_ATOM:
             if not op.atom_ids:
                 raise ValueError("ARCHIVE_ATOM 需要 atom_ids")
-            await store.archive_atom(op.atom_ids[0])
+            if not await store.archive_atom(op.atom_ids[0]):
+                raise RuntimeError(f"ARCHIVE_ATOM 未处理任何原子: {op.atom_ids[0]}")
 
         elif op.op_type == OpType.MIGRATE_ATOM:
             if not op.atom_ids:
                 raise ValueError("MIGRATE_ATOM 需要 atom_ids")
             target_type = op.payload.get("target_type", "")
-            await store.migrate_atom(op.atom_ids[0], target_type)
+            if not await store.migrate_atom(op.atom_ids[0], target_type):
+                raise RuntimeError(f"MIGRATE_ATOM 未处理任何原子: {op.atom_ids[0]} -> {target_type}")
 
         else:
             logger.warning(

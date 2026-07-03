@@ -52,9 +52,8 @@ export interface ModelTaskConfig {
   vlm: TaskConfig
   voice: TaskConfig
   embedding: TaskConfig
-  lpmm_entity_extract: TaskConfig
-  lpmm_rdf_build: TaskConfig
-  lpmm_qa: TaskConfig
+  memory_encoder: TaskConfig
+  memory_weaver: TaskConfig
 }
 
 /**

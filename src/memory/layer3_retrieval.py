@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 import datetime as _dt
+import hashlib
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -111,6 +112,30 @@ def _convert_atom_type(val: Any) -> str:
     if isinstance(val, AtomType):
         return val.value
     return str(val)
+
+
+def _entities_include_user(entities: Any, user_id: str) -> bool:
+    """精确判断 entities 中是否包含目标 user_id。"""
+    if not user_id or entities is None:
+        return False
+
+    if isinstance(entities, str):
+        try:
+            return _entities_include_user(json.loads(entities), user_id)
+        except (json.JSONDecodeError, TypeError):
+            return entities == user_id
+
+    if isinstance(entities, dict):
+        for key in ("user_id", "id", "uid", "qq"):
+            value = entities.get(key)
+            if value is not None and str(value) == user_id:
+                return True
+        return False
+
+    if isinstance(entities, (list, tuple, set)):
+        return any(_entities_include_user(item, user_id) for item in entities)
+
+    return str(entities) == user_id
 
 
 # ---------------------------------------------------------------------------
@@ -256,16 +281,24 @@ class PrivacyFilter:
         """
         privacy = atom.get("privacy_level", PRIVACY_CONTEXT_SENSITIVE)
         atom_scene = atom.get("source_scene", "unknown")
+        atom_scope = atom.get("source_id")
 
         if privacy == PRIVACY_PUBLIC:
             return True
 
         if privacy == PRIVACY_PRIVATE:
-            # PRIVATE: 仅在私聊中可访问
-            return target_scene == "private_chat"
+            # PRIVATE: 仅在同一私聊中可访问；历史数据缺少 source_id 时只允许私聊场景兜底。
+            return target_scene == "private_chat" and (not atom_scope or atom_scope == target_scope)
 
-        # CONTEXT_SENSITIVE: 仅相同场景可访问
-        return target_scene == atom_scene
+        if privacy == PRIVACY_CONTEXT_SENSITIVE:
+            if target_scene != atom_scene:
+                return False
+            # 私聊的上下文敏感记忆只在同一 stream 内复用；历史数据缺少 source_id 时保守放行同私聊场景。
+            if target_scene == "private_chat":
+                return not atom_scope or atom_scope == target_scope
+            return True
+
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +321,7 @@ class RetrievedAtom:
         final_score: 综合评分（weight × similarity）
         fade_level: 褪色等级（完整/摘要/模糊/残影）
         source_scene: 来源场景
+        source_id: 来源聊天流 ID
         importance: 重要性
         confidence: 置信度
         created_at: 创建时间戳
@@ -302,10 +336,74 @@ class RetrievedAtom:
     final_score: float = 0.0
     fade_level: str = "残影"
     source_scene: str = "unknown"
+    source_id: Optional[str] = None
     importance: float = 0.5
     confidence: float = 0.5
     created_at: Optional[float] = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _resolve_scene_type(stream_id: str, scene_type: Optional[str] = None) -> str:
+    """解析聊天场景类型。
+
+    优先使用调用方从 ChatStream 得到的明确类型；仅在旧调用未传入时保留兼容推断。
+    """
+    if scene_type in ("group_chat", "private_chat", "dream", "system"):
+        return scene_type
+    return "group_chat" if "group" in str(stream_id) else "private_chat"
+
+
+def _global_memory_enabled() -> bool:
+    """读取全局记忆开关，配置不可用时默认关闭。"""
+    try:
+        from src.config.config import global_config
+
+        return bool(getattr(global_config.memory, "global_memory", False))
+    except Exception:
+        return False
+
+
+def _stream_id_from_blacklist_entry(entry: str) -> Optional[str]:
+    """将 global_memory_blacklist 条目转换为 ChatStream.stream_id。"""
+    parts = [part.strip() for part in str(entry).split(":")]
+    if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2]:
+        return None
+
+    platform, chat_id, chat_type = parts
+    if chat_type in ("group", "group_chat"):
+        key = f"{platform}_{chat_id}"
+    elif chat_type in ("private", "private_chat"):
+        key = f"{platform}_{chat_id}_private"
+    else:
+        return None
+    return hashlib.md5(key.encode()).hexdigest()
+
+
+def _global_memory_blacklist_source_ids() -> set[str]:
+    """读取全局记忆黑名单并转换为 source_id 集合。"""
+    try:
+        from src.config.config import global_config
+
+        entries = getattr(global_config.memory, "global_memory_blacklist", []) or []
+    except Exception:
+        return set()
+
+    source_ids: set[str] = set()
+    for entry in entries:
+        source_id = _stream_id_from_blacklist_entry(str(entry))
+        if source_id:
+            source_ids.add(source_id)
+        else:
+            logger.warning("忽略无效的全局记忆黑名单条目: %s", entry)
+    return source_ids
+
+
+def _global_memory_allowed(stream_id: str, include_global: Optional[bool] = None) -> bool:
+    """判断当前 stream 是否允许进行全局记忆检索。"""
+    enabled = _global_memory_enabled() if include_global is None else include_global
+    if not enabled:
+        return False
+    return stream_id not in _global_memory_blacklist_source_ids()
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +514,8 @@ class MemoryWriter:
                     "qdrant",
                     atom_ids=[atom.atom_id],
                 ):
-                    await self._upsert_qdrant(atom)
+                    if not await self._upsert_qdrant(atom):
+                        raise RuntimeError("Qdrant upsert 返回 False")
             except Exception as e:
                 logger.warning(f"Qdrant 写入失败（已写入 SQLite）: {atom.atom_id}, {e}")
 
@@ -478,7 +577,14 @@ class MemoryWriter:
                     # 独立写入 Qdrant
                     if atom.embedding:
                         try:
-                            await self._upsert_qdrant(atom)
+                            async with WriteOperation(
+                                self.op_logger,
+                                OpType.BATCH_INSERT,
+                                "qdrant",
+                                atom_ids=[atom.atom_id],
+                            ):
+                                if not await self._upsert_qdrant(atom):
+                                    raise RuntimeError("Qdrant upsert 返回 False")
                         except Exception as e:
                             logger.warning(f"批量写入 Qdrant 失败: {atom.atom_id}, {e}")
                 except Exception as e:
@@ -571,21 +677,38 @@ class MemoryWriter:
                         "confidence": merged.get("confidence", 0.5),
                         "status": merged.get("status", "active"),
                         "source_scene": merged.get("source_scene", "chat"),
+                        "source_id": merged.get("source_id"),
                         "privacy_level": merged.get("privacy_level", "context_sensitive"),
                     }
-                    await self.store.qdrant.upsert_atom_vector(
-                        point_id=atom_id,
-                        vector=embedding_vector,
-                        payload=qdrant_payload,
-                    )
+                    async with WriteOperation(
+                        self.op_logger,
+                        OpType.UPDATE_ATOM,
+                        "qdrant",
+                        atom_ids=[atom_id],
+                        payload={"updates": store_updates},
+                    ):
+                        if not await self.store.qdrant.upsert_atom_vector(
+                            point_id=atom_id,
+                            vector=embedding_vector,
+                            payload=qdrant_payload,
+                        ):
+                            raise RuntimeError("Qdrant upsert 返回 False")
             else:
                 # 非内容字段变更：仅更新 Qdrant payload
                 qdrant_updates = {}
-                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene"):
+                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene", "source_id"):
                     if key in store_updates:
                         qdrant_updates[key] = store_updates[key]
                 if qdrant_updates:
-                    await self.store.qdrant.set_atom_payload(atom_id, qdrant_updates)
+                    async with WriteOperation(
+                        self.op_logger,
+                        OpType.UPDATE_ATOM,
+                        "qdrant",
+                        atom_ids=[atom_id],
+                        payload={"updates": qdrant_updates},
+                    ):
+                        if not await self.store.qdrant.set_atom_payload(atom_id, qdrant_updates):
+                            raise RuntimeError("Qdrant payload 更新返回 False")
         except Exception as e:
             logger.warning(f"Qdrant 同步失败 (update_atom): {atom_id}, {e}")
 
@@ -653,6 +776,7 @@ class MemoryWriter:
             "decay_type": _convert_decay_type(atom.decay_type),
             "reinforcement_count": atom.reinforcement_count,
             "source_scene": atom.source_scene,
+            "source_id": atom.source_id,
             "privacy_level": atom.privacy_level,
             "status": atom.status,
             "embedding_id": atom.atom_id,
@@ -698,6 +822,7 @@ class MemoryWriter:
             decay_type=DecayType(decay_type_str),
             reinforcement_count=int(data.get("reinforcement_count", 0)),
             source_scene=data.get("source_scene", "unknown"),
+            source_id=data.get("source_id"),
             privacy_level=data.get("privacy_level", "context_sensitive"),
             status=data.get("status", "active"),
         )
@@ -721,6 +846,7 @@ class MemoryWriter:
             "confidence": atom.confidence,
             "status": atom.status,
             "source_scene": atom.source_scene,
+            "source_id": atom.source_id,
             "privacy_level": atom.privacy_level,
         }
         return await self.store.qdrant.upsert_atom_vector(
@@ -922,15 +1048,49 @@ class MemoryRetriever:
             logger.error(f"按场景检索失败 ({source_scene}): {e}")
             return []
 
+    async def retrieve_by_source(
+        self,
+        source_id: str,
+        source_scene: Optional[str] = None,
+        limit: int = 50,
+        min_weight: float = 0.1,
+    ) -> list[dict[str, Any]]:
+        """按具体聊天流检索记忆。
+
+        source_id 对应 ChatStream.stream_id，用于隔离不同群聊/私聊的本地记忆。
+        """
+        if not source_id:
+            return []
+        try:
+            with memory_db:
+                conditions = [
+                    MemoryAtomModel.source_id == source_id,
+                    MemoryAtomModel.status == "active",
+                ]
+                if source_scene:
+                    conditions.append(MemoryAtomModel.source_scene == source_scene)
+                query = (
+                    MemoryAtomModel.select()
+                    .where(*conditions)
+                    .order_by(MemoryAtomModel.weight.desc())
+                    .limit(limit)
+                )
+                return [self._model_to_result(atom) for atom in query if atom.weight >= min_weight]
+        except Exception as e:
+            logger.error(f"按来源检索失败 ({source_id}): {e}")
+            return []
+
     async def retrieve_by_user(
         self,
         user_id: str,
         limit: int = 50,
+        source_id: Optional[str] = None,
+        source_scene: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """按用户检索相关记忆
 
         通过 entities 字段中是否包含目标 user_id 来匹配。
-        使用 SQLite LIKE 搜索 JSON 字符串形式的 entities。
+        SQLite LIKE 只做候选粗筛，最终使用 JSON 解析做精确匹配，避免 "12" 误命中 "123"。
 
         Args:
             user_id: 用户 ID
@@ -941,14 +1101,24 @@ class MemoryRetriever:
         """
         try:
             with memory_db:
-                query = (
-                    MemoryAtomModel.select()
-                    .where(MemoryAtomModel.entities.contains(user_id))
-                    .where(MemoryAtomModel.status == "active")
-                    .order_by(MemoryAtomModel.weight.desc())
-                    .limit(limit)
-                )
-                return [self._model_to_result(atom) for atom in query]
+                conditions = [
+                    MemoryAtomModel.entities.contains(user_id),
+                    MemoryAtomModel.status == "active",
+                ]
+                if source_id:
+                    conditions.append(MemoryAtomModel.source_id == source_id)
+                if source_scene:
+                    conditions.append(MemoryAtomModel.source_scene == source_scene)
+                query = MemoryAtomModel.select().where(*conditions).order_by(MemoryAtomModel.weight.desc())
+
+                results: list[dict[str, Any]] = []
+                for atom in query:
+                    if not _entities_include_user(atom.entities, user_id):
+                        continue
+                    results.append(self._model_to_result(atom))
+                    if len(results) >= limit:
+                        break
+                return results
         except Exception as e:
             logger.error(f"按用户检索失败 ({user_id}): {e}")
             return []
@@ -983,6 +1153,8 @@ class MemoryRetriever:
                 if filters:
                     if "source_scene" in filters:
                         conditions.append(MemoryAtomModel.source_scene == filters["source_scene"])
+                    if "source_id" in filters:
+                        conditions.append(MemoryAtomModel.source_id == filters["source_id"])
                     if "atom_type" in filters:
                         conditions.append(MemoryAtomModel.atom_type == filters["atom_type"])
                     if "status" in filters:
@@ -1002,10 +1174,12 @@ class MemoryRetriever:
         self,
         stream_id: str,
         user_id: Optional[str] = None,
+        scene_type: Optional[str] = None,
         max_atoms: int = 5,
         max_chars: int = 2000,
         enable_association_expansion: bool = True,
         include_sensory_tags: bool = True,
+        include_global: Optional[bool] = None,
     ) -> str:
         """获取回复上下文 — 为 LLM 生成检索到的记忆文本块
 
@@ -1020,37 +1194,70 @@ class MemoryRetriever:
         Args:
             stream_id: 聊天流 ID（group_id 或 private chat id）
             user_id: 用户 ID（可选，用于个性化检索）
+            scene_type: 当前场景类型（group_chat/private_chat）
             max_atoms: 最大返回记忆条数
             max_chars: 返回文本的最大字符数
             enable_association_expansion: 是否启用关联扩展（默认 True）
             include_sensory_tags: 是否在格式化中插入感官/情绪/时间标签前缀（默认 True）
+            include_global: 是否补充同场景全局记忆；None 时读取配置
 
         Returns:
             格式化的记忆文本块，可用于 LLM prompt 拼接
         """
         candidates: list[dict[str, Any]] = []
 
-        # 1. 按场景检索该流的记忆
-        scene = "group_chat" if "group" in str(stream_id) else "private_chat"
-        scene_atoms = await self.retrieve_by_scene(
+        scene = _resolve_scene_type(stream_id, scene_type)
+        include_global = _global_memory_allowed(stream_id, include_global)
+        blacklisted_source_ids = _global_memory_blacklist_source_ids() if include_global else set()
+
+        # 1. 优先检索当前聊天流的本地记忆
+        local_atoms = await self.retrieve_by_source(
+            source_id=stream_id,
             source_scene=scene,
             limit=max_atoms * 3,
             min_weight=0.0,
         )
-        candidates.extend(scene_atoms)
+        candidates.extend(local_atoms)
 
-        # 2. 如果指定了用户，补充该用户的记忆
+        # 2. 配置允许时补充同场景全局记忆
+        if include_global:
+            scene_atoms = await self.retrieve_by_scene(
+                source_scene=scene,
+                limit=max_atoms * 3,
+                min_weight=0.0,
+            )
+            privacy_filter = PrivacyFilter()
+            global_atoms = [
+                atom
+                for atom in scene_atoms
+                if atom.get("source_id") != stream_id and atom.get("source_id") not in blacklisted_source_ids
+            ]
+            candidates.extend(privacy_filter.filter_atoms(global_atoms, scene, stream_id))
+
+        # 3. 如果指定了用户，补充当前聊天流内该用户的记忆
         if user_id:
             user_atoms = await self.retrieve_by_user(
                 user_id=user_id,
+                source_id=stream_id,
+                source_scene=scene,
                 limit=max_atoms * 2,
             )
             candidates.extend(user_atoms)
+            if include_global:
+                global_user_atoms = await self.retrieve_by_user(
+                    user_id=user_id,
+                    limit=max_atoms * 2,
+                )
+                privacy_filter = PrivacyFilter()
+                global_user_atoms = [
+                    atom for atom in global_user_atoms if atom.get("source_id") not in blacklisted_source_ids
+                ]
+                candidates.extend(privacy_filter.filter_atoms(global_user_atoms, scene, stream_id))
 
         if not candidates:
             return ""
 
-        # 3. 去重（按 atom_id 去重，保留 first_score 更高的那条）
+        # 4. 去重（按 atom_id 去重，保留 first_score 更高的那条）
         seen: set[str] = set()
         unique: list[dict[str, Any]] = []
         for atom in candidates:
@@ -1063,13 +1270,13 @@ class MemoryRetriever:
                     atom["final_score"] = weight
                 unique.append(atom)
 
-        # 4. 仅保留 fade_level ∈ {完整, 摘要}
+        # 5. 仅保留 fade_level ∈ {完整, 摘要}
         filtered = [a for a in unique if get_fade_level(float(a.get("weight", 0.0))) in ("完整", "摘要")]
 
-        # 5. 按 final_score 排序
+        # 6. 按 final_score 排序
         filtered.sort(key=lambda a: a.get("final_score", 0.0), reverse=True)
 
-        # 6. 感官标签增强（从 EpisodicDetail 表加载并注入前缀到 content）
+        # 7. 感官标签增强（从 EpisodicDetail 表加载并注入前缀到 content）
         top_atoms = filtered[:max_atoms]
         if include_sensory_tags:
             try:
@@ -1109,12 +1316,12 @@ class MemoryRetriever:
             except Exception as e:
                 logger.warning("感官标签增强失败: %s", e)
 
-        # 7. 格式化 & 截断
+        # 8. 格式化 & 截断
         formatted = self._format_atoms_for_prompt(top_atoms)
         if len(formatted) > max_chars:
             formatted = formatted[:max_chars].rsplit("\n", 1)[0]
 
-        # 8. 关联扩展
+        # 9. 关联扩展
         if enable_association_expansion and top_atoms:
             try:
                 expanded = await self._expand_with_associations(top_atoms, max_depth=2)
@@ -1154,10 +1361,12 @@ class MemoryRetriever:
         self,
         stream_id: str,
         user_id: Optional[str] = None,
+        scene_type: Optional[str] = None,
         max_atoms: int = 5,
         max_chars: int = 2000,
         include_sensory_tags: bool = True,
         enable_association_expansion: bool = True,
+        include_global: Optional[bool] = None,
     ) -> tuple[str, list[str]]:
         """获取回复上下文同时返回 atom_ids — 与 get_context_for_reply() 逻辑一致
 
@@ -1169,37 +1378,70 @@ class MemoryRetriever:
         Args:
             stream_id: 聊天流 ID（group_id 或 private chat id）
             user_id: 用户 ID（可选，用于个性化检索）
+            scene_type: 当前场景类型（group_chat/private_chat）
             max_atoms: 最大返回记忆条数
             max_chars: 返回文本的最大字符数
             include_sensory_tags: 是否在格式化中插入感官/情绪/时间标签前缀（默认 True）
             enable_association_expansion: 是否启用关联扩展（默认 True）
+            include_global: 是否补充同场景全局记忆；None 时读取配置
 
         Returns:
             tuple[str, list[str]]: (格式化后的记忆文本块, 检索到的 atom_id 列表)
         """
         candidates: list[dict[str, Any]] = []
 
-        # 1. 按场景检索该流的记忆
-        scene = "group_chat" if "group" in str(stream_id) else "private_chat"
-        scene_atoms = await self.retrieve_by_scene(
+        scene = _resolve_scene_type(stream_id, scene_type)
+        include_global = _global_memory_allowed(stream_id, include_global)
+        blacklisted_source_ids = _global_memory_blacklist_source_ids() if include_global else set()
+
+        # 1. 优先检索当前聊天流的本地记忆
+        local_atoms = await self.retrieve_by_source(
+            source_id=stream_id,
             source_scene=scene,
             limit=max_atoms * 3,
             min_weight=0.0,
         )
-        candidates.extend(scene_atoms)
+        candidates.extend(local_atoms)
 
-        # 2. 如果指定了用户，补充该用户的记忆
+        # 2. 配置允许时补充同场景全局记忆
+        if include_global:
+            scene_atoms = await self.retrieve_by_scene(
+                source_scene=scene,
+                limit=max_atoms * 3,
+                min_weight=0.0,
+            )
+            privacy_filter = PrivacyFilter()
+            global_atoms = [
+                atom
+                for atom in scene_atoms
+                if atom.get("source_id") != stream_id and atom.get("source_id") not in blacklisted_source_ids
+            ]
+            candidates.extend(privacy_filter.filter_atoms(global_atoms, scene, stream_id))
+
+        # 3. 如果指定了用户，补充当前聊天流内该用户的记忆
         if user_id:
             user_atoms = await self.retrieve_by_user(
                 user_id=user_id,
+                source_id=stream_id,
+                source_scene=scene,
                 limit=max_atoms * 2,
             )
             candidates.extend(user_atoms)
+            if include_global:
+                global_user_atoms = await self.retrieve_by_user(
+                    user_id=user_id,
+                    limit=max_atoms * 2,
+                )
+                privacy_filter = PrivacyFilter()
+                global_user_atoms = [
+                    atom for atom in global_user_atoms if atom.get("source_id") not in blacklisted_source_ids
+                ]
+                candidates.extend(privacy_filter.filter_atoms(global_user_atoms, scene, stream_id))
 
         if not candidates:
             return "", []
 
-        # 3. 去重（按 atom_id 去重，保留 first_score 更高的那条）
+        # 4. 去重（按 atom_id 去重，保留 first_score 更高的那条）
         seen: set[str] = set()
         unique: list[dict[str, Any]] = []
         for atom in candidates:
@@ -1212,13 +1454,13 @@ class MemoryRetriever:
                     atom["final_score"] = weight
                 unique.append(atom)
 
-        # 4. 仅保留 fade_level ∈ {完整, 摘要}
+        # 5. 仅保留 fade_level ∈ {完整, 摘要}
         filtered = [a for a in unique if get_fade_level(float(a.get("weight", 0.0))) in ("完整", "摘要")]
 
-        # 5. 按 final_score 排序
+        # 6. 按 final_score 排序
         filtered.sort(key=lambda a: a.get("final_score", 0.0), reverse=True)
 
-        # 6. 感官标签增强（从 EpisodicDetail 表加载并注入前缀到 content）
+        # 7. 感官标签增强（从 EpisodicDetail 表加载并注入前缀到 content）
         top_atoms = filtered[:max_atoms]
         if include_sensory_tags:
             try:
@@ -1260,15 +1502,15 @@ class MemoryRetriever:
             except Exception as e:
                 logger.warning("感官标签增强失败 (get_context_for_reply_with_ids): %s", e)
 
-        # 7. 取 top-N 并收集 atom_ids
+        # 8. 取 top-N 并收集 atom_ids
         atom_ids: list[str] = [a.get("atom_id", "") for a in top_atoms if a.get("atom_id")]
 
-        # 8. 格式化 & 截断
+        # 9. 格式化 & 截断
         formatted = self._format_atoms_for_prompt(top_atoms)
         if len(formatted) > max_chars:
             formatted = formatted[:max_chars].rsplit("\n", 1)[0]
 
-        # 9. 关联扩展
+        # 10. 关联扩展
         if enable_association_expansion and top_atoms:
             try:
                 expanded = await self._expand_with_associations(top_atoms, max_depth=2)
@@ -1291,7 +1533,7 @@ class MemoryRetriever:
             except Exception as e:
                 logger.warning("关联扩展失败 (get_context_for_reply_with_ids): %s", e)
 
-        # 10. 图谱关联扩展
+        # 11. 图谱关联扩展
         if self.graph_store is not None and enable_association_expansion and top_atoms:
             try:
                 graph_expanded = await self._expand_with_graph(atom_ids, max_depth=1)
@@ -1333,7 +1575,9 @@ class MemoryRetriever:
         self,
         stream_id: str,
         user_id: Optional[str] = None,
+        scene_type: Optional[str] = None,
         max_atoms: int = 5,
+        include_global: Optional[bool] = None,
     ) -> list[str]:
         """仅返回检索到的 atom_ids（无格式化文本）
 
@@ -1343,7 +1587,9 @@ class MemoryRetriever:
         Args:
             stream_id: 聊天流 ID
             user_id: 用户 ID（可选）
+            scene_type: 当前场景类型（group_chat/private_chat）
             max_atoms: 最大返回条数
+            include_global: 是否补充同场景全局记忆；None 时读取配置
 
         Returns:
             list[str]: 检索到的 atom_id 列表
@@ -1351,7 +1597,9 @@ class MemoryRetriever:
         _, atom_ids = await self.get_context_for_reply_with_ids(
             stream_id=stream_id,
             user_id=user_id,
+            scene_type=scene_type,
             max_atoms=max_atoms,
+            include_global=include_global,
         )
         return atom_ids
 
@@ -1380,7 +1628,11 @@ class MemoryRetriever:
         """
         # 1. 标准检索
         if query_embedding:
-            results = await self.retrieve_by_vector(query_embedding, filters, top_k)
+            results = await self.retrieve_by_vector(
+                query_embedding=query_embedding,
+                filters=filters,
+                top_k=top_k,
+            )
         else:
             results = await self.keyword_search(
                 query=(filters or {}).get("keyword", ""),
@@ -1548,7 +1800,11 @@ class MemoryRetriever:
         """
         try:
             target_scene = "group_chat" if "group" in str(scene_type) else "private_chat"
-            target_scope = user_id if target_scene == "private_chat" else stream_id
+            if not _global_memory_allowed(stream_id):
+                return ""
+
+            target_scope = stream_id
+            blacklisted_source_ids = _global_memory_blacklist_source_ids()
 
             # 另一场景
             other_scene = "private_chat" if target_scene == "group_chat" else "group_chat"
@@ -1561,15 +1817,20 @@ class MemoryRetriever:
                 limit=cross_scene_atoms * 3,
                 min_weight=0.0,
             )
-            cross_candidates.extend(other_atoms)
+            cross_candidates.extend(
+                atom for atom in other_atoms if atom.get("source_id") not in blacklisted_source_ids
+            )
 
             # 2. 补充该用户跨场景的记忆
             if user_id:
                 user_atoms = await self.retrieve_by_user(
                     user_id=user_id,
+                    source_scene=other_scene,
                     limit=cross_scene_atoms * 2,
                 )
-                cross_candidates.extend(user_atoms)
+                cross_candidates.extend(
+                    atom for atom in user_atoms if atom.get("source_id") not in blacklisted_source_ids
+                )
 
             if not cross_candidates:
                 return ""
@@ -1675,6 +1936,7 @@ class MemoryRetriever:
             "decay_type": model_instance.decay_type,
             "reinforcement_count": model_instance.reinforcement_count,
             "source_scene": model_instance.source_scene,
+            "source_id": model_instance.source_id,
             "privacy_level": model_instance.privacy_level,
             "status": model_instance.status,
             "fade_level": get_fade_level(model_instance.weight),

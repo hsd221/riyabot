@@ -189,6 +189,7 @@ class BM25Retriever:
         self._doc_metadata: dict[str, dict[str, Any]] = {}
         # 文档类型过滤缓存
         self._doc_source_scene: dict[str, str] = {}
+        self._doc_source_id: dict[str, Optional[str]] = {}
 
     # ── 索引构建 ───────────────────────────────────────────────
 
@@ -205,6 +206,7 @@ class BM25Retriever:
         self._doc_contents.clear()
         self._doc_metadata.clear()
         self._doc_source_scene.clear()
+        self._doc_source_id.clear()
 
         total_tokens = 0
 
@@ -228,11 +230,13 @@ class BM25Retriever:
                         "atom_type": model.atom_type,
                         "weight": model.weight,
                         "source_scene": model.source_scene,
+                        "source_id": model.source_id,
                         "importance": model.importance,
                         "confidence": model.confidence,
                         "created_at": model.created_at,
                     }
                     self._doc_source_scene[doc_id] = model.source_scene
+                    self._doc_source_id[doc_id] = model.source_id
 
                     # 统计 term frequency
                     tf: dict[str, int] = {}
@@ -387,6 +391,7 @@ class BM25Retriever:
                 final_score=bm25_score,
                 fade_level=get_fade_level(float(meta.get("weight", 0.0))),
                 source_scene=meta.get("source_scene", "unknown"),
+                source_id=meta.get("source_id"),
                 importance=float(meta.get("importance", 0.5)),
                 confidence=float(meta.get("confidence", 0.5)),
             )
@@ -492,5 +497,6 @@ class BM25Retriever:
         self._doc_contents.clear()
         self._doc_metadata.clear()
         self._doc_source_scene.clear()
+        self._doc_source_id.clear()
 
         logger.debug("BM25 索引缓存已失效")

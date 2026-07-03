@@ -454,6 +454,7 @@ class ConflictArbiter:
                                     "confidence": atom_a.get("confidence", 0.5),
                                     "status": atom_a.get("status", "active"),
                                     "source_scene": atom_a.get("source_scene", "chat"),
+                                    "source_id": atom_a.get("source_id"),
                                     "privacy_level": atom_a.get("privacy_level", "context_sensitive"),
                                 },
                             )
