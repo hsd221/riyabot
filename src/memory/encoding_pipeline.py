@@ -263,7 +263,7 @@ class EncodingPipeline:
                                 )
                             )
 
-                        if atom.atom_type == AtomType.PREFERENCE and atom.entities:
+                        if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and atom.entities:
                             try:
                                 from src.memory.user_profile import ProfileBuilder, ProfileStore
 

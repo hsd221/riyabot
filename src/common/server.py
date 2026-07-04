@@ -20,6 +20,9 @@ def _register_inject_endpoint(app: FastAPI) -> None:
     @app.post("/message/inject")
     async def inject_message(message: Annotated[dict[str, Any], Body()]):
         """接收模拟器发送的消息 JSON，注入 bot 消息处理管线。"""
+        if message.get("_probe") is True:
+            return {"status": "ok"}
+
         from src.chat.message_receive.bot import chat_bot
 
         asyncio.create_task(chat_bot.message_process(message))

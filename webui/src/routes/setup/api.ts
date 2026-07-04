@@ -49,9 +49,7 @@ export async function loadPersonalityConfig(): Promise<PersonalityConfig> {
   return {
     personality: personalityConfig.personality || '',
     reply_style: personalityConfig.reply_style || '',
-    interest: personalityConfig.interest || '',
     plan_style: personalityConfig.plan_style || '',
-    private_plan_style: personalityConfig.private_plan_style || '',
   }
 }
 
@@ -95,15 +93,11 @@ export async function loadOtherBasicConfig(): Promise<OtherBasicConfig> {
   const config = data.config
 
   const toolConfig = config.tool || {}
-  const moodConfig = config.mood || {}
-  const jargonConfig = config.jargon || {}
+  const expressionConfig = config.expression || {}
 
   return {
     enable_tool: toolConfig.enable_tool ?? true,
-    enable_mood: moodConfig.enable_mood ?? false,
-    mood_update_threshold: moodConfig.mood_update_threshold,
-    emotion_style: moodConfig.emotion_style,
-    all_global: jargonConfig.all_global ?? true,
+    all_global_jargon: expressionConfig.all_global_jargon ?? true,
   }
 }
 
@@ -182,7 +176,7 @@ export async function saveEmojiConfig(config: EmojiConfig) {
   return await response.json()
 }
 
-// 保存其他基础配置（工具、情绪、黑话）
+// 保存其他基础配置（工具、黑话）
 export async function saveOtherBasicConfig(config: OtherBasicConfig) {
   // 需要分别保存到不同的section
   const promises = []
@@ -196,26 +190,12 @@ export async function saveOtherBasicConfig(config: OtherBasicConfig) {
     })
   )
 
-  // 保存jargon配置
+  // 保存expression中的全局黑话配置
   promises.push(
-    fetchWithAuth('/api/webui/config/bot/section/jargon', {
+    fetchWithAuth('/api/webui/config/bot/section/expression', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ all_global: config.all_global }),
-    })
-  )
-
-  // 保存mood配置
-  const moodConfig: Record<string, unknown> = { enable_mood: config.enable_mood }
-  if (config.enable_mood) {
-    moodConfig.mood_update_threshold = config.mood_update_threshold || 1
-    moodConfig.emotion_style = config.emotion_style || ''
-  }
-  promises.push(
-    fetchWithAuth('/api/webui/config/bot/section/mood', {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(moodConfig),
+      body: JSON.stringify({ all_global_jargon: config.all_global_jargon }),
     })
   )
 

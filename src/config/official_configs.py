@@ -671,6 +671,35 @@ class TelemetryConfig(ConfigBase):
 
 
 @dataclass
+class LogConfig(ConfigBase):
+    """日志配置类"""
+
+    date_style: str = "m-d H:i:s"
+    """日期格式"""
+
+    log_level_style: Literal["FULL", "full", "compact", "lite"] = "lite"
+    """日志级别样式"""
+
+    color_text: Literal["none", "title", "full"] = "full"
+    """日志文本颜色"""
+
+    log_level: str = "INFO"
+    """全局日志级别"""
+
+    console_log_level: str = "INFO"
+    """控制台日志级别"""
+
+    file_log_level: str = "DEBUG"
+    """文件日志级别"""
+
+    suppress_libraries: list[str] = field(default_factory=lambda: [])
+    """完全屏蔽的第三方库日志列表"""
+
+    library_log_levels: dict[str, str] = field(default_factory=lambda: {})
+    """特定第三方库日志级别"""
+
+
+@dataclass
 class WebUIConfig(ConfigBase):
     """WebUI配置类
 

@@ -160,22 +160,6 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
       </div>
 
       <div className="space-y-3">
-        <Label htmlFor="interest">兴趣 *</Label>
-        <Textarea
-          id="interest"
-          placeholder="描述机器人感兴趣的话题"
-          value={config.interest}
-          onChange={(e) => onChange({ ...config, interest: e.target.value })}
-          rows={2}
-        />
-        <p className="text-xs text-muted-foreground">
-          会影响机器人对什么话题进行回复
-        </p>
-      </div>
-
-      <Separator />
-
-      <div className="space-y-3">
         <Label htmlFor="plan_style">群聊说话规则 *</Label>
         <Textarea
           id="plan_style"
@@ -186,22 +170,6 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
         />
         <p className="text-xs text-muted-foreground">
           定义机器人在群聊中如何行动，例如回复频率、条件等
-        </p>
-      </div>
-
-      <div className="space-y-3">
-        <Label htmlFor="private_plan_style">私聊说话规则 *</Label>
-        <Textarea
-          id="private_plan_style"
-          placeholder="机器人在私聊中的行为风格和规则"
-          value={config.private_plan_style}
-          onChange={(e) =>
-            onChange({ ...config, private_plan_style: e.target.value })
-          }
-          rows={3}
-        />
-        <p className="text-xs text-muted-foreground">
-          定义机器人在私聊中的行为方式
         </p>
       </div>
     </div>
@@ -369,79 +337,18 @@ export function OtherBasicForm({ config, onChange }: OtherBasicFormProps) {
         />
       </div>
 
-      <Separator />
-
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <Label htmlFor="enable_mood">启用情绪系统</Label>
-          <p className="text-xs text-muted-foreground">
-            让机器人具有情绪变化能力
-          </p>
-        </div>
-        <Switch
-          id="enable_mood"
-          checked={config.enable_mood}
-          onCheckedChange={(checked) =>
-            onChange({ ...config, enable_mood: checked })
-          }
-        />
-      </div>
-
-      {config.enable_mood && (
-        <div className="ml-6 space-y-6 border-l-2 border-primary/20 pl-6">
-          <div className="space-y-3">
-            <Label htmlFor="mood_update_threshold">情绪更新阈值</Label>
-            <Input
-              id="mood_update_threshold"
-              type="number"
-              min="0.1"
-              max="10"
-              step="0.1"
-              value={config.mood_update_threshold || 1}
-              onChange={(e) =>
-                onChange({
-                  ...config,
-                  mood_update_threshold: Number(e.target.value),
-                })
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              值越高，情绪更新越慢
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <Label htmlFor="emotion_style">情感特征</Label>
-            <Textarea
-              id="emotion_style"
-              placeholder="描述情绪的变化情况，例如：情绪较为稳定，但遭遇特定事件时起伏较大"
-              value={config.emotion_style || ''}
-              onChange={(e) =>
-                onChange({ ...config, emotion_style: e.target.value })
-              }
-              rows={2}
-            />
-            <p className="text-xs text-muted-foreground">
-              影响机器人的情绪变化方式
-            </p>
-          </div>
-        </div>
-      )}
-
-      <Separator />
-
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <Label htmlFor="all_global">启用全局黑话模式</Label>
+          <Label htmlFor="all_global_jargon">启用全局黑话模式</Label>
           <p className="text-xs text-muted-foreground">
             允许机器人学习和使用群组黑话
           </p>
         </div>
         <Switch
-          id="all_global"
-          checked={config.all_global}
+          id="all_global_jargon"
+          checked={config.all_global_jargon}
           onCheckedChange={(checked) =>
-            onChange({ ...config, all_global: checked })
+            onChange({ ...config, all_global_jargon: checked })
           }
         />
       </div>
@@ -539,4 +446,3 @@ export function SiliconFlowForm({ config, onChange }: SiliconFlowFormProps) {
     </div>
   )
 }
-

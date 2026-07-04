@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Slider } from '@/components/ui/slider'
 import {
   Select,
   SelectContent,
@@ -141,11 +140,16 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   config,
   onChange,
 }: ExpressionSectionProps) {
+  const learningList = config.learning_list ?? []
+  const expressionGroups = config.expression_groups ?? []
+  const allowReflect = config.allow_reflect ?? []
+  const customCriteria = config.expression_auto_check_custom_criteria ?? []
+
   // 添加学习规则
   const addLearningRule = () => {
     onChange({
       ...config,
-      learning_list: [...config.learning_list, ['', 'enable', 'enable', '1.0']],
+      learning_list: [...learningList, ['', 'enable', 'enable', 'enable']],
     })
   }
 
@@ -153,7 +157,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   const removeLearningRule = (index: number) => {
     onChange({
       ...config,
-      learning_list: config.learning_list.filter((_, i) => i !== index),
+      learning_list: learningList.filter((_, i) => i !== index),
     })
   }
 
@@ -163,7 +167,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
     field: 0 | 1 | 2 | 3,
     value: string
   ) => {
-    const newList = [...config.learning_list]
+    const newList = learningList.map((rule) => [...rule] as [string, string, string, string])
     newList[index][field] = value
     onChange({
       ...config,
@@ -202,7 +206,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   const addExpressionGroup = () => {
     onChange({
       ...config,
-      expression_groups: [...config.expression_groups, []],
+      expression_groups: [...expressionGroups, []],
     })
   }
 
@@ -210,13 +214,13 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   const removeExpressionGroup = (index: number) => {
     onChange({
       ...config,
-      expression_groups: config.expression_groups.filter((_, i) => i !== index),
+      expression_groups: expressionGroups.filter((_, i) => i !== index),
     })
   }
 
   // 添加组成员
   const addGroupMember = (groupIndex: number) => {
-    const newGroups = [...config.expression_groups]
+    const newGroups = expressionGroups.map((group) => [...group])
     newGroups[groupIndex] = [...newGroups[groupIndex], '']
     onChange({
       ...config,
@@ -226,7 +230,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
 
   // 删除组成员
   const removeGroupMember = (groupIndex: number, memberIndex: number) => {
-    const newGroups = [...config.expression_groups]
+    const newGroups = expressionGroups.map((group) => [...group])
     newGroups[groupIndex] = newGroups[groupIndex].filter((_, i) => i !== memberIndex)
     onChange({
       ...config,
@@ -236,11 +240,34 @@ export const ExpressionSection = React.memo(function ExpressionSection({
 
   // 更新组成员
   const updateGroupMember = (groupIndex: number, memberIndex: number, value: string) => {
-    const newGroups = [...config.expression_groups]
+    const newGroups = expressionGroups.map((group) => [...group])
     newGroups[groupIndex][memberIndex] = value
     onChange({
       ...config,
       expression_groups: newGroups,
+    })
+  }
+
+  const addCustomCriteria = () => {
+    onChange({
+      ...config,
+      expression_auto_check_custom_criteria: [...customCriteria, ''],
+    })
+  }
+
+  const updateCustomCriteria = (index: number, value: string) => {
+    const newCriteria = [...customCriteria]
+    newCriteria[index] = value
+    onChange({
+      ...config,
+      expression_auto_check_custom_criteria: newCriteria,
+    })
+  }
+
+  const removeCustomCriteria = (index: number) => {
+    onChange({
+      ...config,
+      expression_auto_check_custom_criteria: customCriteria.filter((_, i) => i !== index),
     })
   }
 
@@ -263,9 +290,9 @@ export const ExpressionSection = React.memo(function ExpressionSection({
           </div>
 
           <div className="space-y-4">
-            {config.learning_list.map((rule, index) => {
+            {learningList.map((rule, index) => {
               // 检查是否已有全局配置（rule[0] === ''）
-              const hasGlobalConfig = config.learning_list.some((r, i) => i !== index && r[0] === '')
+              const hasGlobalConfig = learningList.some((r, i) => i !== index && r[0] === '')
               const isGlobal = rule[0] === ''
               
               // 解析聊天流 ID（格式：platform:id:type）
@@ -436,50 +463,29 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     </div>
                   </div>
 
-                  {/* 学习强度 - 改为滑块+输入框 */}
-                  <div className="grid gap-3">
+                  {/* 学习黑话 */}
+                  <div className="grid gap-2">
                     <div className="flex items-center justify-between">
-                      <Label className="text-xs font-medium">学习强度</Label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="5"
-                        value={rule[3]}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value)
-                          if (!isNaN(val)) {
-                            updateLearningRule(index, 3, Math.max(0, Math.min(5, val)).toFixed(1))
-                          }
-                        }}
-                        className="w-20 h-8 text-xs"
+                      <div>
+                        <Label className="text-xs font-medium">学习黑话</Label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          允许麦麦从该聊天流学习 jargon/黑话
+                        </p>
+                      </div>
+                      <Switch
+                        checked={rule[3] === 'enable'}
+                        onCheckedChange={(checked) =>
+                          updateLearningRule(index, 3, checked ? 'enable' : 'disable')
+                        }
                       />
                     </div>
-                    <Slider
-                      value={[parseFloat(rule[3]) || 1.0]}
-                      onValueChange={(values) =>
-                        updateLearningRule(index, 3, values[0].toFixed(1))
-                      }
-                      min={0}
-                      max={5}
-                      step={0.1}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>0 (不学习)</span>
-                      <span>2.5</span>
-                      <span>5.0 (快速学习)</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      影响学习频率，最短学习间隔 = 300/学习强度（秒）
-                    </p>
                   </div>
                 </div>
               </div>
               )
             })}
 
-            {config.learning_list.length === 0 && (
+            {learningList.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 暂无学习规则，点击"添加规则"开始配置
               </div>
@@ -488,25 +494,129 @@ export const ExpressionSection = React.memo(function ExpressionSection({
         </div>
       </div>
 
-      {/* 表达反思配置 */}
+      {/* 表达优化配置 */}
       <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
         <div>
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4">
             <div>
-              <h3 className="text-lg font-semibold">表达反思配置</h3>
+              <h3 className="text-lg font-semibold">表达优化配置</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                配置麦麦主动向管理员询问表达方式是否合适的功能
+                配置表达方式的自动检查和手动反思
               </p>
             </div>
-            <Switch
-              checked={config.reflect}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, reflect: checked })
-              }
-            />
           </div>
 
-          {config.reflect && (
+          <div className="space-y-4">
+            <div className="rounded-lg border p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">自动表达优化</span>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    定时抽取表达方式并按评估标准自动检查
+                  </p>
+                </div>
+                <Switch
+                  checked={config.expression_self_reflect}
+                  onCheckedChange={(checked) =>
+                    onChange({ ...config, expression_self_reflect: checked })
+                  }
+                />
+              </div>
+
+              {config.expression_self_reflect && (
+                <div className="grid gap-4 p-3 sm:p-4 rounded-lg bg-muted/50">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="expression_auto_check_interval">自动检查间隔（秒）</Label>
+                      <Input
+                        id="expression_auto_check_interval"
+                        type="number"
+                        min="1"
+                        value={config.expression_auto_check_interval}
+                        onChange={(e) =>
+                          onChange({ ...config, expression_auto_check_interval: parseInt(e.target.value) })
+                        }
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="expression_auto_check_count">每次检查数量</Label>
+                      <Input
+                        id="expression_auto_check_count"
+                        type="number"
+                        min="1"
+                        value={config.expression_auto_check_count}
+                        onChange={(e) =>
+                          onChange({ ...config, expression_auto_check_count: parseInt(e.target.value) })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between">
+                      <Label>额外评估标准</Label>
+                      <Button onClick={addCustomCriteria} size="sm" variant="outline">
+                        <Plus className="h-4 w-4 mr-1" />
+                        添加标准
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {customCriteria.map((criteria, index) => (
+                        <div key={index} className="flex gap-2">
+                          <Input
+                            value={criteria}
+                            onChange={(e) => updateCustomCriteria(index, e.target.value)}
+                            placeholder="例如：避免过度重复同一种语气"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => removeCustomCriteria(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <div>
+                <span className="text-sm font-medium">只使用已检查表达</span>
+                <p className="text-xs text-muted-foreground mt-1">
+                  开启后只选择 checked=true 且未拒绝的表达方式
+                </p>
+              </div>
+              <Switch
+                checked={config.expression_checked_only}
+                onCheckedChange={(checked) =>
+                  onChange({ ...config, expression_checked_only: checked })
+                }
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <div>
+                <span className="text-sm font-medium">手动表达反思</span>
+                <p className="text-xs text-muted-foreground mt-1">
+                  麦麦主动向操作员询问表达方式是否合适
+                </p>
+              </div>
+            <Switch
+              checked={config.expression_manual_reflect}
+              onCheckedChange={(checked) =>
+                onChange({ ...config, expression_manual_reflect: checked })
+              }
+            />
+            </div>
+          </div>
+
+          {config.expression_manual_reflect && (
             <div className="space-y-4">
               {/* 表达反思操作员 ID */}
               <div className="rounded-lg border p-4 space-y-4">
@@ -516,7 +626,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                 
                 <div className="space-y-4">
                   {(() => {
-                    const operatorId = config.reflect_operator_id || ''
+                    const operatorId = config.manual_reflect_operator_id || ''
                     const parts = operatorId.split(':')
                     const platform = parts[0] || 'qq'
                     const chatId = parts[1] || ''
@@ -531,7 +641,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <Select
                               value={platform}
                               onValueChange={(value) => {
-                                onChange({ ...config, reflect_operator_id: `${value}:${chatId}:${chatType}` })
+                                onChange({ ...config, manual_reflect_operator_id: `${value}:${chatId}:${chatType}` })
                               }}
                             >
                               <SelectTrigger>
@@ -550,7 +660,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <Input
                               value={chatId}
                               onChange={(e) => {
-                                onChange({ ...config, reflect_operator_id: `${platform}:${e.target.value}:${chatType}` })
+                                onChange({ ...config, manual_reflect_operator_id: `${platform}:${e.target.value}:${chatType}` })
                               }}
                               placeholder="输入 ID"
                               className="font-mono text-sm"
@@ -563,7 +673,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <Select
                               value={chatType}
                               onValueChange={(value) => {
-                                onChange({ ...config, reflect_operator_id: `${platform}:${chatId}:${value}` })
+                                onChange({ ...config, manual_reflect_operator_id: `${platform}:${chatId}:${value}` })
                               }}
                             >
                               <SelectTrigger>
@@ -577,7 +687,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                           </div>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          当前操作员 ID：{config.reflect_operator_id || '（未设置）'}
+                          当前操作员 ID：{config.manual_reflect_operator_id || '（未设置）'}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           麦麦会向此操作员询问表达方式是否合适
@@ -601,7 +711,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     onClick={() => {
                       onChange({
                         ...config,
-                        allow_reflect: [...(config.allow_reflect || []), 'qq::group'],
+                        allow_reflect: [...allowReflect, 'qq::group'],
                       })
                     }}
                     size="sm"
@@ -613,7 +723,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                 </div>
 
                 <div className="space-y-2">
-                  {(config.allow_reflect || []).map((chatId, index) => {
+                  {allowReflect.map((chatId, index) => {
                     const parts = chatId.split(':')
                     const platform = parts[0] || 'qq'
                     const id = parts[1] || ''
@@ -624,7 +734,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                         <Select
                           value={platform}
                           onValueChange={(value) => {
-                            const newList = [...config.allow_reflect]
+                            const newList = [...allowReflect]
                             newList[index] = `${value}:${id}:${chatType}`
                             onChange({ ...config, allow_reflect: newList })
                           }}
@@ -641,7 +751,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                         <Input
                           value={id}
                           onChange={(e) => {
-                            const newList = [...config.allow_reflect]
+                            const newList = [...allowReflect]
                             newList[index] = `${platform}:${e.target.value}:${chatType}`
                             onChange({ ...config, allow_reflect: newList })
                           }}
@@ -652,7 +762,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                         <Select
                           value={chatType}
                           onValueChange={(value) => {
-                            const newList = [...config.allow_reflect]
+                            const newList = [...allowReflect]
                             newList[index] = `${platform}:${id}:${value}`
                             onChange({ ...config, allow_reflect: newList })
                           }}
@@ -670,7 +780,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                           onClick={() => {
                             onChange({
                               ...config,
-                              allow_reflect: config.allow_reflect.filter((_, i) => i !== index),
+                              allow_reflect: allowReflect.filter((_, i) => i !== index),
                             })
                           }}
                           size="sm"
@@ -682,7 +792,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     )
                   })}
 
-                  {(!config.allow_reflect || config.allow_reflect.length === 0) && (
+                  {allowReflect.length === 0 && (
                     <div className="text-center py-4 text-muted-foreground text-sm">
                       列表为空，所有聊天流都可以进行表达反思
                     </div>
@@ -711,9 +821,9 @@ export const ExpressionSection = React.memo(function ExpressionSection({
           </div>
 
           <div className="space-y-4">
-            {config.expression_groups.map((group, groupIndex) => {
+            {expressionGroups.map((group, groupIndex) => {
               // 获取所有已配置的聊天流 ID（用于下拉框选项）
-              const availableChatIds = config.learning_list
+              const availableChatIds = learningList
                 .map(rule => rule[0])
                 .filter(id => id !== '') // 过滤掉全局配置
               
@@ -777,7 +887,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               )
             })}
 
-            {config.expression_groups.length === 0 && (
+            {expressionGroups.length === 0 && (
               <div className="text-center py-8 text-muted-foreground">
                 暂无共享组，点击"添加共享组"开始配置
               </div>
@@ -805,6 +915,40 @@ export const ExpressionSection = React.memo(function ExpressionSection({
           <p className="text-xs text-muted-foreground mt-2">
             开启后，新增的黑话将默认设为全局（所有聊天流共享）。关闭后，已记录的全局黑话不会改变，需要手动删除。
           </p>
+
+          <div className="flex items-center space-x-2 mt-4">
+            <Switch
+              id="enable_jargon_explanation"
+              checked={config.enable_jargon_explanation}
+              onCheckedChange={(checked) =>
+                onChange({ ...config, enable_jargon_explanation: checked })
+              }
+            />
+            <Label htmlFor="enable_jargon_explanation" className="cursor-pointer">
+              回复前解释上下文黑话
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            关闭可减少一次 LLM 调用，仅影响回复前的黑话匹配与解释
+          </p>
+
+          <div className="grid gap-2 mt-4">
+            <Label htmlFor="jargon_mode">黑话解释来源</Label>
+            <Select
+              value={config.jargon_mode}
+              onValueChange={(value) =>
+                onChange({ ...config, jargon_mode: value as 'context' | 'planner' })
+              }
+            >
+              <SelectTrigger id="jargon_mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="context">上下文自动匹配</SelectItem>
+                <SelectItem value="planner">Planner unknown_words</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
     </div>

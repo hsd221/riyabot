@@ -1,7 +1,9 @@
 import React from 'react'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Plus, Trash2 } from 'lucide-react'
 import type { EmojiConfig, MemoryConfig, ToolConfig } from '../types'
 
 interface FeaturesSectionProps {
@@ -21,6 +23,31 @@ export const FeaturesSection = React.memo(function FeaturesSection({
   onMemoryChange,
   onToolChange,
 }: FeaturesSectionProps) {
+  const globalMemoryBlacklist = memoryConfig.global_memory_blacklist ?? []
+
+  const addGlobalMemoryBlacklistItem = () => {
+    onMemoryChange({
+      ...memoryConfig,
+      global_memory_blacklist: [...globalMemoryBlacklist, ''],
+    })
+  }
+
+  const updateGlobalMemoryBlacklistItem = (index: number, value: string) => {
+    const newBlacklist = [...globalMemoryBlacklist]
+    newBlacklist[index] = value
+    onMemoryChange({
+      ...memoryConfig,
+      global_memory_blacklist: newBlacklist,
+    })
+  }
+
+  const removeGlobalMemoryBlacklistItem = (index: number) => {
+    onMemoryChange({
+      ...memoryConfig,
+      global_memory_blacklist: globalMemoryBlacklist.filter((_, i) => i !== index),
+    })
+  }
+
   return (
     <div className="space-y-6">
       {/* 工具设置 */}
@@ -79,22 +106,6 @@ export const FeaturesSection = React.memo(function FeaturesSection({
 
             <div className="flex items-center space-x-2">
               <Switch
-                id="enable_jargon_detection"
-                checked={memoryConfig.enable_jargon_detection ?? true}
-                onCheckedChange={(checked) =>
-                  onMemoryChange({ ...memoryConfig, enable_jargon_detection: checked })
-                }
-              />
-              <Label htmlFor="enable_jargon_detection" className="cursor-pointer">
-                启用黑话识别
-              </Label>
-            </div>
-            <p className="text-xs text-muted-foreground -mt-2">
-              记忆检索过程中是否启用黑话识别
-            </p>
-
-            <div className="flex items-center space-x-2">
-              <Switch
                 id="global_memory"
                 checked={memoryConfig.global_memory ?? false}
                 onCheckedChange={(checked) =>
@@ -108,6 +119,157 @@ export const FeaturesSection = React.memo(function FeaturesSection({
             <p className="text-xs text-muted-foreground -mt-2">
               允许记忆检索在所有聊天记录中进行全局查询（忽略当前聊天流）
             </p>
+
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="planner_question"
+                checked={memoryConfig.planner_question ?? true}
+                onCheckedChange={(checked) =>
+                  onMemoryChange({ ...memoryConfig, planner_question: checked })
+                }
+              />
+              <Label htmlFor="planner_question" className="cursor-pointer">
+                使用 Planner 提供的记忆检索问题
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground -mt-2">
+              开启后，Planner 在 reply 动作中提供 question 时会直接用于记忆检索
+            </p>
+
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label>全局记忆黑名单</Label>
+                <Button onClick={addGlobalMemoryBlacklistItem} size="sm" variant="outline">
+                  <Plus className="h-4 w-4 mr-1" />
+                  添加
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {globalMemoryBlacklist.map((item, index) => (
+                  <div key={index} className="flex gap-2">
+                    <Input
+                      value={item}
+                      onChange={(e) => updateGlobalMemoryBlacklistItem(index, e.target.value)}
+                      placeholder="qq:123456:group"
+                      className="font-mono text-sm"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => removeGlobalMemoryBlacklistItem(index)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                启用全局记忆后，黑名单中的聊天流不会被纳入全局检索
+              </p>
+            </div>
+
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div>
+                <h4 className="text-sm font-semibold">记忆存储</h4>
+                <p className="text-xs text-muted-foreground mt-1">
+                  覆盖 MemoryStore 的 SQLite 与 Qdrant 存储参数
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="sqlite_path">SQLite 数据库路径</Label>
+                <Input
+                  id="sqlite_path"
+                  value={memoryConfig.sqlite_path}
+                  onChange={(e) => onMemoryChange({ ...memoryConfig, sqlite_path: e.target.value })}
+                  className="font-mono text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="qdrant_url">Qdrant 服务器 URL</Label>
+                  <Input
+                    id="qdrant_url"
+                    value={memoryConfig.qdrant_url}
+                    onChange={(e) => onMemoryChange({ ...memoryConfig, qdrant_url: e.target.value })}
+                    placeholder="留空时使用本地模式"
+                    className="font-mono text-sm"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="qdrant_api_key">Qdrant API Key</Label>
+                  <Input
+                    id="qdrant_api_key"
+                    value={memoryConfig.qdrant_api_key ?? ''}
+                    onChange={(e) => onMemoryChange({ ...memoryConfig, qdrant_api_key: e.target.value })}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="qdrant_local_path">Qdrant 本地数据目录</Label>
+                <Input
+                  id="qdrant_local_path"
+                  value={memoryConfig.qdrant_local_path}
+                  onChange={(e) => onMemoryChange({ ...memoryConfig, qdrant_local_path: e.target.value })}
+                  className="font-mono text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="embedding_dimension">嵌入维度</Label>
+                  <Input
+                    id="embedding_dimension"
+                    type="number"
+                    min="1"
+                    value={memoryConfig.embedding_dimension}
+                    onChange={(e) =>
+                      onMemoryChange({ ...memoryConfig, embedding_dimension: parseInt(e.target.value) })
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="vector_batch_size">向量批量写入大小</Label>
+                  <Input
+                    id="vector_batch_size"
+                    type="number"
+                    min="1"
+                    value={memoryConfig.vector_batch_size}
+                    onChange={(e) =>
+                      onMemoryChange({ ...memoryConfig, vector_batch_size: parseInt(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="collection_name_atoms">记忆原子集合名</Label>
+                  <Input
+                    id="collection_name_atoms"
+                    value={memoryConfig.collection_name_atoms}
+                    onChange={(e) => onMemoryChange({ ...memoryConfig, collection_name_atoms: e.target.value })}
+                    className="font-mono text-sm"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="collection_name_graph">图条目集合名</Label>
+                  <Input
+                    id="collection_name_graph"
+                    value={memoryConfig.collection_name_graph}
+                    onChange={(e) => onMemoryChange({ ...memoryConfig, collection_name_graph: e.target.value })}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

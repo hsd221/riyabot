@@ -3,13 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Plus, Trash2 } from 'lucide-react'
 import type { MaimMessageConfig } from '../types'
 
@@ -20,10 +13,15 @@ interface MaimMessageSectionProps {
 
 export const MaimMessageSection = React.memo(function MaimMessageSection({ config, onChange }: MaimMessageSectionProps) {
   const [newToken, setNewToken] = useState('')
+  const [newApiKey, setNewApiKey] = useState('')
+
+  const authTokens = config.auth_token ?? []
+  const allowedApiKeys = config.api_server_allowed_api_keys ?? []
 
   const addToken = () => {
-    if (newToken && !config.auth_token.includes(newToken)) {
-      onChange({ ...config, auth_token: [...config.auth_token, newToken] })
+    const token = newToken.trim()
+    if (token && !authTokens.includes(token)) {
+      onChange({ ...config, auth_token: [...authTokens, token] })
       setNewToken('')
     }
   }
@@ -31,111 +29,161 @@ export const MaimMessageSection = React.memo(function MaimMessageSection({ confi
   const removeToken = (index: number) => {
     onChange({
       ...config,
-      auth_token: config.auth_token.filter((_, i) => i !== index),
+      auth_token: authTokens.filter((_, i) => i !== index),
+    })
+  }
+
+  const addApiKey = () => {
+    const apiKey = newApiKey.trim()
+    if (apiKey && !allowedApiKeys.includes(apiKey)) {
+      onChange({ ...config, api_server_allowed_api_keys: [...allowedApiKeys, apiKey] })
+      setNewApiKey('')
+    }
+  }
+
+  const removeApiKey = (index: number) => {
+    onChange({
+      ...config,
+      api_server_allowed_api_keys: allowedApiKeys.filter((_, i) => i !== index),
     })
   }
 
   return (
     <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold mb-4">MaimMessage 服务配置</h3>
+        <h3 className="text-lg font-semibold mb-4">MaimMessage 配置</h3>
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>启用自定义服务器</Label>
+              <Label>启用额外新版 API Server</Label>
               <p className="text-sm text-muted-foreground">
-                是否使用自定义的 MaimMessage 服务器
+                额外监听一个新版 MaimMessage API Server 端口
               </p>
             </div>
             <Switch
-              checked={config.use_custom}
-              onCheckedChange={(checked) => onChange({ ...config, use_custom: checked })}
+              checked={config.enable_api_server}
+              onCheckedChange={(checked) => onChange({ ...config, enable_api_server: checked })}
             />
           </div>
 
-          {config.use_custom && (
-            <>
+          {config.enable_api_server && (
+            <div className="space-y-4 rounded-lg border p-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>主机地址</Label>
+                  <Label htmlFor="api_server_host">主机地址</Label>
                   <Input
-                    value={config.host}
-                    onChange={(e) => onChange({ ...config, host: e.target.value })}
-                    placeholder="127.0.0.1"
+                    id="api_server_host"
+                    value={config.api_server_host}
+                    onChange={(e) => onChange({ ...config, api_server_host: e.target.value })}
+                    placeholder="0.0.0.0"
+                    className="font-mono text-sm"
                   />
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>端口号</Label>
+                  <Label htmlFor="api_server_port">端口号</Label>
                   <Input
+                    id="api_server_port"
                     type="number"
-                    value={config.port}
-                    onChange={(e) => onChange({ ...config, port: parseInt(e.target.value) })}
+                    min="1"
+                    max="65535"
+                    value={config.api_server_port}
+                    onChange={(e) => onChange({ ...config, api_server_port: parseInt(e.target.value) })}
                     placeholder="8090"
                   />
                 </div>
-
-                <div className="grid gap-2">
-                  <Label>连接模式</Label>
-                  <Select
-                    value={config.mode}
-                    onValueChange={(value) => onChange({ ...config, mode: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ws">WebSocket (ws)</SelectItem>
-                      <SelectItem value="tcp">TCP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    checked={config.use_wss}
-                    onCheckedChange={(checked) => onChange({ ...config, use_wss: checked })}
-                    disabled={config.mode !== 'ws'}
-                  />
-                  <Label>使用 WSS 安全连接</Label>
-                </div>
               </div>
 
-              {config.use_wss && config.mode === 'ws' && (
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="api_server_use_wss"
+                  checked={config.api_server_use_wss}
+                  onCheckedChange={(checked) => onChange({ ...config, api_server_use_wss: checked })}
+                />
+                <Label htmlFor="api_server_use_wss" className="cursor-pointer">
+                  启用 WSS
+                </Label>
+              </div>
+
+              {config.api_server_use_wss && (
                 <div className="grid gap-4">
                   <div className="grid gap-2">
-                    <Label>SSL 证书文件路径</Label>
+                    <Label htmlFor="api_server_cert_file">SSL 证书文件路径</Label>
                     <Input
-                      value={config.cert_file}
-                      onChange={(e) => onChange({ ...config, cert_file: e.target.value })}
+                      id="api_server_cert_file"
+                      value={config.api_server_cert_file}
+                      onChange={(e) => onChange({ ...config, api_server_cert_file: e.target.value })}
                       placeholder="cert.pem"
+                      className="font-mono text-sm"
                     />
                   </div>
 
                   <div className="grid gap-2">
-                    <Label>SSL 密钥文件路径</Label>
+                    <Label htmlFor="api_server_key_file">SSL 密钥文件路径</Label>
                     <Input
-                      value={config.key_file}
-                      onChange={(e) => onChange({ ...config, key_file: e.target.value })}
+                      id="api_server_key_file"
+                      value={config.api_server_key_file}
+                      onChange={(e) => onChange({ ...config, api_server_key_file: e.target.value })}
                       placeholder="key.pem"
+                      className="font-mono text-sm"
                     />
                   </div>
                 </div>
               )}
-            </>
+
+              <div>
+                <Label className="mb-2 block">允许的 API Key</Label>
+                <p className="text-sm text-muted-foreground mb-2">为空时允许所有连接</p>
+                <div className="flex gap-2 mb-2">
+                  <Input
+                    value={newApiKey}
+                    onChange={(e) => setNewApiKey(e.target.value)}
+                    placeholder="输入 API Key"
+                    className="font-mono text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        addApiKey()
+                      }
+                    }}
+                  />
+                  <Button onClick={addApiKey} size="sm">
+                    <Plus className="h-4 w-4" strokeWidth={2} fill="none" />
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {allowedApiKeys.map((apiKey, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between bg-secondary px-3 py-2 rounded-md"
+                    >
+                      <span className="text-sm font-mono break-all">{apiKey}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => removeApiKey(index)}
+                      >
+                        <Trash2 className="h-3 w-3" strokeWidth={2} fill="none" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {/* 认证令牌 */}
       <div>
-        <Label className="mb-2 block">认证令牌</Label>
-        <p className="text-sm text-muted-foreground mb-2">用于 API 验证，为空则不启用验证</p>
+        <Label className="mb-2 block">旧版 API 认证令牌</Label>
+        <p className="text-sm text-muted-foreground mb-2">用于旧版 API 验证，为空则不启用验证</p>
         <div className="flex gap-2 mb-2">
           <Input
             value={newToken}
             onChange={(e) => setNewToken(e.target.value)}
             placeholder="输入认证令牌"
+            className="font-mono text-sm"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
@@ -148,24 +196,24 @@ export const MaimMessageSection = React.memo(function MaimMessageSection({ confi
           </Button>
         </div>
         <div className="space-y-2">
-          {config.auth_token.map((token, index) => (
+          {authTokens.map((token, index) => (
             <div
               key={index}
               className="flex items-center justify-between bg-secondary px-3 py-2 rounded-md"
             >
-              <span className="text-sm font-mono">{token}</span>
+              <span className="text-sm font-mono break-all">{token}</span>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-6 w-6 p-0"
                 onClick={() => removeToken(index)}
               >
-              <Trash2 className="h-3 w-3" strokeWidth={2} fill="none" />
-            </Button>
-          </div>
-        ))}
+                <Trash2 className="h-3 w-3" strokeWidth={2} fill="none" />
+              </Button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
-  </div>
   )
 })

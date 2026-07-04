@@ -3,6 +3,8 @@
 {chat_context_description}，以下是具体的聊天内容
 **聊天内容**
 {chat_content_block}
+{memory_context_block}
+如果上方出现相关用户画像与记忆，它们只用于判断是否需要回复、回复谁、是否需要回忆或查询；不要在动作选择理由中复述隐私细节。
 
 **可选的action**
 reply

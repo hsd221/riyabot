@@ -56,6 +56,9 @@ interface AdapterConfig {
   maibot_server: {
     host: string
     port: number
+    enable_api_server: boolean
+    base_url: string
+    api_key: string
   }
   chat: {
     group_list_type: 'whitelist' | 'blacklist'
@@ -69,6 +72,9 @@ interface AdapterConfig {
   voice: {
     use_tts: boolean
   }
+  forward: {
+    image_threshold: number
+  }
   debug: {
     level: string
   }
@@ -76,7 +82,7 @@ interface AdapterConfig {
 
 const DEFAULT_CONFIG: AdapterConfig = {
   inner: {
-    version: '0.1.2',
+    version: '0.1.3',
   },
   nickname: {
     nickname: '',
@@ -90,6 +96,9 @@ const DEFAULT_CONFIG: AdapterConfig = {
   maibot_server: {
     host: 'localhost',
     port: 8000,
+    enable_api_server: false,
+    base_url: 'ws://127.0.0.1:18095/ws',
+    api_key: 'maibot',
   },
   chat: {
     group_list_type: 'whitelist',
@@ -102,6 +111,9 @@ const DEFAULT_CONFIG: AdapterConfig = {
   },
   voice: {
     use_tts: false,
+  },
+  forward: {
+    image_threshold: 3,
   },
   debug: {
     level: 'INFO',
@@ -556,6 +568,9 @@ export function AdapterConfigPage() {
     lines.push('[maibot_server] # 连接麦麦的ws服务设置')
     lines.push(`host = "${fillDefaults(config.maibot_server.host, DEFAULT_CONFIG.maibot_server.host)}" # 麦麦在.env文件中设置的主机地址，即HOST字段`)
     lines.push(`port = ${fillDefaults(config.maibot_server.port || 0, DEFAULT_CONFIG.maibot_server.port)}        # 麦麦在.env文件中设置的端口，即PORT字段`)
+    lines.push(`enable_api_server = ${config.maibot_server.enable_api_server} # 是否启用API-Server模式连接`)
+    lines.push(`base_url = "${fillDefaults(config.maibot_server.base_url, DEFAULT_CONFIG.maibot_server.base_url)}"             # API-Server连接地址 (ws://ip:port/path)，仅在enable_api_server为true时使用`)
+    lines.push(`api_key = "${fillDefaults(config.maibot_server.api_key, DEFAULT_CONFIG.maibot_server.api_key)}"        # API Key (仅在enable_api_server为true时使用)`)
     lines.push('')
 
     // Chat section
@@ -576,6 +591,11 @@ export function AdapterConfigPage() {
     // Voice section
     lines.push('[voice] # 发送语音设置')
     lines.push(`use_tts = ${config.voice.use_tts} # 是否使用tts语音（请确保你配置了tts并有对应的adapter）`)
+    lines.push('')
+
+    // Forward section
+    lines.push('[forward] # 转发消息处理设置')
+    lines.push(`image_threshold = ${fillDefaults(config.forward.image_threshold || 0, DEFAULT_CONFIG.forward.image_threshold)} # 图片数量阈值：转发消息中图片数量超过此值时使用占位符(避免麦麦VLM处理卡死)`)
     lines.push('')
 
     // Debug section
@@ -946,7 +966,7 @@ export function AdapterConfigPage() {
         ) : (
           <Tabs defaultValue="napcat" className="w-full">
             <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-              <TabsList className="inline-flex w-auto min-w-full sm:grid sm:w-full sm:grid-cols-5">
+              <TabsList className="inline-flex w-auto min-w-full sm:grid sm:w-full sm:grid-cols-6">
                 <TabsTrigger value="napcat" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">
                   <span className="hidden sm:inline">Napcat 连接</span>
                   <span className="sm:hidden">Napcat</span>
@@ -962,6 +982,10 @@ export function AdapterConfigPage() {
                 <TabsTrigger value="voice" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">
                   <span className="hidden sm:inline">语音设置</span>
                   <span className="sm:hidden">语音</span>
+                </TabsTrigger>
+                <TabsTrigger value="forward" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">
+                  <span className="hidden sm:inline">转发消息</span>
+                  <span className="sm:hidden">转发</span>
                 </TabsTrigger>
                 <TabsTrigger value="debug" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">调试</TabsTrigger>
               </TabsList>
@@ -1008,6 +1032,17 @@ export function AdapterConfigPage() {
                   setConfig(newConfig)
                   autoSaveToPath(newConfig)
                 }} 
+              />
+            </TabsContent>
+
+            {/* 转发消息配置 */}
+            <TabsContent value="forward" className="space-y-4">
+              <ForwardSection
+                config={config}
+                onChange={(newConfig) => {
+                  setConfig(newConfig)
+                  autoSaveToPath(newConfig)
+                }}
               />
             </TabsContent>
 
@@ -1213,6 +1248,58 @@ function MaiBotServerSection({
               className="text-sm md:text-base"
             />
             <p className="text-xs text-muted-foreground">麦麦在 .env 文件中设置的 PORT 字段（留空使用默认值 8000）</p>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+            <div>
+              <Label htmlFor="maibot-api-server" className="text-sm md:text-base">API-Server 模式</Label>
+              <p className="text-xs text-muted-foreground mt-1">启用后通过新版 API-Server 地址连接麦麦</p>
+            </div>
+            <Switch
+              id="maibot-api-server"
+              checked={config.maibot_server.enable_api_server}
+              onCheckedChange={(checked) =>
+                onChange({
+                  ...config,
+                  maibot_server: { ...config.maibot_server, enable_api_server: checked },
+                })
+              }
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="maibot-base-url" className="text-sm md:text-base">API-Server 地址</Label>
+            <Input
+              id="maibot-base-url"
+              value={config.maibot_server.base_url}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  maibot_server: { ...config.maibot_server, base_url: e.target.value },
+                })
+              }
+              placeholder="ws://127.0.0.1:18095/ws"
+              className="text-sm md:text-base"
+            />
+            <p className="text-xs text-muted-foreground">仅在 API-Server 模式启用时使用</p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="maibot-api-key" className="text-sm md:text-base">API Key</Label>
+            <Input
+              id="maibot-api-key"
+              type="password"
+              value={config.maibot_server.api_key}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  maibot_server: { ...config.maibot_server, api_key: e.target.value },
+                })
+              }
+              placeholder="maibot"
+              className="text-sm md:text-base"
+            />
+            <p className="text-xs text-muted-foreground">仅在 API-Server 模式启用时使用</p>
           </div>
         </div>
       </div>
@@ -1522,6 +1609,46 @@ function VoiceSection({
               })
             }
           />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 转发消息配置组件
+function ForwardSection({
+  config,
+  onChange,
+}: {
+  config: AdapterConfig
+  onChange: (config: AdapterConfig) => void
+}) {
+  return (
+    <div className="rounded-lg border bg-card p-4 md:p-6 space-y-4 md:space-y-6">
+      <div>
+        <h3 className="text-base md:text-lg font-semibold mb-3 md:mb-4">转发消息处理设置</h3>
+        <div className="grid gap-3 md:gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="forward-image-threshold" className="text-sm md:text-base">图片数量阈值</Label>
+            <Input
+              id="forward-image-threshold"
+              type="number"
+              min={0}
+              value={config.forward.image_threshold || ''}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  forward: {
+                    ...config.forward,
+                    image_threshold: e.target.value ? parseInt(e.target.value) : 0,
+                  },
+                })
+              }
+              placeholder="3"
+              className="text-sm md:text-base"
+            />
+            <p className="text-xs text-muted-foreground">转发消息中图片数量超过此值时使用占位符，避免 VLM 处理卡死</p>
+          </div>
         </div>
       </div>
     </div>

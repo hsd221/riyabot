@@ -34,6 +34,7 @@ from src.memory.atom import (
     get_fade_level,
     update_weight,
     to_datetime,
+    to_timestamp,
 )
 from src.memory.graph_store import GraphStore
 from src.memory.store import MemoryStore
@@ -641,11 +642,10 @@ class MemoryWriter:
             if key in ("created_at", "last_accessed_at", "last_reinforced_at"):
                 if isinstance(value, str):
                     try:
-                        value = _dt.datetime.fromisoformat(value)
+                        _dt.datetime.fromisoformat(value)
                     except (ValueError, TypeError):
                         continue
-                elif isinstance(value, (int, float)):
-                    value = to_datetime(value)
+                value = to_timestamp(value)
             store_updates[key] = value
 
         try:
@@ -755,13 +755,13 @@ class MemoryWriter:
     def _atom_to_store_dict(self, atom: MemoryAtomDC) -> dict[str, Any]:
         """将 MemoryAtom dataclass 转为 store.insert_atom 可接受的字典
 
-        处理字段类型转换: enum→str, datetime↔float, 列表→JSON。
+        处理字段类型转换: enum→str, 时间→float, 列表→JSON。
 
         Args:
             atom: 记忆原子 dataclass
 
         Returns:
-            适合 store.insert_atom 的字段字典
+            适合 store.insert_atom 的字段字典，同时保持 WriteOperation payload 可 JSON 序列化
         """
         data: dict[str, Any] = {
             "atom_id": atom.atom_id,
@@ -770,8 +770,8 @@ class MemoryWriter:
             "importance": atom.importance,
             "confidence": atom.confidence,
             "weight": atom.weight,
-            "created_at": to_datetime(atom.created_at),
-            "last_accessed_at": to_datetime(atom.last_accessed_at),
+            "created_at": to_timestamp(atom.created_at),
+            "last_accessed_at": to_timestamp(atom.last_accessed_at),
             "ttl_days": int(atom.ttl_days),
             "decay_type": _convert_decay_type(atom.decay_type),
             "reinforcement_count": atom.reinforcement_count,
@@ -792,7 +792,7 @@ class MemoryWriter:
 
         # last_reinforced_at: 有值则转换，无值让 store 用默认值
         if atom.last_reinforced_at is not None:
-            data["last_reinforced_at"] = to_datetime(atom.last_reinforced_at)
+            data["last_reinforced_at"] = to_timestamp(atom.last_reinforced_at)
 
         return data
 

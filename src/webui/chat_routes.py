@@ -16,6 +16,11 @@ from src.common.database.database_model import Messages
 from src.config.config import global_config
 from src.chat.message_receive.bot import chat_bot
 from src.webui.auth import verify_auth_token_from_cookie_or_header
+from src.webui.person_routes import (
+    get_profile_person_dict,
+    get_profile_person_stats,
+    list_profile_person_dicts,
+)
 from src.webui.token_manager import get_token_manager
 from src.webui.ws_auth import verify_ws_token
 
@@ -286,8 +291,10 @@ async def get_chat_history(
 
 @router.get("/platforms")
 async def get_available_platforms(_auth: bool = Depends(require_auth)):
-    """获取可用平台列表（用户画像功能已迁移，返回空列表）"""
-    return {"success": True, "platforms": []}
+    """获取可用平台列表（来自新记忆系统用户画像）"""
+    stats = get_profile_person_stats()
+    platforms = [{"platform": platform, "count": count} for platform, count in stats["platforms"].items()]
+    return {"success": True, "platforms": platforms}
 
 
 @router.get("/persons")
@@ -297,8 +304,20 @@ async def get_persons_by_platform(
     limit: int = Query(default=50, ge=1, le=200),
     _auth: bool = Depends(require_auth),
 ):
-    """获取指定平台的用户列表（用户画像功能已迁移，返回空列表）"""
-    return {"success": True, "persons": [], "total": 0}
+    """获取指定平台的用户列表（来自新记忆系统用户画像）"""
+    persons = list_profile_person_dicts(search=search, platform=platform, is_known=True, limit=limit)
+    compact_persons = [
+        {
+            "person_id": person["person_id"],
+            "user_id": person["user_id"],
+            "person_name": person["person_name"],
+            "nickname": person["nickname"],
+            "platform": person["platform"],
+            "is_known": person["is_known"],
+        }
+        for person in persons
+    ]
+    return {"success": True, "persons": compact_persons, "total": len(compact_persons)}
 
 
 @router.delete("/history")
@@ -388,10 +407,21 @@ async def websocket_chat(
     current_virtual_config: Optional[VirtualIdentityConfig] = None
 
     # 如果 URL 参数中提供了虚拟身份信息，自动配置
-    # 注意：用户画像功能已迁移，无法通过 PersonInfo DB 查询用户信息
-    # 虚拟身份模式设置请通过 WebSocket 消息 set_virtual_identity 进行（需提供完整用户信息）
     if platform and person_id:
-        logger.warning("URL 参数虚拟身份配置不可用：用户画像功能已迁移。请通过 set_virtual_identity 消息设置。")
+        person = get_profile_person_dict(person_id)
+        if person and person["platform"] == platform:
+            virtual_group_id = group_id or f"{VIRTUAL_GROUP_ID_PREFIX}{platform}_{person['user_id']}"
+            current_virtual_config = VirtualIdentityConfig(
+                enabled=True,
+                platform=platform,
+                person_id=person["person_id"],
+                user_id=person["user_id"],
+                user_nickname=person["nickname"] or person["person_name"] or person["user_id"],
+                group_id=virtual_group_id,
+                group_name=group_name or "WebUI虚拟群聊",
+            )
+        else:
+            logger.warning("URL 参数虚拟身份配置失败：未找到匹配用户画像 platform=%s person_id=%s", platform, person_id)
 
     await chat_manager.connect(websocket, session_id, user_id)
 

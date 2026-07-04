@@ -4,6 +4,7 @@
 
 import os
 import tomlkit
+from dataclasses import fields
 from fastapi import APIRouter, HTTPException, Body, Depends, Cookie, Header
 from typing import Any, Annotated, Optional
 
@@ -24,6 +25,8 @@ from src.config.official_configs import (
     ResponsePostProcessConfig,
     ResponseSplitterConfig,
     TelemetryConfig,
+    LogConfig,
+    WebUIConfig,
     ExperimentalConfig,
     MaimMessageConfig,
     LPMMKnowledgeConfig,
@@ -31,6 +34,7 @@ from src.config.official_configs import (
     MemoryConfig,
     DebugConfig,
     VoiceConfig,
+    DreamConfig,
 )
 from src.config.api_ada_configs import (
     ModelTaskConfig,
@@ -48,6 +52,62 @@ RawContentBody = Annotated[str, Body(embed=True)]
 PathBody = Annotated[dict[str, str], Body()]
 
 router = APIRouter(prefix="/config", tags=["config"])
+
+BOT_SECTION_SCHEMAS = {
+    "bot": BotConfig,
+    "personality": PersonalityConfig,
+    "relationship": RelationshipConfig,
+    "chat": ChatConfig,
+    "message_receive": MessageReceiveConfig,
+    "emoji": EmojiConfig,
+    "expression": ExpressionConfig,
+    "keyword_reaction": KeywordReactionConfig,
+    "chinese_typo": ChineseTypoConfig,
+    "response_post_process": ResponsePostProcessConfig,
+    "response_splitter": ResponseSplitterConfig,
+    "telemetry": TelemetryConfig,
+    "log": LogConfig,
+    "webui": WebUIConfig,
+    "experimental": ExperimentalConfig,
+    "maim_message": MaimMessageConfig,
+    "lpmm_knowledge": LPMMKnowledgeConfig,
+    "tool": ToolConfig,
+    "memory": MemoryConfig,
+    "debug": DebugConfig,
+    "voice": VoiceConfig,
+    "dream": DreamConfig,
+}
+
+LEGACY_BOT_SECTIONS = {"mood", "jargon"}
+
+
+def _allowed_field_names(config_class: type) -> set[str]:
+    """返回配置类允许保存到 TOML 的字段名。"""
+    return {field.name for field in fields(config_class) if not field.name.startswith("_")}
+
+
+def _prune_legacy_bot_config_keys(config_data: Any, section_name: Optional[str] = None) -> None:
+    """清理已知废弃配置键，避免 WebUI 保存后继续保留旧字段。"""
+    if not isinstance(config_data, dict):
+        return
+
+    if section_name is None:
+        for legacy_section in LEGACY_BOT_SECTIONS:
+            config_data.pop(legacy_section, None)
+        section_names = BOT_SECTION_SCHEMAS.keys()
+    else:
+        section_names = [section_name]
+
+    for name in section_names:
+        section = config_data.get(name)
+        config_class = BOT_SECTION_SCHEMAS.get(name)
+        if config_class is None or not isinstance(section, dict):
+            continue
+
+        allowed_fields = _allowed_field_names(config_class)
+        for key in list(section.keys()):
+            if key not in allowed_fields:
+                section.pop(key, None)
 
 
 def require_auth(
@@ -105,6 +165,8 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
     - response_post_process: ResponsePostProcessConfig
     - response_splitter: ResponseSplitterConfig
     - telemetry: TelemetryConfig
+    - log: LogConfig
+    - webui: WebUIConfig
     - experimental: ExperimentalConfig
     - maim_message: MaimMessageConfig
     - lpmm_knowledge: LPMMKnowledgeConfig
@@ -112,31 +174,13 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
     - memory: MemoryConfig
     - debug: DebugConfig
     - voice: VoiceConfig
-    - jargon: JargonConfig
+    - dream: DreamConfig
     - model_task_config: ModelTaskConfig
     - api_provider: APIProvider
     - model_info: ModelInfo
     """
     section_map = {
-        "bot": BotConfig,
-        "personality": PersonalityConfig,
-        "relationship": RelationshipConfig,
-        "chat": ChatConfig,
-        "message_receive": MessageReceiveConfig,
-        "emoji": EmojiConfig,
-        "expression": ExpressionConfig,
-        "keyword_reaction": KeywordReactionConfig,
-        "chinese_typo": ChineseTypoConfig,
-        "response_post_process": ResponsePostProcessConfig,
-        "response_splitter": ResponseSplitterConfig,
-        "telemetry": TelemetryConfig,
-        "experimental": ExperimentalConfig,
-        "maim_message": MaimMessageConfig,
-        "lpmm_knowledge": LPMMKnowledgeConfig,
-        "tool": ToolConfig,
-        "memory": MemoryConfig,
-        "debug": DebugConfig,
-        "voice": VoiceConfig,
+        **BOT_SECTION_SCHEMAS,
         "model_task_config": ModelTaskConfig,
         "api_provider": APIProvider,
         "model_info": ModelInfo,
@@ -202,6 +246,8 @@ async def get_model_config(_auth: bool = Depends(require_auth)):
 async def update_bot_config(config_data: ConfigBody, _auth: bool = Depends(require_auth)):
     """更新麦麦主程序配置"""
     try:
+        _prune_legacy_bot_config_keys(config_data)
+
         # 验证配置数据
         try:
             Config.from_dict(config_data)
@@ -274,6 +320,8 @@ async def update_bot_config_section(section_name: str, section_data: SectionBody
         else:
             # 其他类型直接替换
             config_data[section_name] = section_data
+
+        _prune_legacy_bot_config_keys(config_data, section_name)
 
         # 验证完整配置
         try:

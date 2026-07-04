@@ -25,6 +25,7 @@ from src.plugin_system.base.component_types import ActionInfo, ComponentType, Ac
 from src.plugin_system.core.component_registry import component_registry
 from src.plugin_system.apis.message_api import translate_pid_to_description
 from src.common.person_stub import Person
+from src.memory.prompt_integration import build_memory_retrieval_prompt
 
 if TYPE_CHECKING:
     from src.common.data_models.info_data_model import TargetPersonInfo
@@ -43,6 +44,8 @@ def init_prompt():
 {chat_context_description}，以下是具体的聊天内容
 **聊天内容**
 {chat_content_block}
+{memory_context_block}
+如果上方出现相关用户画像与记忆，它们只用于判断是否需要回复、回复谁、是否需要回忆或查询；不要在动作选择理由中复述隐私细节。
 
 **可选的action**
 reply
@@ -552,11 +555,14 @@ class ActionPlanner:
                 reply_action_example += ', "quote":"如果需要引用该message，设置为true"'
             reply_action_example += "}"
 
+            memory_context_block = await self._build_planner_memory_context(chat_content_block, message_id_list)
+
             planner_prompt_template = await global_prompt_manager.get_prompt_async("planner_prompt")
             prompt = planner_prompt_template.format(
                 time_block=time_block,
                 chat_context_description=chat_context_description,
                 chat_content_block=chat_content_block,
+                memory_context_block=memory_context_block,
                 actions_before_now_block=actions_before_now_block,
                 action_options_text=action_options_block,
                 moderation_prompt=moderation_prompt_block,
@@ -571,6 +577,46 @@ class ActionPlanner:
             logger.error(f"构建 Planner 提示词时出错: {e}")
             logger.error(traceback.format_exc())
             return "构建 Planner Prompt 时出错", []
+
+    async def _build_planner_memory_context(
+        self,
+        chat_content_block: str,
+        message_id_list: List[Tuple[str, "DatabaseMessages"]],
+    ) -> str:
+        """为 planner 构建短记忆上下文。"""
+        try:
+            chat_stream = get_chat_manager().get_stream(self.chat_id)
+            if chat_stream is None:
+                return ""
+
+            user_id = None
+            sender = ""
+            target = ""
+            for _, message in reversed(message_id_list):
+                if message.user_id and not is_bot_self(message.user_platform, message.user_id):
+                    user_id = message.user_id
+                    sender = message.user_nickname or message.user_cardname or message.user_id
+                    target = message.processed_plain_text or message.display_message or ""
+                    break
+
+            memory_context, _ = await build_memory_retrieval_prompt(
+                chat_talking_prompt_short=chat_content_block[-1200:],
+                sender=sender,
+                target=target,
+                chat_stream=chat_stream,
+                think_level=1,
+                user_id=user_id,
+                max_atoms=3,
+                max_chars=500,
+                include_cross_scene=False,
+            )
+            if not memory_context:
+                return ""
+
+            return f"\n**相关用户画像与记忆（内部参考）**\n{memory_context}"
+        except Exception as e:
+            logger.debug(f"{self.log_prefix}构建 planner 记忆上下文失败: {e}")
+            return ""
 
     def get_necessary_info(self) -> Tuple[bool, Optional["TargetPersonInfo"], Dict[str, ActionInfo]]:
         """

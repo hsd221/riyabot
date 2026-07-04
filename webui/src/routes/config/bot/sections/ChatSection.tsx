@@ -209,12 +209,14 @@ const RulePreview = React.memo(function RulePreview({ rule }: { rule: { target: 
 })
 
 export const ChatSection = React.memo(function ChatSection({ config, onChange }: ChatSectionProps) {
+  const talkValueRules = config.talk_value_rules ?? []
+
   // 添加发言频率规则
   const addTalkValueRule = () => {
     onChange({
       ...config,
       talk_value_rules: [
-        ...config.talk_value_rules,
+        ...talkValueRules,
         { target: '', time: '00:00-23:59', value: 1.0 },
       ],
     })
@@ -224,7 +226,7 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
   const removeTalkValueRule = (index: number) => {
     onChange({
       ...config,
-      talk_value_rules: config.talk_value_rules.filter((_, i) => i !== index),
+      talk_value_rules: talkValueRules.filter((_, i) => i !== index),
     })
   }
 
@@ -234,7 +236,7 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
     field: 'target' | 'time' | 'value',
     value: string | number
   ) => {
-    const newRules = [...config.talk_value_rules]
+    const newRules = [...talkValueRules]
     newRules[index] = {
       ...newRules[index],
       [field]: value,
@@ -278,6 +280,24 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
           </div>
 
           <div className="grid gap-2">
+            <Label htmlFor="at_bot_inevitable_reply">@ Bot 回复增幅</Label>
+            <Input
+              id="at_bot_inevitable_reply"
+              type="number"
+              step="0.1"
+              min="0"
+              max="1"
+              value={config.at_bot_inevitable_reply}
+              onChange={(e) =>
+                onChange({ ...config, at_bot_inevitable_reply: parseFloat(e.target.value) })
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              @bot 时额外提高回复概率，1 为 100% 回复，0 为不额外增幅
+            </p>
+          </div>
+
+          <div className="grid gap-2">
             <Label htmlFor="max_context_size">上下文长度</Label>
             <Input
               id="max_context_size"
@@ -307,6 +327,35 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
             </p>
           </div>
 
+          <div className="grid gap-2">
+            <Label htmlFor="plan_reply_log_max_per_chat">每个聊天保存的 Plan/Reply 日志数</Label>
+            <Input
+              id="plan_reply_log_max_per_chat"
+              type="number"
+              min="1"
+              value={config.plan_reply_log_max_per_chat}
+              onChange={(e) =>
+                onChange({ ...config, plan_reply_log_max_per_chat: parseInt(e.target.value) })
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              超过此数量时会自动删除最老的 Plan/Reply 日志
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="llm_quote"
+              checked={config.llm_quote}
+              onCheckedChange={(checked) =>
+                onChange({ ...config, llm_quote: checked })
+              }
+            />
+            <Label htmlFor="llm_quote" className="cursor-pointer">
+              允许 LLM 控制引用消息
+            </Label>
+          </div>
+
           <div className="flex items-center space-x-2">
             <Switch
               id="enable_talk_value_rules"
@@ -317,19 +366,6 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
             />
             <Label htmlFor="enable_talk_value_rules" className="cursor-pointer">
               启用动态发言频率规则
-            </Label>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="include_planner_reasoning"
-              checked={config.include_planner_reasoning}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, include_planner_reasoning: checked })
-              }
-            />
-            <Label htmlFor="include_planner_reasoning" className="cursor-pointer">
-              将 planner 推理加入 replyer
             </Label>
           </div>
         </div>
@@ -351,9 +387,9 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
             </Button>
           </div>
 
-          {config.talk_value_rules && config.talk_value_rules.length > 0 ? (
+          {talkValueRules.length > 0 ? (
             <div className="space-y-4">
-              {config.talk_value_rules.map((rule, index) => (
+              {talkValueRules.map((rule, index) => (
                 <div key={index} className="rounded-lg border p-4 bg-muted/50 space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-muted-foreground">

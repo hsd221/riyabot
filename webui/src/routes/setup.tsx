@@ -80,12 +80,8 @@ export function SetupPage() {
     personality: '是一个女大学生，现在在读大二，会刷贴吧。',
     reply_style:
       '请回复的平淡一些，简短一些，说中文，不要刻意突出自身学科背景。可以参考贴吧，知乎和微博的回复风格。',
-    interest:
-      '对技术相关话题，游戏和动漫相关话题感兴趣，也对日常话题感兴趣，不喜欢太过沉重严肃的话题',
     plan_style:
       '1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用\n2.如果相同的内容已经被执行，请不要重复执行\n3.请控制你的发言频率，不要太过频繁的发言\n4.如果有人对你感到厌烦，请减少回复\n5.如果有人对你进行攻击，或者情绪激动，请你以合适的方法应对',
-    private_plan_style:
-      '1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用\n2.如果相同的内容已经被执行，请不要重复执行\n3.某句话如果已经被回复过，不要重复回复',
   })
 
   // 步骤3：表情包配置
@@ -102,10 +98,7 @@ export function SetupPage() {
   // 步骤4：其他基础配置
   const [otherBasic, setOtherBasic] = useState<OtherBasicConfig>({
     enable_tool: true,
-    enable_mood: false,
-    mood_update_threshold: 1,
-    emotion_style: '情绪较为稳定，但遇遇特定事件的时候起伏较大',
-    all_global: true,
+    all_global_jargon: true,
   })
 
   // 步骤5：硅基流动API配置
@@ -139,7 +132,7 @@ export function SetupPage() {
     {
       id: 'other',
       title: '其他设置',
-      description: '工具、情绪系统等配置',
+      description: '工具、黑话模式等配置',
       icon: Settings,
     },
     {

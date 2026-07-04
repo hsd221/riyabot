@@ -1,20 +1,26 @@
 """人物信息管理 API 路由
 
-# 用户画像功能已迁移 — 路由保留占位
-未来的用户画像系统会替代此模块。
+对接新记忆系统的 user_profiles 表，并保持旧 WebUI PersonInfo API 兼容。
 """
 
 from fastapi import APIRouter, HTTPException, Header, Query, Cookie
-from pydantic import BaseModel
-from typing import Optional, List, Dict
+from pydantic import BaseModel, Field
+from typing import Any, Optional, List, Dict
 from src.common.logger import get_logger
 from .auth import verify_auth_token_from_cookie_or_header
 import json
+import zlib
+from collections import Counter
+from datetime import datetime
+
+from src.memory.user_profile import ProfileStore, UserProfile
 
 logger = get_logger("webui.person")
 
 # 创建路由器
 router = APIRouter(prefix="/person", tags=["Person"])
+
+_WEBUI_META_KEY = "_webui_person_info"
 
 
 class PersonInfoResponse(BaseModel):
@@ -33,6 +39,15 @@ class PersonInfoResponse(BaseModel):
     know_times: Optional[float]
     know_since: Optional[float]
     last_know: Optional[float]
+    profile_traits: Dict[str, float] = Field(default_factory=dict)
+    profile_interests: List[str] = Field(default_factory=list)
+    profile_preferences: Dict[str, str] = Field(default_factory=dict)
+    profile_facts: Dict[str, str] = Field(default_factory=dict)
+    profile_stats: Dict[str, Any] = Field(default_factory=dict)
+    profile_expression_style: Optional[str] = None
+    profile_expression_patterns: Dict[str, Any] = Field(default_factory=dict)
+    mood_history_count: int = 0
+    last_extracted_at: Optional[float] = None
 
 
 class PersonListResponse(BaseModel):
@@ -111,6 +126,189 @@ def parse_group_nick_name(group_nick_name_str: Optional[str]) -> Optional[List[D
         return None
 
 
+def _stable_int_id(value: str) -> int:
+    """从 user_id 生成稳定的正整数 ID，兼容旧前端表格 key。"""
+    return zlib.crc32(value.encode("utf-8")) & 0x7FFFFFFF
+
+
+def _to_timestamp(value: Any) -> Optional[float]:
+    """将画像时间字段转换为前端使用的秒级时间戳。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_fact(profile: UserProfile, *keys: str) -> Optional[str]:
+    """按候选键从 profile.facts 中取第一个非空字符串。"""
+    for key in keys:
+        value = profile.facts.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _profile_meta(profile: UserProfile) -> Dict[str, Any]:
+    """读取 WebUI 私有元数据，不参与画像语义聚合。"""
+    meta = profile.stats.get(_WEBUI_META_KEY) if isinstance(profile.stats, dict) else None
+    return meta if isinstance(meta, dict) else {}
+
+
+def _first_meta(profile: UserProfile, *keys: str) -> Optional[str]:
+    """按候选键从 WebUI 私有元数据中取第一个非空字符串。"""
+    meta = _profile_meta(profile)
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _profile_platform(profile: UserProfile) -> str:
+    """从画像事实中恢复平台，缺省使用 memory。"""
+    return _first_meta(profile, "platform") or _first_fact(profile, "platform", "平台", "source_platform") or "memory"
+
+
+def _profile_display_name(profile: UserProfile) -> str:
+    """从画像事实中恢复显示名，缺省使用 user_id。"""
+    return (
+        _first_meta(profile, "person_name", "display_name")
+        or _first_fact(profile, "person_name", "display_name", "name", "username", "昵称", "姓名")
+        or profile.user_id
+    )
+
+
+def _profile_nickname(profile: UserProfile) -> Optional[str]:
+    """从画像事实中恢复昵称。"""
+    return _first_meta(profile, "nickname") or _first_fact(profile, "nickname", "nick_name", "user_nickname", "群昵称")
+
+
+def _public_profile_stats(profile: UserProfile) -> Dict[str, Any]:
+    """过滤 WebUI/内部私有统计字段后返回给前端展示。"""
+    if not isinstance(profile.stats, dict):
+        return {}
+    return {key: value for key, value in profile.stats.items() if not key.startswith("_")}
+
+
+def _group_nicknames(profile: UserProfile) -> Optional[List[Dict[str, str]]]:
+    """读取 WebUI 兼容的群昵称列表。"""
+    raw = profile.facts.get("group_nick_name") or profile.facts.get("group_nicknames")
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        parsed = parse_group_nick_name(raw)
+        if parsed:
+            return parsed
+    return None
+
+
+def _profile_search_text(person: Dict[str, Any]) -> str:
+    """构建搜索文本。"""
+    parts = [
+        person.get("person_id"),
+        person.get("person_name"),
+        person.get("nickname"),
+        person.get("platform"),
+        person.get("user_id"),
+        person.get("memory_points"),
+        person.get("name_reason"),
+    ]
+    parts.extend(person.get("profile_interests") or [])
+    parts.append(json.dumps(person.get("profile_preferences") or {}, ensure_ascii=False))
+    parts.append(json.dumps(person.get("profile_facts") or {}, ensure_ascii=False))
+    return "\n".join(str(part) for part in parts if part).lower()
+
+
+def profile_to_person_dict(profile: UserProfile) -> Dict[str, Any]:
+    """将新记忆画像转换成旧 WebUI PersonInfo 形状。"""
+    meta = _profile_meta(profile)
+    is_known = meta.get("is_known", True)
+    name_reason = _first_meta(profile, "name_reason") or _first_fact(profile, "name_reason") or "来自新记忆系统用户画像"
+    person_name = _profile_display_name(profile)
+
+    return {
+        "id": _stable_int_id(profile.user_id),
+        "is_known": bool(is_known),
+        "person_id": profile.user_id,
+        "person_name": person_name,
+        "name_reason": name_reason,
+        "platform": _profile_platform(profile),
+        "user_id": profile.user_id,
+        "nickname": _profile_nickname(profile),
+        "group_nick_name": _group_nicknames(profile),
+        "memory_points": _first_meta(profile, "memory_points") or profile.impression or None,
+        "know_times": _to_timestamp(profile.created_at),
+        "know_since": _to_timestamp(profile.created_at),
+        "last_know": _to_timestamp(profile.updated_at),
+        "profile_traits": dict(profile.traits or {}),
+        "profile_interests": list(profile.interests or []),
+        "profile_preferences": dict(profile.preferences or {}),
+        "profile_facts": dict(profile.facts or {}),
+        "profile_stats": _public_profile_stats(profile),
+        "profile_expression_style": profile.expression_style or None,
+        "profile_expression_patterns": dict(profile.expression_patterns or {}),
+        "mood_history_count": len(profile.mood_history or []),
+        "last_extracted_at": _to_timestamp(profile.last_extracted_at),
+    }
+
+
+def list_profile_person_dicts(
+    search: Optional[str] = None,
+    platform: Optional[str] = None,
+    is_known: Optional[bool] = None,
+    limit: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """列出新记忆系统中的画像，并按旧 PersonInfo 查询条件过滤。"""
+    profile_store = ProfileStore()
+    persons: List[Dict[str, Any]] = []
+    search_text = search.strip().lower() if search else ""
+
+    for user_id in profile_store.list_profiles():
+        profile = profile_store.get_profile(user_id)
+        if profile is None:
+            continue
+
+        person = profile_to_person_dict(profile)
+        if platform and person["platform"] != platform:
+            continue
+        if is_known is not None and person["is_known"] != is_known:
+            continue
+        if search_text and search_text not in _profile_search_text(person):
+            continue
+
+        persons.append(person)
+        if limit is not None and len(persons) >= limit:
+            break
+
+    return persons
+
+
+def get_profile_person_dict(person_id: str) -> Optional[Dict[str, Any]]:
+    """获取单个新记忆画像的旧 PersonInfo 字典。"""
+    profile = ProfileStore().get_profile(person_id)
+    if profile is None:
+        return None
+    return profile_to_person_dict(profile)
+
+
+def get_profile_person_stats() -> Dict[str, Any]:
+    """统计新记忆系统画像数量。"""
+    persons = list_profile_person_dicts()
+    platform_counts = Counter(person["platform"] for person in persons)
+    known = sum(1 for person in persons if person["is_known"])
+    total = len(persons)
+    return {
+        "total": total,
+        "known": known,
+        "unknown": total - known,
+        "platforms": dict(platform_counts),
+    }
+
+
 @router.get("/list", response_model=PersonListResponse)
 async def get_person_list(
     page: int = Query(1, ge=1, description="页码"),
@@ -121,11 +319,15 @@ async def get_person_list(
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
 ):
-    """获取人物信息列表（用户画像功能已迁移，返回空列表）"""
+    """获取人物信息列表（来自新记忆系统用户画像）"""
     try:
         verify_auth_token(maibot_session, authorization)
-        logger.info("人物列表查询：用户画像功能已迁移，返回空列表")
-        return PersonListResponse(success=True, total=0, page=page, page_size=page_size, data=[])
+        persons = list_profile_person_dicts(search=search, platform=platform, is_known=is_known)
+        total = len(persons)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_data = [PersonInfoResponse(**person) for person in persons[start:end]]
+        return PersonListResponse(success=True, total=total, page=page, page_size=page_size, data=page_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -133,14 +335,64 @@ async def get_person_list(
         raise HTTPException(status_code=500, detail=f"获取人物列表失败: {str(e)}") from e
 
 
+@router.get("/stats/summary")
+async def get_person_stats(maibot_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)):
+    """获取人物信息统计数据（来自新记忆系统用户画像）"""
+    try:
+        verify_auth_token(maibot_session, authorization)
+        return {"success": True, "data": get_profile_person_stats()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"获取统计数据失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}") from e
+
+
+@router.post("/batch/delete", response_model=BatchDeleteResponse)
+async def batch_delete_persons(
+    request: BatchDeleteRequest,
+    maibot_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+):
+    """批量删除人物画像。"""
+    try:
+        verify_auth_token(maibot_session, authorization)
+        profile_store = ProfileStore()
+        failed_ids: List[str] = []
+        deleted_count = 0
+
+        for person_id in request.person_ids:
+            if not profile_store.profile_exists(person_id):
+                failed_ids.append(person_id)
+                continue
+            profile_store.delete_profile(person_id)
+            deleted_count += 1
+
+        return BatchDeleteResponse(
+            success=True,
+            message=f"已删除 {deleted_count} 个用户画像",
+            deleted_count=deleted_count,
+            failed_count=len(failed_ids),
+            failed_ids=failed_ids,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"批量删除人物信息失败: {e}")
+        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}") from e
+
+
 @router.get("/{person_id}", response_model=PersonDetailResponse)
 async def get_person_detail(
     person_id: str, maibot_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)
 ):
-    """获取人物详细信息（用户画像功能已迁移）"""
+    """获取人物详细信息（来自新记忆系统用户画像）"""
     try:
         verify_auth_token(maibot_session, authorization)
-        raise HTTPException(status_code=404, detail="用户画像功能已迁移")
+        profile = ProfileStore().get_profile(person_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="用户画像不存在")
+        return PersonDetailResponse(success=True, data=PersonInfoResponse(**profile_to_person_dict(profile)))
     except HTTPException:
         raise
     except Exception as e:
@@ -155,10 +407,61 @@ async def update_person(
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
 ):
-    """更新人物信息（用户画像功能已迁移，操作不可用）"""
+    """更新人物画像的 WebUI 兼容字段。"""
     try:
         verify_auth_token(maibot_session, authorization)
-        raise HTTPException(status_code=400, detail="操作不可用：用户画像功能已迁移")
+        profile_store = ProfileStore()
+        profile = profile_store.get_profile(person_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="用户画像不存在")
+
+        if request.person_name is not None:
+            value = request.person_name.strip()
+            meta = _profile_meta(profile)
+            if value:
+                meta["person_name"] = value
+            else:
+                meta.pop("person_name", None)
+            profile.facts.pop("person_name", None)
+            profile.stats[_WEBUI_META_KEY] = meta
+        if request.name_reason is not None:
+            value = request.name_reason.strip()
+            meta = _profile_meta(profile)
+            if value:
+                meta["name_reason"] = value
+            else:
+                meta.pop("name_reason", None)
+            profile.facts.pop("name_reason", None)
+            profile.stats[_WEBUI_META_KEY] = meta
+        if request.nickname is not None:
+            value = request.nickname.strip()
+            meta = _profile_meta(profile)
+            if value:
+                meta["nickname"] = value
+            else:
+                meta.pop("nickname", None)
+            profile.facts.pop("nickname", None)
+            profile.stats[_WEBUI_META_KEY] = meta
+        if request.memory_points is not None:
+            value = request.memory_points.strip()
+            meta = _profile_meta(profile)
+            if value:
+                meta["memory_points"] = value
+            else:
+                meta.pop("memory_points", None)
+            profile.stats[_WEBUI_META_KEY] = meta
+        if request.is_known is not None:
+            meta = _profile_meta(profile)
+            meta["is_known"] = request.is_known
+            profile.stats[_WEBUI_META_KEY] = meta
+
+        profile_store.save_profile(profile)
+        updated = profile_store.get_profile(person_id) or profile
+        return PersonUpdateResponse(
+            success=True,
+            message="用户画像已更新",
+            data=PersonInfoResponse(**profile_to_person_dict(updated)),
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -170,48 +473,16 @@ async def update_person(
 async def delete_person(
     person_id: str, maibot_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)
 ):
-    """删除人物信息（用户画像功能已迁移，操作不可用）"""
+    """删除人物画像。"""
     try:
         verify_auth_token(maibot_session, authorization)
-        raise HTTPException(status_code=400, detail="操作不可用：用户画像功能已迁移")
+        profile_store = ProfileStore()
+        if not profile_store.profile_exists(person_id):
+            raise HTTPException(status_code=404, detail="用户画像不存在")
+        profile_store.delete_profile(person_id)
+        return PersonDeleteResponse(success=True, message="用户画像已删除")
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"删除人物信息失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除人物信息失败: {str(e)}") from e
-
-
-@router.get("/stats/summary")
-async def get_person_stats(maibot_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)):
-    """获取人物信息统计数据（用户画像功能已迁移，返回空数据）"""
-    try:
-        verify_auth_token(maibot_session, authorization)
-        return {"success": True, "data": {"total": 0, "known": 0, "unknown": 0, "platforms": {}}}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"获取统计数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}") from e
-
-
-@router.post("/batch/delete", response_model=BatchDeleteResponse)
-async def batch_delete_persons(
-    request: BatchDeleteRequest,
-    maibot_session: Optional[str] = Cookie(None),
-    authorization: Optional[str] = Header(None),
-):
-    """批量删除人物信息（用户画像功能已迁移，操作不可用）"""
-    try:
-        verify_auth_token(maibot_session, authorization)
-        return BatchDeleteResponse(
-            success=True,
-            message="操作不可用：用户画像功能已迁移",
-            deleted_count=0,
-            failed_count=0,
-            failed_ids=[],
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"批量删除人物信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}") from e

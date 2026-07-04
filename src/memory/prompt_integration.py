@@ -21,6 +21,9 @@ async def build_memory_retrieval_prompt(
     question: Optional[str] = None,
     user_id: Optional[str] = None,
     graph_store: Optional[Any] = None,
+    max_atoms: int = 5,
+    max_chars: int = 800,
+    include_cross_scene: bool = True,
 ) -> tuple[str, list[str]]:
     """从新记忆系统检索相关上下文，用于 LLM prompt 拼接
 
@@ -62,23 +65,24 @@ async def build_memory_retrieval_prompt(
             stream_id=stream_id,
             user_id=resolved_user_id,
             scene_type=scene_type,
-            max_atoms=5,
-            max_chars=800,
+            max_atoms=max_atoms,
+            max_chars=max_chars,
         )
 
         # 跨场景记忆检索（try/except 保护，不中断正常流程）
         cross_scene_text = ""
-        try:
-            cross_scene_text = await retriever.get_cross_scene_context(
-                scene_type=scene_type,
-                stream_id=stream_id,
-                user_id=resolved_user_id or "",
-                max_atoms=2,
-                max_chars=300,
-                cross_scene_atoms=3,
-            )
-        except Exception:
-            pass
+        if include_cross_scene:
+            try:
+                cross_scene_text = await retriever.get_cross_scene_context(
+                    scene_type=scene_type,
+                    stream_id=stream_id,
+                    user_id=resolved_user_id or "",
+                    max_atoms=2,
+                    max_chars=300,
+                    cross_scene_atoms=3,
+                )
+            except Exception:
+                pass
 
         # 尝试添加用户 profile 上下文（模块不存在时静默跳过）
         profile_text = ""
@@ -92,14 +96,24 @@ async def build_memory_retrieval_prompt(
             except Exception:
                 pass
 
-        # 拼接最终文本
-        final_text = ""
+        # 拼接最终文本：这是内部参考资料，不要求模型逐条使用，更不能在回复中暴露来源。
+        sections: list[str] = []
         if profile_text:
-            final_text += f"\n【用户画像】\n{profile_text}\n"
+            sections.append(f"【用户画像参考】\n{profile_text}")
         if memory_context:
-            final_text += f"\n【记忆检索】\n{memory_context}\n"
+            sections.append(f"【相关记忆参考】\n{memory_context}")
         if cross_scene_text:
-            final_text += f"\n【跨场景记忆】\n{cross_scene_text}\n"
+            sections.append(f"【跨场景记忆参考】\n{cross_scene_text}")
+
+        final_text = ""
+        if sections:
+            final_text = (
+                "\n【内部参考资料】\n"
+                "以下内容只用于理解聊天对象和上下文。不要在回复中提到这些资料来源，"
+                "不要说“用户画像”“记忆检索”“资料显示”，也不要逐条复述；只在自然相关时融入回复。\n"
+                + "\n\n".join(sections)
+                + "\n"
+            )
 
         if final_text:
             logger.debug(

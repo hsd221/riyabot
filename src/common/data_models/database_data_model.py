@@ -157,6 +157,42 @@ class DatabaseMessages(BaseDataModel):
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
+    @property
+    def user_id(self) -> str:
+        """兼容旧版扁平字段访问。"""
+        return self.user_info.user_id
+
+    @user_id.setter
+    def user_id(self, value: str) -> None:
+        self.user_info.user_id = value
+
+    @property
+    def user_nickname(self) -> str:
+        """兼容旧版扁平字段访问。"""
+        return self.user_info.user_nickname
+
+    @user_nickname.setter
+    def user_nickname(self, value: str) -> None:
+        self.user_info.user_nickname = value
+
+    @property
+    def user_cardname(self) -> Optional[str]:
+        """兼容旧版扁平字段访问。"""
+        return self.user_info.user_cardname
+
+    @user_cardname.setter
+    def user_cardname(self, value: Optional[str]) -> None:
+        self.user_info.user_cardname = value
+
+    @property
+    def user_platform(self) -> str:
+        """兼容旧版扁平字段访问。"""
+        return self.user_info.platform
+
+    @user_platform.setter
+    def user_platform(self, value: str) -> None:
+        self.user_info.platform = value
+
     # def __post_init__(self):
     #     assert isinstance(self.message_id, str), "message_id must be a string"
     #     assert isinstance(self.time, float), "time must be a float"

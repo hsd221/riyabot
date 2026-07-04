@@ -45,6 +45,31 @@ import { Textarea } from '@/components/ui/textarea'
 import type { PersonInfo, PersonUpdateRequest } from '@/types/person'
 import { getPersonList, getPersonDetail, updatePerson, deletePerson, getPersonStats, batchDeletePersons } from '@/lib/person-api'
 
+function getProfileDisplayName(person: PersonInfo): string {
+  return person.person_name || person.nickname || person.user_id
+}
+
+function getProfileSummary(person: PersonInfo): string {
+  if (person.memory_points) return person.memory_points
+  const interests = person.profile_interests?.slice(0, 3).join('、')
+  if (interests) return `兴趣：${interests}`
+  const preferences = Object.entries(person.profile_preferences || {})
+    .slice(0, 2)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('；')
+  if (preferences) return `偏好：${preferences}`
+  const facts = Object.entries(person.profile_facts || {})
+    .slice(0, 2)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('；')
+  if (facts) return `事实：${facts}`
+  return '画像正在收集中'
+}
+
+function objectCount(value: Record<string, unknown> | Record<string, string> | undefined): number {
+  return value ? Object.keys(value).length : 0
+}
+
 export function PersonManagementPage() {
   const [persons, setPersons] = useState<PersonInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -122,7 +147,7 @@ export function PersonManagementPage() {
     }
   }
 
-  // 编辑人物
+  // 编辑显示备注
   const handleEdit = (person: PersonInfo) => {
     setSelectedPerson(person)
     setIsEditDialogOpen(true)
@@ -134,7 +159,7 @@ export function PersonManagementPage() {
       await deletePerson(person.person_id)
       toast({
         title: '删除成功',
-        description: `已删除人物信息: ${person.person_name || person.nickname || person.user_id}`,
+        description: `已删除用户画像: ${getProfileDisplayName(person)}`,
       })
       setDeleteConfirmPerson(null)
       loadPersons()
@@ -178,7 +203,7 @@ export function PersonManagementPage() {
     if (selectedPersons.size === 0) {
       toast({
         title: '未选择任何人物',
-        description: '请先选择要删除的人物',
+        description: '请先选择要删除的用户画像',
         variant: 'destructive',
       })
       return
@@ -237,10 +262,10 @@ export function PersonManagementPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
               <Users className="h-8 w-8" strokeWidth={2} />
-              人物信息管理
+              用户画像
             </h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              管理麦麦认识的所有人物信息
+              查看麦麦从新记忆系统聚合出的用户画像
             </p>
           </div>
         </div>
@@ -252,15 +277,15 @@ export function PersonManagementPage() {
       {/* 统计卡片 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">总人数</div>
+          <div className="text-sm text-muted-foreground">画像总数</div>
           <div className="text-2xl font-bold mt-1">{stats.total}</div>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">已认识</div>
+          <div className="text-sm text-muted-foreground">可用于回复</div>
           <div className="text-2xl font-bold mt-1 text-green-600">{stats.known}</div>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">未认识</div>
+          <div className="text-sm text-muted-foreground">隐藏画像</div>
           <div className="text-2xl font-bold mt-1 text-muted-foreground">{stats.unknown}</div>
         </div>
       </div>
@@ -274,7 +299,7 @@ export function PersonManagementPage() {
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 id="search"
-                placeholder="搜索名称、昵称或用户ID..."
+                placeholder="搜索用户、印象、兴趣、偏好或事实..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
@@ -282,7 +307,7 @@ export function PersonManagementPage() {
             </div>
           </div>
           <div>
-            <Label htmlFor="filter-known">认识状态</Label>
+            <Label htmlFor="filter-known">画像状态</Label>
             <Select
               value={filterKnown === undefined ? 'all' : filterKnown.toString()}
               onValueChange={(value) => {
@@ -295,8 +320,8 @@ export function PersonManagementPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部</SelectItem>
-                <SelectItem value="true">已认识</SelectItem>
-                <SelectItem value="false">未认识</SelectItem>
+                <SelectItem value="true">可用于回复</SelectItem>
+                <SelectItem value="false">隐藏画像</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -328,7 +353,7 @@ export function PersonManagementPage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-4 pt-4 border-t">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {selectedPersons.size > 0 && (
-              <span>已选择 {selectedPersons.size} 个人物</span>
+              <span>已选择 {selectedPersons.size} 个画像</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -366,7 +391,7 @@ export function PersonManagementPage() {
                   onClick={openBatchDeleteDialog}
                 >
                   <Trash2 className="h-4 w-4 mr-1" />
-                  批量删除
+                  批量删除画像
                 </Button>
               </>
             )}
@@ -389,10 +414,11 @@ export function PersonManagementPage() {
                   />
                 </TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead>名称</TableHead>
-                <TableHead>昵称</TableHead>
+                <TableHead>用户</TableHead>
+                <TableHead>画像摘要</TableHead>
                 <TableHead>平台</TableHead>
-                <TableHead>用户ID</TableHead>
+                <TableHead>兴趣/偏好</TableHead>
+                <TableHead>事实/情绪</TableHead>
                 <TableHead>最后更新</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -417,7 +443,7 @@ export function PersonManagementPage() {
                       <Checkbox
                         checked={selectedPersons.has(person.person_id)}
                         onCheckedChange={() => togglePersonSelection(person.person_id)}
-                        aria-label={`选择 ${person.person_name || person.nickname || person.user_id}`}
+                        aria-label={`选择 ${getProfileDisplayName(person)}`}
                       />
                     </TableCell>
                     <TableCell>
@@ -427,15 +453,31 @@ export function PersonManagementPage() {
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                           : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
                       )}>
-                        {person.is_known ? '已认识' : '未认识'}
+                        {person.is_known ? '可用' : '隐藏'}
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium">
-                      {person.person_name || <span className="text-muted-foreground">-</span>}
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="font-medium max-w-[12rem] truncate" title={getProfileDisplayName(person)}>
+                          {getProfileDisplayName(person)}
+                        </div>
+                        <div className="font-mono text-xs text-muted-foreground max-w-[12rem] truncate" title={person.user_id}>
+                          {person.user_id}
+                        </div>
+                      </div>
                     </TableCell>
-                    <TableCell>{person.nickname || '-'}</TableCell>
+                    <TableCell className="max-w-[22rem]">
+                      <div className="text-sm line-clamp-2" title={getProfileSummary(person)}>
+                        {getProfileSummary(person)}
+                      </div>
+                    </TableCell>
                     <TableCell>{person.platform}</TableCell>
-                    <TableCell className="font-mono text-sm">{person.user_id}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {person.profile_interests?.length || 0} 兴趣 / {objectCount(person.profile_preferences)} 偏好
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {objectCount(person.profile_facts)} 事实 / {person.mood_history_count || 0} 情绪
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatTime(person.last_know)}
                     </TableCell>
@@ -455,7 +497,7 @@ export function PersonManagementPage() {
                           onClick={() => handleEdit(person)}
                         >
                           <Edit className="h-4 w-4 mr-1" />
-                          编辑
+                          备注
                         </Button>
                         <Button
                           size="sm"
@@ -501,16 +543,14 @@ export function PersonManagementPage() {
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                         : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
                     )}>
-                      {person.is_known ? '已认识' : '未认识'}
+                      {person.is_known ? '可用于回复' : '隐藏画像'}
                     </div>
                     <h3 className="font-semibold text-sm line-clamp-1 w-full break-all">
-                      {person.person_name || <span className="text-muted-foreground">未命名</span>}
+                      {getProfileDisplayName(person)}
                     </h3>
-                    {person.nickname && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1 w-full break-all">
-                        昵称: {person.nickname}
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2 w-full break-all">
+                      {getProfileSummary(person)}
+                    </p>
                   </div>
                 </div>
 
@@ -523,6 +563,14 @@ export function PersonManagementPage() {
                   <div>
                     <div className="text-xs text-muted-foreground mb-1">用户ID</div>
                     <p className="font-mono text-xs truncate" title={person.user_id}>{person.user_id}</p>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">兴趣/偏好</div>
+                    <p className="text-xs">{person.profile_interests?.length || 0} / {objectCount(person.profile_preferences)}</p>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">事实/情绪</div>
+                    <p className="text-xs">{objectCount(person.profile_facts)} / {person.mood_history_count || 0}</p>
                   </div>
                   <div className="col-span-2">
                     <div className="text-xs text-muted-foreground mb-1">最后更新</div>
@@ -548,7 +596,7 @@ export function PersonManagementPage() {
                     className="text-xs px-2 py-1 h-auto flex-shrink-0"
                   >
                     <Edit className="h-3 w-3 mr-1" />
-                    编辑
+                    备注
                   </Button>
                   <Button
                     variant="outline"
@@ -674,7 +722,7 @@ export function PersonManagementPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除人物信息 "{deleteConfirmPerson?.person_name || deleteConfirmPerson?.nickname || deleteConfirmPerson?.user_id}" 吗？
+              确定要删除用户画像 "{deleteConfirmPerson ? getProfileDisplayName(deleteConfirmPerson) : ''}" 吗？
               此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -696,7 +744,7 @@ export function PersonManagementPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认批量删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除选中的 {selectedPersons.size} 个人物信息吗？
+              确定要删除选中的 {selectedPersons.size} 个用户画像吗？
               此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -734,62 +782,54 @@ function PersonDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>人物详情</DialogTitle>
+          <DialogTitle>用户画像详情</DialogTitle>
           <DialogDescription>
-            查看 {person.person_name || person.nickname || person.user_id} 的完整信息
+            查看 {getProfileDisplayName(person)} 的结构化画像
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* 基本信息 */}
           <div className="grid grid-cols-2 gap-4">
-            <InfoItem icon={User} label="人物名称" value={person.person_name} />
+            <InfoItem icon={User} label="显示名称" value={getProfileDisplayName(person)} />
             <InfoItem icon={MessageSquare} label="昵称" value={person.nickname} />
             <InfoItem icon={Hash} label="用户ID" value={person.user_id} mono />
-            <InfoItem icon={Hash} label="人物ID" value={person.person_id} mono />
+            <InfoItem icon={Hash} label="画像ID" value={person.person_id} mono />
             <InfoItem label="平台" value={person.platform} />
-            <InfoItem label="状态" value={person.is_known ? '已认识' : '未认识'} />
+            <InfoItem label="状态" value={person.is_known ? '可用于回复' : '隐藏画像'} />
           </div>
 
-          {/* 名称原因 */}
-          {person.name_reason && (
-            <div className="rounded-lg border bg-muted/50 p-3">
-              <Label className="text-xs text-muted-foreground">名称设定原因</Label>
-              <p className="mt-1 text-sm">{person.name_reason}</p>
-            </div>
-          )}
-
-          {/* 记忆点 */}
+          {/* 印象 */}
           {person.memory_points && (
             <div className="rounded-lg border bg-muted/50 p-3">
-              <Label className="text-xs text-muted-foreground">个人印象</Label>
+              <Label className="text-xs text-muted-foreground">画像印象</Label>
               <p className="mt-1 text-sm whitespace-pre-wrap">{person.memory_points}</p>
             </div>
           )}
 
-          {/* 群昵称列表 */}
-          {person.group_nick_name && person.group_nick_name.length > 0 && (
+          {person.profile_expression_style && (
             <div className="rounded-lg border bg-muted/50 p-3">
-              <Label className="text-xs text-muted-foreground">群昵称</Label>
-              <div className="mt-2 space-y-1">
-                {person.group_nick_name.map((item, index) => (
-                  <div key={index} className="text-sm flex items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">{item.group_id}</span>
-                    <span>→</span>
-                    <span>{item.group_nick_name}</span>
-                  </div>
-                ))}
-              </div>
+              <Label className="text-xs text-muted-foreground">表达风格</Label>
+              <p className="mt-1 text-sm whitespace-pre-wrap">{person.profile_expression_style}</p>
             </div>
           )}
 
+          <ProfileListSection title="兴趣" items={person.profile_interests} />
+          <ProfileMapSection title="偏好" data={person.profile_preferences} />
+          <ProfileMapSection title="事实" data={person.profile_facts} />
+          <ProfileTraitSection traits={person.profile_traits} />
+          <ProfileMapSection title="行为统计" data={person.profile_stats} />
+          <ProfileMapSection title="表达模式" data={person.profile_expression_patterns} />
+
           {/* 时间信息 */}
           <div className="grid grid-cols-3 gap-4">
-            <InfoItem icon={Clock} label="认识时间" value={formatTime(person.know_times)} />
+            <InfoItem icon={Clock} label="画像创建" value={formatTime(person.know_times)} />
             <InfoItem icon={Clock} label="首次记录" value={formatTime(person.know_since)} />
             <InfoItem icon={Clock} label="最后更新" value={formatTime(person.last_know)} />
+            <InfoItem icon={Clock} label="最后提取" value={formatTime(person.last_extracted_at)} />
+            <InfoItem label="情绪记录" value={`${person.mood_history_count || 0} 条`} />
           </div>
         </div>
 
@@ -810,7 +850,7 @@ function InfoItem({
 }: {
   icon?: typeof User
   label: string
-  value: string | null | undefined
+  value: string | number | null | undefined
   mono?: boolean
 }) {
   return (
@@ -819,11 +859,75 @@ function InfoItem({
         {Icon && <Icon className="h-3 w-3" />}
         {label}
       </Label>
-      <div className={cn('text-sm', mono && 'font-mono', !value && 'text-muted-foreground')}>
+      <div className={cn('text-sm break-words', mono && 'font-mono', !value && 'text-muted-foreground')}>
         {value || '-'}
       </div>
     </div>
   )
+}
+
+function ProfileListSection({ title, items }: { title: string; items?: string[] }) {
+  if (!items || items.length === 0) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/50 p-3">
+      <Label className="text-xs text-muted-foreground">{title}</Label>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span key={item} className="rounded-md bg-background px-2 py-1 text-xs border">
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProfileMapSection({ title, data }: { title: string; data?: Record<string, unknown> }) {
+  const entries = Object.entries(data || {})
+  if (entries.length === 0) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/50 p-3">
+      <Label className="text-xs text-muted-foreground">{title}</Label>
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {entries.map(([key, value]) => (
+          <div key={key} className="rounded-md bg-background border p-2 min-w-0">
+            <div className="text-xs text-muted-foreground break-all">{key}</div>
+            <div className="mt-1 text-sm break-words">{formatProfileValue(value)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProfileTraitSection({ traits }: { traits?: Record<string, number> }) {
+  const entries = Object.entries(traits || {})
+  if (entries.length === 0) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/50 p-3">
+      <Label className="text-xs text-muted-foreground">特征</Label>
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {entries.map(([name, confidence]) => (
+          <div key={name} className="rounded-md bg-background border p-2">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="break-words">{name}</span>
+              <span className="text-xs text-muted-foreground">{Math.round(confidence * 100)}%</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function formatProfileValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
 }
 
 // 人物编辑对话框
@@ -862,7 +966,7 @@ function PersonEditDialog({
       await updatePerson(person.person_id, formData)
       toast({
         title: '保存成功',
-        description: '人物信息已更新',
+        description: '显示备注已更新',
       })
       onSuccess()
     } catch (error) {
@@ -882,52 +986,52 @@ function PersonEditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>编辑人物信息</DialogTitle>
+          <DialogTitle>编辑显示备注</DialogTitle>
           <DialogDescription>
-            修改 {person.person_name || person.nickname || person.user_id} 的信息
+            为 {getProfileDisplayName(person)} 设置 WebUI 显示信息，不修改自动提取的画像事实、偏好和兴趣
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="person_name">人物名称</Label>
+              <Label htmlFor="person_name">显示名称</Label>
               <Input
                 id="person_name"
                 value={formData.person_name || ''}
                 onChange={(e) => setFormData({ ...formData, person_name: e.target.value })}
-                placeholder="为这个人设置一个名称"
+                placeholder="仅用于 WebUI 显示"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="nickname">昵称</Label>
+              <Label htmlFor="nickname">显示昵称</Label>
               <Input
                 id="nickname"
                 value={formData.nickname || ''}
                 onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
-                placeholder="昵称"
+                placeholder="仅用于 WebUI 显示"
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="name_reason">名称设定原因</Label>
+            <Label htmlFor="name_reason">备注来源</Label>
             <Textarea
               id="name_reason"
               value={formData.name_reason || ''}
               onChange={(e) => setFormData({ ...formData, name_reason: e.target.value })}
-              placeholder="为什么这样称呼这个人？"
+              placeholder="说明这个显示名称或备注的来源"
               rows={2}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="memory_points">个人印象</Label>
+            <Label htmlFor="memory_points">显示摘要覆盖</Label>
             <Textarea
               id="memory_points"
               value={formData.memory_points || ''}
               onChange={(e) => setFormData({ ...formData, memory_points: e.target.value })}
-              placeholder="对这个人的印象和记忆点..."
+              placeholder="留空时使用记忆系统自动生成的画像印象"
               rows={4}
             />
           </div>
@@ -935,9 +1039,9 @@ function PersonEditDialog({
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div>
               <Label htmlFor="is_known" className="text-base font-medium">
-                已认识
+                可用于回复
               </Label>
-              <p className="text-sm text-muted-foreground">标记是否已经认识这个人</p>
+              <p className="text-sm text-muted-foreground">关闭后此画像会在 WebUI 中标记为隐藏</p>
             </div>
             <Switch
               id="is_known"

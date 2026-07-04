@@ -18,9 +18,7 @@ export interface BotBasicConfig {
 export interface PersonalityConfig {
   personality: string
   reply_style: string
-  interest: string
   plan_style: string
-  private_plan_style: string
 }
 
 // 步骤3：表情包配置
@@ -37,10 +35,7 @@ export interface EmojiConfig {
 // 步骤4：其他基础配置
 export interface OtherBasicConfig {
   enable_tool: boolean
-  enable_mood: boolean
-  mood_update_threshold?: number
-  emotion_style?: string
-  all_global: boolean
+  all_global_jargon: boolean
 }
 
 // 步骤5：硅基流动API配置

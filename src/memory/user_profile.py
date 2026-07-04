@@ -571,8 +571,9 @@ class ProfileRetriever:
         if profile.interests:
             lines.append(f"兴趣: {'、'.join(profile.interests)}")
 
-        if profile.stats:
-            stats_str = "；".join(f"{k}: {v}" for k, v in profile.stats.items())
+        public_stats = {k: v for k, v in profile.stats.items() if not str(k).startswith("_")} if profile.stats else {}
+        if public_stats:
+            stats_str = "；".join(f"{k}: {v}" for k, v in public_stats.items())
             lines.append(f"统计: {stats_str}")
 
         result = "\n".join(lines)

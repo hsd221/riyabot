@@ -27,6 +27,15 @@ export interface PersonInfo {
   know_times: number | null
   know_since: number | null
   last_know: number | null
+  profile_traits: Record<string, number>
+  profile_interests: string[]
+  profile_preferences: Record<string, string>
+  profile_facts: Record<string, string>
+  profile_stats: Record<string, unknown>
+  profile_expression_style: string | null
+  profile_expression_patterns: Record<string, unknown>
+  mood_history_count: number
+  last_extracted_at: number | null
 }
 
 /**

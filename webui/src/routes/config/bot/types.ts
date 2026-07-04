@@ -13,35 +13,46 @@ export interface BotConfig {
 export interface PersonalityConfig {
   personality: string
   reply_style: string
-  interest: string
+  multiple_reply_style: string[]
+  multiple_probability: number
   plan_style: string
   visual_style: string
-  private_plan_style: string
   states: string[]
   state_probability: number
+}
+
+export interface TalkValueRule {
+  target: string
+  time: string
+  value: number
 }
 
 export interface ChatConfig {
   talk_value: number
   mentioned_bot_reply: boolean
+  at_bot_inevitable_reply: number
   max_context_size: number
   planner_smooth: number
   enable_talk_value_rules: boolean
-  talk_value_rules: Array<{
-    target: string
-    time: string
-    value: number
-  }>
-  include_planner_reasoning: boolean
+  talk_value_rules: TalkValueRule[]
+  plan_reply_log_max_per_chat: number
+  llm_quote: boolean
 }
 
 export interface ExpressionConfig {
   learning_list: Array<[string, string, string, string]>
   expression_groups: Array<string[]>
-  reflect: boolean
-  reflect_operator_id: string
+  expression_self_reflect: boolean
+  expression_manual_reflect: boolean
+  manual_reflect_operator_id: string
   allow_reflect: string[]
   all_global_jargon: boolean
+  enable_jargon_explanation: boolean
+  jargon_mode: 'context' | 'planner'
+  expression_checked_only: boolean
+  expression_auto_check_interval: number
+  expression_auto_check_count: number
+  expression_auto_check_custom_criteria: string[]
 }
 
 export interface EmojiConfig {
@@ -57,18 +68,30 @@ export interface EmojiConfig {
 export interface MemoryConfig {
   max_agent_iterations: number
   agent_timeout_seconds: number
-  enable_jargon_detection: boolean
   global_memory: boolean
+  global_memory_blacklist: string[]
+  planner_question: boolean
+  sqlite_path: string
+  qdrant_url: string
+  qdrant_api_key?: string | null
+  qdrant_local_path: string
+  embedding_dimension: number
+  collection_name_atoms: string
+  collection_name_graph: string
+  vector_batch_size: number
 }
 
 export interface ToolConfig {
   enable_tool: boolean
 }
 
-// MoodConfig 已在后端移除
-
 export interface VoiceConfig {
   enable_asr: boolean
+}
+
+export interface MessageReceiveConfig {
+  ban_words: string[]
+  ban_msgs_regex: string[]
 }
 
 export interface KeywordRule {
@@ -120,21 +143,46 @@ export interface DebugConfig {
   show_jargon_prompt: boolean
   show_memory_prompt: boolean
   show_planner_prompt: boolean
+  show_lpmm_paragraph: boolean
 }
 
 export interface MaimMessageConfig {
   auth_token: string[]
-  use_custom: boolean
-  host: string
-  port: number
-  mode: string
-  use_wss: boolean
-  cert_file: string
-  key_file: string
+  enable_api_server: boolean
+  api_server_host: string
+  api_server_port: number
+  api_server_use_wss: boolean
+  api_server_cert_file: string
+  api_server_key_file: string
+  api_server_allowed_api_keys: string[]
 }
 
 export interface TelemetryConfig {
   enable: boolean
+}
+
+export interface WebUIConfig {
+  enabled: boolean
+  mode: 'development' | 'production'
+  anti_crawler_mode: 'false' | 'strict' | 'loose' | 'basic'
+  allowed_ips: string
+  trusted_proxies: string
+  trust_xff: boolean
+  secure_cookie: boolean
+}
+
+export interface ExperimentalConfig {
+  private_plan_style: string
+  chat_prompts: string[]
+}
+
+export interface DreamConfig {
+  interval_minutes: number
+  max_iterations: number
+  first_delay_seconds: number
+  dream_send: string
+  dream_time_ranges: string[]
+  dream_visible: boolean
 }
 
 /**
@@ -149,6 +197,7 @@ export interface AllBotConfigs {
   memoryConfig: MemoryConfig | null
   toolConfig: ToolConfig | null
   voiceConfig: VoiceConfig | null
+  messageReceiveConfig: MessageReceiveConfig | null
   keywordReactionConfig: KeywordReactionConfig | null
   responsePostProcessConfig: ResponsePostProcessConfig | null
   chineseTypoConfig: ChineseTypoConfig | null
@@ -157,6 +206,9 @@ export interface AllBotConfigs {
   debugConfig: DebugConfig | null
   maimMessageConfig: MaimMessageConfig | null
   telemetryConfig: TelemetryConfig | null
+  webuiConfig: WebUIConfig | null
+  experimentalConfig: ExperimentalConfig | null
+  dreamConfig: DreamConfig | null
 }
 
 /**
@@ -171,6 +223,7 @@ export type ConfigSectionName =
   | 'memory'
   | 'tool'
   | 'voice'
+  | 'message_receive'
   | 'keyword_reaction'
   | 'response_post_process'
   | 'chinese_typo'
@@ -179,3 +232,6 @@ export type ConfigSectionName =
   | 'debug'
   | 'maim_message'
   | 'telemetry'
+  | 'webui'
+  | 'experimental'
+  | 'dream'

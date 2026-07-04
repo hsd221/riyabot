@@ -27,6 +27,35 @@ from src.memory.types import PayloadSchemaField
 logger = get_logger("memory.store")
 
 _QDRANT_POINT_NAMESPACE = uuid.UUID("8e9e1f74-2b30-4f33-8e9b-9b2c972a1a67")
+_DATETIME_FIELDS = ("created_at", "last_accessed_at", "last_reinforced_at")
+
+
+def _coerce_datetime(value: Any) -> datetime.datetime:
+    """将持久层时间字段归一化为 Peewee DateTimeField 可接受的 datetime。"""
+    if isinstance(value, datetime.datetime):
+        return value
+    if value is None:
+        return datetime.datetime.now()
+    if isinstance(value, (int, float)):
+        return datetime.datetime.fromtimestamp(value)
+    if isinstance(value, str):
+        try:
+            return datetime.datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            try:
+                return datetime.datetime.fromtimestamp(float(value))
+            except (TypeError, ValueError):
+                logger.warning("无法解析时间字段，使用当前时间", value=value)
+                return datetime.datetime.now()
+    logger.warning("未知时间字段类型，使用当前时间", value_type=type(value).__name__)
+    return datetime.datetime.now()
+
+
+def _normalize_datetime_fields(data: dict[str, Any], *, fill_missing: bool = False) -> None:
+    """原地归一化记忆原子的时间字段。"""
+    for field_name in _DATETIME_FIELDS:
+        if fill_missing or field_name in data:
+            data[field_name] = _coerce_datetime(data.get(field_name))
 
 # ---------------------------------------------------------------------------
 # Qdrant 客户端导入（可选依赖）
@@ -633,9 +662,7 @@ class MemoryStore:
         """
         atom_id = str(atom_data.get("atom_id") or uuid.uuid4())
         atom_data["atom_id"] = atom_id
-        atom_data.setdefault("created_at", datetime.datetime.now())
-        atom_data.setdefault("last_accessed_at", datetime.datetime.now())
-        atom_data.setdefault("last_reinforced_at", datetime.datetime.now())
+        _normalize_datetime_fields(atom_data, fill_missing=True)
 
         # JSON 字段序列化
         if isinstance(atom_data.get("entities"), (list, dict)):
@@ -662,6 +689,8 @@ class MemoryStore:
         Returns:
             bool: 是否成功
         """
+        _normalize_datetime_fields(updates)
+
         # JSON 字段序列化
         if isinstance(updates.get("entities"), (list, dict)):
             updates["entities"] = json.dumps(updates["entities"], ensure_ascii=False)
@@ -698,6 +727,7 @@ class MemoryStore:
         try:
             with memory_db.atomic():
                 for atom_id, updates in updates_list:
+                    _normalize_datetime_fields(updates)
                     if isinstance(updates.get("entities"), (list, dict)):
                         updates["entities"] = json.dumps(updates["entities"], ensure_ascii=False)
                     query = MemoryAtom.update(**updates).where(MemoryAtom.atom_id == atom_id)

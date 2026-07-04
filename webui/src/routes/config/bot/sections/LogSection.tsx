@@ -56,7 +56,7 @@ export const LogSection = React.memo(function LogSection({ config, onChange }: L
   }
 
   const logLevels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-  const logLevelStyles = ['FULL', 'compact', 'lite']
+  const logLevelStyles = ['full', 'compact', 'lite']
   const colorTextOptions = ['none', 'title', 'full']
 
   return (
