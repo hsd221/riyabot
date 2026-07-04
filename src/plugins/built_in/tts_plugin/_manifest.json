@@ -4,16 +4,16 @@
   "version": "0.1.0",
   "description": "将文本转换为语音进行播放的插件，支持多种语音模式和智能语音输出场景判断。",
   "author": {
-    "name": "MaiBot团队", 
-    "url": "https://github.com/MaiM-with-u"
+    "name": "RiyaBot Core",
+    "url": "https://github.com/hsd221/riyabot"
   },
   "license": "GPL-v3.0-or-later",
   
   "host_application": {
     "min_version": "0.8.0"
   },
-  "homepage_url": "https://github.com/MaiM-with-u/maibot",
-  "repository_url": "https://github.com/MaiM-with-u/maibot",
+  "homepage_url": "https://github.com/hsd221/riyabot",
+  "repository_url": "https://github.com/hsd221/riyabot",
   "keywords": ["tts", "voice", "audio", "speech", "accessibility"],
   "categories": ["Audio Tools", "Accessibility", "Voice Assistant"],
   

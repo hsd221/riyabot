@@ -300,7 +300,7 @@ export function EmojiManagementPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">表情包管理</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            管理麦麦的表情包资源
+            管理璃夜的表情包资源
           </p>
         </div>
         <Button onClick={() => setUploadDialogOpen(true)} className="gap-2">
@@ -1498,7 +1498,7 @@ function EmojiUploadDialog({
                 onCheckedChange={(checked) => updateFileInfo(file.id, { isRegistered: checked === true })}
               />
               <Label htmlFor="single-is-registered" className="cursor-pointer">
-                上传后立即注册（可被麦麦使用）
+                上传后立即注册（可被璃夜使用）
               </Label>
             </div>
           </div>

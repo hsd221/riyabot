@@ -65,7 +65,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
             </Label>
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            允许麦麦使用各种工具来增强功能
+            允许璃夜使用各种工具来增强功能
           </p>
         </div>
       </div>
@@ -306,7 +306,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
                   onEmojiChange({ ...emojiConfig, max_reg_num: parseInt(e.target.value) })
                 }
               />
-              <p className="text-xs text-muted-foreground">麦麦最多可以注册的表情包数量</p>
+              <p className="text-xs text-muted-foreground">璃夜最多可以注册的表情包数量</p>
             </div>
 
             <div className="grid gap-2">
@@ -351,7 +351,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
               </Label>
             </div>
             <p className="text-xs text-muted-foreground -mt-2">
-              允许麦麦将看到的表情包据为己有
+              允许璃夜将看到的表情包据为己有
             </p>
 
             <div className="flex items-center space-x-2">

@@ -51,7 +51,7 @@ install(extra_lines=3)
 # 配置主程序日志格式
 logger = get_logger("config")
 
-# 获取当前文件所在目录的父目录的父目录（即MaiBot项目根目录）
+# 获取当前文件所在目录的父目录的父目录（即RiyaBot项目根目录）
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 TEMPLATE_DIR = os.path.join(PROJECT_ROOT, "template")
@@ -457,7 +457,7 @@ def api_ada_load_config(config_path: str) -> APIAdapterConfig:
 
 
 # 获取配置文件路径
-logger.info(f"MaiCore当前版本: {MMC_VERSION}")
+logger.info(f"RiyaBot当前版本: {MMC_VERSION}")
 update_config()
 update_model_config()
 

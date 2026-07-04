@@ -380,7 +380,7 @@ export function SiliconFlowForm({ config, onChange }: SiliconFlowFormProps) {
             </p>
             <p className="text-blue-700 dark:text-blue-300 mb-2">
               硅基流动提供了完整的模型覆盖，包括 DeepSeek V3、Qwen、视觉模型、语音识别和嵌入模型。
-              只需一个 API Key 即可使用麦麦的所有功能！
+              只需一个 API Key 即可使用璃夜的所有功能！
             </p>
             <a
               href="https://cloud.siliconflow.cn"
@@ -421,7 +421,7 @@ export function SiliconFlowForm({ config, onChange }: SiliconFlowFormProps) {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          请输入您的硅基流动 API 密钥。获取后，麦麦将自动配置所有必需的模型。
+          请输入您的硅基流动 API 密钥。获取后，璃夜将自动配置所有必需的模型。
         </p>
       </div>
 

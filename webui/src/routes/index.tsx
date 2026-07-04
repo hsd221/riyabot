@@ -170,7 +170,7 @@ export function IndexPage() {
       })
       toast({
         title: '重启中',
-        description: '麦麦正在重启，请稍候...',
+        description: '璃夜正在重启，请稍候...',
       })
       // 3秒后刷新状态
       setTimeout(() => {
@@ -181,7 +181,7 @@ export function IndexPage() {
       console.error('重启失败:', error)
       toast({
         title: '重启失败',
-        description: '无法重启麦麦，请检查控制台',
+        description: '无法重启璃夜，请检查控制台',
         variant: 'destructive',
       })
       setRestarting(false)
@@ -261,7 +261,7 @@ export function IndexPage() {
           <RefreshCw className="h-12 w-12 animate-spin mx-auto text-primary" />
           <div className="space-y-2">
             <p className="text-lg font-medium">加载统计数据中...</p>
-            <p className="text-sm text-muted-foreground">正在获取麦麦运行数据</p>
+            <p className="text-sm text-muted-foreground">正在获取璃夜运行数据</p>
           </div>
           <div className="space-y-2">
             <Progress value={loadingProgress} className="h-2" />
@@ -374,7 +374,7 @@ export function IndexPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">实时监控面板</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            麦麦运行状态和统计数据一览
+            璃夜运行状态和统计数据一览
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -427,7 +427,7 @@ export function IndexPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Power className="h-4 w-4" />
-              麦麦状态
+              璃夜状态
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -480,7 +480,7 @@ export function IndexPage() {
                 className="gap-2"
               >
                 <RotateCcw className={`h-4 w-4 ${restarting ? 'animate-spin' : ''}`} />
-                {restarting ? '重启中...' : '重启麦麦'}
+                {restarting ? '重启中...' : '重启璃夜'}
               </Button>
               <Button variant="outline" size="sm" asChild className="gap-2">
                 <Link to="/logs">
@@ -526,7 +526,7 @@ export function IndexPage() {
               <Button variant="outline" size="sm" asChild className="gap-2">
                 <Link to="/survey/maibot-feedback">
                   <MessageSquare className="h-4 w-4" />
-                  麦麦反馈
+                  璃夜反馈
                 </Link>
               </Button>
             </div>

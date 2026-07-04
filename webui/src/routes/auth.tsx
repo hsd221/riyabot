@@ -155,7 +155,7 @@ export function AuthPage() {
           </div>
 
           <div className="space-y-2">
-            <CardTitle className="text-2xl font-bold">欢迎使用 MaiBot</CardTitle>
+            <CardTitle className="text-2xl font-bold">欢迎使用 RiyaBot</CardTitle>
             <CardDescription className="text-base">
               请输入您的 Access Token 以继续访问系统
             </CardDescription>
@@ -220,7 +220,7 @@ export function AuthPage() {
                     如何获取 Access Token
                   </DialogTitle>
                   <DialogDescription>
-                    Access Token 是访问 MaiBot WebUI 的唯一凭证，请按以下方式获取
+                    Access Token 是访问 RiyaBot Console 的唯一凭证，请按以下方式获取
                   </DialogDescription>
                 </DialogHeader>
 
@@ -232,7 +232,7 @@ export function AuthPage() {
                       <div className="flex-1 space-y-2">
                         <h4 className="font-semibold text-sm">方式一：查看启动日志</h4>
                         <p className="text-sm text-muted-foreground">
-                          在 MaiBot 启动时，控制台会显示 WebUI Access Token。
+                          在 RiyaBot 启动时，控制台会显示 WebUI Access Token。
                         </p>
                         <div className="rounded bg-background p-2 font-mono text-xs">
                           <p className="text-muted-foreground">🔑 WebUI Access Token: abc123...</p>

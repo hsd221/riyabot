@@ -237,7 +237,7 @@ export function ExpressionManagementPage() {
               表达方式管理
             </h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              管理麦麦的表达方式和话术模板
+              管理璃夜的表达方式和话术模板
             </p>
           </div>
           <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">

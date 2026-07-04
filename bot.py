@@ -144,14 +144,13 @@ def print_opensource_notice():
     notice_lines = [
         "",
         f"{Fore.CYAN}{'═' * 70}{Style.RESET_ALL}",
-        f"{Fore.GREEN}  ★ MaiBot - 开源 AI 聊天机器人 ★{Style.RESET_ALL}",
+        f"{Fore.GREEN}  ★ RiyaBot / 璃夜Bot - 开源 AI 聊天机器人 ★{Style.RESET_ALL}",
         f"{Fore.CYAN}{'─' * 70}{Style.RESET_ALL}",
         f"{Fore.YELLOW}  本项目是完全免费的开源软件，基于 GPL-3.0 协议发布{Style.RESET_ALL}",
         f"{Fore.WHITE}  如果有人向你「出售本软件」，你被骗了！{Style.RESET_ALL}",
         "",
-        f"{Fore.WHITE}  官方仓库: {Fore.BLUE}https://github.com/MaiM-with-u/MaiBot {Style.RESET_ALL}",
-        f"{Fore.WHITE}  官方文档: {Fore.BLUE}https://docs.mai-mai.org {Style.RESET_ALL}",
-        f"{Fore.WHITE}  官方群聊: {Fore.BLUE}1006149251{Style.RESET_ALL}",
+        f"{Fore.WHITE}  官方仓库: {Fore.BLUE}https://github.com/hsd221/riyabot {Style.RESET_ALL}",
+        f"{Fore.WHITE}  项目文档: {Fore.BLUE}https://github.com/hsd221/riyabot#readme {Style.RESET_ALL}",
         f"{Fore.CYAN}{'─' * 70}{Style.RESET_ALL}",
         f"{Fore.RED}  ⚠ 将本软件作为「商品」倒卖、隐瞒开源性质均违反协议！{Style.RESET_ALL}",
         f"{Fore.CYAN}{'═' * 70}{Style.RESET_ALL}",
@@ -177,7 +176,7 @@ def easter_egg():
 
 async def graceful_shutdown():  # sourcery skip: use-named-expression
     try:
-        logger.info("正在优雅关闭麦麦...")
+        logger.info("正在优雅关闭璃夜...")
 
         # 关闭 WebUI 服务器
         try:
@@ -218,10 +217,10 @@ async def graceful_shutdown():  # sourcery skip: use-named-expression
             except Exception as e:
                 logger.error(f"等待任务取消时发生异常: {e}")
 
-        logger.info("麦麦优雅关闭完成")
+        logger.info("璃夜优雅关闭完成")
 
     except Exception as e:
-        logger.error(f"麦麦关闭失败: {e}", exc_info=True)
+        logger.error(f"璃夜关闭失败: {e}", exc_info=True)
 
 
 def _calculate_file_hash(file_path: Path, file_type: str) -> str:

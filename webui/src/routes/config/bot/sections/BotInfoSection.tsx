@@ -88,7 +88,7 @@ export const BotInfoSection = React.memo(function BotInfoSection({ config, onCha
               id="nickname"
               value={config.nickname}
               onChange={(e) => onChange({ ...config, nickname: e.target.value })}
-              placeholder="麦麦"
+              placeholder="璃夜"
             />
           </div>
 
@@ -151,7 +151,7 @@ export const BotInfoSection = React.memo(function BotInfoSection({ config, onCha
                   <Input
                     value={alias}
                     onChange={(e) => updateAlias(index, e.target.value)}
-                    placeholder="小麦"
+                    placeholder="小璃"
                   />
                   <AlertDialog>
                     <AlertDialogTrigger asChild>

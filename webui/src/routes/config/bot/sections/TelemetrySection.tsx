@@ -16,7 +16,7 @@ export const TelemetrySection = React.memo(function TelemetrySection({ config, o
         <div className="space-y-0.5">
           <Label>启用统计信息发送</Label>
           <p className="text-sm text-muted-foreground">
-            发送匿名统计信息，帮助我们了解全球有多少只麦麦在运行
+            发送匿名统计信息，帮助我们了解全球有多少只璃夜在运行
           </p>
         </div>
         <Switch

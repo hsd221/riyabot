@@ -43,7 +43,7 @@
   - 通过在插件类中定义`plugin_name`属性来指定插件内部标识符。
   - 由于此更改一个文件中现在可以有多个插件类，但每个插件类必须有**唯一的**`plugin_name`。
   - 在某些插件加载失败时，现在会显示包名而不是插件内部标识符。
-    - 例如：`MaiMBot.plugins.example_plugin`而不是`example_plugin`。
+    - 例如：`RiyaBot.plugins.example_plugin`而不是`example_plugin`。
     - 仅在插件 import 失败时会如此，正常注册过程中失败的插件不会显示包名，而是显示插件内部标识符。（这是特性，但是基本上不可能出现这个情况）
 7. 现在不支持单文件插件了，加载方式已经完全删除。
 8. 把`BaseEventPlugin`合并到了`BasePlugin`中，所有插件都应该继承自`BasePlugin`。

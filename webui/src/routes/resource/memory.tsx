@@ -535,7 +535,7 @@ export function MemoryPage() {
               记忆系统
             </h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              查看麦麦的记忆原子、梦境运行和洞察信息
+              查看璃夜的记忆原子、梦境运行和洞察信息
             </p>
           </div>
           <Button

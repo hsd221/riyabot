@@ -73,28 +73,28 @@ const indexRoute = createRoute({
   component: IndexPage,
 })
 
-// 配置路由 - 麦麦主程序配置
+// 配置路由 - 璃夜主程序配置
 const botConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/bot',
   component: BotConfigPage,
 })
 
-// 配置路由 - 麦麦模型提供商配置
+// 配置路由 - 璃夜模型提供商配置
 const modelProviderConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/modelProvider',
   component: ModelProviderConfigPage,
 })
 
-// 配置路由 - 麦麦模型配置
+// 配置路由 - 璃夜模型配置
 const modelConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/model',
   component: ModelConfigPage,
 })
 
-// 配置路由 - 麦麦适配器配置
+// 配置路由 - 璃夜适配器配置
 const adapterConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/adapter',
@@ -185,7 +185,7 @@ const webuiFeedbackSurveyRoute = createRoute({
   component: WebUIFeedbackSurveyPage,
 })
 
-// 问卷调查路由 - 麦麦体验反馈
+// 问卷调查路由 - 璃夜体验反馈
 const maibotFeedbackSurveyRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/survey/maibot-feedback',

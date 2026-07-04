@@ -98,7 +98,7 @@ const DEFAULT_CONFIG: AdapterConfig = {
     port: 8000,
     enable_api_server: false,
     base_url: 'ws://127.0.0.1:18095/ws',
-    api_key: 'maibot',
+    api_key: 'riyabot',
   },
   chat: {
     group_list_type: 'whitelist',
@@ -125,13 +125,13 @@ const PRESETS = {
   oneclick: {
     name: '一键包',
     description: '使用一键包部署的适配器配置',
-    path: '../MaiBot-Napcat-Adapter/config.toml',
+    path: '../RiyaBot-NapCat-Adapter/config.toml',
     icon: Package,
   },
   docker: {
     name: 'Docker',
     description: 'Docker Compose 部署的适配器配置',
-    path: '/MaiMBot/adapters-config/config.toml',
+    path: '/RiyaBot/adapters-config/config.toml',
     icon: Container,
   },
 } as const
@@ -564,10 +564,10 @@ export function AdapterConfigPage() {
     lines.push(`heartbeat_interval = ${fillDefaults(config.napcat_server.heartbeat_interval || 0, DEFAULT_CONFIG.napcat_server.heartbeat_interval)} # 与Napcat设置的心跳相同（按秒计）`)
     lines.push('')
 
-    // MaiBot server section
-    lines.push('[maibot_server] # 连接麦麦的ws服务设置')
-    lines.push(`host = "${fillDefaults(config.maibot_server.host, DEFAULT_CONFIG.maibot_server.host)}" # 麦麦在.env文件中设置的主机地址，即HOST字段`)
-    lines.push(`port = ${fillDefaults(config.maibot_server.port || 0, DEFAULT_CONFIG.maibot_server.port)}        # 麦麦在.env文件中设置的端口，即PORT字段`)
+    // RiyaBot server section
+    lines.push('[maibot_server] # 连接璃夜的ws服务设置')
+    lines.push(`host = "${fillDefaults(config.maibot_server.host, DEFAULT_CONFIG.maibot_server.host)}" # 璃夜在.env文件中设置的主机地址，即HOST字段`)
+    lines.push(`port = ${fillDefaults(config.maibot_server.port || 0, DEFAULT_CONFIG.maibot_server.port)}        # 璃夜在.env文件中设置的端口，即PORT字段`)
     lines.push(`enable_api_server = ${config.maibot_server.enable_api_server} # 是否启用API-Server模式连接`)
     lines.push(`base_url = "${fillDefaults(config.maibot_server.base_url, DEFAULT_CONFIG.maibot_server.base_url)}"             # API-Server连接地址 (ws://ip:port/path)，仅在enable_api_server为true时使用`)
     lines.push(`api_key = "${fillDefaults(config.maibot_server.api_key, DEFAULT_CONFIG.maibot_server.api_key)}"        # API Key (仅在enable_api_server为true时使用)`)
@@ -595,7 +595,7 @@ export function AdapterConfigPage() {
 
     // Forward section
     lines.push('[forward] # 转发消息处理设置')
-    lines.push(`image_threshold = ${fillDefaults(config.forward.image_threshold || 0, DEFAULT_CONFIG.forward.image_threshold)} # 图片数量阈值：转发消息中图片数量超过此值时使用占位符(避免麦麦VLM处理卡死)`)
+    lines.push(`image_threshold = ${fillDefaults(config.forward.image_threshold || 0, DEFAULT_CONFIG.forward.image_threshold)} # 图片数量阈值：转发消息中图片数量超过此值时使用占位符(避免璃夜VLM处理卡死)`)
     lines.push('')
 
     // Debug section
@@ -670,9 +670,9 @@ export function AdapterConfigPage() {
         {/* 页面标题 */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">麦麦适配器配置</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold">璃夜适配器配置</h1>
             <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">
-              管理麦麦的 QQ 适配器的配置文件
+              管理璃夜的 QQ 适配器的配置文件
             </p>
           </div>
         </div>
@@ -846,7 +846,7 @@ export function AdapterConfigPage() {
                       </div>
                       <div className="pl-2 space-y-0.5 text-[10px] md:text-xs break-all">
                         <div>C:\Adapter\config.toml</div>
-                        <div className="hidden sm:block">D:\MaiBot\adapter\config.toml</div>
+                        <div className="hidden sm:block">D:\RiyaBot\adapter\config.toml</div>
                         <div className="hidden sm:block">\\server\share\config.toml</div>
                       </div>
                     </div>
@@ -971,9 +971,9 @@ export function AdapterConfigPage() {
                   <span className="hidden sm:inline">Napcat 连接</span>
                   <span className="sm:hidden">Napcat</span>
                 </TabsTrigger>
-                <TabsTrigger value="maibot" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">
-                  <span className="hidden sm:inline">麦麦连接</span>
-                  <span className="sm:hidden">麦麦</span>
+                <TabsTrigger value="riyabot" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">
+                  <span className="hidden sm:inline">璃夜连接</span>
+                  <span className="sm:hidden">璃夜</span>
                 </TabsTrigger>
                 <TabsTrigger value="chat" className="flex-shrink-0 text-xs sm:text-sm whitespace-nowrap">
                   <span className="hidden sm:inline">聊天控制</span>
@@ -1002,9 +1002,9 @@ export function AdapterConfigPage() {
               />
             </TabsContent>
 
-            {/* 麦麦服务器配置 */}
-            <TabsContent value="maibot" className="space-y-4">
-              <MaiBotServerSection 
+            {/* 璃夜服务器配置 */}
+            <TabsContent value="riyabot" className="space-y-4">
+              <RiyaBotServerSection
                 config={config} 
                 onChange={(newConfig) => {
                   setConfig(newConfig)
@@ -1202,8 +1202,8 @@ function NapcatServerSection({
   )
 }
 
-// 麦麦服务器配置组件
-function MaiBotServerSection({
+// 璃夜服务器配置组件
+function RiyaBotServerSection({
   config,
   onChange,
 }: {
@@ -1213,12 +1213,12 @@ function MaiBotServerSection({
   return (
     <div className="rounded-lg border bg-card p-4 md:p-6 space-y-4 md:space-y-6">
       <div>
-        <h3 className="text-base md:text-lg font-semibold mb-3 md:mb-4">麦麦 WebSocket 服务设置</h3>
+        <h3 className="text-base md:text-lg font-semibold mb-3 md:mb-4">璃夜 WebSocket 服务设置</h3>
         <div className="grid gap-3 md:gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="maibot-host" className="text-sm md:text-base">主机地址</Label>
+            <Label htmlFor="riyabot-host" className="text-sm md:text-base">主机地址</Label>
             <Input
-              id="maibot-host"
+              id="riyabot-host"
               value={config.maibot_server.host}
               onChange={(e) =>
                 onChange({
@@ -1229,13 +1229,13 @@ function MaiBotServerSection({
               placeholder="localhost"
               className="text-sm md:text-base"
             />
-            <p className="text-xs text-muted-foreground">麦麦在 .env 文件中设置的 HOST 字段</p>
+            <p className="text-xs text-muted-foreground">璃夜在 .env 文件中设置的 HOST 字段</p>
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="maibot-port" className="text-sm md:text-base">端口</Label>
+            <Label htmlFor="riyabot-port" className="text-sm md:text-base">端口</Label>
             <Input
-              id="maibot-port"
+              id="riyabot-port"
               type="number"
               value={config.maibot_server.port || ''}
               onChange={(e) =>
@@ -1247,16 +1247,16 @@ function MaiBotServerSection({
               placeholder="8000"
               className="text-sm md:text-base"
             />
-            <p className="text-xs text-muted-foreground">麦麦在 .env 文件中设置的 PORT 字段（留空使用默认值 8000）</p>
+            <p className="text-xs text-muted-foreground">璃夜在 .env 文件中设置的 PORT 字段（留空使用默认值 8000）</p>
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div>
-              <Label htmlFor="maibot-api-server" className="text-sm md:text-base">API-Server 模式</Label>
-              <p className="text-xs text-muted-foreground mt-1">启用后通过新版 API-Server 地址连接麦麦</p>
+              <Label htmlFor="riyabot-api-server" className="text-sm md:text-base">API-Server 模式</Label>
+              <p className="text-xs text-muted-foreground mt-1">启用后通过新版 API-Server 地址连接璃夜</p>
             </div>
             <Switch
-              id="maibot-api-server"
+              id="riyabot-api-server"
               checked={config.maibot_server.enable_api_server}
               onCheckedChange={(checked) =>
                 onChange({
@@ -1268,9 +1268,9 @@ function MaiBotServerSection({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="maibot-base-url" className="text-sm md:text-base">API-Server 地址</Label>
+            <Label htmlFor="riyabot-base-url" className="text-sm md:text-base">API-Server 地址</Label>
             <Input
-              id="maibot-base-url"
+              id="riyabot-base-url"
               value={config.maibot_server.base_url}
               onChange={(e) =>
                 onChange({
@@ -1285,9 +1285,9 @@ function MaiBotServerSection({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="maibot-api-key" className="text-sm md:text-base">API Key</Label>
+            <Label htmlFor="riyabot-api-key" className="text-sm md:text-base">API Key</Label>
             <Input
-              id="maibot-api-key"
+              id="riyabot-api-key"
               type="password"
               value={config.maibot_server.api_key}
               onChange={(e) =>
@@ -1296,7 +1296,7 @@ function MaiBotServerSection({
                   maibot_server: { ...config.maibot_server, api_key: e.target.value },
                 })
               }
-              placeholder="maibot"
+              placeholder="riyabot"
               className="text-sm md:text-base"
             />
             <p className="text-xs text-muted-foreground">仅在 API-Server 模式启用时使用</p>

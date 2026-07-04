@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-适配器模拟器 — 模拟真实 QQ 适配器向 MaiBot 逐条发送消息，测试记忆系统端到端流程。
+适配器模拟器 — 模拟真实 QQ 适配器向 RiyaBot 逐条发送消息，测试记忆系统端到端流程。
 
 工作方式:
   1. 通过 HTTP POST 向 bot 内网 API (/message/inject) 逐条发送消息
@@ -12,7 +12,7 @@
   - 回退到内置消息模板
 
 模型调用记录:
-  - 从 data/MaiBot.db 的 llm_usage 表读取本次运行期间新增记录
+  - 从 data/RiyaBot.db 的 llm_usage 表读取本次运行期间新增记录
   - 默认输出到 tests/artifacts/adapter_sim_llm_summary_*.json
     和 tests/artifacts/adapter_sim_llm_calls_*.jsonl/.csv
 
@@ -329,7 +329,7 @@ def build_message(platform: str = "qq") -> Optional[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 _MEMORY_DB_PATH = _PROJECT_ROOT / "data" / "memory.db"
-_MAIBOT_DB_PATH = _PROJECT_ROOT / "data" / "MaiBot.db"
+_RIYABOT_DB_PATH = _PROJECT_ROOT / "data" / "RiyaBot.db"
 _DEFAULT_ARTIFACT_DIR = _PROJECT_ROOT / "tests" / "artifacts"
 
 
@@ -384,7 +384,7 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
 def get_llm_usage_cursor() -> dict[str, Any]:
     """获取 llm_usage 当前游标，用于之后只导出本次运行期间新增记录。"""
     result: dict[str, Any] = {
-        "db_exists": _MAIBOT_DB_PATH.exists(),
+        "db_exists": _RIYABOT_DB_PATH.exists(),
         "table_exists": False,
         "max_id": 0,
         "record_count": 0,
@@ -393,7 +393,7 @@ def get_llm_usage_cursor() -> dict[str, Any]:
         return result
 
     try:
-        conn = _open_sqlite(_MAIBOT_DB_PATH)
+        conn = _open_sqlite(_RIYABOT_DB_PATH)
         if not _table_exists(conn, "llm_usage"):
             conn.close()
             return result
@@ -410,11 +410,11 @@ def get_llm_usage_cursor() -> dict[str, Any]:
 
 def load_llm_usage_since(start_id: int) -> list[dict[str, Any]]:
     """读取 start_id 之后的 llm_usage 明细。"""
-    if not _MAIBOT_DB_PATH.exists():
+    if not _RIYABOT_DB_PATH.exists():
         return []
 
     try:
-        conn = _open_sqlite(_MAIBOT_DB_PATH)
+        conn = _open_sqlite(_RIYABOT_DB_PATH)
         if not _table_exists(conn, "llm_usage"):
             conn.close()
             return []
@@ -530,7 +530,7 @@ def summarize_llm_usage(rows: list[dict[str, Any]], start_id: int, start_time: f
     end_id = max((int(row.get("id") or 0) for row in rows), default=start_id)
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "database": str(_MAIBOT_DB_PATH),
+        "database": str(_RIYABOT_DB_PATH),
         "cursor": {
             "start_id": start_id,
             "end_id": end_id,

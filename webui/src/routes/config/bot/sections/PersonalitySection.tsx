@@ -163,7 +163,7 @@ export const PersonalitySection = React.memo(function PersonalitySection({ confi
               id="plan_style"
               value={config.plan_style}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onChange({ ...config, plan_style: e.target.value })}
-              placeholder="麦麦的说话规则和行为风格"
+              placeholder="璃夜的说话规则和行为风格"
               rows={5}
             />
           </div>

@@ -265,7 +265,7 @@ export function PersonManagementPage() {
               用户画像
             </h1>
             <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              查看麦麦从新记忆系统聚合出的用户画像
+              查看璃夜从新记忆系统聚合出的用户画像
             </p>
           </div>
         </div>

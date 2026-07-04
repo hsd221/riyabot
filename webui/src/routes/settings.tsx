@@ -986,7 +986,7 @@ function OtherTab() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `maibot-webui-settings-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `riyabot-console-settings-${new Date().toISOString().slice(0, 10)}.json`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -1434,7 +1434,7 @@ function AboutTab() {
               本项目在 GitHub 开源，欢迎 Star ⭐ 支持！
             </p>
             <a
-              href="https://github.com/Mai-with-u/MaiBot-Dashboard"
+              href="https://github.com/hsd221/riyabot"
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
@@ -1480,7 +1480,7 @@ function AboutTab() {
         <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">关于 {APP_NAME}</h3>
         <div className="space-y-2 text-xs sm:text-sm text-muted-foreground">
           <p>版本: {APP_VERSION}</p>
-          <p>麦麦（MaiBot）的现代化 Web 管理界面</p>
+          <p>璃夜（RiyaBot）的现代化 Web 管理界面</p>
         </div>
       </div>
 
@@ -1489,12 +1489,12 @@ function AboutTab() {
         <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">作者</h3>
         <div className="space-y-3">
           <div className="space-y-1">
-            <p className="text-sm font-medium">MaiBot 核心</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">Mai-with-u</p>
+            <p className="text-sm font-medium">RiyaBot Core</p>
+            <p className="text-xs sm:text-sm text-muted-foreground">Forked from MaiBot/MaiCore</p>
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">WebUI</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">Mai-with-u <a href="https://github.com/DrSmoothl" target="_blank" rel="noopener noreferrer" className="text-primary underline">@MotricSeven</a></p>
+            <p className="text-xs sm:text-sm text-muted-foreground">Based on the upstream WebUI by Mai-with-u and <a href="https://github.com/DrSmoothl" target="_blank" rel="noopener noreferrer" className="text-primary underline">@MotricSeven</a></p>
           </div>
         </div>
       </div>
@@ -1637,7 +1637,7 @@ function AboutTab() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm sm:text-base font-semibold text-foreground mb-1">
-                  MaiBot WebUI
+                  RiyaBot Console
                 </p>
                 <p className="text-xs sm:text-sm text-muted-foreground">
                   本项目采用 GNU General Public License v3.0 开源许可证。

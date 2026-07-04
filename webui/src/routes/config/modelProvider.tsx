@@ -209,7 +209,7 @@ export function ModelProviderConfigPage() {
     }
   }
 
-  // 重启麦麦
+  // 重启璃夜
   const handleRestart = async () => {
     try {
       setRestarting(true)
@@ -244,7 +244,7 @@ export function ModelProviderConfigPage() {
       setHasUnsavedChanges(false)
       toast({
         title: '保存成功',
-        description: '正在重启麦麦...',
+        description: '正在重启璃夜...',
       })
       await handleRestart()
     } catch (error) {
@@ -749,18 +749,18 @@ export function ModelProviderConfigPage() {
                 className="w-full sm:w-auto sm:min-w-[120px]"
               >
                 <Power className="mr-2 h-4 w-4" />
-                {restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启麦麦'}
+                {restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启璃夜'}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>确认重启麦麦？</AlertDialogTitle>
+                <AlertDialogTitle>确认重启璃夜？</AlertDialogTitle>
                 <AlertDialogDescription asChild>
                   <div>
                     <p>
                       {hasUnsavedChanges
-                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启麦麦使新配置生效。重启过程中麦麦将暂时离线。'
-                        : '即将重启麦麦主程序。重启过程中麦麦将暂时离线,配置将在重启后生效。'
+                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启璃夜使新配置生效。重启过程中璃夜将暂时离线。'
+                        : '即将重启璃夜主程序。重启过程中璃夜将暂时离线,配置将在重启后生效。'
                       }
                     </p>
                   </div>
@@ -781,7 +781,7 @@ export function ModelProviderConfigPage() {
       <Alert>
         <Info className="h-4 w-4" />
         <AlertDescription>
-          配置更新后需要<strong>重启麦麦</strong>才能生效。你可以点击右上角的"保存并重启"按钮一键完成保存和重启。
+          配置更新后需要<strong>重启璃夜</strong>才能生效。你可以点击右上角的"保存并重启"按钮一键完成保存和重启。
         </AlertDescription>
       </Alert>
 

@@ -1,10 +1,10 @@
 # 🚀 快速开始指南
 
-本指南将带你从零开始创建一个功能完整的MaiCore插件。
+本指南将带你从零开始创建一个功能完整的RiyaBot插件。
 
 ## 📖 概述
 
-这个指南将带你快速创建你的第一个MaiCore插件。我们将创建一个简单的问候插件，展示插件系统的基本概念。
+这个指南将带你快速创建你的第一个RiyaBot插件。我们将创建一个简单的问候插件，展示插件系统的基本概念。
 
 以下代码都在我们的`plugins/hello_world_plugin/`目录下。
 
@@ -18,7 +18,7 @@
 
 确保你已经：
 
-1. 克隆了MaiCore项目
+1. 克隆了RiyaBot项目
 2. 安装了Python依赖
 3. 了解基本的Python语法
 
@@ -58,7 +58,7 @@ from src.plugin_system import BasePlugin, register_plugin, ComponentInfo
 
 @register_plugin # 注册插件
 class HelloWorldPlugin(BasePlugin):
-    """Hello World插件 - 你的第一个MaiCore插件"""
+    """Hello World插件 - 你的第一个RiyaBot插件"""
 
     # 以下是插件基本信息和方法（必须填写）
     plugin_name = "hello_world_plugin"
@@ -73,7 +73,7 @@ class HelloWorldPlugin(BasePlugin):
         return []
 ```
 
-🎉 恭喜！你刚刚创建了一个最简单但完整的MaiCore插件！
+🎉 恭喜！你刚刚创建了一个最简单但完整的RiyaBot插件！
 
 **解释一下这些代码：**
 
@@ -84,9 +84,9 @@ class HelloWorldPlugin(BasePlugin):
 
 ### 4. 测试基础插件
 
-现在就可以测试这个插件了！启动MaiCore：
+现在就可以测试这个插件了！启动RiyaBot：
 
-直接通过启动器运行MaiCore或者 `python bot.py`
+直接通过启动器运行RiyaBot或者 `python bot.py`
 
 在日志中你应该能看到插件被加载的信息。虽然插件还没有任何功能，但它已经成功运行了！
 
@@ -96,9 +96,9 @@ class HelloWorldPlugin(BasePlugin):
 
 现在我们要给插件加入一个有用的功能，我们从最好玩的Action做起
 
-Action是一类可以让MaiCore根据自身意愿选择使用的“动作”，在MaiCore中，不论是“回复”还是“不回复”，或者“发送表情”以及“禁言”等等，都是通过Action实现的。
+Action是一类可以让RiyaBot根据自身意愿选择使用的“动作”，在RiyaBot中，不论是“回复”还是“不回复”，或者“发送表情”以及“禁言”等等，都是通过Action实现的。
 
-你可以通过编写动作，来拓展MaiCore的能力，包括发送语音，截图，甚至操作文件，编写代码......
+你可以通过编写动作，来拓展RiyaBot的能力，包括发送语音，截图，甚至操作文件，编写代码......
 
 现在让我们给插件添加第一个简单的功能。这个Action可以对用户发送一句问候语。
 
@@ -138,7 +138,7 @@ class HelloAction(BaseAction):
 
 @register_plugin
 class HelloWorldPlugin(BasePlugin):
-    """Hello World插件 - 你的第一个MaiCore插件"""
+    """Hello World插件 - 你的第一个RiyaBot插件"""
 
     # 插件基本信息
     plugin_name = "hello_world_plugin"
@@ -160,21 +160,21 @@ class HelloWorldPlugin(BasePlugin):
 
 - `HelloAction` 是我们定义的问候动作类，继承自 `BaseAction`，并实现了核心功能。
 - 在 `HelloWorldPlugin` 中，我们通过 `get_plugin_components()` 方法，通过调用`get_action_info()`这个内置方法将 `HelloAction` 注册为插件的一个组件。
-- 这样一来，当插件被加载时，问候动作也会被一并加载，并可以在MaiCore中使用。
-- `execute()` 函数是Action的核心，定义了当Action被MaiCore选择后，具体要做什么
+- 这样一来，当插件被加载时，问候动作也会被一并加载，并可以在RiyaBot中使用。
+- `execute()` 函数是Action的核心，定义了当Action被RiyaBot选择后，具体要做什么
 - `self.send_text()` 是发送文本消息的便捷方法
 
 Action 组件中有关`activation_type`、`action_parameters`、`action_require`、`associated_types` 等的详细说明请参考 [Action组件指南](./action-components.md)。
 
 ### 6. 测试问候Action
 
-重启MaiCore，然后在聊天中发送任意消息，比如：
+重启RiyaBot，然后在聊天中发送任意消息，比如：
 
 ```
 你好
 ```
 
-MaiCore可能会选择使用你的问候Action，发送回复：
+RiyaBot可能会选择使用你的问候Action，发送回复：
 
 ```
 嗨！很开心见到你！😊
@@ -182,7 +182,7 @@ MaiCore可能会选择使用你的问候Action，发送回复：
 
 ![1750332508760](image/quick-start/1750332508760.png)
 
-> **💡 小提示**：MaiCore会智能地决定什么时候使用它。如果没有立即看到效果，多试几次不同的消息。
+> **💡 小提示**：RiyaBot会智能地决定什么时候使用它。如果没有立即看到效果，多试几次不同的消息。
 
 🎉 太棒了！你的插件已经有实际功能了！
 
@@ -222,7 +222,7 @@ class TimeCommand(BaseCommand):
 
 @register_plugin
 class HelloWorldPlugin(BasePlugin):
-    """Hello World插件 - 你的第一个MaiCore插件"""
+    """Hello World插件 - 你的第一个RiyaBot插件"""
 
     # 插件基本信息
     plugin_name = "hello_world_plugin"
@@ -250,7 +250,7 @@ class HelloWorldPlugin(BasePlugin):
 
 ### 8. 测试时间查询Command
 
-重启MaiCore，发送命令：
+重启RiyaBot，发送命令：
 
 ```
 /time
@@ -285,7 +285,7 @@ from src.plugin_system import ConfigField
 
 @register_plugin
 class HelloWorldPlugin(BasePlugin):
-    """Hello World插件 - 你的第一个MaiCore插件"""
+    """Hello World插件 - 你的第一个RiyaBot插件"""
 
     # 插件基本信息
     plugin_name: str = "hello_world_plugin"  # 内部标识符
@@ -319,7 +319,7 @@ class HelloWorldPlugin(BasePlugin):
 
 ```toml
 # hello_world_plugin - 自动生成的配置文件
-# 我的第一个MaiCore插件，包含问候功能和时间查询等基础示例
+# 我的第一个RiyaBot插件，包含问候功能和时间查询等基础示例
 
 # 插件基本信息
 [plugin]
@@ -419,7 +419,7 @@ class TimeCommand(BaseCommand):
 
 ### 3. 发布到插件市场
 
-如果你想让更多人使用你的插件，可以将它发布到MaiCore的插件市场。
+如果你想让更多人使用你的插件，可以将它发布到RiyaBot的插件市场。
 
 这部分请参考 [plugin-repo](https://github.com/Maim-with-u/plugin-repo) 的文档。
 

@@ -75,16 +75,16 @@ export function Layout({ children }: LayoutProps) {
       ],
     },
     {
-      title: '麦麦配置编辑',
+      title: '璃夜配置编辑',
       items: [
-        { icon: FileText, label: '麦麦主程序配置', path: '/config/bot' },
+        { icon: FileText, label: '璃夜主程序配置', path: '/config/bot' },
         { icon: Server, label: 'AI模型厂商配置', path: '/config/modelProvider', tourId: 'sidebar-model-provider' },
         { icon: Boxes, label: '模型管理与分配', path: '/config/model', tourId: 'sidebar-model-management' },
-        { icon: Sliders, label: '麦麦适配器配置', path: '/config/adapter' },
+        { icon: Sliders, label: '璃夜适配器配置', path: '/config/adapter' },
       ],
     },
     {
-      title: '麦麦资源管理',
+      title: '璃夜资源管理',
       items: [
         { icon: Smile, label: '表情包管理', path: '/resource/emoji' },
         { icon: MessageSquare, label: '表达方式管理', path: '/resource/expression' },
@@ -153,14 +153,14 @@ export function Layout({ children }: LayoutProps) {
               "flex items-baseline gap-2",
               !sidebarOpen && "lg:hidden"
             )}>
-              <span className="font-bold text-xl text-primary-gradient whitespace-nowrap">MaiBot WebUI</span>
+              <span className="font-bold text-xl text-primary-gradient whitespace-nowrap">RiyaBot Console</span>
               <span className="text-xs text-primary/60 whitespace-nowrap">
                 {formatVersion()}
               </span>
             </div>
             {/* 折叠时的 Logo - 仅桌面端显示 */}
             {!sidebarOpen && (
-              <span className="hidden lg:block font-bold text-primary-gradient text-2xl">M</span>
+              <span className="hidden lg:block font-bold text-primary-gradient text-2xl">R</span>
             )}
           </div>
         </div>
@@ -320,16 +320,16 @@ export function Layout({ children }: LayoutProps) {
             {/* 搜索对话框 */}
             <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
 
-            {/* 麦麦文档链接 */}
+            {/* 璃夜文档链接 */}
             <Button
               variant="ghost"
               size="sm"
               onClick={() => window.open('https://docs.mai-mai.org', '_blank')}
               className="gap-2"
-              title="查看麦麦文档"
+              title="查看璃夜文档"
             >
               <BookOpen className="h-4 w-4" />
-              <span className="hidden sm:inline">麦麦文档</span>
+              <span className="hidden sm:inline">璃夜文档</span>
             </Button>
 
             {/* 主题切换按钮 */}

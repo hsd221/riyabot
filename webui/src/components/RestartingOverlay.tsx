@@ -95,9 +95,9 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
           {status === 'restarting' && (
             <>
               <Loader2 className="h-16 w-16 text-primary animate-spin" />
-              <h2 className="text-2xl font-bold">正在重启麦麦</h2>
+              <h2 className="text-2xl font-bold">正在重启璃夜</h2>
               <p className="text-muted-foreground text-center">
-                请稍候，麦麦正在重启中...
+                请稍候，璃夜正在重启中...
               </p>
             </>
           )}

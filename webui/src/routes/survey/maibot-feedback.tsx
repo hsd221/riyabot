@@ -1,5 +1,5 @@
 /**
- * 麦麦使用体验反馈问卷页面
+ * 璃夜使用体验反馈问卷页面
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -16,15 +16,15 @@ export function MaiBotFeedbackSurveyPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [maibotVersion, setMaibotVersion] = useState<string>('未知版本')
 
-  // 初始化问卷配置，获取麦麦版本
+  // 初始化问卷配置，获取璃夜版本
   useEffect(() => {
     const init = async () => {
       try {
-        // 获取麦麦版本
+        // 获取璃夜版本
         const status = await getMaiBotStatus()
         setMaibotVersion(status.version || '未知版本')
       } catch (error) {
-        console.error('Failed to get MaiBot version:', error)
+        console.error('Failed to get RiyaBot version:', error)
         setMaibotVersion('获取失败')
       }
 
@@ -47,12 +47,12 @@ export function MaiBotFeedbackSurveyPage() {
 
   // 提交成功回调
   const handleSubmitSuccess = useCallback((submissionId: string) => {
-    console.log('MaiBot Survey submitted:', submissionId)
+    console.log('RiyaBot Survey submitted:', submissionId)
   }, [])
 
   // 提交错误回调
   const handleSubmitError = useCallback((error: string) => {
-    console.error('MaiBot Survey submission error:', error)
+    console.error('RiyaBot Survey submission error:', error)
   }, [])
 
   if (isLoading) {
@@ -85,7 +85,7 @@ export function MaiBotFeedbackSurveyPage() {
       <div className="mb-4 sm:mb-6 shrink-0">
         <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
           <FileQuestion className="h-8 w-8" strokeWidth={2} />
-          麦麦使用体验反馈问卷
+          璃夜使用体验反馈问卷
         </h1>
         <p className="text-muted-foreground mt-1 text-sm sm:text-base">
           感谢您的反馈，帮助我们打造更好的 AI 伙伴

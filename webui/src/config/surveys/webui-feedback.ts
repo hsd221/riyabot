@@ -3,8 +3,8 @@ import type { SurveyConfig } from '@/types/survey'
 export const webuiFeedbackSurvey: SurveyConfig = {
   id: 'webui-feedback-v1',
   version: '1.0.0',
-  title: '麦麦 WebUI 使用反馈问卷',
-  description: '感谢您使用麦麦 WebUI！您的反馈将帮助我们不断改进产品体验。',
+  title: '璃夜 WebUI 使用反馈问卷',
+  description: '感谢您使用璃夜 WebUI！您的反馈将帮助我们不断改进产品体验。',
   questions: [
     {
       id: 'webui_version',
@@ -70,7 +70,7 @@ export const webuiFeedbackSurvey: SurveyConfig = {
     {
       id: 'overall_satisfaction',
       type: 'single',
-      title: '你对麦麦 WebUI 的整体满意度如何？',
+      title: '你对璃夜 WebUI 的整体满意度如何？',
       required: true,
       options: [
         { id: 'very_satisfied', label: '非常满意', value: 'very_satisfied' },
@@ -83,7 +83,7 @@ export const webuiFeedbackSurvey: SurveyConfig = {
     {
       id: 'would_recommend',
       type: 'single',
-      title: '你愿意推荐麦麦 WebUI 给其他人使用吗？',
+      title: '你愿意推荐璃夜 WebUI 给其他人使用吗？',
       required: true,
       options: [
         { id: 'yes', label: '是', value: 'yes' },

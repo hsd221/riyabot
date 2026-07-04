@@ -1,63 +1,68 @@
 name: Bug Report
-description: 提交 Bug
-labels: ["BUG"]
+description: 报告 RiyaBot 的可复现问题
+labels: ["bug"]
 body:
 - type: checkboxes
   attributes:
     label: "检查项"
-    description: "请检查下列项目，并勾选确认。"
+    description: "提交前请先确认这些信息。"
     options:
-    - label: "我确认此问题在所有分支的最新版本中依旧存在"
+    - label: "我已经搜索过现有 Issues，未找到相同或高度相似的问题"
       required: true
-    - label: "我确认在 Issues 列表中并无其他人已经提出过与此问题相同或相似的问题"
+    - label: "我确认这不是本地配置、模型额度或第三方平台风控导致的问题"
       required: true
-    - label: "我使用了 Docker"
 - type: dropdown
   attributes:
-    label: "使用的分支"
-    description: "请选择您正在使用的版本分支"
+    label: "运行方式"
+    description: "请选择你主要使用的部署方式"
     options:
-      - main
-      - dev
+      - 本地运行
+      - Docker Compose
+      - 自定义容器/服务器
+      - 其他
   validations:
     required: true
 - type: input
   attributes:
-    label: "具体版本号"
-    description: "请输入您使用的具体版本号"
-    placeholder: "例如：0.5.11、0.5.8、0.6.0"
+    label: "版本或提交"
+    description: "请填写版本号、分支名或 commit hash"
+    placeholder: "例如：main / dev / v0.11.6 / abc1234"
   validations:
     required: true
 - type: textarea
   attributes:
-    label: 遇到的问题
+    label: "问题描述"
+    description: "说明你看到的异常行为，以及你期望发生什么。"
   validations:
     required: true
 - type: textarea
   attributes:
-    label: 报错信息
+    label: "复现步骤"
+    description: "请尽量写成可以从干净环境复现的步骤。"
+    placeholder: |
+      1. ...
+      2. ...
+      3. ...
   validations:
     required: true
 - type: textarea
   attributes:
-    label: 如何重现此问题？
-    placeholder: "若不知道请略过此问题"
+    label: "日志或报错"
+    description: "请粘贴关键日志，注意删除 Token、Cookie、QQ 号、API Key 等敏感信息。"
+    render: text
 - type: textarea
   attributes:
-    label: 可能造成问题的原因
-    placeholder: "若不知道请略过此问题"
-- type: textarea
-  attributes:
-    label: 系统环境 
-    placeholder: "例如：Windows 11 专业版 64位 24H2 / Debian Bookworm"
+    label: "系统环境"
+    placeholder: "例如：Windows 11 / Ubuntu 24.04 / Debian Bookworm"
   validations:
     required: true
 - type: textarea
   attributes:
-    label: Python 版本 
-    placeholder: "例如：Python 3.11"
+    label: "Python 与依赖环境"
+    placeholder: "例如：Python 3.11，uv sync 后运行"
   validations:
     required: true
 - type: textarea
   attributes:
-    label: 补充信息
+    label: "补充信息"
+    description: "截图、配置片段、可能相关的最近改动等。"

@@ -173,7 +173,7 @@ class StatisticOutputTask(AsyncTask):
 
     SEP_LINE = "-" * 84
 
-    def __init__(self, record_file_path: str = "maibot_statistics.html"):
+    def __init__(self, record_file_path: str = "riyabot_statistics.html"):
         # 延迟300秒启动，运行间隔300秒
         super().__init__(task_name="Statistics Data Output Task", wait_before_start=0, run_interval=300)
 
@@ -1329,7 +1329,7 @@ class StatisticOutputTask(AsyncTask):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MaiBot运行统计报告</title>
+    <title>RiyaBot运行统计报告</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
@@ -1469,7 +1469,7 @@ class StatisticOutputTask(AsyncTask):
             + f"""
     <div class="container">
         <div class="toolbar">
-            <h1 style="margin: 0;">MaiBot运行统计报告</h1>
+            <h1 style="margin: 0;">RiyaBot运行统计报告</h1>
             <div class="right">
                 <span class="info-item" style="margin: 0;"><strong>统计截止时间:</strong> {now.strftime("%Y-%m-%d %H:%M:%S")}</span>
             </div>
@@ -1480,7 +1480,7 @@ class StatisticOutputTask(AsyncTask):
         </div>
 
         {joined_tab_content}
-        <div class="footer">Made with ❤️ by MaiBot • 本页会定期自动覆盖生成</div>
+        <div class="footer">Made with RiyaBot • 本页会定期自动覆盖生成</div>
     </div>
 """
             + """
@@ -2204,7 +2204,7 @@ class StatisticOutputTask(AsyncTask):
 class AsyncStatisticOutputTask(AsyncTask):
     """完全异步的统计输出任务 - 更高性能版本"""
 
-    def __init__(self, record_file_path: str = "maibot_statistics.html"):
+    def __init__(self, record_file_path: str = "riyabot_statistics.html"):
         # 延迟0秒启动，运行间隔300秒
         super().__init__(task_name="Async Statistics Data Output Task", wait_before_start=0, run_interval=300)
 

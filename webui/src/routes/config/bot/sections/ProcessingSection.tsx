@@ -753,7 +753,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                     <Textarea
                       value={rule.reaction}
                       onChange={(e) => updateRegexRule(index, 'reaction', e.target.value)}
-                      placeholder="触发后麦麦的反应...&#10;可以使用 [捕获组名] 来引用正则表达式中的内容"
+                      placeholder="触发后璃夜的反应...&#10;可以使用 [捕获组名] 来引用正则表达式中的内容"
                       rows={3}
                       className="text-sm"
                     />
@@ -867,7 +867,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                     <Textarea
                       value={rule.reaction}
                       onChange={(e) => updateKeywordRule(ruleIndex, 'reaction', e.target.value)}
-                      placeholder="触发后麦麦的反应..."
+                      placeholder="触发后璃夜的反应..."
                       rows={3}
                       className="text-sm"
                     />
@@ -927,7 +927,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                   </Label>
                 </div>
                 <p className="text-xs text-muted-foreground mb-4">
-                  为回复添加随机错别字，让麦麦的回复更自然
+                  为回复添加随机错别字，让璃夜的回复更自然
                 </p>
 
                 {chineseTypoConfig.enable && (

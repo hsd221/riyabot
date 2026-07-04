@@ -172,7 +172,7 @@ export function PluginsPage() {
         }
       }
 
-      // 4. 获取麦麦版本
+      // 4. 获取璃夜版本
       if (!isUnmounted) {
         const version = await getMaimaiVersion()
         setMaimaiVersion(version)
@@ -417,7 +417,7 @@ export function PluginsPage() {
     if (maimaiVersion && !checkPluginCompatibility(plugin)) {
       toast({
         title: '无法安装',
-        description: '插件与当前麦麦版本不兼容',
+        description: '插件与当前璃夜版本不兼容',
         variant: 'destructive',
       })
       return
@@ -567,7 +567,7 @@ export function PluginsPage() {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold">插件市场</h1>
-            <p className="text-muted-foreground mt-2">浏览和管理麦麦的插件</p>
+            <p className="text-muted-foreground mt-2">浏览和管理璃夜的插件</p>
           </div>
           <Button onClick={() => navigate({ to: '/plugin-mirrors' })}>
             <Settings2 className="h-4 w-4 mr-2" />
@@ -594,7 +594,7 @@ export function PluginsPage() {
             <CardContent>
               <p className="text-sm text-orange-800 dark:text-orange-200">
                 您可以从 <a href="https://git-scm.com/downloads" target="_blank" rel="noopener noreferrer" className="underline font-medium">git-scm.com</a> 下载并安装 Git。
-                安装完成后，请重启麦麦应用。
+                安装完成后，请重启璃夜应用。
               </p>
             </CardContent>
           </Card>

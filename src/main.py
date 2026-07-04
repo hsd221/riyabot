@@ -74,7 +74,7 @@ class MainSystem:
 --------------------------------
 如果你想要编写或了解插件相关内容，请访问开发文档https://docs.mai-mai.org/develop/
 --------------------------------
-如果你需要查阅模型的消耗以及麦麦的统计数据，请访问根目录的maibot_statistics.html文件
+如果你需要查阅模型的消耗以及璃夜的统计数据，请访问根目录的riyabot_statistics.html文件
 """)
 
     async def _init_components(self):

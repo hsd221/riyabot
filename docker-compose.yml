@@ -1,6 +1,8 @@
+name: riyabot
+
 services:
   adapters:
-    container_name: maim-bot-adapters
+    container_name: riyabot-adapters
     #### prod ####
     image: unclas/maimbot-adapter:latest
     # image: infinitycat/maimbot-adapter:latest
@@ -16,15 +18,13 @@ services:
       - ./data/adapters:/adapters/data # adapters 数据持久化
     restart: always
     networks:
-      - maim_bot
+      - riyabot_net
   core:
-    container_name: maim-bot-core
-    #### prod ####
-    image: sengokucola/maibot:latest
-    # image: infinitycat/maibot:latest
-    #### dev ####
-    # image: sengokucola/maibot:dev
-    # image: infinitycat/maibot:dev
+    container_name: riyabot-core
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: riyabot:latest
     environment:
       - TZ=Asia/Shanghai
 #      - EULA_AGREE=1b662741904d7155d1ce1c00b3530d0d # 同意EULA
@@ -33,17 +33,17 @@ services:
       - "18001:8001" # webui端口
 #      - "8000:8000"
     volumes:
-      - ./docker-config/mmc/.env:/MaiMBot/.env # 持久化env配置文件
-      - ./docker-config/mmc:/MaiMBot/config # 持久化bot配置文件
-      - ./docker-config/adapters:/MaiMBot/adapters-config # adapter配置文件夹映射
-      - ./data/MaiMBot/maibot_statistics.html:/MaiMBot/maibot_statistics.html #统计数据输出
-      - ./data/MaiMBot:/MaiMBot/data # 共享目录
-      - ./data/MaiMBot/plugins:/MaiMBot/plugins # 插件目录
-      - ./data/MaiMBot/logs:/MaiMBot/logs # 日志目录
+      - ./docker-config/mmc/.env:/RiyaBot/.env # 持久化env配置文件
+      - ./docker-config/mmc:/RiyaBot/config # 持久化bot配置文件
+      - ./docker-config/adapters:/RiyaBot/adapters-config # adapter配置文件夹映射
+      - ./data/RiyaBot/riyabot_statistics.html:/RiyaBot/riyabot_statistics.html #统计数据输出
+      - ./data/RiyaBot:/RiyaBot/data # 共享目录
+      - ./data/RiyaBot/plugins:/RiyaBot/plugins # 插件目录
+      - ./data/RiyaBot/logs:/RiyaBot/logs # 日志目录
       # - site-packages:/usr/local/lib/python3.13/site-packages # 持久化Python包，需要时启用
     restart: always
     networks:
-      - maim_bot
+      - riyabot_net
   napcat:
     environment:
       - NAPCAT_UID=1000
@@ -54,12 +54,12 @@ services:
     volumes:
       - ./docker-config/napcat:/app/napcat/config # 持久化napcat配置文件
       - ./data/qq:/app/.config/QQ # 持久化QQ本体
-      - ./data/MaiMBot:/MaiMBot/data # 共享目录
-    container_name: maim-bot-napcat
+      - ./data/RiyaBot:/RiyaBot/data # 共享目录
+    container_name: riyabot-napcat
     restart: always
     image: mlikiowa/napcat-docker:latest
     networks:
-      - maim_bot
+      - riyabot_net
   sqlite-web:
     # 注意：coleifer/sqlite-web 镜像不支持arm64
     image: coleifer/sqlite-web
@@ -68,27 +68,27 @@ services:
     ports:
       - "8120:8080"
     volumes:
-      - ./data/MaiMBot:/data/MaiMBot
+      - ./data/RiyaBot:/data/RiyaBot
     environment:
-      - SQLITE_DATABASE=MaiMBot/MaiBot.db  # 你的数据库文件
+      - SQLITE_DATABASE=RiyaBot/RiyaBot.db  # 你的数据库文件
     networks:
-      - maim_bot
+      - riyabot_net
 
   # chat2db占用相对较高但是功能强大
   # 内存占用约600m，内存充足推荐选此
   # chat2db:
   #   image: chat2db/chat2db:latest
-  #   container_name: maim-bot-chat2db
+  #   container_name: riyabot-chat2db
   #   restart: always
   #   ports:
   #     - "10824:10824"
   #   volumes:
-  #     - ./data/MaiMBot:/data/MaiMBot
+  #     - ./data/RiyaBot:/data/RiyaBot
   #   networks:
-  #     - maim_bot
+  #     - riyabot_net
   
 # volumes:         #  若需要持久化Python包时启用
 #   site-packages:
 networks:
-  maim_bot:
+  riyabot_net:
     driver: bridge

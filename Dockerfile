@@ -3,7 +3,7 @@ FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # 工作目录
-WORKDIR /MaiMBot
+WORKDIR /RiyaBot
 
 # 复制依赖列表
 COPY requirements.txt .

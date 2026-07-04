@@ -22,7 +22,7 @@ from src.common.logger import get_logger
 logger = get_logger("memory.schema")
 
 # ---------------------------------------------------------------------------
-# 数据库连接 — 独立的 memory.db，与主 MaiBot.db 分离
+# 数据库连接 — 独立的 memory.db，与主 RiyaBot.db 分离
 # ---------------------------------------------------------------------------
 
 _ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

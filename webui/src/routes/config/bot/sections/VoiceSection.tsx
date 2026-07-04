@@ -20,7 +20,7 @@ export const VoiceSection = React.memo(function VoiceSection({ config, onChange 
         <Label className="cursor-pointer">启用语音识别</Label>
       </div>
       <p className="text-xs text-muted-foreground">
-        启用后麦麦可以识别语音消息，需要配置语音识别模型
+        启用后璃夜可以识别语音消息，需要配置语音识别模型
       </p>
     </div>
   )

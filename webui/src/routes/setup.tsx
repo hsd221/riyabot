@@ -256,17 +256,17 @@ export function SetupPage() {
       setRestartProgress('正在完成初始化...')
       await completeSetup()
 
-      // 3. 触发麦麦重启
-      setRestartProgress('正在重启麦麦...')
+      // 3. 触发璃夜重启
+      setRestartProgress('正在重启璃夜...')
       await restartMaiBot()
 
       toast({
         title: '配置完成',
-        description: '麦麦正在重启以应用新配置...',
+        description: '璃夜正在重启以应用新配置...',
       })
 
-      // 4. 轮询检查麦麦是否重启成功
-      setRestartProgress('等待麦麦重启完成...')
+      // 4. 轮询检查璃夜是否重启成功
+      setRestartProgress('等待璃夜重启完成...')
       const maxAttempts = 60 // 最多等待60秒
       let attempt = 0
       let restartSuccess = false
@@ -287,7 +287,7 @@ export function SetupPage() {
       }
 
       if (!restartSuccess) {
-        throw new Error('重启超时,请手动检查麦麦状态')
+        throw new Error('重启超时,请手动检查璃夜状态')
       }
 
       // 5. 导航到首页
@@ -349,7 +349,7 @@ export function SetupPage() {
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold">正在重启麦麦</h2>
+              <h2 className="text-2xl font-bold">正在重启璃夜</h2>
               <p className="text-muted-foreground">{restartProgress}</p>
             </div>
             <div className="w-full">

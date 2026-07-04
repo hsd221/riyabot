@@ -3,13 +3,13 @@ import type { SurveyConfig } from '@/types/survey'
 export const maibotFeedbackSurvey: SurveyConfig = {
   id: 'maibot-feedback-v1',
   version: '1.0.0',
-  title: '麦麦使用体验反馈问卷',
-  description: '感谢您使用麦麦！您的反馈将帮助我们打造更好的 AI 伙伴。',
+  title: '璃夜使用体验反馈问卷',
+  description: '感谢您使用璃夜！您的反馈将帮助我们打造更好的 AI 伙伴。',
   questions: [
     {
       id: 'maibot_version',
       type: 'text',
-      title: '你正在使用的麦麦版本',
+      title: '你正在使用的璃夜版本',
       description: '此项由系统自动填写',
       required: true,
       readOnly: true,
@@ -18,7 +18,7 @@ export const maibotFeedbackSurvey: SurveyConfig = {
     {
       id: 'improvement_areas',
       type: 'textarea',
-      title: '你认为麦麦还有哪些部分可以改进？',
+      title: '你认为璃夜还有哪些部分可以改进？',
       required: true,
       placeholder: '请分享你认为可以改进的方面...',
       maxLength: 1000,
@@ -26,7 +26,7 @@ export const maibotFeedbackSurvey: SurveyConfig = {
     {
       id: 'problems_encountered',
       type: 'multiple',
-      title: '你在使用麦麦时遇到过哪些问题？',
+      title: '你在使用璃夜时遇到过哪些问题？',
       description: '可多选',
       required: true,
       options: [
@@ -50,7 +50,7 @@ export const maibotFeedbackSurvey: SurveyConfig = {
     {
       id: 'helpful_features',
       type: 'textarea',
-      title: '你觉得麦麦的哪些功能对你最有帮助？',
+      title: '你觉得璃夜的哪些功能对你最有帮助？',
       required: true,
       placeholder: '请分享对你最有帮助的功能...',
       maxLength: 1000,
@@ -66,7 +66,7 @@ export const maibotFeedbackSurvey: SurveyConfig = {
     {
       id: 'overall_satisfaction',
       type: 'single',
-      title: '你对麦麦的整体满意度如何？',
+      title: '你对璃夜的整体满意度如何？',
       required: true,
       options: [
         { id: 'very_satisfied', label: '非常满意', value: 'very_satisfied' },
@@ -79,7 +79,7 @@ export const maibotFeedbackSurvey: SurveyConfig = {
     {
       id: 'would_recommend',
       type: 'single',
-      title: '你愿意推荐麦麦给其他人使用吗？',
+      title: '你愿意推荐璃夜给其他人使用吗？',
       required: true,
       options: [
         { id: 'yes', label: '是', value: 'yes' },
@@ -98,6 +98,6 @@ export const maibotFeedbackSurvey: SurveyConfig = {
   ],
   settings: {
     allowMultiple: false,
-    thankYouMessage: '感谢你的反馈！你的意见对麦麦的成长非常重要，我们会认真考虑每一条建议。',
+    thankYouMessage: '感谢你的反馈！你的意见对璃夜的成长非常重要，我们会认真考虑每一条建议。',
   },
 }

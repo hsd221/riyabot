@@ -293,7 +293,7 @@ export function ChatPage() {
           console.error('[Chat] 获取平台列表失败: 非 JSON 响应:', text.substring(0, 200))
           toast({
             title: '连接失败',
-            description: '无法连接到后端服务，请确保 MaiBot 已启动',
+            description: '无法连接到后端服务，请确保 RiyaBot 已启动',
             variant: 'destructive',
           })
         }
@@ -385,7 +385,7 @@ export function ChatPage() {
               content: msg.content,
               timestamp: msg.timestamp,
               sender: {
-                name: msg.sender_name || (msg.is_bot ? '麦麦' : 'WebUI用户'),
+                name: msg.sender_name || (msg.is_bot ? '璃夜' : 'WebUI用户'),
                 user_id: msg.user_id,
                 is_bot: msg.is_bot
               }
@@ -596,7 +596,7 @@ export function ChatPage() {
                     content: msg.content,
                     timestamp: msg.timestamp,
                     sender: {
-                      name: msg.sender_name || (isBot ? '麦麦' : '用户'),
+                      name: msg.sender_name || (isBot ? '璃夜' : '用户'),
                       user_id: msg.sender_id,
                       is_bot: isBot,
                     },
@@ -761,7 +761,7 @@ export function ChatPage() {
       content: '',
       timestamp: currentTimestamp + 0.001, // 稍微晚一点确保顺序
       sender: {
-        name: activeTab?.sessionInfo.bot_name || '麦麦',
+        name: activeTab?.sessionInfo.bot_name || '璃夜',
         is_bot: true,
       }
     }
@@ -976,7 +976,7 @@ export function ChatPage() {
               新建虚拟身份对话
             </DialogTitle>
             <DialogDescription>
-              选择一个麦麦已认识的用户，以该用户的身份与麦麦对话。麦麦将使用她对该用户的记忆和认知来回应。
+              选择一个璃夜已认识的用户，以该用户的身份与璃夜对话。璃夜将使用她对该用户的记忆和认知来回应。
             </DialogDescription>
           </DialogHeader>
           
@@ -1099,7 +1099,7 @@ export function ChatPage() {
                   }))}
                 />
                 <p className="text-xs text-muted-foreground">
-                  麦麦会认为这是一个名为此名称的群聊
+                  璃夜会认为这是一个名为此名称的群聊
                 </p>
               </div>
             )}
@@ -1182,7 +1182,7 @@ export function ChatPage() {
               </Avatar>
               <div className="min-w-0">
                 <h1 className="text-base sm:text-lg font-semibold truncate">
-                  {activeTab?.sessionInfo.bot_name || '麦麦'}
+                  {activeTab?.sessionInfo.bot_name || '璃夜'}
                 </h1>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   {activeTab?.isConnected ? (
@@ -1289,7 +1289,7 @@ export function ChatPage() {
             {activeTab?.messages.length === 0 && !isLoadingHistory && (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <Bot className="h-12 w-12 mb-4 opacity-50" />
-                <p className="text-sm">开始与 {activeTab?.sessionInfo.bot_name || '麦麦'} 对话吧！</p>
+                <p className="text-sm">开始与 {activeTab?.sessionInfo.bot_name || '璃夜'} 对话吧！</p>
               </div>
             )}
             

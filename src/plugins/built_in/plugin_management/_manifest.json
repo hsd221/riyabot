@@ -4,15 +4,15 @@
   "version": "1.0.0",
   "description": "通过系统API管理插件和组件的生命周期，包括加载、卸载、启用和禁用等操作。",
   "author": {
-    "name": "MaiBot团队",
-    "url": "https://github.com/MaiM-with-u"
+    "name": "RiyaBot Core",
+    "url": "https://github.com/hsd221/riyabot"
   },
   "license": "GPL-v3.0-or-later",
   "host_application": {
     "min_version": "0.10.1"
   },
-  "homepage_url": "https://github.com/MaiM-with-u/maibot",
-  "repository_url": "https://github.com/MaiM-with-u/maibot",
+  "homepage_url": "https://github.com/hsd221/riyabot",
+  "repository_url": "https://github.com/hsd221/riyabot",
   "keywords": [
     "plugins",
     "components",

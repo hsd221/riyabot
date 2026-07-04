@@ -280,7 +280,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
             <div>
               <h3 className="text-lg font-semibold">表达学习配置</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                配置麦麦如何学习和使用表达方式
+                配置璃夜如何学习和使用表达方式
               </p>
             </div>
             <Button onClick={addLearningRule} size="sm" variant="outline">
@@ -433,7 +433,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                       <div>
                         <Label className="text-xs font-medium">使用学到的表达</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          允许麦麦使用从聊天中学到的表达方式
+                          允许璃夜使用从聊天中学到的表达方式
                         </p>
                       </div>
                       <Switch
@@ -451,7 +451,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                       <div>
                         <Label className="text-xs font-medium">学习表达</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          允许麦麦从聊天中学习新的表达方式
+                          允许璃夜从聊天中学习新的表达方式
                         </p>
                       </div>
                       <Switch
@@ -469,7 +469,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                       <div>
                         <Label className="text-xs font-medium">学习黑话</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          允许麦麦从该聊天流学习 jargon/黑话
+                          允许璃夜从该聊天流学习 jargon/黑话
                         </p>
                       </div>
                       <Switch
@@ -604,7 +604,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               <div>
                 <span className="text-sm font-medium">手动表达反思</span>
                 <p className="text-xs text-muted-foreground mt-1">
-                  麦麦主动向操作员询问表达方式是否合适
+                  璃夜主动向操作员询问表达方式是否合适
                 </p>
               </div>
             <Switch
@@ -690,7 +690,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                           当前操作员 ID：{config.manual_reflect_operator_id || '（未设置）'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          麦麦会向此操作员询问表达方式是否合适
+                          璃夜会向此操作员询问表达方式是否合适
                         </p>
                       </div>
                     )
