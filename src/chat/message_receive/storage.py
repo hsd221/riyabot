@@ -30,6 +30,24 @@ class MessageStorage:
             return []
 
     @staticmethod
+    def _serialize_additional_config(additional_config) -> str:
+        if isinstance(additional_config, str):
+            return additional_config
+        if isinstance(additional_config, dict):
+            return json.dumps(additional_config, ensure_ascii=False)
+        return "{}"
+
+    @staticmethod
+    def _serialize_selected_expressions(selected_expressions) -> str:
+        if isinstance(selected_expressions, str):
+            return selected_expressions
+        if isinstance(selected_expressions, list):
+            return json.dumps(selected_expressions, ensure_ascii=False)
+        if selected_expressions is None:
+            return ""
+        return json.dumps(selected_expressions, ensure_ascii=False)
+
+    @staticmethod
     async def store_message(message: Union[MessageSending, MessageRecv], chat_stream: ChatStream) -> None:
         """存储消息到数据库"""
         try:
@@ -71,7 +89,7 @@ class MessageStorage:
                 is_command = False
                 key_words = ""
                 key_words_lite = ""
-                selected_expressions = message.selected_expressions
+                selected_expressions = MessageStorage._serialize_selected_expressions(message.selected_expressions)
                 intercept_message_level = 0
             else:
                 filtered_display_message = ""
@@ -141,6 +159,9 @@ class MessageStorage:
                 intercept_message_level=intercept_message_level,
                 key_words=key_words,
                 key_words_lite=key_words_lite,
+                additional_config=MessageStorage._serialize_additional_config(
+                    getattr(message.message_info, "additional_config", None)
+                ),
                 selected_expressions=selected_expressions,
             )
         except Exception:

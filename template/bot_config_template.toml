@@ -1,5 +1,5 @@
 [inner]
-version = "7.4.1"
+version = "7.4.2"
 
 #----以下是给开发人员阅读的，如果你只是部署了璃夜，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -254,6 +254,9 @@ color_text = "full" # 日志文本颜色，可选none，title，full
 log_level = "INFO" # 全局日志级别（向下兼容，优先级低于下面的分别设置）
 console_log_level = "INFO" # 控制台日志级别，可选: DEBUG, INFO, WARNING, ERROR, CRITICAL
 file_log_level = "DEBUG" # 文件日志级别，可选: DEBUG, INFO, WARNING, ERROR, CRITICAL
+debug_plaintext_logging = false # DEBUG级别是否允许记录截断后的明文文本，默认关闭以避免泄露敏感内容
+max_debug_text_length = 500 # DEBUG明文字段最大长度
+max_log_field_length = 2000 # 普通日志字段最大长度，超出会自动截断
 
 # 第三方库日志控制
 suppress_libraries = ["faiss","httpx", "urllib3", "asyncio", "websockets", "httpcore", "requests", "peewee", "openai","uvicorn","jieba"] # 完全屏蔽的库

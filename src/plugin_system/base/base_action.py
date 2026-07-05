@@ -125,7 +125,13 @@ class BaseAction(ABC):
             self.log_prefix = f"[{self.user_nickname} 的 私聊]"
 
         logger.debug(
-            f"{self.log_prefix} 聊天信息: 类型={'群聊' if self.is_group else '私聊'}, 平台={self.platform}, 目标={self.target_id}"
+            "Action 聊天上下文已初始化",
+            event_code="plugin.action.context_initialized",
+            action_name=self.action_name,
+            chat_id=self.chat_id,
+            chat_type="group" if self.is_group else "private",
+            platform=self.platform,
+            target_id=self.target_id,
         )
 
     @abstractmethod
@@ -157,7 +163,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送文本失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
 
         return await send_api.text_to_stream(
@@ -187,7 +197,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送表情失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
 
         return await send_api.emoji_to_stream(
@@ -216,7 +230,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送图片失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
 
         return await send_api.image_to_stream(
@@ -246,7 +264,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送命令失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
 
         # 构造命令数据
@@ -282,7 +304,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送自定义消息失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
 
         return await send_api.custom_to_stream(
@@ -313,7 +339,11 @@ class BaseAction(ABC):
             reply_message: 回复的消息对象
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送混合消息失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
         reply_set = ReplySetModel()
         reply_set.add_hybrid_content_by_raw(message_tuple_list)
@@ -343,7 +373,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not self.chat_id:
-            logger.error(f"{self.log_prefix} 缺少聊天ID")
+            logger.error(
+                "Action 发送转发消息失败，缺少聊天 ID",
+                event_code="plugin.action.chat_id_missing",
+                action_name=self.action_name,
+            )
             return False
         reply_set = ReplySetModel()
         forward_message_nodes: List[ForwardNode] = []
@@ -360,7 +394,12 @@ class BaseAction(ABC):
                     user_id=sender_id, user_nickname=nickname, content=single_node_content_list
                 )
             else:
-                logger.warning(f"{self.log_prefix} 转发消息时遇到无效的消息格式: {message}")
+                logger.warning(
+                    "Action 转发消息节点格式无效",
+                    event_code="plugin.action.forward_node_invalid",
+                    action_name=self.action_name,
+                    node_type=type(message).__name__,
+                )
                 continue
             forward_message_nodes.append(forward_message_node)
         reply_set.add_forward_content(forward_message_nodes)
@@ -381,7 +420,11 @@ class BaseAction(ABC):
             bool: 是否发送成功
         """
         if not audio_base64:
-            logger.error(f"{self.log_prefix} 缺少音频内容")
+            logger.error(
+                "Action 发送语音失败，缺少音频内容",
+                event_code="plugin.action.voice_content_missing",
+                action_name=self.action_name,
+            )
             return False
         reply_set = ReplySetModel()
         reply_set.add_voice_content(audio_base64)
@@ -430,11 +473,22 @@ class BaseAction(ABC):
         try:
             # 获取循环开始时间，如果没有则使用当前时间
             loop_start_time = self.action_data.get("loop_start_time", time.time())
-            logger.info(f"{self.log_prefix} 开始等待新消息... (最长等待: {timeout}秒, 从时间点: {loop_start_time})")
+            logger.info(
+                "Action 开始等待新消息",
+                event_code="plugin.action.wait_new_message.started",
+                action_name=self.action_name,
+                chat_id=self.chat_id,
+                timeout_seconds=timeout,
+                loop_start_time=loop_start_time,
+            )
 
             # 确保有有效的chat_id
             if not self.chat_id:
-                logger.error(f"{self.log_prefix} 等待新消息失败: 没有有效的chat_id")
+                logger.error(
+                    "Action 等待新消息失败，缺少聊天 ID",
+                    event_code="plugin.action.wait_new_message.chat_id_missing",
+                    action_name=self.action_name,
+                )
                 return False, "没有有效的chat_id"
 
             wait_start_time = asyncio.get_event_loop().time()
@@ -446,27 +500,55 @@ class BaseAction(ABC):
                 )
 
                 if new_message_count > 0:
-                    logger.info(f"{self.log_prefix} 检测到{new_message_count}条新消息，聊天ID: {self.chat_id}")
+                    logger.info(
+                        "Action 等待期间检测到新消息",
+                        event_code="plugin.action.wait_new_message.detected",
+                        action_name=self.action_name,
+                        chat_id=self.chat_id,
+                        count=new_message_count,
+                    )
                     return True, ""
 
                 # 检查超时
                 elapsed_time = asyncio.get_event_loop().time() - wait_start_time
                 if elapsed_time > timeout:
-                    logger.warning(f"{self.log_prefix} 等待新消息超时({timeout}秒)，聊天ID: {self.chat_id}")
+                    logger.warning(
+                        "Action 等待新消息超时",
+                        event_code="plugin.action.wait_new_message.timeout",
+                        action_name=self.action_name,
+                        chat_id=self.chat_id,
+                        timeout_seconds=timeout,
+                    )
                     return False, ""
 
                 # 每30秒记录一次等待状态
                 if int(elapsed_time) % 15 == 0 and int(elapsed_time) > 0:
-                    logger.debug(f"{self.log_prefix} 已等待{int(elapsed_time)}秒，继续等待新消息...")
+                    logger.debug(
+                        "Action 继续等待新消息",
+                        event_code="plugin.action.wait_new_message.waiting",
+                        action_name=self.action_name,
+                        chat_id=self.chat_id,
+                        elapsed_seconds=int(elapsed_time),
+                    )
 
                 # 短暂休眠
                 await asyncio.sleep(0.5)
 
         except asyncio.CancelledError:
-            logger.info(f"{self.log_prefix} 等待新消息被中断 (CancelledError)")
+            logger.info(
+                "Action 等待新消息被取消",
+                event_code="plugin.action.wait_new_message.cancelled",
+                action_name=self.action_name,
+                chat_id=self.chat_id,
+            )
             return False, ""
         except Exception as e:
-            logger.error(f"{self.log_prefix} 等待新消息时发生错误: {e}")
+            logger.exception(
+                "Action 等待新消息异常",
+                event_code="plugin.action.wait_new_message.failed",
+                action_name=self.action_name,
+                chat_id=self.chat_id,
+            )
             return False, f"等待新消息失败: {str(e)}"
 
     @classmethod
@@ -483,7 +565,9 @@ class BaseAction(ABC):
         # 从类属性读取名称，如果没有定义则使用类名自动生成
         name = getattr(cls, "action_name", cls.__name__.lower().replace("action", ""))
         if "." in name:
-            logger.error(f"Action名称 '{name}' 包含非法字符 '.'，请使用下划线替代")
+            logger.error(
+                "Action 名称包含非法字符", event_code="plugin.action.name_invalid", action_name=name, invalid_char="."
+            )
             raise ValueError(f"Action名称 '{name}' 包含非法字符 '.'，请使用下划线替代")
         # 获取focus_activation_type和normal_activation_type
         focus_activation_type = getattr(cls, "focus_activation_type", ActionActivationType.ALWAYS)

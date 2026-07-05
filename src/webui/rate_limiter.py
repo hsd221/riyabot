@@ -155,11 +155,24 @@ class RateLimiter:
         # 检查是否需要封禁
         if current_failures >= max_failures:
             self.block_ip(request, block_duration)
-            logger.warning(f"⚠️ IP {ip} 认证失败次数过多 ({current_failures}/{max_failures})，已封禁")
+            logger.warning(
+                "认证失败次数达到上限，IP 已封禁",
+                event_code="webui.auth_failures.ip_blocked",
+                ip=ip,
+                current_failures=current_failures,
+                max_failures=max_failures,
+                block_duration=block_duration,
+            )
             return True, 0
 
         if current_failures >= max_failures - 2:
-            logger.warning(f"⚠️ IP {ip} 认证失败 {current_failures}/{max_failures} 次")
+            logger.warning(
+                "认证失败次数接近上限",
+                event_code="webui.auth_failures.near_limit",
+                ip=ip,
+                current_failures=current_failures,
+                max_failures=max_failures,
+            )
 
         return False, max(0, remaining)
 

@@ -3,7 +3,6 @@ import hashlib
 import os
 import time
 import platform
-import traceback
 import shutil
 import sys
 import subprocess
@@ -58,12 +57,16 @@ def run_runner_process():
     env["MAIBOT_WORKER_PROCESS"] = "1"
 
     while True:
-        logger.info(f"正在启动 {script_file}...")
-        logger.info("正在编译着色器：1/114514")
-
         # 启动子进程 (Worker)
         # 使用 sys.executable 确保使用相同的 Python 解释器
         cmd = [python_executable, script_file] + sys.argv[1:]
+        logger.info(
+            "Worker 进程启动",
+            event_code="runner.worker.start",
+            script_file=script_file,
+            python_executable=python_executable,
+            argv_count=len(sys.argv),
+        )
 
         process = subprocess.Popen(cmd, env=env)
 
@@ -72,11 +75,11 @@ def run_runner_process():
             return_code = process.wait()
 
             if return_code == RESTART_EXIT_CODE:
-                logger.info("检测到重启请求 (退出码 42)，正在重启...")
+                logger.info("Worker 请求重启", event_code="runner.worker.restart_requested", exit_code=return_code)
                 time.sleep(1)  # 稍作等待
                 continue
             else:
-                logger.info(f"程序已退出 (退出码 {return_code})")
+                logger.info("Worker 进程退出", event_code="runner.worker.exited", exit_code=return_code)
                 sys.exit(return_code)
 
         except KeyboardInterrupt:
@@ -88,7 +91,7 @@ def run_runner_process():
                     process.terminate()
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    logger.warning("子进程未响应，强制关闭...")
+                    logger.warning("Worker 进程停止超时，执行强制终止", event_code="runner.worker.kill_timeout")
                     process.kill()
             sys.exit(0)
 
@@ -122,7 +125,7 @@ from src.manager.async_task_manager import async_task_manager  # noqa
 # 设置工作目录为脚本所在目录
 # script_dir = os.path.dirname(os.path.abspath(__file__))
 # os.chdir(script_dir)
-logger.info(f"已设置工作目录为: {script_dir}")
+logger.info("工作目录已设置", event_code="app.workdir.set", workdir=script_dir)
 
 
 confirm_logger = get_logger("confirm")
@@ -176,7 +179,7 @@ def easter_egg():
 
 async def graceful_shutdown():  # sourcery skip: use-named-expression
     try:
-        logger.info("正在优雅关闭璃夜...")
+        logger.info("应用开始关闭", event_code="app.shutdown.started")
 
         # 关闭 WebUI 服务器
         try:
@@ -186,7 +189,7 @@ async def graceful_shutdown():  # sourcery skip: use-named-expression
             if webui_server and webui_server._server:
                 await webui_server.shutdown()
         except Exception as e:
-            logger.warning(f"关闭 WebUI 服务器时出错: {e}")
+            logger.warning("WebUI 服务器关闭失败，继续关闭流程", event_code="app.shutdown.webui_failed", error=str(e))
 
         from src.plugin_system.core.events_manager import events_manager
         from src.plugin_system.base.component_types import EventType
@@ -201,7 +204,7 @@ async def graceful_shutdown():  # sourcery skip: use-named-expression
         remaining_tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
 
         if remaining_tasks:
-            logger.info(f"正在取消 {len(remaining_tasks)} 个剩余任务...")
+            logger.info("剩余异步任务开始取消", event_code="app.shutdown.cancel_tasks", count=len(remaining_tasks))
 
             # 取消所有剩余任务
             for task in remaining_tasks:
@@ -211,22 +214,24 @@ async def graceful_shutdown():  # sourcery skip: use-named-expression
             # 等待所有任务完成，设置超时
             try:
                 await asyncio.wait_for(asyncio.gather(*remaining_tasks, return_exceptions=True), timeout=15.0)
-                logger.info("所有剩余任务已成功取消")
+                logger.info("剩余异步任务已取消", event_code="app.shutdown.tasks_cancelled", count=len(remaining_tasks))
             except asyncio.TimeoutError:
-                logger.warning("等待任务取消超时，强制继续关闭")
-            except Exception as e:
-                logger.error(f"等待任务取消时发生异常: {e}")
+                logger.warning(
+                    "等待异步任务取消超时", event_code="app.shutdown.task_cancel_timeout", timeout_seconds=15.0
+                )
+            except Exception:
+                logger.exception("等待异步任务取消失败", event_code="app.shutdown.task_cancel_failed")
 
-        logger.info("璃夜优雅关闭完成")
+        logger.info("应用关闭完成", event_code="app.shutdown.completed")
 
-    except Exception as e:
-        logger.error(f"璃夜关闭失败: {e}", exc_info=True)
+    except Exception:
+        logger.exception("应用关闭失败", event_code="app.shutdown.failed")
 
 
 def _calculate_file_hash(file_path: Path, file_type: str) -> str:
     """计算文件的MD5哈希值"""
     if not file_path.exists():
-        logger.error(f"{file_type} 文件不存在")
+        logger.error("协议文件不存在", event_code="agreement.file_missing", file_type=file_type, path=str(file_path))
         raise FileNotFoundError(f"{file_type} 文件不存在")
 
     with open(file_path, "r", encoding="utf-8") as f:
@@ -271,11 +276,11 @@ def _prompt_user_confirmation(eula_hash: str, privacy_hash: str) -> None:
 def _save_confirmations(eula_updated: bool, privacy_updated: bool, eula_hash: str, privacy_hash: str) -> None:
     """保存用户确认结果"""
     if eula_updated:
-        logger.info(f"更新EULA确认文件{eula_hash}")
+        logger.info("EULA 确认文件已更新", event_code="agreement.eula_confirmation_updated", hash=eula_hash)
         Path("eula.confirmed").write_text(eula_hash, encoding="utf-8")
 
     if privacy_updated:
-        logger.info(f"更新隐私条款确认文件{privacy_hash}")
+        logger.info("隐私条款确认文件已更新", event_code="agreement.privacy_confirmation_updated", hash=privacy_hash)
         Path("privacy.confirmed").write_text(privacy_hash, encoding="utf-8")
 
 
@@ -310,7 +315,7 @@ def raw_main():
     print_opensource_notice()
 
     check_eula()
-    logger.info("检查EULA和隐私条款完成")
+    logger.info("协议确认检查完成", event_code="agreement.check_completed")
 
     easter_egg()
 
@@ -342,7 +347,7 @@ if __name__ == "__main__":
             loop.run_until_complete(main_tasks)
 
         except KeyboardInterrupt:
-            logger.warning("收到中断信号，正在优雅关闭...")
+            logger.warning("收到中断信号，开始关闭流程", event_code="app.interrupt_received")
 
             # 取消主任务
             if "main_tasks" in locals() and main_tasks and not main_tasks.done():
@@ -356,8 +361,8 @@ if __name__ == "__main__":
             if loop and not loop.is_closed():
                 try:
                     loop.run_until_complete(graceful_shutdown())
-                except Exception as ge:
-                    logger.error(f"优雅关闭时发生错误: {ge}")
+                except Exception:
+                    logger.exception("中断处理期间关闭失败", event_code="app.interrupt_shutdown_failed")
         # 新增：检测外部请求关闭
 
     except SystemExit as e:
@@ -367,10 +372,10 @@ if __name__ == "__main__":
         else:
             exit_code = 1 if e.code else 0
         if exit_code == RESTART_EXIT_CODE:
-            logger.info("收到重启信号，准备退出并请求重启...")
+            logger.info("收到重启退出码", event_code="app.restart_exit_requested", exit_code=exit_code)
 
-    except Exception as e:
-        logger.error(f"主程序发生异常: {str(e)} {str(traceback.format_exc())}")
+    except Exception:
+        logger.exception("主程序异常退出", event_code="app.main_failed")
         exit_code = 1  # 标记发生错误
     finally:
         # 确保 loop 在任何情况下都尝试关闭（如果存在且未关闭）

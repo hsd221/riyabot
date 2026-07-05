@@ -87,7 +87,14 @@ async def update_progress(
     }
 
     await broadcast_progress(progress_data)
-    logger.debug(f"进度更新: [{operation}] {stage} - {progress}% - {message}")
+    logger.debug(
+        "插件进度已更新",
+        event_code="webui.plugin_progress.updated",
+        operation=operation,
+        stage=stage,
+        progress=progress,
+        message=message,
+    )
 
 
 @router.websocket("/ws/plugin-progress")
@@ -107,7 +114,11 @@ async def websocket_plugin_progress(websocket: WebSocket, token: Optional[str] =
     # 方式 1: 尝试验证临时 WebSocket token（推荐方式）
     if token and verify_ws_token(token):
         is_authenticated = True
-        logger.debug("插件进度 WebSocket 使用临时 token 认证成功")
+        logger.debug(
+            "插件进度 WebSocket 认证成功",
+            event_code="webui.plugin_progress_ws.auth_success",
+            auth_method="ws_token",
+        )
 
     # 方式 2: 尝试从 Cookie 获取 session token
     if not is_authenticated:
@@ -116,23 +127,35 @@ async def websocket_plugin_progress(websocket: WebSocket, token: Optional[str] =
             token_manager = get_token_manager()
             if token_manager.verify_token(cookie_token):
                 is_authenticated = True
-                logger.debug("插件进度 WebSocket 使用 Cookie 认证成功")
+                logger.debug(
+                    "插件进度 WebSocket 认证成功",
+                    event_code="webui.plugin_progress_ws.auth_success",
+                    auth_method="cookie",
+                )
 
     # 方式 3: 尝试直接验证 query 参数作为 session token（兼容旧方式）
     if not is_authenticated and token:
         token_manager = get_token_manager()
         if token_manager.verify_token(token):
             is_authenticated = True
-            logger.debug("插件进度 WebSocket 使用 session token 认证成功")
+            logger.debug(
+                "插件进度 WebSocket 认证成功",
+                event_code="webui.plugin_progress_ws.auth_success",
+                auth_method="session_token",
+            )
 
     if not is_authenticated:
-        logger.warning("插件进度 WebSocket 连接被拒绝：认证失败")
+        logger.warning("插件进度 WebSocket 连接被拒绝", event_code="webui.plugin_progress_ws.auth_failed")
         await websocket.close(code=4001, reason="认证失败，请重新登录")
         return
 
     await websocket.accept()
     active_connections.add(websocket)
-    logger.info(f"📡 插件进度 WebSocket 客户端已连接（已认证），当前连接数: {len(active_connections)}")
+    logger.info(
+        "插件进度 WebSocket 客户端已连接",
+        event_code="webui.plugin_progress_ws.connected",
+        connection_count=len(active_connections),
+    )
 
     try:
         # 发送当前进度状态
@@ -147,15 +170,21 @@ async def websocket_plugin_progress(websocket: WebSocket, token: Optional[str] =
                 if data == "ping":
                     await websocket.send_text("pong")
 
-            except Exception as e:
-                logger.error(f"处理客户端消息时出错: {e}")
+            except Exception:
+                logger.exception(
+                    "插件进度 WebSocket 客户端消息处理失败", event_code="webui.plugin_progress_ws.message_failed"
+                )
                 break
 
     except WebSocketDisconnect:
         active_connections.discard(websocket)
-        logger.info(f"📡 插件进度 WebSocket 客户端已断开，当前连接数: {len(active_connections)}")
-    except Exception as e:
-        logger.error(f"❌ WebSocket 错误: {e}")
+        logger.info(
+            "插件进度 WebSocket 客户端已断开",
+            event_code="webui.plugin_progress_ws.disconnected",
+            connection_count=len(active_connections),
+        )
+    except Exception:
+        logger.exception("插件进度 WebSocket 连接异常", event_code="webui.plugin_progress_ws.connection_failed")
         active_connections.discard(websocket)
 
 

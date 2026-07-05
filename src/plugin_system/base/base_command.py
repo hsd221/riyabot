@@ -44,7 +44,11 @@ class BaseCommand(ABC):
 
         self.log_prefix = "[Command]"
 
-        logger.debug(f"{self.log_prefix} Command组件初始化完成")
+        logger.debug(
+            "Command 组件实例初始化完成",
+            event_code="plugin.command.initialized",
+            command_name=getattr(self, "command_name", self.__class__.__name__),
+        )
 
     def set_matched_groups(self, groups: Dict[str, str]) -> None:
         """设置正则表达式匹配的命名组
@@ -109,7 +113,7 @@ class BaseCommand(ABC):
         # 获取聊天流信息
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送文本失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
 
         return await send_api.text_to_stream(
@@ -137,7 +141,7 @@ class BaseCommand(ABC):
         """
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送图片失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
 
         return await send_api.image_to_stream(
@@ -168,7 +172,7 @@ class BaseCommand(ABC):
         """
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送表情失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
 
         return await send_api.emoji_to_stream(
@@ -197,7 +201,7 @@ class BaseCommand(ABC):
             # 获取聊天流信息
             chat_stream = self.message.chat_stream
             if not chat_stream or not hasattr(chat_stream, "stream_id"):
-                logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+                logger.error("Command 发送命令失败，缺少聊天流", event_code="plugin.command.stream_missing")
                 return False
 
             # 构造命令数据
@@ -211,14 +215,28 @@ class BaseCommand(ABC):
             )
 
             if success:
-                logger.info(f"{self.log_prefix} 成功发送命令: {command_name}")
+                logger.info(
+                    "Command 消息发送完成",
+                    event_code="plugin.command.send_command.completed",
+                    command_name=command_name,
+                    stream_id=chat_stream.stream_id,
+                )
             else:
-                logger.error(f"{self.log_prefix} 发送命令失败: {command_name}")
+                logger.error(
+                    "Command 消息发送失败",
+                    event_code="plugin.command.send_command.failed",
+                    command_name=command_name,
+                    stream_id=chat_stream.stream_id,
+                )
 
             return success
 
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 发送命令时出错: {e}")
+        except Exception:
+            logger.exception(
+                "Command 发送命令异常",
+                event_code="plugin.command.send_command.exception",
+                command_name=command_name,
+            )
             return False
 
     async def send_voice(self, voice_base64: str) -> bool:
@@ -231,7 +249,7 @@ class BaseCommand(ABC):
         """
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送语音失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
 
         return await send_api.custom_to_stream(
@@ -264,7 +282,7 @@ class BaseCommand(ABC):
         """
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送混合消息失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
         reply_set = ReplySetModel()
         reply_set.add_hybrid_content_by_raw(message_tuple_list)
@@ -295,7 +313,7 @@ class BaseCommand(ABC):
         """
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送转发消息失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
         reply_set = ReplySetModel()
         forward_message_nodes: List[ForwardNode] = []
@@ -312,7 +330,11 @@ class BaseCommand(ABC):
                     user_id=sender_id, user_nickname=nickname, content=single_node_content_list
                 )
             else:
-                logger.warning(f"{self.log_prefix} 转发消息时遇到无效的消息格式: {message}")
+                logger.warning(
+                    "Command 转发消息节点格式无效",
+                    event_code="plugin.command.forward_node_invalid",
+                    node_type=type(message).__name__,
+                )
                 continue
             forward_message_nodes.append(forward_message_node)
         reply_set.add_forward_content(forward_message_nodes)
@@ -351,7 +373,7 @@ class BaseCommand(ABC):
         # 获取聊天流信息
         chat_stream = self.message.chat_stream
         if not chat_stream or not hasattr(chat_stream, "stream_id"):
-            logger.error(f"{self.log_prefix} 缺少聊天流或stream_id")
+            logger.error("Command 发送自定义消息失败，缺少聊天流", event_code="plugin.command.stream_missing")
             return False
 
         return await send_api.custom_to_stream(
@@ -377,7 +399,12 @@ class BaseCommand(ABC):
             CommandInfo: 生成的Command信息对象
         """
         if "." in cls.command_name:
-            logger.error(f"Command名称 '{cls.command_name}' 包含非法字符 '.'，请使用下划线替代")
+            logger.error(
+                "Command 名称包含非法字符",
+                event_code="plugin.command.name_invalid",
+                command_name=cls.command_name,
+                invalid_char=".",
+            )
             raise ValueError(f"Command名称 '{cls.command_name}' 包含非法字符 '.'，请使用下划线替代")
         return CommandInfo(
             name=cls.command_name,

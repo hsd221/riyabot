@@ -76,10 +76,20 @@ FICTIONAL_GROUPS: list[tuple[str, str, str]] = [
 ]
 
 # Special message texts to filter out
-_SPECIAL_TEXTS = frozenset({
-    "[动画表情]", "[语音]", "[分享]", "[红包]", "[音乐]", "[视频]",
-    "[图片]", "[文件]", "[合并转发]", "[QQ红包]",
-})
+_SPECIAL_TEXTS = frozenset(
+    {
+        "[动画表情]",
+        "[语音]",
+        "[分享]",
+        "[红包]",
+        "[音乐]",
+        "[视频]",
+        "[图片]",
+        "[文件]",
+        "[合并转发]",
+        "[QQ红包]",
+    }
+)
 _TAG_PATTERN = re.compile(r"\[(?:图片|视频|合并转发|文件|卡片消息|表情):[^\]]*\]")
 _EMOJI_TAG = re.compile(r"\[\[?(?:图片|视频|表情|动画表情)\]?\]")
 _REPLY_PREFIX_RE = re.compile(r"\[回复[^\]]*\]\s*")
@@ -87,11 +97,11 @@ _REPLY_PREFIX_RE = re.compile(r"\[回复[^\]]*\]\s*")
 # Timeline definitions: (label, days_ago, count, spread_hours)
 # Each entry says: inject N messages spread over M hours, starting X days ago.
 TIMELINE_SLOTS: list[tuple[str, int, int, int]] = [
-    ("1 day ago",    1,   50,  6),     # 50 msgs over 6 hours, 1 day ago
-    ("3 days ago",   3,   100, 12),    # 100 msgs over 12 hours, 3 days ago
-    ("1 week ago",   7,   200, 48),    # 200 msgs over 2 days, 1 week ago
-    ("1 month ago",  30,  300, 120),   # 300 msgs over 5 days, 1 month ago
-    ("1 quarter ago", 90, 500, 336),   # 500 msgs over 14 days, 1 quarter ago
+    ("1 day ago", 1, 50, 6),  # 50 msgs over 6 hours, 1 day ago
+    ("3 days ago", 3, 100, 12),  # 100 msgs over 12 hours, 3 days ago
+    ("1 week ago", 7, 200, 48),  # 200 msgs over 2 days, 1 week ago
+    ("1 month ago", 30, 300, 120),  # 300 msgs over 5 days, 1 month ago
+    ("1 quarter ago", 90, 500, 336),  # 500 msgs over 14 days, 1 quarter ago
 ]
 
 # Total: 1150 messages
@@ -103,7 +113,7 @@ def _clean_reply_prefix(text: str) -> str:
     if text.startswith("[回复"):
         idx = text.find("]")
         if idx != -1:
-            text = text[idx + 1:].lstrip("\n").lstrip()
+            text = text[idx + 1 :].lstrip("\n").lstrip()
     return text.strip()
 
 
@@ -237,16 +247,18 @@ def generate_timeline_messages(
 
             stream_id = compute_stream_id("qq", gid)
 
-            result.append({
-                "stream_id": stream_id,
-                "message_id": fake_msg_id,
-                "user_id": user_id,
-                "speaker": user_name,
-                "content": text,
-                "timestamp": ts.timestamp(),
-                "chat_type": "group",
-                "group_id": gid,
-            })
+            result.append(
+                {
+                    "stream_id": stream_id,
+                    "message_id": fake_msg_id,
+                    "user_id": user_id,
+                    "speaker": user_name,
+                    "content": text,
+                    "timestamp": ts.timestamp(),
+                    "chat_type": "group",
+                    "group_id": gid,
+                }
+            )
 
     return result
 
@@ -254,6 +266,7 @@ def generate_timeline_messages(
 # ---------------------------------------------------------------------------
 # Injection Method A: raw_message_archive table
 # ---------------------------------------------------------------------------
+
 
 def inject_raw_message_archive(
     conn: sqlite3.Connection,
@@ -297,6 +310,7 @@ def inject_raw_message_archive(
 # Injection Method B: direct atom insertion (via MemoryStore)
 # ---------------------------------------------------------------------------
 
+
 def _make_atom_data(
     content: str,
     atom_type: str = "episodic",
@@ -317,9 +331,59 @@ def _make_atom_data(
     }
 
 
+async def _get_initialized_memory_store(
+    db_path: Path | None = None,
+    qdrant_path: Path | None = None,
+) -> Any | None:
+    """Create or reuse the MemoryStore singleton for standalone test scripts."""
+    try:
+        from src.memory.store import MemoryStore, MemoryStoreConfig
+    except ImportError as e:
+        print(f"  [跳过] 无法导入 MemoryStore: {e}", file=sys.stderr)
+        return None
+
+    if getattr(MemoryStore, "_instance", None) is None:
+        if db_path:
+            config = MemoryStoreConfig(
+                sqlite_path=str(db_path),
+                qdrant_local_path=str(qdrant_path or db_path.parent / "qdrant"),
+            )
+        else:
+            config = MemoryStoreConfig()
+        store = MemoryStore(config)
+    else:
+        store = MemoryStore.get_instance()
+
+    if not store._initialized:
+        try:
+            await store.initialize()
+        except Exception as e:
+            print(f"  [跳过] MemoryStore 初始化失败: {e}", file=sys.stderr)
+            return None
+
+    return store
+
+
+async def _close_memory_store() -> None:
+    """Close the MemoryStore singleton created by this standalone script."""
+    try:
+        from src.memory.store import MemoryStore
+    except ImportError:
+        return
+
+    if getattr(MemoryStore, "_instance", None) is None:
+        return
+
+    store = MemoryStore.get_instance()
+    if getattr(store, "_initialized", False):
+        await store.close()
+
+
 async def inject_direct_atoms(
     messages: list[dict[str, Any]],
     dry_run: bool = False,
+    db_path: Path | None = None,
+    qdrant_path: Path | None = None,
 ) -> int:
     """Inject atoms directly via MemoryStore (Method B).
 
@@ -328,19 +392,9 @@ async def inject_direct_atoms(
     if dry_run:
         return 0
 
-    try:
-        from src.memory.store import MemoryStore
-    except ImportError as e:
-        print(f"  [跳过] 无法导入 MemoryStore: {e}", file=sys.stderr)
+    store = await _get_initialized_memory_store(db_path, qdrant_path)
+    if store is None:
         return 0
-
-    store = MemoryStore.get_instance()
-    if not store._initialized:
-        try:
-            await store.initialize()
-        except Exception as e:
-            print(f"  [跳过] MemoryStore 初始化失败: {e}", file=sys.stderr)
-            return 0
 
     # Inject a subset (every 10th message) as direct atoms
     atom_count = 0
@@ -372,9 +426,12 @@ async def inject_direct_atoms(
 # Post-injection: trigger encoding pipeline
 # ---------------------------------------------------------------------------
 
+
 async def trigger_encoding_pipeline(
     messages: list[dict[str, Any]],
     dry_run: bool = False,
+    db_path: Path | None = None,
+    qdrant_path: Path | None = None,
 ) -> dict[str, Any]:
     """Feed messages into EncodingPipeline and run a cycle.
 
@@ -388,18 +445,13 @@ async def trigger_encoding_pipeline(
     try:
         # Import here so script works without full bot setup
         from src.memory.encoding_pipeline import EncodingPipeline, get_encoding_pipeline
-        from src.memory.store import MemoryStore
     except ImportError as e:
         print(f"  [跳过] 无法导入编码管线: {e}", file=sys.stderr)
         return result
 
-    store = MemoryStore.get_instance()
-    if not store._initialized:
-        try:
-            await store.initialize()
-        except Exception as e:
-            print(f"  [跳过] MemoryStore 初始化失败: {e}", file=sys.stderr)
-            return result
+    store = await _get_initialized_memory_store(db_path, qdrant_path)
+    if store is None:
+        return result
 
     # Reuse existing pipeline or create a temporary one
     pipeline = get_encoding_pipeline()
@@ -450,6 +502,7 @@ async def trigger_encoding_pipeline(
 # Verification & reporting
 # ---------------------------------------------------------------------------
 
+
 def print_verification(
     conn: sqlite3.Connection,
     messages: list[dict[str, Any]],
@@ -473,8 +526,7 @@ def print_verification(
     # 2. Count per time period (by stream_id -> group mapping)
     # We can't easily reconstruct groups from stream_id (it's MD5 hashed),
     # but we can count total injected vs total in DB
-    cursor.execute("SELECT COUNT(*) FROM raw_message_archive WHERE timestamp > ?",
-                   (time.time() - 2 * 86400,))
+    cursor.execute("SELECT COUNT(*) FROM raw_message_archive WHERE timestamp > ?", (time.time() - 2 * 86400,))
     recent_1d = cursor.fetchone()[0]
     cursor.execute(
         "SELECT COUNT(*) FROM raw_message_archive WHERE timestamp > ? AND timestamp <= ?",
@@ -538,7 +590,8 @@ def print_verification(
     print(f"\n  Unique users in archive: {len(users_in_db)}")
     for uid in sorted(users_in_db):
         cursor.execute(
-            "SELECT COUNT(*) FROM raw_message_archive WHERE user_id = ?", (uid,),
+            "SELECT COUNT(*) FROM raw_message_archive WHERE user_id = ?",
+            (uid,),
         )
         cnt = cursor.fetchone()[0]
         user_name = next((n for u, n in FICTIONAL_USERS if u == uid), uid)
@@ -548,6 +601,7 @@ def print_verification(
 # ---------------------------------------------------------------------------
 # Database helpers
 # ---------------------------------------------------------------------------
+
 
 def _ensure_tables(conn: sqlite3.Connection) -> None:
     """Create required tables if they do not exist."""
@@ -627,6 +681,7 @@ def _warn_existing_data(conn: sqlite3.Connection) -> bool:
 # Summary printer
 # ---------------------------------------------------------------------------
 
+
 def print_summary_table(
     messages: list[dict[str, Any]],
 ) -> None:
@@ -643,10 +698,7 @@ def print_summary_table(
     for slot_label, days_ago, _expected_count, spread_hours in TIMELINE_SLOTS:
         slot_start = time.time() - (days_ago + spread_hours / 2 / 24) * 86400
         slot_end = time.time() - (days_ago - spread_hours / 2 / 24) * 86400
-        count = sum(
-            1 for m in messages
-            if slot_start <= m["timestamp"] <= slot_end
-        )
+        count = sum(1 for m in messages if slot_start <= m["timestamp"] <= slot_end)
         print(f"  {slot_label:20s}  {count:4d} messages  (spread over {spread_hours}h)")
 
     print(f"\n  Total messages: {len(messages)}")
@@ -672,6 +724,7 @@ def print_summary_table(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Inject fake chat records into memory.db for memory system testing.",
@@ -696,6 +749,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print what would be done without actually injecting",
     )
+    parser.add_argument(
+        "--qdrant-path",
+        default=None,
+        help="Optional Qdrant local path. E2E uses this to avoid locking the bot's live Qdrant directory.",
+    )
     return parser.parse_args(argv)
 
 
@@ -708,10 +766,13 @@ def main() -> None:
     args = parse_args()
     db_path = Path(args.db_path)
     export_dir = Path(args.export_dir)
+    qdrant_path = Path(args.qdrant_path) if args.qdrant_path else None
     dry_run = args.dry_run
 
     print(f"[配置] DB 路径:    {db_path}")
     print(f"[配置] 导出目录:  {export_dir}")
+    if qdrant_path:
+        print(f"[配置] Qdrant 路径: {qdrant_path}")
     print(f"[配置] 触发编码:  {args.trigger_encoding}")
     print(f"[配置] Dry-run:   {dry_run}")
 
@@ -755,7 +816,10 @@ def main() -> None:
         print(f"\n[步骤 5] {'(预演) ' if dry_run else ''}注入直接原子 (Method B)...")
         if not dry_run:
             import asyncio
-            atom_count = asyncio.run(inject_direct_atoms(timeline_messages, dry_run=False))
+
+            atom_count = asyncio.run(
+                inject_direct_atoms(timeline_messages, dry_run=False, db_path=db_path, qdrant_path=qdrant_path)
+            )
             print(f"  注入 {atom_count} 个直接原子")
     else:
         print("\n[步骤 5] 跳过直接原子注入 (使用 --trigger-encoding 启用)")
@@ -766,11 +830,19 @@ def main() -> None:
         print(f"\n[步骤 6] {'(预演) ' if dry_run else ''}触发编码管线...")
         if not dry_run:
             import asyncio
+
             encoding_result = asyncio.run(
-                trigger_encoding_pipeline(timeline_messages, dry_run=False),
+                trigger_encoding_pipeline(
+                    timeline_messages,
+                    dry_run=False,
+                    db_path=db_path,
+                    qdrant_path=qdrant_path,
+                ),
             )
-            print(f"  编码结果: ingested={encoding_result.get('ingested', 0)}, "
-                  f"atoms_written={encoding_result.get('atoms_written', 0)}")
+            print(
+                f"  编码结果: ingested={encoding_result.get('ingested', 0)}, "
+                f"atoms_written={encoding_result.get('atoms_written', 0)}"
+            )
     else:
         print("\n[步骤 6] 跳过编码管线触发 (使用 --trigger-encoding 启用)")
 
@@ -793,6 +865,11 @@ def main() -> None:
         print("    2. 启动 bot 观察梦境系统处理历史数据")
         print("    3. 检查 memory_atoms 表中由编码管线创建的原子")
         print("-" * 72)
+
+    if args.trigger_encoding and not dry_run:
+        import asyncio
+
+        asyncio.run(_close_memory_store())
 
 
 if __name__ == "__main__":

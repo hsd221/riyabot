@@ -692,6 +692,15 @@ class LogConfig(ConfigBase):
     file_log_level: str = "DEBUG"
     """文件日志级别"""
 
+    debug_plaintext_logging: bool = False
+    """DEBUG级别是否允许记录截断后的明文文本"""
+
+    max_debug_text_length: int = 500
+    """DEBUG明文字段最大长度"""
+
+    max_log_field_length: int = 2000
+    """普通日志字段最大长度"""
+
     suppress_libraries: list[str] = field(default_factory=lambda: [])
     """完全屏蔽的第三方库日志列表"""
 

@@ -108,6 +108,21 @@ ERROR_KEYWORDS: list[str] = [
 MEMORY_DB_PATH = PROJECT_ROOT / "data" / "memory.db"
 
 
+def _is_chat_observation_log(entry: dict[str, Any]) -> bool:
+    """Return True for chat-content logs that may contain historical error text."""
+    logger_name = str(entry.get("logger_name") or entry.get("logger", ""))
+    level = str(entry.get("level", "")).lower()
+    message = str(entry.get("event") or entry.get("message", ""))
+
+    if level not in {"debug", "info"}:
+        return False
+    if logger_name in {"chat", "所见", "聊天"}:
+        return True
+    if logger_name == "person_stub" and "register_person" in message:
+        return True
+    return "[所见]" in message
+
+
 # ---------------------------------------------------------------------------
 # 自定义 Logging Handler —— 捕获目标 Logger 的日志记录
 # ---------------------------------------------------------------------------
@@ -547,6 +562,8 @@ class MetricsCollector:
                             # 解析 JSONL
                             try:
                                 entry = json.loads(line)
+                                if isinstance(entry, dict) and _is_chat_observation_log(entry):
+                                    continue
                                 msg_text = json.dumps(entry, ensure_ascii=False)
                             except json.JSONDecodeError:
                                 msg_text = line

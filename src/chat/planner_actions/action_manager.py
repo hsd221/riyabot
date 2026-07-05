@@ -62,13 +62,23 @@ class ActionManager:
                 action_name, ComponentType.ACTION
             )  # type: ignore
             if not component_class:
-                logger.warning(f"{log_prefix} 未找到Action组件: {action_name}")
+                logger.warning(
+                    "Action 组件未找到",
+                    event_code="action_manager.component_missing",
+                    action_name=action_name,
+                    chat_id=getattr(chat_stream, "stream_id", None),
+                )
                 return None
 
             # 获取组件信息
             component_info = component_registry.get_component_info(action_name, ComponentType.ACTION)
             if not component_info:
-                logger.warning(f"{log_prefix} 未找到Action组件信息: {action_name}")
+                logger.warning(
+                    "Action 组件信息未找到",
+                    event_code="action_manager.component_info_missing",
+                    action_name=action_name,
+                    chat_id=getattr(chat_stream, "stream_id", None),
+                )
                 return None
 
             # 获取插件配置
@@ -87,14 +97,22 @@ class ActionManager:
                 action_message=action_message,
             )
 
-            logger.debug(f"创建Action实例成功: {action_name}")
+            logger.debug(
+                "Action 实例创建完成",
+                event_code="action_manager.instance_created",
+                action_name=action_name,
+                component_class=component_class.__name__,
+                chat_id=getattr(chat_stream, "stream_id", None),
+            )
             return instance
 
-        except Exception as e:
-            logger.error(f"创建Action实例失败 {action_name}: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
+        except Exception:
+            logger.exception(
+                "Action 实例创建失败",
+                event_code="action_manager.instance_create_failed",
+                action_name=action_name,
+                chat_id=getattr(chat_stream, "stream_id", None),
+            )
             return None
 
     def get_using_actions(self) -> Dict[str, ActionInfo]:
@@ -113,15 +131,22 @@ class ActionManager:
             bool: 移除是否成功
         """
         if action_name not in self._using_actions:
-            logger.warning(f"移除失败: 动作 {action_name} 不在当前使用的动作集中")
+            logger.warning(
+                "动作不在当前使用集中，无法移除", event_code="action_manager.remove_missing", action_name=action_name
+            )
             return False
 
         del self._using_actions[action_name]
-        logger.debug(f"已从使用集中移除动作 {action_name}")
+        logger.debug("动作已从使用集中移除", event_code="action_manager.removed", action_name=action_name)
         return True
 
     def restore_actions(self) -> None:
         """恢复到默认动作集"""
         actions_to_restore = list(self._using_actions.keys())
         self._using_actions = component_registry.get_default_actions()
-        logger.debug(f"恢复动作集: 从 {actions_to_restore} 恢复到默认动作集 {list(self._using_actions.keys())}")
+        logger.debug(
+            "动作集已恢复为默认集合",
+            event_code="action_manager.restored_default",
+            previous_actions=actions_to_restore,
+            restored_actions=list(self._using_actions.keys()),
+        )

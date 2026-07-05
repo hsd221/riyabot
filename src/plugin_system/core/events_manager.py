@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
-from typing import List, Dict, Optional, Type, Tuple, TYPE_CHECKING
+import json
+from collections.abc import Mapping
+from typing import Any, List, Dict, Optional, Type, Tuple, TYPE_CHECKING
 
 from src.chat.message_receive.message import MessageRecv, MessageSending
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -13,6 +15,20 @@ if TYPE_CHECKING:
     from src.common.data_models.llm_data_model import LLMGenerationDataModel
 
 logger = get_logger("events_manager")
+
+
+def _normalize_additional_data(additional_data: Any) -> Dict[Any, Any]:
+    if isinstance(additional_data, Mapping):
+        return dict(additional_data)
+    if isinstance(additional_data, str) and additional_data.strip():
+        try:
+            parsed = json.loads(additional_data)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            logger.debug(
+                "事件消息 additional_config 不是有效 JSON，已忽略", event_code="event.additional_config.invalid_json"
+            )
+    return {}
 
 
 class EventsManager:
@@ -47,17 +63,28 @@ class EventsManager:
             bool: 是否注册成功
         """
         if not issubclass(handler_class, BaseEventHandler):
-            logger.error(f"类 {handler_class.__name__} 不是 BaseEventHandler 的子类")
+            logger.error(
+                "事件处理器类型无效",
+                event_code="event.handler.invalid_class",
+                handler_class=handler_class.__name__,
+            )
             return False
 
         handler_name = handler_info.name
 
         if handler_name in self._handler_mapping:
-            logger.warning(f"事件处理器 {handler_name} 已存在，跳过注册")
+            logger.warning(
+                "事件处理器已存在，跳过注册", event_code="event.handler.duplicate", handler_name=handler_name
+            )
             return False
 
         if handler_info.event_type not in self._history_enable_map:
-            logger.error(f"事件类型 {handler_info.event_type} 未注册，无法为其注册处理器 {handler_name}")
+            logger.error(
+                "事件类型未注册，无法注册处理器",
+                event_code="event.handler.event_type_missing",
+                handler_name=handler_name,
+                event_type=str(handler_info.event_type),
+            )
             return False
 
         self._handler_mapping[handler_name] = handler_class
@@ -71,6 +98,7 @@ class EventsManager:
         llm_response: Optional["LLMGenerationDataModel"] = None,
         stream_id: Optional[str] = None,
         action_usage: Optional[List[str]] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, Optional[MaiMessages]]:
         """
         处理所有事件，根据事件类型分发给订阅的处理器。
@@ -81,7 +109,7 @@ class EventsManager:
 
         # 1. 准备消息
         transformed_message = self._prepare_message(
-            event_type, message, llm_prompt, llm_response, stream_id, action_usage
+            event_type, message, llm_prompt, llm_response, stream_id, action_usage, extra_data
         )
         if transformed_message:
             transformed_message = transformed_message.deepcopy()
@@ -128,18 +156,35 @@ class EventsManager:
                 task.cancel()
             try:
                 await asyncio.wait_for(asyncio.gather(*remaining_tasks, return_exceptions=True), timeout=5)
-                logger.info(f"已取消事件处理器 {handler_name} 的所有任务")
+                logger.info(
+                    "事件处理器任务已取消",
+                    event_code="event.handler.tasks_cancelled",
+                    handler_name=handler_name,
+                    task_count=len(remaining_tasks),
+                )
             except asyncio.TimeoutError:
-                logger.warning(f"取消事件处理器 {handler_name} 的任务超时，开始强制取消")
-            except Exception as e:
-                logger.error(f"取消事件处理器 {handler_name} 的任务时发生异常: {e}")
+                logger.warning(
+                    "事件处理器任务取消超时",
+                    event_code="event.handler.task_cancel_timeout",
+                    handler_name=handler_name,
+                    timeout_seconds=5,
+                    task_count=len(remaining_tasks),
+                )
+            except Exception:
+                logger.exception(
+                    "事件处理器任务取消失败", event_code="event.handler.task_cancel_failed", handler_name=handler_name
+                )
         if handler_name in self._handler_tasks:
             del self._handler_tasks[handler_name]
 
     async def unregister_event_subscriber(self, handler_name: str) -> bool:
         """取消注册事件处理器"""
         if handler_name not in self._handler_mapping:
-            logger.warning(f"事件处理器 {handler_name} 不存在，无法取消注册")
+            logger.warning(
+                "事件处理器不存在，无法取消注册",
+                event_code="event.handler.unregister_missing",
+                handler_name=handler_name,
+            )
             return False
 
         await self.cancel_handler_tasks(handler_name)
@@ -148,7 +193,7 @@ class EventsManager:
         if not self._remove_event_handler_instance(handler_class):
             return False
 
-        logger.info(f"事件处理器 {handler_name} 已成功取消注册")
+        logger.info("事件处理器已取消注册", event_code="event.handler.unregistered", handler_name=handler_name)
         return True
 
     async def get_event_result_history(self, event_type: EventType | str) -> List[CustomEventHandlerResult]:
@@ -176,7 +221,11 @@ class EventsManager:
     def _insert_event_handler(self, handler_class: Type[BaseEventHandler], handler_info: EventHandlerInfo) -> bool:
         """插入事件处理器到对应的事件类型列表中并设置其插件配置"""
         if handler_class.event_type == EventType.UNKNOWN:
-            logger.error(f"事件处理器 {handler_class.__name__} 的事件类型未知，无法注册")
+            logger.error(
+                "事件处理器事件类型未知，无法注册",
+                event_code="event.handler.unknown_event_type",
+                handler_class=handler_class.__name__,
+            )
             return False
         if handler_class.event_type not in self._events_subscribers:
             self._events_subscribers[handler_class.event_type] = []
@@ -191,17 +240,23 @@ class EventsManager:
         """从事件类型列表中移除事件处理器"""
         display_handler_name = handler_class.handler_name or handler_class.__name__
         if handler_class.event_type == EventType.UNKNOWN:
-            logger.warning(f"事件处理器 {display_handler_name} 的事件类型未知，不存在于处理器列表中")
+            logger.warning(
+                "事件处理器事件类型未知，无法移除",
+                event_code="event.handler.remove_unknown_event_type",
+                handler_name=display_handler_name,
+            )
             return False
 
         handlers = self._events_subscribers[handler_class.event_type]
         for i, handler in enumerate(handlers):
             if isinstance(handler, handler_class):
                 del handlers[i]
-                logger.debug(f"事件处理器 {display_handler_name} 已移除")
+                logger.debug("事件处理器已移除", event_code="event.handler.removed", handler_name=display_handler_name)
                 return True
 
-        logger.warning(f"未找到事件处理器 {display_handler_name}，无法移除")
+        logger.warning(
+            "事件处理器未找到，无法移除", event_code="event.handler.remove_missing", handler_name=display_handler_name
+        )
         return False
 
     def _transform_event_message(
@@ -209,6 +264,7 @@ class EventsManager:
         message: MessageRecv | MessageSending,
         llm_prompt: Optional[str] = None,
         llm_response: Optional["LLMGenerationDataModel"] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> MaiMessages:
         """转换事件消息格式"""
         # 直接赋值部分内容
@@ -219,8 +275,10 @@ class EventsManager:
             llm_response_model=llm_response.model if llm_response else None,
             llm_response_tool_call=llm_response.tool_calls if llm_response else None,
             raw_message=message.raw_message,
-            additional_data=message.message_info.additional_config or {},
+            additional_data=_normalize_additional_data(message.message_info.additional_config),
         )
+        if extra_data:
+            transformed_message.additional_data.update(extra_data)
 
         # 消息段处理
         if message.message_segment.type == "seglist":
@@ -261,13 +319,17 @@ class EventsManager:
         return transformed_message
 
     def _build_message_from_stream(
-        self, stream_id: str, llm_prompt: Optional[str] = None, llm_response: Optional["LLMGenerationDataModel"] = None
+        self,
+        stream_id: str,
+        llm_prompt: Optional[str] = None,
+        llm_response: Optional["LLMGenerationDataModel"] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> MaiMessages:
         """从流ID构建消息"""
         chat_stream = get_chat_manager().get_stream(stream_id)
         assert chat_stream, f"未找到流ID为 {stream_id} 的聊天流"
         message = chat_stream.context.get_last_message()
-        return self._transform_event_message(message, llm_prompt, llm_response)
+        return self._transform_event_message(message, llm_prompt, llm_response, extra_data)
 
     def _transform_event_without_message(
         self,
@@ -275,6 +337,7 @@ class EventsManager:
         llm_prompt: Optional[str] = None,
         llm_response: Optional["LLMGenerationDataModel"] = None,
         action_usage: Optional[List[str]] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> MaiMessages:
         """没有message对象时进行转换"""
         chat_stream = get_chat_manager().get_stream(stream_id)
@@ -289,7 +352,7 @@ class EventsManager:
             is_group_message=(not (not chat_stream.group_info)),
             is_private_message=(not chat_stream.group_info),
             action_usage=action_usage,
-            additional_data={"response_is_processed": True},
+            additional_data={"response_is_processed": True, **(extra_data or {})},
         )
 
     def _prepare_message(
@@ -300,17 +363,20 @@ class EventsManager:
         llm_response: Optional["LLMGenerationDataModel"] = None,
         stream_id: Optional[str] = None,
         action_usage: Optional[List[str]] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> Optional[MaiMessages]:
         """根据事件类型和输入，准备和转换消息对象。"""
         if message:
-            return self._transform_event_message(message, llm_prompt, llm_response)
+            return self._transform_event_message(message, llm_prompt, llm_response, extra_data)
 
         if event_type not in [EventType.ON_START, EventType.ON_STOP]:
             assert stream_id, "如果没有消息，必须为非启动/关闭事件提供流ID"
             if event_type in [EventType.ON_MESSAGE, EventType.ON_PLAN, EventType.POST_LLM, EventType.AFTER_LLM]:
-                return self._build_message_from_stream(stream_id, llm_prompt, llm_response)
+                return self._build_message_from_stream(stream_id, llm_prompt, llm_response, extra_data)
             else:
-                return self._transform_event_without_message(stream_id, llm_prompt, llm_response, action_usage)
+                return self._transform_event_without_message(
+                    stream_id, llm_prompt, llm_response, action_usage, extra_data
+                )
 
         return None  # ON_START, ON_STOP事件没有消息体
 
@@ -325,11 +391,18 @@ class EventsManager:
 
             task_name = f"{handler.plugin_name}-{handler.handler_name}"
             task.set_name(task_name)
-            task.add_done_callback(lambda t: self._task_done_callback(t, event_type))
+            task.add_done_callback(
+                lambda t, handler_name=handler.handler_name: self._task_done_callback(t, event_type, handler_name)
+            )
 
             self._handler_tasks.setdefault(handler.handler_name, []).append(task)
-        except Exception as e:
-            logger.error(f"创建事件处理器任务 {handler.handler_name} 时发生异常: {e}", exc_info=True)
+        except Exception:
+            logger.exception(
+                "事件处理器任务创建失败",
+                event_code="event.handler.task_create_failed",
+                handler_name=handler.handler_name,
+                event_type=str(event_type),
+            )
 
     async def _dispatch_intercepting_handler_task(
         self, handler: BaseEventHandler, event_type: EventType | str, message: Optional[MaiMessages] = None
@@ -352,19 +425,33 @@ class EventsManager:
                     actual_desc = f"非 tuple 类型: {type(result)}"
 
                 logger.error(
-                    f"[{self.__class__.__name__}] EventHandler {handler.handler_name} 返回值不符合预期:\n"
-                    f"  模块来源: {handler.__class__.__module__}.{handler.__class__.__name__}\n"
-                    f"  期望: 5 个元素 ({', '.join(expected_fields)})\n"
-                    f"  实际: {actual_desc}"
+                    "事件处理器返回值格式无效",
+                    event_code="event.handler.invalid_result",
+                    handler_name=handler.handler_name,
+                    handler_class=f"{handler.__class__.__module__}.{handler.__class__.__name__}",
+                    expected_fields=expected_fields,
+                    actual_desc=actual_desc,
                 )
                 return True, None
 
             success, continue_processing, return_message, custom_result, modified_message = result
 
             if not success:
-                logger.error(f"EventHandler {handler.handler_name} 执行失败: {return_message}")
+                logger.error(
+                    "事件处理器执行失败",
+                    event_code="event.handler.execute_failed",
+                    handler_name=handler.handler_name,
+                    event_type=str(event_type),
+                    return_message=return_message,
+                )
             else:
-                logger.debug(f"EventHandler {handler.handler_name} 执行成功: {return_message}")
+                logger.debug(
+                    "事件处理器执行完成",
+                    event_code="event.handler.execute_completed",
+                    handler_name=handler.handler_name,
+                    event_type=str(event_type),
+                    return_message=return_message,
+                )
 
             if self._history_enable_map[event_type] and custom_result:
                 self._events_result_history[event_type].append(custom_result)
@@ -372,16 +459,24 @@ class EventsManager:
             return continue_processing, modified_message
 
         except KeyError:
-            logger.error(f"事件 {event_type} 注册的历史记录启用情况与实际不符合")
+            logger.error(
+                "事件历史记录配置不一致", event_code="event.history_config_mismatch", event_type=str(event_type)
+            )
             return True, None
-        except Exception as e:
-            logger.error(f"EventHandler {handler.handler_name} 发生异常: {e}", exc_info=True)
+        except Exception:
+            logger.exception(
+                "事件处理器执行异常",
+                event_code="event.handler.exception",
+                handler_name=handler.handler_name,
+                event_type=str(event_type),
+            )
             return True, None  # 发生异常时默认不中断其他处理
 
     def _task_done_callback(
         self,
         task: asyncio.Task[Tuple[bool, bool, str | None, CustomEventHandlerResult | None, MaiMessages | None]],
         event_type: EventType | str,
+        handler_name: str,
     ):
         """任务完成回调"""
         task_name = task.get_name() or "Unknown Task"
@@ -392,21 +487,37 @@ class EventsManager:
         try:
             success, _, result, custom_result, _ = task.result()  # 忽略是否继续的标志和消息的修改，因为消息本身未被拦截
             if success:
-                logger.debug(f"事件处理任务 {task_name} 已成功完成: {result}")
+                logger.debug(
+                    "事件处理任务完成",
+                    event_code="event.task.completed",
+                    task_name=task_name,
+                    event_type=str(event_type),
+                    return_message=result,
+                )
             else:
-                logger.error(f"事件处理任务 {task_name} 执行失败: {result}")
+                logger.error(
+                    "事件处理任务执行失败",
+                    event_code="event.task.failed",
+                    task_name=task_name,
+                    event_type=str(event_type),
+                    return_message=result,
+                )
 
             if self._history_enable_map[event_type] and custom_result:
                 self._events_result_history[event_type].append(custom_result)
         except asyncio.CancelledError:
             pass
         except KeyError:
-            logger.error(f"事件 {event_type} 注册的历史记录启用情况与实际不符合")
-        except Exception as e:
-            logger.error(f"事件处理任务 {task_name} 发生异常: {e}")
+            logger.error(
+                "事件历史记录配置不一致", event_code="event.history_config_mismatch", event_type=str(event_type)
+            )
+        except Exception:
+            logger.exception(
+                "事件处理任务异常", event_code="event.task.exception", task_name=task_name, event_type=str(event_type)
+            )
         finally:
             with contextlib.suppress(ValueError, KeyError):
-                self._handler_tasks[task_name].remove(task)
+                self._handler_tasks[handler_name].remove(task)
 
 
 events_manager = EventsManager()

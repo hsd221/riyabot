@@ -47,7 +47,7 @@ class MainSystem:
         from src.config.config import global_config
 
         if not global_config.webui.enabled:
-            logger.info("WebUI 已禁用")
+            logger.info("WebUI 已禁用", event_code="webui.disabled")
             return
 
         try:
@@ -55,40 +55,37 @@ class MainSystem:
 
             self.webui_server = get_webui_server()
 
-        except Exception as e:
-            logger.error(f"❌ 初始化 WebUI 服务器失败: {e}")
+        except Exception:
+            logger.exception("WebUI 服务器初始化失败", event_code="webui.init_failed")
 
     async def initialize(self):
         """初始化系统组件"""
-        logger.info(f"正在唤醒{global_config.bot.nickname}......")
+        logger.info("系统初始化开始", event_code="system.initialize.started", bot_name=global_config.bot.nickname)
 
         # 其他初始化任务
         await asyncio.gather(self._init_components())
 
-        logger.info(f"""
---------------------------------
-全部系统初始化完成，{global_config.bot.nickname}已成功唤醒
---------------------------------
-如果想要自定义{global_config.bot.nickname}的功能,请查阅：https://docs.mai-mai.org/manual/usage/
-或者遇到了问题，请访问我们的文档:https://docs.mai-mai.org/
---------------------------------
-如果你想要编写或了解插件相关内容，请访问开发文档https://docs.mai-mai.org/develop/
---------------------------------
-如果你需要查阅模型的消耗以及璃夜的统计数据，请访问根目录的riyabot_statistics.html文件
-""")
+        logger.info(
+            "系统初始化完成",
+            event_code="system.initialize.completed",
+            bot_name=global_config.bot.nickname,
+            docs_url="https://docs.mai-mai.org/",
+            plugin_docs_url="https://docs.mai-mai.org/develop/",
+            statistics_file="riyabot_statistics.html",
+        )
 
     async def _init_components(self):
         """初始化其他组件"""
         init_start_time = time.time()
 
         prompt_manager.load_prompts()
-        logger.info(f"已加载 {len(prompt_manager._prompts)} 个外部提示词模板")
+        logger.info("外部提示词模板已加载", event_code="prompt.templates.loaded", count=len(prompt_manager._prompts))
 
         # 同步外部提示词到旧 PromptManager 兼容层
         from src.chat.utils.prompt_builder import init_external_prompts
 
         synced = init_external_prompts()
-        logger.info(f"已同步 {synced} 个提示词到兼容层")
+        logger.info("提示词兼容层已同步", event_code="prompt.compat_synced", count=synced)
 
         # 添加在线时间统计任务
         await async_task_manager.add_task(OnlineTimeRecordTask())
@@ -111,13 +108,13 @@ class MainSystem:
 
         # 初始化表情管理器
         get_emoji_manager().initialize()
-        logger.info("表情包管理器初始化成功")
+        logger.info("表情包管理器初始化完成", event_code="emoji.manager.initialized")
 
         # 初始化聊天管理器
         await get_chat_manager()._initialize()
         asyncio.create_task(get_chat_manager()._auto_save_task())
 
-        logger.info("聊天管理器初始化成功")
+        logger.info("聊天管理器初始化完成", event_code="chat.manager.initialized")
 
         # 初始化记忆存储
         try:
@@ -136,7 +133,7 @@ class MainSystem:
             )
             store = MemoryStore(memory_config)
             await store.initialize()
-            logger.info("记忆存储初始化完成")
+            logger.info("记忆存储初始化完成", event_code="memory.store.initialized")
 
             # 启动记忆遗忘定期扫描
             try:
@@ -144,9 +141,13 @@ class MainSystem:
 
                 forgetting_manager = ForgettingManager(store)
                 await async_task_manager.add_task(ForgettingSweepTask(forgetting_manager))
-                logger.info("记忆遗忘扫描任务已注册（3600 秒间隔）")
-            except Exception as e:
-                logger.warning(f"记忆遗忘扫描任务注册失败: {e}")
+                logger.info(
+                    "记忆遗忘扫描任务已注册", event_code="memory.forgetting.task_registered", interval_seconds=3600
+                )
+            except Exception:
+                logger.warning(
+                    "记忆遗忘扫描任务注册失败", event_code="memory.forgetting.task_register_failed", exc_info=True
+                )
 
             # 创建写操作日志记录器（供编码管线和一致性协调任务共享）
             memory_op_logger = None
@@ -157,9 +158,11 @@ class MainSystem:
                     db_path=memory_config.sqlite_path,
                     max_entries=5000,
                 )
-                logger.info("记忆写操作日志记录器已初始化")
-            except Exception as e:
-                logger.warning(f"记忆写操作日志记录器初始化失败: {e}")
+                logger.info("记忆写操作日志记录器初始化完成", event_code="memory.write_op_logger.initialized")
+            except Exception:
+                logger.warning(
+                    "记忆写操作日志记录器初始化失败", event_code="memory.write_op_logger.init_failed", exc_info=True
+                )
 
             # 启动编码管线（连接 Layer 2 → Layer 3）
             try:
@@ -167,9 +170,9 @@ class MainSystem:
 
                 pipeline = EncodingPipeline(store, op_logger=memory_op_logger)
                 await async_task_manager.add_task(EncodingTask(pipeline, interval=300))
-                logger.info("编码管线已注册（300 秒间隔）")
-            except Exception as e:
-                logger.warning(f"编码管线注册失败: {e}")
+                logger.info("编码管线任务已注册", event_code="memory.encoding.task_registered", interval_seconds=300)
+            except Exception:
+                logger.warning("编码管线任务注册失败", event_code="memory.encoding.task_register_failed", exc_info=True)
 
             # 启动梦境维护任务
             try:
@@ -187,9 +190,13 @@ class MainSystem:
                 )
                 await async_task_manager.add_task(dream_task)
                 dream_config = global_config.dream
-                logger.info(f"梦境维护任务已注册（{dream_config.interval_minutes} 分钟间隔）")
-            except Exception as e:
-                logger.warning(f"梦境维护任务注册失败: {e}")
+                logger.info(
+                    "梦境维护任务已注册",
+                    event_code="memory.dream.task_registered",
+                    interval_minutes=dream_config.interval_minutes,
+                )
+            except Exception:
+                logger.warning("梦境维护任务注册失败", event_code="memory.dream.task_register_failed", exc_info=True)
 
             # 启动双写一致性协调任务
             if memory_op_logger is not None:
@@ -202,13 +209,25 @@ class MainSystem:
                         interval=120,
                     )
                     await async_task_manager.add_task(recon_task)
-                    logger.info("双写一致性协调任务已注册（120 秒间隔）")
-                except Exception as e:
-                    logger.warning(f"双写一致性协调任务注册失败: {e}")
+                    logger.info(
+                        "双写一致性协调任务已注册",
+                        event_code="memory.reconciliation.task_registered",
+                        interval_seconds=120,
+                    )
+                except Exception:
+                    logger.warning(
+                        "双写一致性协调任务注册失败",
+                        event_code="memory.reconciliation.task_register_failed",
+                        exc_info=True,
+                    )
             else:
-                logger.warning("写操作日志记录器不可用，跳过双写一致性协调任务")
-        except Exception as e:
-            logger.warning(f"记忆存储初始化失败（不影响主系统运行）: {e}")
+                logger.warning(
+                    "双写一致性协调任务未注册",
+                    event_code="memory.reconciliation.task_skipped",
+                    reason="write_op_logger_unavailable",
+                )
+        except Exception:
+            logger.warning("记忆存储初始化失败，主系统继续启动", event_code="memory.store.init_failed", exc_info=True)
 
         # await asyncio.sleep(0.5) #防止logger输出飞了
 
@@ -224,9 +243,9 @@ class MainSystem:
         # logger.info("已触发 ON_START 事件")
         try:
             init_time = int(1000 * (time.time() - init_start_time))
-            logger.info(f"初始化完成，神经元放电{init_time}次")
-        except Exception as e:
-            logger.error(f"启动大脑和外部世界失败: {e}")
+            logger.info("组件初始化完成", event_code="system.components.initialized", duration_ms=init_time)
+        except Exception:
+            logger.exception("系统组件初始化失败", event_code="system.components.init_failed")
             raise
 
     async def schedule_tasks(self):
@@ -244,7 +263,7 @@ class MainSystem:
 
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
-            logger.info("调度任务已取消")
+            logger.info("调度任务已取消", event_code="system.schedule.cancelled")
             raise
 
     # async def forget_memory_task(self):

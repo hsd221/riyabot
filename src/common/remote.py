@@ -3,7 +3,7 @@ import asyncio
 import aiohttp
 import platform
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.common.tcp_connector import get_tcp_connector
 from src.config.config import global_config
 from src.manager.async_task_manager import AsyncTask
@@ -56,13 +56,13 @@ class TelemetryHeartBeatTask(AsyncTask):
         """
 
         if "deploy_time" not in local_storage:
-            logger.error("本地存储中缺少部署时间，无法请求UUID")
+            logger.error("本地存储缺少部署时间，无法请求 UUID", event_code="telemetry.uuid.deploy_time_missing")
             return False
 
         try_count: int = 0
         while True:
             # 如果不存在，则向服务端请求一个新的UUID（注册客户端）
-            logger.info("正在向遥测服务端请求UUID...")
+            logger.info("开始请求遥测 UUID", event_code="telemetry.uuid.request_started")
 
             try:
                 async with aiohttp.ClientSession(connector=await get_tcp_connector()) as session:
@@ -71,9 +71,12 @@ class TelemetryHeartBeatTask(AsyncTask):
                         json={"deploy_time": local_storage["deploy_time"]},
                         timeout=aiohttp.ClientTimeout(total=5),  # 设置超时时间为5秒
                     ) as response:
-                        logger.debug(f"{TELEMETRY_SERVER_URL}/stat/reg_client")
-                        logger.debug(local_storage["deploy_time"])  # type: ignore
-                        logger.debug(f"Response status: {response.status}")
+                        logger.debug(
+                            "遥测 UUID 注册响应",
+                            event_code="telemetry.uuid.response",
+                            status_code=response.status,
+                            deploy_time_hash=hash_id(local_storage["deploy_time"]),  # type: ignore
+                        )
 
                         if response.status == 200:
                             data = await response.json()
@@ -81,33 +84,40 @@ class TelemetryHeartBeatTask(AsyncTask):
                                 # 将UUID存储到本地
                                 local_storage["mmc_uuid"] = client_id
                                 self.client_uuid = client_id
-                                logger.info(f"成功获取UUID: {self.client_uuid}")
+                                logger.info(
+                                    "遥测 UUID 获取完成",
+                                    event_code="telemetry.uuid.request_completed",
+                                    uuid_hash=hash_id(self.client_uuid),
+                                )
                                 return True  # 成功获取UUID，返回True
                             else:
-                                logger.error("无效的服务端响应")
+                                logger.error("遥测 UUID 响应缺少 UUID", event_code="telemetry.uuid.invalid_response")
                         else:
                             response_text = await response.text()
                             logger.error(
-                                f"请求UUID失败，不过你还是可以正常使用麦麦，状态码: {response.status}, 响应内容: {response_text}"
+                                "遥测 UUID 请求失败，主程序继续运行",
+                                event_code="telemetry.uuid.request_failed",
+                                status_code=response.status,
+                                response=response_text,
                             )
             except Exception as e:
-                import traceback
-
-                error_msg = str(e) or "未知错误"
                 logger.warning(
-                    f"请求UUID出错，不过你还是可以正常使用麦麦: {type(e).__name__}: {error_msg}"
-                )  # 可能是网络问题
-                logger.debug(f"完整错误信息: {traceback.format_exc()}")
+                    "遥测 UUID 请求异常，主程序继续运行",
+                    event_code="telemetry.uuid.request_exception",
+                    error_type=type(e).__name__,
+                    error=str(e) or "未知错误",
+                    exc_info=True,
+                )
 
             # 请求失败，重试次数+1
             try_count += 1
             if try_count > 3:
                 # 如果超过3次仍然失败，则退出
-                logger.error("获取UUID失败，请检查网络连接或服务端状态")
+                logger.error("遥测 UUID 获取失败，已达到最大重试次数", event_code="telemetry.uuid.retries_exhausted")
                 return False
             else:
                 # 如果可以重试，等待后继续（指数退避）
-                logger.info(f"获取UUID失败，将于 {4**try_count} 秒后重试...")
+                logger.info("遥测 UUID 将重试", event_code="telemetry.uuid.retry_scheduled", delay_seconds=4**try_count)
                 await asyncio.sleep(4**try_count)
 
     async def _send_heartbeat(self):
@@ -117,8 +127,12 @@ class TelemetryHeartBeatTask(AsyncTask):
             "User-Agent": f"HeartbeatClient/{self.client_uuid[:8]}",  # type: ignore
         }
 
-        logger.debug(f"正在发送心跳到服务器: {self.server_url}")
-        logger.debug(str(headers))
+        logger.debug(
+            "遥测心跳开始发送",
+            event_code="telemetry.heartbeat.send_started",
+            server_url=self.server_url,
+            uuid_hash=hash_id(self.client_uuid),
+        )
 
         try:
             async with aiohttp.ClientSession(connector=await get_tcp_connector()) as session:
@@ -128,17 +142,21 @@ class TelemetryHeartBeatTask(AsyncTask):
                     json=self.info_dict,
                     timeout=aiohttp.ClientTimeout(total=5),  # 设置超时时间为5秒
                 ) as response:
-                    logger.debug(f"Response status: {response.status}")
+                    logger.debug("遥测心跳响应", event_code="telemetry.heartbeat.response", status_code=response.status)
 
                     # 处理响应
                     if 200 <= response.status < 300:
                         # 成功
-                        logger.debug(f"心跳发送成功，状态码: {response.status}")
+                        logger.debug(
+                            "遥测心跳发送完成", event_code="telemetry.heartbeat.sent", status_code=response.status
+                        )
                     elif response.status == 403:
                         # 403 Forbidden
                         logger.warning(
-                            "（此消息不会影响正常使用）心跳发送失败，403 Forbidden: 可能是UUID无效或未注册。"
-                            "处理措施：重置UUID，下次发送心跳时将尝试重新注册。"
+                            "遥测心跳被拒绝，UUID 将重置",
+                            event_code="telemetry.heartbeat.forbidden",
+                            status_code=response.status,
+                            uuid_hash=hash_id(self.client_uuid),
                         )
                         self.client_uuid = None
                         del local_storage["mmc_uuid"]  # 删除本地存储的UUID
@@ -146,20 +164,27 @@ class TelemetryHeartBeatTask(AsyncTask):
                         # 其他错误
                         response_text = await response.text()
                         logger.warning(
-                            f"（此消息不会影响正常使用）状态未发送，状态码: {response.status}, 响应内容: {response_text}"
+                            "遥测心跳发送失败，主程序继续运行",
+                            event_code="telemetry.heartbeat.failed",
+                            status_code=response.status,
+                            response=response_text,
                         )
         except Exception as e:
-            import traceback
-
-            error_msg = str(e) or "未知错误"
-            logger.warning(f"（此消息不会影响正常使用）状态未发生: {type(e).__name__}: {error_msg}")
-            logger.debug(f"完整错误信息: {traceback.format_exc()}")
+            logger.warning(
+                "遥测心跳发送异常，主程序继续运行",
+                event_code="telemetry.heartbeat.exception",
+                error_type=type(e).__name__,
+                error=str(e) or "未知错误",
+                exc_info=True,
+            )
 
     async def run(self):
         # 发送心跳
         if global_config.telemetry.enable:
             if self.client_uuid is None and not await self._req_uuid():
-                logger.warning("获取UUID失败，跳过此次心跳")
+                logger.warning(
+                    "遥测 UUID 不可用，跳过本次心跳", event_code="telemetry.heartbeat.skipped_uuid_unavailable"
+                )
                 return
 
             await self._send_heartbeat()

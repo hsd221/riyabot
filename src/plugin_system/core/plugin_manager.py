@@ -1,5 +1,4 @@
 import os
-import traceback
 
 from typing import Dict, List, Optional, Tuple, Type, Any
 from importlib.util import spec_from_file_location, module_from_spec
@@ -8,7 +7,6 @@ from pathlib import Path
 
 from src.common.logger import get_logger
 from src.plugin_system.base.plugin_base import PluginBase
-from src.plugin_system.base.component_types import ComponentType
 from src.plugin_system.utils.manifest_utils import VersionComparator
 from .component_registry import component_registry
 
@@ -32,7 +30,7 @@ class PluginManager:
 
         # 确保插件目录存在
         self._ensure_plugin_directories()
-        logger.info("插件管理器初始化完成")
+        logger.info("插件管理器初始化完成", event_code="plugin.manager.initialized")
 
     # === 插件目录管理 ===
 
@@ -41,12 +39,12 @@ class PluginManager:
         if os.path.exists(directory):
             if directory not in self.plugin_directories:
                 self.plugin_directories.append(directory)
-                logger.debug(f"已添加插件目录: {directory}")
+                logger.debug("插件目录已添加", event_code="plugin.directory.added", directory=directory)
                 return True
             else:
-                logger.warning(f"插件不可重复加载: {directory}")
+                logger.warning("插件目录已存在，跳过添加", event_code="plugin.directory.duplicate", directory=directory)
         else:
-            logger.warning(f"插件目录不存在: {directory}")
+            logger.warning("插件目录不存在", event_code="plugin.directory.missing", directory=directory)
         return False
 
     # === 插件加载管理 ===
@@ -57,7 +55,7 @@ class PluginManager:
         Returns:
             tuple[int, int]: (插件数量, 组件数量)
         """
-        logger.debug("开始加载所有插件...")
+        logger.debug("插件加载开始", event_code="plugin.load_all.started")
 
         # 第一阶段：加载所有插件模块（注册插件类）
         total_loaded_modules = 0
@@ -68,7 +66,12 @@ class PluginManager:
             total_loaded_modules += loaded
             total_failed_modules += failed
 
-        logger.debug(f"插件模块加载完成 - 成功: {total_loaded_modules}, 失败: {total_failed_modules}")
+        logger.debug(
+            "插件模块扫描完成",
+            event_code="plugin.modules.scanned",
+            loaded_count=total_loaded_modules,
+            failed_count=total_failed_modules,
+        )
 
         total_registered = 0
         total_failed_registration = 0
@@ -91,7 +94,7 @@ class PluginManager:
         """
         plugin_class = self.plugin_classes.get(plugin_name)
         if not plugin_class:
-            logger.error(f"插件 {plugin_name} 的插件类未注册或不存在")
+            logger.error("插件类未注册", event_code="plugin.class_missing", plugin_name=plugin_name)
             return False, 1
         try:
             # 使用记录的插件目录路径
@@ -103,11 +106,11 @@ class PluginManager:
 
             plugin_instance = plugin_class(plugin_dir=plugin_dir)  # 实例化插件（可能因为缺少manifest而失败）
             if not plugin_instance:
-                logger.error(f"插件 {plugin_name} 实例化失败")
+                logger.error("插件实例化失败", event_code="plugin.instantiate_failed", plugin_name=plugin_name)
                 return False, 1
             # 检查插件是否启用
             if not plugin_instance.enable_plugin:
-                logger.info(f"插件 {plugin_name} 已禁用，跳过加载")
+                logger.info("插件已禁用，跳过加载", event_code="plugin.load_skipped_disabled", plugin_name=plugin_name)
                 return False, 0
 
             # 检查版本兼容性
@@ -116,7 +119,12 @@ class PluginManager:
             )
             if not is_compatible:
                 self.failed_plugins[plugin_name] = compatibility_error
-                logger.error(f"❌ 插件加载失败: {plugin_name} - {compatibility_error}")
+                logger.error(
+                    "插件版本兼容性检查失败",
+                    event_code="plugin.version_incompatible",
+                    plugin_name=plugin_name,
+                    reason=compatibility_error,
+                )
                 return False, 1
             if plugin_instance.register_plugin():
                 self.loaded_plugins[plugin_name] = plugin_instance
@@ -124,30 +132,34 @@ class PluginManager:
                 return True, 1
             else:
                 self.failed_plugins[plugin_name] = "插件注册失败"
-                logger.error(f"❌ 插件注册失败: {plugin_name}")
+                logger.error("插件注册失败", event_code="plugin.register_failed", plugin_name=plugin_name)
                 return False, 1
 
         except FileNotFoundError as e:
             # manifest文件缺失
             error_msg = f"缺少manifest文件: {str(e)}"
             self.failed_plugins[plugin_name] = error_msg
-            logger.error(f"❌ 插件加载失败: {plugin_name} - {error_msg}")
+            logger.error(
+                "插件加载失败，manifest 文件缺失", event_code="plugin.manifest_missing", plugin_name=plugin_name
+            )
             return False, 1
 
         except ValueError as e:
             # manifest文件格式错误或验证失败
-            traceback.print_exc()
             error_msg = f"manifest验证失败: {str(e)}"
             self.failed_plugins[plugin_name] = error_msg
-            logger.error(f"❌ 插件加载失败: {plugin_name} - {error_msg}")
+            logger.exception(
+                "插件加载失败，manifest 验证失败",
+                event_code="plugin.manifest_invalid",
+                plugin_name=plugin_name,
+            )
             return False, 1
 
         except Exception as e:
             # 其他错误
             error_msg = f"未知错误: {str(e)}"
             self.failed_plugins[plugin_name] = error_msg
-            logger.error(f"❌ 插件加载失败: {plugin_name} - {error_msg}")
-            logger.debug("详细错误信息: ", exc_info=True)
+            logger.exception("插件加载失败", event_code="plugin.load_failed", plugin_name=plugin_name)
             return False, 1
 
     async def remove_registered_plugin(self, plugin_name: str) -> bool:
@@ -157,7 +169,7 @@ class PluginManager:
         if not plugin_name:
             raise ValueError("插件名称不能为空")
         if plugin_name not in self.loaded_plugins:
-            logger.warning(f"插件 {plugin_name} 未加载")
+            logger.warning("插件未加载，无法移除", event_code="plugin.remove_not_loaded", plugin_name=plugin_name)
             return False
         plugin_instance = self.loaded_plugins[plugin_name]
         plugin_info = plugin_instance.plugin_info
@@ -176,7 +188,7 @@ class PluginManager:
             return False
         if not self.load_registered_plugin_classes(plugin_name)[0]:
             return False
-        logger.debug(f"插件 {plugin_name} 重载成功")
+        logger.debug("插件重载完成", event_code="plugin.reload_completed", plugin_name=plugin_name)
         return True
 
     def rescan_plugin_directory(self) -> Tuple[int, int]:
@@ -187,12 +199,14 @@ class PluginManager:
         total_fail = 0
         for directory in self.plugin_directories:
             if os.path.exists(directory):
-                logger.debug(f"重新扫描插件根目录: {directory}")
+                logger.debug(
+                    "插件根目录开始重新扫描", event_code="plugin.directory.rescan_started", directory=directory
+                )
                 success, fail = self._load_plugin_modules_from_directory(directory)
                 total_success += success
                 total_fail += fail
             else:
-                logger.warning(f"插件根目录不存在: {directory}")
+                logger.warning("插件根目录不存在", event_code="plugin.directory.missing", directory=directory)
         return total_success, total_fail
 
     def get_plugin_instance(self, plugin_name: str) -> Optional["PluginBase"]:
@@ -246,12 +260,14 @@ class PluginManager:
         for directory in default_directories:
             if not os.path.exists(directory):
                 os.makedirs(directory, exist_ok=True)
-                logger.info(f"创建插件根目录: {directory}")
+                logger.info("插件根目录已创建", event_code="plugin.directory.created", directory=directory)
             if directory not in self.plugin_directories:
                 self.plugin_directories.append(directory)
-                logger.debug(f"已添加插件根目录: {directory}")
+                logger.debug("插件根目录已添加", event_code="plugin.directory.added", directory=directory)
             else:
-                logger.warning(f"根目录不可重复加载: {directory}")
+                logger.warning(
+                    "插件根目录已存在，跳过添加", event_code="plugin.directory.duplicate", directory=directory
+                )
 
     # == 插件加载 ==
 
@@ -261,10 +277,10 @@ class PluginManager:
         failed_count = 0
 
         if not os.path.exists(directory):
-            logger.warning(f"插件根目录不存在: {directory}")
+            logger.warning("插件根目录不存在", event_code="plugin.directory.missing", directory=directory)
             return 0, 1
 
-        logger.debug(f"正在扫描插件根目录: {directory}")
+        logger.debug("插件根目录开始扫描", event_code="plugin.directory.scan_started", directory=directory)
 
         # 遍历目录中的所有包
         for item in os.listdir(directory):
@@ -297,19 +313,21 @@ class PluginManager:
             # 动态导入插件模块
             spec = spec_from_file_location(module_name, plugin_file)
             if spec is None or spec.loader is None:
-                logger.error(f"无法创建模块规范: {plugin_file}")
+                logger.error("插件模块规范创建失败", event_code="plugin.module.spec_failed", plugin_file=plugin_file)
                 return False
 
             module = module_from_spec(spec)
             module.__package__ = module_name  # 设置模块包名
             spec.loader.exec_module(module)
 
-            logger.debug(f"插件模块加载成功: {plugin_file}")
+            logger.debug(
+                "插件模块加载完成", event_code="plugin.module.loaded", plugin_file=plugin_file, module_name=module_name
+            )
             return True
 
         except Exception as e:
             error_msg = f"加载插件模块 {plugin_file} 失败: {e}"
-            logger.error(error_msg)
+            logger.exception("插件模块加载失败", event_code="plugin.module.load_failed", plugin_file=plugin_file)
             self.failed_plugins[module_name] = error_msg
             return False
 
@@ -343,11 +361,23 @@ class PluginManager:
             is_compatible, error_msg = VersionComparator.is_version_in_range(current_version, min_version, max_version)
             if not is_compatible:
                 return False, f"版本不兼容: {error_msg}"
-            logger.debug(f"插件 {plugin_name} 版本兼容性检查通过")
+            logger.debug(
+                "插件版本兼容性检查通过",
+                event_code="plugin.version_compatible",
+                plugin_name=plugin_name,
+                current_version=current_version,
+                min_version=min_version,
+                max_version=max_version,
+            )
             return True, ""
 
         except Exception as e:
-            logger.warning(f"插件 {plugin_name} 版本兼容性检查失败: {e}")
+            logger.warning(
+                "插件版本兼容性检查异常",
+                event_code="plugin.version_check_failed",
+                plugin_name=plugin_name,
+                error=str(e),
+            )
             return False, f"插件 {plugin_name} 版本兼容性检查失败: {e}"  # 检查失败时默认不允许加载
 
     # == 显示统计与插件信息 ==
@@ -362,72 +392,39 @@ class PluginManager:
         event_handler_count = stats.get("event_handlers", 0)
         total_components = stats.get("total_components", 0)
 
-        # 📋 显示插件加载总览
         if total_registered > 0:
-            logger.info("🎉 插件系统加载完成!")
             logger.info(
-                f"📊 总览: {total_registered}个插件, {total_components}个组件 (Action: {action_count}, Command: {command_count}, Tool: {tool_count}, EventHandler: {event_handler_count})"
+                "插件系统加载完成",
+                event_code="plugin.system.loaded",
+                plugin_count=total_registered,
+                failed_plugin_count=total_failed_registration,
+                total_components=total_components,
+                action_count=action_count,
+                command_count=command_count,
+                tool_count=tool_count,
+                event_handler_count=event_handler_count,
             )
 
-            # 显示详细的插件列表
-            logger.info("📋 已加载插件详情:")
             for plugin_name in self.loaded_plugins.keys():
                 if plugin_info := component_registry.get_plugin_info(plugin_name):
-                    # 插件基本信息
-                    version_info = f"v{plugin_info.version}" if plugin_info.version else ""
-                    author_info = f"by {plugin_info.author}" if plugin_info.author else "unknown"
-                    license_info = f"[{plugin_info.license}]" if plugin_info.license else ""
-                    info_parts = [part for part in [version_info, author_info, license_info] if part]
-                    extra_info = f" ({', '.join(info_parts)})" if info_parts else ""
-
-                    logger.info(f"  📦 {plugin_info.display_name}{extra_info}")
-
-                    # Manifest信息
-                    if plugin_info.manifest_data:
-                        """
-                        if plugin_info.keywords:
-                            logger.info(f"    🏷️ 关键词: {', '.join(plugin_info.keywords)}")
-                        if plugin_info.categories:
-                            logger.info(f"    📁 分类: {', '.join(plugin_info.categories)}")
-                        """
-                        if plugin_info.homepage_url:
-                            logger.info(f"    🌐 主页: {plugin_info.homepage_url}")
-
-                    # 组件列表
-                    if plugin_info.components:
-                        action_components = [
-                            c for c in plugin_info.components if c.component_type == ComponentType.ACTION
-                        ]
-                        command_components = [
-                            c for c in plugin_info.components if c.component_type == ComponentType.COMMAND
-                        ]
-                        tool_components = [c for c in plugin_info.components if c.component_type == ComponentType.TOOL]
-                        event_handler_components = [
-                            c for c in plugin_info.components if c.component_type == ComponentType.EVENT_HANDLER
-                        ]
-
-                        if action_components:
-                            action_names = [c.name for c in action_components]
-                            logger.info(f"    🎯 Action组件: {', '.join(action_names)}")
-
-                        if command_components:
-                            command_names = [c.name for c in command_components]
-                            logger.info(f"    ⚡ Command组件: {', '.join(command_names)}")
-                        if tool_components:
-                            tool_names = [c.name for c in tool_components]
-                            logger.info(f"    🛠️ Tool组件: {', '.join(tool_names)}")
-                        if event_handler_components:
-                            event_handler_names = [c.name for c in event_handler_components]
-                            logger.info(f"    📢 EventHandler组件: {', '.join(event_handler_names)}")
-
-                    # 依赖信息
-                    if plugin_info.dependencies:
-                        logger.info(f"    🔗 依赖: {', '.join(plugin_info.dependencies)}")
-
-                    # 配置文件信息
-                    if plugin_info.config_file:
-                        config_status = "✅" if self.plugin_paths.get(plugin_name) else "❌"
-                        logger.info(f"    ⚙️ 配置: {plugin_info.config_file} {config_status}")
+                    component_counts = {}
+                    for component in plugin_info.components:
+                        component_counts[component.component_type.value] = (
+                            component_counts.get(component.component_type.value, 0) + 1
+                        )
+                    logger.debug(
+                        "已加载插件详情",
+                        event_code="plugin.loaded.detail",
+                        plugin_name=plugin_name,
+                        display_name=plugin_info.display_name,
+                        version=plugin_info.version,
+                        author=plugin_info.author,
+                        license=plugin_info.license,
+                        homepage_url=plugin_info.homepage_url,
+                        component_counts=component_counts,
+                        dependency_count=len(plugin_info.dependencies),
+                        config_file=plugin_info.config_file,
+                    )
 
             root_path = Path(__file__)
 
@@ -435,8 +432,6 @@ class PluginManager:
             while not (root_path / "pyproject.toml").exists() and root_path.parent != root_path:
                 root_path = root_path.parent
 
-            # 显示目录统计
-            logger.info("📂 加载目录统计:")
             for directory in self.plugin_directories:
                 if os.path.exists(directory):
                     plugins_in_dir = []
@@ -449,18 +444,29 @@ class PluginManager:
                         ):
                             plugins_in_dir.append(plugin_name)
 
-                    if plugins_in_dir:
-                        logger.info(f" 📁 {directory}: {len(plugins_in_dir)}个插件 ({', '.join(plugins_in_dir)})")
-                    else:
-                        logger.info(f" 📁 {directory}: 0个插件")
+                    logger.debug(
+                        "插件目录加载统计",
+                        event_code="plugin.directory.stats",
+                        directory=directory,
+                        plugin_count=len(plugins_in_dir),
+                        plugins=plugins_in_dir,
+                    )
 
-            # 失败信息
             if total_failed_registration > 0:
-                logger.info(f"⚠️  失败统计: {total_failed_registration}个插件加载失败")
+                logger.warning(
+                    "部分插件加载失败",
+                    event_code="plugin.system.partial_failure",
+                    failed_plugin_count=total_failed_registration,
+                )
                 for failed_plugin, error in self.failed_plugins.items():
-                    logger.info(f"  ❌ {failed_plugin}: {error}")
+                    logger.warning(
+                        "插件加载失败详情",
+                        event_code="plugin.load_failure.detail",
+                        plugin_name=failed_plugin,
+                        error=error,
+                    )
         else:
-            logger.warning("😕 没有成功加载任何插件")
+            logger.warning("没有插件加载成功", event_code="plugin.system.no_plugins_loaded")
 
     def _show_plugin_components(self, plugin_name: str) -> None:
         if plugin_info := component_registry.get_plugin_info(plugin_name):
@@ -471,20 +477,18 @@ class PluginManager:
 
             components_str = ", ".join([f"{count}个{ctype}" for ctype, count in component_types.items()])
 
-            # 显示manifest信息
-            manifest_info = ""
-            if plugin_info.license:
-                manifest_info += f" [{plugin_info.license}]"
-            if plugin_info.keywords:
-                manifest_info += f" 关键词: {', '.join(plugin_info.keywords[:3])}"  # 只显示前3个关键词
-                if len(plugin_info.keywords) > 3:
-                    manifest_info += "..."
-
             logger.info(
-                f"✅ 插件加载成功: {plugin_name} v{plugin_info.version} ({components_str}){manifest_info} - {plugin_info.description}"
+                "插件加载成功",
+                event_code="plugin.loaded",
+                plugin_name=plugin_name,
+                version=plugin_info.version,
+                component_summary=components_str,
+                license=plugin_info.license,
+                keyword_count=len(plugin_info.keywords),
+                description=plugin_info.description,
             )
         else:
-            logger.info(f"✅ 插件加载成功: {plugin_name}")
+            logger.info("插件加载成功", event_code="plugin.loaded", plugin_name=plugin_name)
 
 
 # 全局插件管理器实例

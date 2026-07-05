@@ -1,5 +1,6 @@
 import time
 import asyncio
+import json
 import urllib3
 
 from abc import abstractmethod
@@ -9,10 +10,23 @@ from typing import Optional, Any, List
 from maim_message import Seg, UserInfo, BaseMessageInfo, MessageBase
 
 from src.common.logger import get_logger
+from src.common.data_models.message_component_model import (
+    MessageComponentSequence,
+    ReplyComponent,
+    SegmentListComponent,
+    components_to_plain_text,
+    from_components_to_seg,
+    from_seg_to_components,
+)
 from src.config.config import global_config
 from src.chat.utils.utils_image import get_image_manager
 from src.chat.utils.utils_voice import get_voice_text
 from .chat_stream import ChatStream
+from .media_background import (
+    schedule_emoji_description_task,
+    schedule_image_description_task,
+    schedule_voice_transcription_task,
+)
 
 install(extra_lines=3)
 
@@ -34,6 +48,7 @@ class Message(MessageBase):
     chat_stream: "ChatStream" = None  # type: ignore
     reply: Optional["Message"] = None
     processed_plain_text: str = ""
+    message_components: MessageComponentSequence = None  # type: ignore
 
     def __init__(
         self,
@@ -62,11 +77,18 @@ class Message(MessageBase):
         self.chat_stream = chat_stream
         # 文本处理相关属性
         self.processed_plain_text = processed_plain_text
+        self.message_components = from_seg_to_components(message_segment) if message_segment else MessageComponentSequence()
 
         # 回复消息
         self.reply = reply
 
-    async def _process_message_segments(self, segment: Seg) -> str:
+    async def _process_message_segments(
+        self,
+        segment: Seg,
+        *,
+        enable_heavy_media_analysis: bool = True,
+        enable_voice_transcription: bool = True,
+    ) -> str:
         # sourcery skip: remove-unnecessary-else, swap-if-else-branches
         """递归处理消息段，转换为文字描述
 
@@ -78,7 +100,14 @@ class Message(MessageBase):
         """
         if segment.type == "seglist":
             # 处理消息段列表 - 使用并行处理提升性能
-            tasks = [self._process_message_segments(seg) for seg in segment.data]  # type: ignore
+            tasks = [
+                self._process_message_segments(
+                    seg,
+                    enable_heavy_media_analysis=enable_heavy_media_analysis,
+                    enable_voice_transcription=enable_voice_transcription,
+                )
+                for seg in segment.data
+            ]  # type: ignore
             results = await asyncio.gather(*tasks, return_exceptions=True)
             segments_text = []
             for result in results:
@@ -92,7 +121,11 @@ class Message(MessageBase):
             # 处理转发消息 - 使用并行处理
             async def process_forward_node(node_dict):
                 message = MessageBase.from_dict(node_dict)  # type: ignore
-                processed_text = await self._process_message_segments(message.message_segment)
+                processed_text = await self._process_message_segments(
+                    message.message_segment,
+                    enable_heavy_media_analysis=enable_heavy_media_analysis,
+                    enable_voice_transcription=enable_voice_transcription,
+                )
                 if processed_text:
                     return f"{global_config.bot.nickname}: {processed_text}"
                 return None
@@ -109,10 +142,20 @@ class Message(MessageBase):
             return "[合并消息]: " + "\n--  ".join(segments_text)
         else:
             # 处理单个消息段
-            return await self._process_single_segment(segment)  # type: ignore
+            return await self._process_single_segment(  # type: ignore
+                segment,
+                enable_heavy_media_analysis=enable_heavy_media_analysis,
+                enable_voice_transcription=enable_voice_transcription,
+            )
 
     @abstractmethod
-    async def _process_single_segment(self, segment) -> str:
+    async def _process_single_segment(
+        self,
+        segment,
+        *,
+        enable_heavy_media_analysis: bool = True,
+        enable_voice_transcription: bool = True,
+    ) -> str:
         pass
 
 
@@ -128,6 +171,7 @@ class MessageRecv(Message):
         """
         self.message_info = BaseMessageInfo.from_dict(message_dict.get("message_info", {}))
         self.message_segment = Seg.from_dict(message_dict.get("message_segment", {}))
+        self.message_components = from_seg_to_components(self.message_segment)
         self.raw_message = message_dict.get("raw_message")
         self.processed_plain_text = message_dict.get("processed_plain_text", "")
         self.is_emoji = False
@@ -154,6 +198,14 @@ class MessageRecv(Message):
         try:
             msg_info_dict = message_dict.get("message_info", {})
             add_cfg = msg_info_dict.get("additional_config") or {}
+            if isinstance(add_cfg, str) and add_cfg.strip():
+                try:
+                    parsed_add_cfg = json.loads(add_cfg)
+                    add_cfg = parsed_add_cfg if isinstance(parsed_add_cfg, dict) else {}
+                except json.JSONDecodeError:
+                    add_cfg = {}
+            if isinstance(add_cfg, dict):
+                self.message_info.additional_config = add_cfg
             if isinstance(add_cfg, dict) and add_cfg.get("at_bot"):
                 # 标记为被提及，提高后续回复优先级
                 self.is_mentioned = True  # type: ignore
@@ -163,15 +215,31 @@ class MessageRecv(Message):
     def update_chat_stream(self, chat_stream: "ChatStream"):
         self.chat_stream = chat_stream
 
-    async def process(self) -> None:
+    async def process(
+        self,
+        *,
+        enable_heavy_media_analysis: bool = True,
+        enable_voice_transcription: bool = True,
+    ) -> None:
         """处理消息内容，生成纯文本和详细文本
 
         这个方法必须在创建实例后显式调用，因为它包含异步操作。
         """
         # print(f"self.message_segment: {self.message_segment}")
-        self.processed_plain_text = await self._process_message_segments(self.message_segment)
+        self.message_components = from_seg_to_components(self.message_segment)
+        self.processed_plain_text = await self._process_message_segments(
+            self.message_segment,
+            enable_heavy_media_analysis=enable_heavy_media_analysis,
+            enable_voice_transcription=enable_voice_transcription,
+        )
 
-    async def _process_single_segment(self, segment: Seg) -> str:
+    async def _process_single_segment(
+        self,
+        segment: Seg,
+        *,
+        enable_heavy_media_analysis: bool = True,
+        enable_voice_transcription: bool = True,
+    ) -> str:
         """处理单个消息段
 
         Args:
@@ -187,10 +255,13 @@ class MessageRecv(Message):
                 return segment.data  # type: ignore
             elif segment.type == "image":
                 # 如果是base64图片数据
+                self.has_picid = True
+                self.is_picid = True
+                self.is_emoji = False
                 if isinstance(segment.data, str):
-                    self.has_picid = True
-                    self.is_picid = True
-                    self.is_emoji = False
+                    if not enable_heavy_media_analysis:
+                        schedule_image_description_task(segment.data, self.message_info.message_id)
+                        return "[图片]"
                     image_manager = get_image_manager()
                     # 使用 semaphore 限制 VLM 并发，避免同时处理太多图片
                     async with _vlm_semaphore:
@@ -203,6 +274,9 @@ class MessageRecv(Message):
                 self.is_picid = False
                 self.is_voice = False
                 if isinstance(segment.data, str):
+                    if not enable_heavy_media_analysis:
+                        schedule_emoji_description_task(segment.data, self.message_info.message_id)
+                        return "[表情包]"
                     # 使用 semaphore 限制 VLM 并发
                     async with _vlm_semaphore:
                         return await get_image_manager().get_emoji_description(segment.data)
@@ -212,6 +286,9 @@ class MessageRecv(Message):
                 self.is_emoji = False
                 self.is_voice = True
                 if isinstance(segment.data, str):
+                    if not enable_voice_transcription:
+                        schedule_voice_transcription_task(segment.data, self.message_info.message_id)
+                        return "[语音消息]"
                     return await get_voice_text(segment.data)
                 return "[发了一段语音，网卡了加载不出来]"
             elif segment.type == "mention_bot":
@@ -337,7 +414,13 @@ class MessageProcessBase(Message):
         self.thinking_time = round(time.time() - self.thinking_start_time, 2)
         return self.thinking_time
 
-    async def _process_single_segment(self, segment: Seg) -> str:
+    async def _process_single_segment(
+        self,
+        segment: Seg,
+        *,
+        enable_heavy_media_analysis: bool = True,
+        enable_voice_transcription: bool = True,
+    ) -> str:
         """处理单个消息段
 
         Args:
@@ -431,11 +514,14 @@ class MessageSending(MessageProcessBase):
         self.interest_value = 0.0
 
         self.selected_expressions = selected_expressions
+        self.preserve_message_components = False
 
     def build_reply(self):
         """设置回复消息"""
         if self.reply:
             self.reply_to_message_id = self.reply.message_info.message_id
+            original_segment = self.message_segment
+            original_components = self.message_components
             self.message_segment = Seg(
                 type="seglist",
                 data=[
@@ -443,10 +529,37 @@ class MessageSending(MessageProcessBase):
                     self.message_segment,
                 ],
             )
+            if self.preserve_message_components and original_components:
+                reply_component = ReplyComponent(
+                    target_message_id=self.reply.message_info.message_id,
+                    target_text=getattr(self.reply, "processed_plain_text", None),
+                )
+                if original_segment and original_segment.type == "seglist":
+                    trailing_component = SegmentListComponent(sequence=original_components)
+                    self.message_components = MessageComponentSequence(
+                        [reply_component, trailing_component],
+                        force_seglist=True,
+                    )
+                else:
+                    self.message_components = MessageComponentSequence(
+                        [reply_component, *original_components.components],
+                        force_seglist=True,
+                    )
+            else:
+                self.message_components = from_seg_to_components(self.message_segment)
 
     async def process(self) -> None:
         """处理消息内容，生成纯文本和详细文本"""
         if self.message_segment:
+            if self.preserve_message_components and self.message_components:
+                try:
+                    component_segment = await from_components_to_seg(self.message_components)
+                    if component_segment.to_dict() == self.message_segment.to_dict():
+                        self.processed_plain_text = components_to_plain_text(self.message_components)
+                        return
+                except Exception as e:
+                    logger.debug(f"发送消息组件转换失败，回退到 Seg 处理: {e}")
+            self.message_components = from_seg_to_components(self.message_segment)
             self.processed_plain_text = await self._process_message_segments(self.message_segment)
 
     def to_dict(self):

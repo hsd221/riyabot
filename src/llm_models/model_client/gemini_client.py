@@ -265,13 +265,13 @@ def _build_stream_api_resp(
 
     if str(reason).endswith("MAX_TOKENS"):
         has_visible_output = bool(resp.content and resp.content.strip())
-        if has_visible_output:
-            logger.warning(
-                "⚠ Gemini 响应因达到 max_tokens 限制被部分截断，\n"
-                "    可能会对回复内容造成影响，建议修改模型 max_tokens 配置！"
-            )
-        else:
-            logger.warning("⚠ Gemini 响应因达到 max_tokens 限制被截断，\n    请修改模型 max_tokens 配置！")
+        logger.warning(
+            "Gemini 响应达到 max_tokens 限制",
+            event_code="llm.gemini.response.max_tokens_reached",
+            stream=True,
+            has_visible_output=has_visible_output,
+            remediation="调整模型 max_tokens 配置",
+        )
 
     if not resp.content and not resp.tool_calls:
         if not getattr(resp, "reasoning_content", None):
@@ -355,8 +355,8 @@ def _default_normal_response_parser(
                         api_response.reasoning_content = (
                             api_response.reasoning_content + part.text if api_response.reasoning_content else part.text
                         )
-    except Exception as e:
-        logger.warning(f"解析思考内容时发生错误: {e}，跳过解析")
+    except Exception:
+        logger.warning("Gemini 思考内容解析失败，已跳过", event_code="llm.gemini.reasoning_parse_failed", exc_info=True)
 
     # 解析响应内容
     api_response.content = resp.text
@@ -403,17 +403,19 @@ def _default_normal_response_parser(
                 if not has_real_output and getattr(resp, "text", None):
                     has_real_output = True
 
-                if has_real_output:
-                    logger.warning(
-                        "⚠ Gemini 响应因达到 max_tokens 限制被部分截断，\n"
-                        "    可能会对回复内容造成影响，建议修改模型 max_tokens 配置！"
-                    )
-                else:
-                    logger.warning("⚠ Gemini 响应因达到 max_tokens 限制被截断，\n    请修改模型 max_tokens 配置！")
+                logger.warning(
+                    "Gemini 响应达到 max_tokens 限制",
+                    event_code="llm.gemini.response.max_tokens_reached",
+                    stream=False,
+                    has_visible_output=has_real_output,
+                    remediation="调整模型 max_tokens 配置",
+                )
 
                 return api_response, _usage_record
-    except Exception as e:
-        logger.debug(f"检查 MAX_TOKENS 截断时异常: {e}")
+    except Exception:
+        logger.debug(
+            "检查 Gemini max_tokens 截断状态失败", event_code="llm.gemini.max_tokens_check_failed", exc_info=True
+        )
 
     # 最终的、唯一的空响应检查
     if not api_response.content and not api_response.tool_calls:
@@ -464,7 +466,11 @@ class GeminiClient(BaseClient):
                 tb = int(extra_params["thinking_budget"])
             except (ValueError, TypeError):
                 logger.warning(
-                    f"无效的 thinking_budget 值 {extra_params['thinking_budget']}，将使用模型自动预算模式 {tb}"
+                    "Gemini thinking_budget 无效，使用自动预算",
+                    event_code="llm.gemini.thinking_budget.invalid",
+                    model_id=model_id,
+                    thinking_budget=extra_params["thinking_budget"],
+                    fallback=tb,
                 )
 
         # 优先尝试精确匹配
@@ -486,22 +492,43 @@ class GeminiClient(BaseClient):
             if limits and limits.get("can_disable", False):
                 return THINKING_BUDGET_DISABLED
             if limits:
-                logger.warning(f"模型 {model_id} 不支持禁用思考预算，已回退到最小值 {limits['min']}")
+                logger.warning(
+                    "Gemini 模型不支持禁用思考预算，已回退到最小值",
+                    event_code="llm.gemini.thinking_budget.disable_unsupported",
+                    model_id=model_id,
+                    fallback=limits["min"],
+                )
                 return limits["min"]
             return THINKING_BUDGET_AUTO
 
         # 已知模型范围裁剪 + 提示
         if limits:
             if tb < limits["min"]:
-                logger.warning(f"模型 {model_id} 的 thinking_budget={tb} 过小，已调整为最小值 {limits['min']}")
+                logger.warning(
+                    "Gemini thinking_budget 低于模型最小值，已调整",
+                    event_code="llm.gemini.thinking_budget.too_low",
+                    model_id=model_id,
+                    thinking_budget=tb,
+                    adjusted=limits["min"],
+                )
                 return limits["min"]
             if tb > limits["max"]:
-                logger.warning(f"模型 {model_id} 的 thinking_budget={tb} 过大，已调整为最大值 {limits['max']}")
+                logger.warning(
+                    "Gemini thinking_budget 高于模型最大值，已调整",
+                    event_code="llm.gemini.thinking_budget.too_high",
+                    model_id=model_id,
+                    thinking_budget=tb,
+                    adjusted=limits["max"],
+                )
                 return limits["max"]
             return tb
 
         # 未知模型 → 默认自动模式
-        logger.warning(f"模型 {model_id} 未在 THINKING_BUDGET_LIMITS 中定义，已启用模型自动预算兼容")
+        logger.warning(
+            "Gemini 模型未定义 thinking_budget 限制，使用自动预算",
+            event_code="llm.gemini.thinking_budget.unknown_model",
+            model_id=model_id,
+        )
         return THINKING_BUDGET_AUTO
 
     async def get_response(
@@ -559,7 +586,11 @@ class GeminiClient(BaseClient):
             # 去掉后缀并更新模型ID
             model_identifier = model_identifier.removesuffix("-search")
             model_info.model_identifier = model_identifier
-            logger.info(f"模型已启用 GoogleSearch 功能：{model_identifier}")
+            logger.info(
+                "Gemini GoogleSearch 功能已启用",
+                event_code="llm.gemini.google_search.enabled",
+                model_identifier=model_identifier,
+            )
 
         # 将response_format转换为Gemini API所需的格式
         generation_config_dict = {

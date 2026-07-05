@@ -1,11 +1,11 @@
-import traceback
 import os
 import re
 
 from typing import Dict, Any, Optional
 from maim_message import UserInfo, Seg, GroupInfo
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
+from src.common.data_models.message_component_model import from_seg_to_components
 from src.config.config import global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.message_receive.message import MessageRecv
@@ -24,6 +24,27 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 logger = get_logger("chat")
 
 
+def _apply_modified_message(
+    message: MessageRecv,
+    modified_message: Any,
+    *,
+    merge_additional_data: bool = False,
+) -> None:
+    if not modified_message:
+        return
+    if modified_message._modify_flags.modify_message_segments:
+        message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
+        message.message_components = from_seg_to_components(message.message_segment)
+    if modified_message._modify_flags.modify_plain_text:
+        message.processed_plain_text = modified_message.plain_text
+    if merge_additional_data and modified_message.additional_data:
+        additional_config = message.message_info.additional_config
+        if not isinstance(additional_config, dict):
+            additional_config = {}
+        additional_config.update(modified_message.additional_data)
+        message.message_info.additional_config = additional_config
+
+
 def _check_ban_words(text: str, userinfo: UserInfo, group_info: Optional[GroupInfo] = None) -> bool:
     """检查消息是否包含过滤词
 
@@ -37,9 +58,16 @@ def _check_ban_words(text: str, userinfo: UserInfo, group_info: Optional[GroupIn
     """
     for word in global_config.message_receive.ban_words:
         if word in text:
-            chat_name = group_info.group_name if group_info else "私聊"
-            logger.info(f"[{chat_name}]{userinfo.user_nickname}:{text}")
-            logger.info(f"[过滤词识别]消息中含有{word}，filtered")
+            logger.info(
+                "消息命中过滤词，已跳过处理",
+                event_code="chat.message.filtered_by_word",
+                chat_type="group" if group_info else "private",
+                group_id=group_info.group_id if group_info else None,
+                user_id=userinfo.user_id,
+                text_hash=hash_id(text),
+                text_length=len(text),
+                rule_hash=hash_id(word),
+            )
             return True
     return False
 
@@ -61,9 +89,16 @@ def _check_ban_regex(text: str, userinfo: UserInfo, group_info: Optional[GroupIn
 
     for pattern in global_config.message_receive.ban_msgs_regex:
         if re.search(pattern, text):
-            chat_name = group_info.group_name if group_info else "私聊"
-            logger.info(f"[{chat_name}]{userinfo.user_nickname}:{text}")
-            logger.info(f"[正则表达式过滤]消息匹配到{pattern}，filtered")
+            logger.info(
+                "消息命中过滤正则，已跳过处理",
+                event_code="chat.message.filtered_by_regex",
+                chat_type="group" if group_info else "private",
+                group_id=group_info.group_id if group_info else None,
+                user_id=userinfo.user_id,
+                text_hash=hash_id(text),
+                text_length=len(text),
+                pattern=pattern,
+            )
             return True
     return False
 
@@ -77,7 +112,7 @@ class ChatBot:
     async def _ensure_started(self):
         """确保所有任务已启动"""
         if not self._started:
-            logger.debug("确保ChatBot所有任务已启动")
+            logger.debug("ChatBot 启动状态已确认", event_code="chatbot.ensure_started")
 
             self._started = True
 
@@ -99,7 +134,13 @@ class ChatBot:
                     and command_name
                     in global_announcement_manager.get_disabled_chat_commands(message.chat_stream.stream_id)
                 ):
-                    logger.info("用户禁用的命令，跳过处理")
+                    logger.info(
+                        "命令被聊天流配置禁用，已跳过处理",
+                        event_code="chat.command.skipped_disabled",
+                        plugin_name=plugin_name,
+                        command_name=command_name,
+                        chat_id=message.chat_stream.stream_id,
+                    )
                     return False, None, True
 
                 message.is_command = True
@@ -111,47 +152,166 @@ class ChatBot:
                 command_instance: BaseCommand = command_class(message, plugin_config)
                 command_instance.set_matched_groups(matched_groups)
 
+                hook_context = {
+                    "command_name": command_name,
+                    "plugin_name": plugin_name,
+                    "matched_groups": matched_groups,
+                }
+                continue_flag, modified_message = await events_manager.handle_mai_events(
+                    EventType.ON_COMMAND_BEFORE_EXECUTE,
+                    message,
+                    extra_data=hook_context,
+                )
+                if not continue_flag:
+                    logger.info(
+                        "命令执行前 hook 取消命令",
+                        event_code="chat.command.cancelled_by_before_hook",
+                        plugin_name=plugin_name,
+                        command_name=command_name,
+                    )
+                    return True, None, False
+                if modified_message:
+                    _apply_modified_message(message, modified_message)
+                    if "matched_groups" in modified_message.additional_data:
+                        updated_groups = modified_message.additional_data["matched_groups"]
+                        if isinstance(updated_groups, dict):
+                            matched_groups = updated_groups
+                            command_instance.set_matched_groups(matched_groups)
+                            hook_context["matched_groups"] = matched_groups
+                    if modified_message.additional_data.get("execute_command") is False:
+                        logger.info(
+                            "命令执行前 hook 跳过命令",
+                            event_code="chat.command.skipped_by_before_hook",
+                            plugin_name=plugin_name,
+                            command_name=command_name,
+                        )
+                        continue_process = bool(modified_message.additional_data.get("continue_process", True))
+                        return True, modified_message.additional_data.get("response"), continue_process
+
                 try:
                     # 执行命令
                     success, response, intercept_message_level = await command_instance.execute()
                     message.intercept_message_level = intercept_message_level
 
+                    continue_process = not bool(intercept_message_level)
+                    continue_flag, modified_message = await events_manager.handle_mai_events(
+                        EventType.ON_COMMAND_AFTER_EXECUTE,
+                        message,
+                        extra_data={
+                            **hook_context,
+                            "success": success,
+                            "response": response,
+                            "intercept_message_level": intercept_message_level,
+                            "continue_process": continue_process,
+                        },
+                    )
+                    if not continue_flag:
+                        continue_process = False
+                    if modified_message:
+                        _apply_modified_message(message, modified_message)
+                        if "success" in modified_message.additional_data:
+                            success = bool(modified_message.additional_data["success"])
+                        if "response" in modified_message.additional_data:
+                            response = modified_message.additional_data["response"]
+                        if "intercept_message_level" in modified_message.additional_data:
+                            intercept_message_level = int(modified_message.additional_data["intercept_message_level"])
+                            message.intercept_message_level = intercept_message_level
+                        if "continue_process" in modified_message.additional_data:
+                            continue_process = bool(modified_message.additional_data["continue_process"])
+
                     # 记录命令执行结果
                     if success:
-                        logger.info(f"命令执行成功: {command_class.__name__} (拦截等级: {intercept_message_level})")
+                        logger.info(
+                            "命令执行完成",
+                            event_code="chat.command.executed",
+                            status="success",
+                            plugin_name=plugin_name,
+                            command_name=command_name,
+                            command_class=command_class.__name__,
+                            intercept_message_level=intercept_message_level,
+                        )
                     else:
-                        logger.warning(f"命令执行失败: {command_class.__name__} - {response}")
+                        logger.warning(
+                            "命令执行完成",
+                            event_code="chat.command.executed",
+                            status="failed",
+                            plugin_name=plugin_name,
+                            command_name=command_name,
+                            command_class=command_class.__name__,
+                            response=response,
+                            intercept_message_level=intercept_message_level,
+                        )
 
                     # 根据命令的拦截设置决定是否继续处理消息
                     return (
                         True,
                         response,
-                        not bool(intercept_message_level),
+                        continue_process,
                     )  # 找到命令，根据intercept_message决定是否继续
 
                 except Exception as e:
-                    logger.error(f"执行命令时出错: {command_class.__name__} - {e}")
-                    logger.error(traceback.format_exc())
+                    logger.exception(
+                        "命令执行异常",
+                        event_code="chat.command.execute_failed",
+                        plugin_name=plugin_name,
+                        command_name=command_name,
+                        command_class=command_class.__name__,
+                    )
 
-                    try:
-                        await command_instance.send_text(f"命令执行出错: {str(e)}")
-                    except Exception as send_error:
-                        logger.error(f"发送错误消息失败: {send_error}")
+                    success = False
+                    response = str(e)
+                    intercept_message_level = message.intercept_message_level
+                    continue_process = False
+                    continue_flag, modified_message = await events_manager.handle_mai_events(
+                        EventType.ON_COMMAND_AFTER_EXECUTE,
+                        message,
+                        extra_data={
+                            **hook_context,
+                            "success": success,
+                            "response": response,
+                            "intercept_message_level": intercept_message_level,
+                            "continue_process": continue_process,
+                        },
+                    )
+                    if not continue_flag:
+                        continue_process = False
+                    if modified_message:
+                        _apply_modified_message(message, modified_message)
+                        if "success" in modified_message.additional_data:
+                            success = bool(modified_message.additional_data["success"])
+                        if "response" in modified_message.additional_data:
+                            response = modified_message.additional_data["response"]
+                        if "intercept_message_level" in modified_message.additional_data:
+                            intercept_message_level = int(modified_message.additional_data["intercept_message_level"])
+                            message.intercept_message_level = intercept_message_level
+                        if "continue_process" in modified_message.additional_data:
+                            continue_process = bool(modified_message.additional_data["continue_process"])
+
+                    if not success and not continue_process and response:
+                        try:
+                            await command_instance.send_text(f"命令执行出错: {response}")
+                        except Exception:
+                            logger.exception(
+                                "命令错误提示发送失败",
+                                event_code="chat.command.error_response_send_failed",
+                                plugin_name=plugin_name,
+                                command_name=command_name,
+                            )
 
                     # 命令出错时，根据命令的拦截设置决定是否继续处理消息
-                    return True, str(e), False  # 出错时继续处理消息
+                    return True, response, continue_process  # 出错时继续处理消息
 
             # 没有找到命令，继续处理消息
             return False, None, True
 
-        except Exception as e:
-            logger.error(f"处理命令时出错: {e}")
+        except Exception:
+            logger.exception("命令处理流程异常", event_code="chat.command.process_failed")
             return False, None, True  # 出错时继续处理消息
 
     async def handle_notice_message(self, message: MessageRecv):
         if message.message_info.message_id == "notice":
             message.is_notify = True
-            logger.debug("notice消息")
+            logger.debug("通知消息开始处理", event_code="chat.notice.process_started")
             try:
                 seg = message.message_segment
                 mi = message.message_info
@@ -173,11 +333,6 @@ class ChatBot:
 
                 # 撤回事件打印；无法获取被撤回者则省略
                 if sub_type == "recall":
-                    op_name = (
-                        getattr(op, "user_cardname", None)
-                        or getattr(op, "user_nickname", None)
-                        or str(getattr(op, "user_id", None))
-                    )
                     recalled_name = None
                     try:
                         if isinstance(recalled, dict):
@@ -190,16 +345,35 @@ class ChatBot:
                         pass
 
                     if recalled_name and str(recalled_id) != str(getattr(op, "user_id", None)):
-                        logger.info(f"{op_name} 撤回了 {recalled_name} 的消息")
+                        logger.info(
+                            "消息撤回通知",
+                            event_code="chat.notice.recall",
+                            operator_id=getattr(op, "user_id", None),
+                            recalled_user_id=recalled_id,
+                            group_id=gid,
+                            message_id=msg_id,
+                        )
                     else:
-                        logger.info(f"{op_name} 撤回了消息")
+                        logger.info(
+                            "消息撤回通知",
+                            event_code="chat.notice.recall",
+                            operator_id=getattr(op, "user_id", None),
+                            group_id=gid,
+                            message_id=msg_id,
+                        )
                 else:
                     logger.debug(
-                        f"[notice] sub_type={sub_type} scene={scene} op={getattr(op, 'user_nickname', None)}({getattr(op, 'user_id', None)}) "
-                        f"gid={gid} msg_id={msg_id} recalled={recalled_id}"
+                        "通知消息详情",
+                        event_code="chat.notice.detail",
+                        sub_type=sub_type,
+                        scene=scene,
+                        operator_id=getattr(op, "user_id", None),
+                        group_id=gid,
+                        message_id=msg_id,
+                        recalled_user_id=recalled_id,
                     )
             except Exception:
-                logger.info("[notice] (简略) 收到一条通知事件")
+                logger.exception("通知消息解析失败", event_code="chat.notice.parse_failed")
 
             return True
 
@@ -218,9 +392,19 @@ class ChatBot:
         mmc_message_id = message_data.get("echo")
         actual_message_id = message_data.get("actual_id")
         if MessageStorage.update_message(mmc_message_id, actual_message_id):
-            logger.debug(f"更新消息ID成功: {mmc_message_id} -> {actual_message_id}")
+            logger.debug(
+                "消息 ID 映射已更新",
+                event_code="chat.message_id.updated",
+                mmc_message_id=mmc_message_id,
+                actual_message_id=actual_message_id,
+            )
         else:
-            logger.warning(f"更新消息ID失败: {mmc_message_id} -> {actual_message_id}")
+            logger.warning(
+                "消息 ID 映射更新失败",
+                event_code="chat.message_id.update_failed",
+                mmc_message_id=mmc_message_id,
+                actual_message_id=actual_message_id,
+            )
 
     async def message_process(self, message_data: Dict[str, Any]) -> None:
         """处理转化后的统一格式消息
@@ -259,14 +443,30 @@ class ChatBot:
             )
             if not continue_flag:
                 return
-            if modified_message and modified_message._modify_flags.modify_message_segments:
-                message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
+            _apply_modified_message(message, modified_message, merge_additional_data=True)
+
+            continue_flag, modified_message = await events_manager.handle_mai_events(
+                EventType.ON_MESSAGE_BEFORE_PROCESS, message
+            )
+            if not continue_flag:
+                return
+            _apply_modified_message(message, modified_message, merge_additional_data=True)
 
             if await self.handle_notice_message(message):
                 pass
 
             # 处理消息内容，生成纯文本
-            await message.process()
+            await message.process(
+                enable_heavy_media_analysis=False,
+                enable_voice_transcription=False,
+            )
+
+            continue_flag, modified_message = await events_manager.handle_mai_events(
+                EventType.ON_MESSAGE_AFTER_PROCESS, message
+            )
+            if not continue_flag:
+                return
+            _apply_modified_message(message, modified_message, merge_additional_data=True)
 
             # 平台层的 @ 检测由底层 is_mentioned_bot_in_message 统一处理；此处不做用户名硬编码匹配
 
@@ -302,14 +502,17 @@ class ChatBot:
             # 如果是命令且不需要继续处理，则直接返回
             if is_command and not continue_process:
                 await MessageStorage.store_message(message, chat)
-                logger.info(f"命令处理完成，跳过后续消息处理: {cmd_result}")
+                logger.info(
+                    "命令处理完成，后续消息处理已跳过",
+                    event_code="chat.command.completed_skip_message",
+                    result=cmd_result,
+                )
                 return
 
             continue_flag, modified_message = await events_manager.handle_mai_events(EventType.ON_MESSAGE, message)
             if not continue_flag:
                 return
-            if modified_message and modified_message._modify_flags.modify_plain_text:
-                message.processed_plain_text = modified_message.plain_text
+            _apply_modified_message(message, modified_message)
 
             # 确认从接口发来的message是否有自定义的prompt模板信息
             if message.message_info.template_info and not message.message_info.template_info.template_default:
@@ -319,7 +522,13 @@ class ChatBot:
                     if isinstance(template_items, dict):
                         for k in template_items.keys():
                             await Prompt.create_async(template_items[k], k)
-                            logger.debug(f"注册{template_items[k]},{k}")
+                            logger.debug(
+                                "消息自定义提示词模板已注册",
+                                event_code="chat.prompt_template.registered",
+                                template_key=k,
+                                template_hash=hash_id(template_items[k]),
+                                template_length=len(str(template_items[k])),
+                            )
             else:
                 template_group_name = None
 
@@ -332,9 +541,8 @@ class ChatBot:
             else:
                 await preprocess()
 
-        except Exception as e:
-            logger.error(f"预处理消息失败: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.exception("消息预处理失败", event_code="chat.message.preprocess_failed")
 
 
 # 创建全局ChatBot实例

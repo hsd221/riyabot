@@ -35,7 +35,7 @@ class LocalStoreManager:
             del self.store[key]
             self.save_local_store()
         else:
-            logger.warning(f"尝试删除不存在的键: {key}")
+            logger.warning("本地存储键不存在，删除已跳过", event_code="local_store.delete_missing_key", key=key)
 
     def __contains__(self, item: str) -> bool:
         """检查本地存储数据是否存在"""
@@ -45,29 +45,31 @@ class LocalStoreManager:
         """加载本地存储数据"""
         if os.path.exists(self.file_path):
             # 存在本地存储文件，加载数据
-            logger.info("正在阅读记事本......我在看，我真的在看！")
-            logger.debug(f"加载本地存储数据: {self.file_path}")
+            logger.info("本地存储开始加载", event_code="local_store.load_started", path=self.file_path)
+            logger.debug("本地存储文件读取", event_code="local_store.file_read", path=self.file_path)
             try:
                 with open(self.file_path, "r", encoding="utf-8") as f:
                     self.store = json.load(f)
-                    logger.info("全都记起来了！")
+                    logger.info("本地存储加载完成", event_code="local_store.loaded", path=self.file_path)
             except json.JSONDecodeError:
-                logger.warning("啊咧？记事本被弄脏了，正在重建记事本......")
+                logger.warning(
+                    "本地存储 JSON 无效，开始重建", event_code="local_store.invalid_json_rebuild", path=self.file_path
+                )
                 self.store = {}
                 with open(self.file_path, "w", encoding="utf-8") as f:
                     json.dump({}, f, ensure_ascii=False, indent=4)
-                logger.info("记事本重建成功！")
+                logger.info("本地存储重建完成", event_code="local_store.rebuilt", path=self.file_path)
         else:
             # 不存在本地存储文件，创建新的目录和文件
-            logger.warning("啊咧？记事本不存在，正在创建新的记事本......")
+            logger.warning("本地存储文件不存在，开始创建", event_code="local_store.missing_create", path=self.file_path)
             os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump({}, f, ensure_ascii=False, indent=4)
-            logger.info("记事本创建成功！")
+            logger.info("本地存储文件创建完成", event_code="local_store.created", path=self.file_path)
 
     def save_local_store(self):
         """保存本地存储数据"""
-        logger.debug(f"保存本地存储数据: {self.file_path}")
+        logger.debug("本地存储开始保存", event_code="local_store.save_started", path=self.file_path)
         with open(self.file_path, "w", encoding="utf-8") as f:
             json.dump(self.store, f, ensure_ascii=False, indent=4)
 

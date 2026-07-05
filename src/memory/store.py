@@ -57,6 +57,7 @@ def _normalize_datetime_fields(data: dict[str, Any], *, fill_missing: bool = Fal
         if fill_missing or field_name in data:
             data[field_name] = _coerce_datetime(data.get(field_name))
 
+
 # ---------------------------------------------------------------------------
 # Qdrant 客户端导入（可选依赖）
 # ---------------------------------------------------------------------------
@@ -272,11 +273,15 @@ class QdrantManager:
                 self._graph_payload_schema(),
             )
             logger.info(
-                f"Qdrant [{mode}] 已就绪: {source}, "
-                f"集合: {self.config.collection_name_atoms}, {self.config.collection_name_graph}"
+                "Qdrant 已就绪",
+                event_code="memory.qdrant.ready",
+                mode=mode,
+                source=source,
+                atom_collection=self.config.collection_name_atoms,
+                graph_collection=self.config.collection_name_graph,
             )
-        except Exception as e:
-            logger.error(f"Qdrant 初始化失败: {e}")
+        except Exception:
+            logger.exception("Qdrant 初始化失败", event_code="memory.qdrant.init_failed")
             self._client = None
 
     async def close(self) -> None:
@@ -340,9 +345,15 @@ class QdrantManager:
                         field_name=field_schema["name"],
                         field_type=field_schema["type"],
                     )
-                logger.info(f"Qdrant 集合 '{collection_name}' 已创建")
-            except Exception as e:
-                logger.error(f"创建 Qdrant 集合 '{collection_name}' 失败: {e}")
+                logger.info(
+                    "Qdrant 集合已创建", event_code="memory.qdrant.collection_created", collection=collection_name
+                )
+            except Exception:
+                logger.exception(
+                    "Qdrant 集合创建失败",
+                    event_code="memory.qdrant.collection_create_failed",
+                    collection=collection_name,
+                )
 
     # -- 向量写入 -----------------------------------------------------------
 
@@ -369,8 +380,13 @@ class QdrantManager:
                 ],
             )
             return True
-        except Exception as e:
-            logger.error(f"Qdrant upsert 原子向量失败 ({point_id}): {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 原子向量写入失败",
+                event_code="memory.qdrant.atom_vector_upsert_failed",
+                point_id=point_id,
+                vector_dimension=len(vector),
+            )
             return False
 
     async def upsert_graph_vector(
@@ -396,8 +412,13 @@ class QdrantManager:
                 ],
             )
             return True
-        except Exception as e:
-            logger.error(f"Qdrant upsert 图向量失败 ({point_id}): {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 图向量写入失败",
+                event_code="memory.qdrant.graph_vector_upsert_failed",
+                point_id=point_id,
+                vector_dimension=len(vector),
+            )
             return False
 
     async def batch_upsert_atom_vectors(
@@ -427,8 +448,12 @@ class QdrantManager:
                 points=point_structs,
             )
             return len(point_structs)
-        except Exception as e:
-            logger.error(f"Qdrant 批量写入原子向量失败: {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 原子向量批量写入失败",
+                event_code="memory.qdrant.atom_vectors_batch_upsert_failed",
+                count=len(points),
+            )
             return 0
 
     # -- 向量检索 -----------------------------------------------------------
@@ -468,8 +493,13 @@ class QdrantManager:
                 }
                 for hit in results
             ]
-        except Exception as e:
-            logger.error(f"Qdrant 向量检索失败: {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 原子向量检索失败",
+                event_code="memory.qdrant.atom_vector_search_failed",
+                limit=limit,
+                has_filters=bool(filters),
+            )
             return []
 
     async def search_similar_graph_entries(
@@ -495,8 +525,12 @@ class QdrantManager:
                 }
                 for hit in results
             ]
-        except Exception as e:
-            logger.error(f"Qdrant 图条目检索失败: {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 图条目检索失败",
+                event_code="memory.qdrant.graph_vector_search_failed",
+                limit=limit,
+            )
             return []
 
     # -- 向量删除 -----------------------------------------------------------
@@ -513,8 +547,12 @@ class QdrantManager:
                 points_selector=qdrant_models.PointIdsList(points=[self._normalize_point_id(point_id)]),
             )
             return True
-        except Exception as e:
-            logger.error(f"Qdrant 删除原子向量失败 ({point_id}): {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 原子向量删除失败",
+                event_code="memory.qdrant.atom_vector_delete_failed",
+                point_id=point_id,
+            )
             return False
 
     async def set_atom_payload(self, point_id: str, payload: dict[str, Any]) -> bool:
@@ -541,8 +579,13 @@ class QdrantManager:
                 points=[self._normalize_point_id(point_id)],
             )
             return True
-        except Exception as e:
-            logger.error(f"Qdrant 设置原子 payload 失败 ({point_id}): {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 原子 payload 设置失败",
+                event_code="memory.qdrant.atom_payload_set_failed",
+                point_id=point_id,
+                payload_keys=list(payload.keys()),
+            )
             return False
 
     async def delete_graph_vector(self, entry_id: str) -> bool:
@@ -557,8 +600,12 @@ class QdrantManager:
                 points_selector=qdrant_models.PointIdsList(points=[self._normalize_point_id(entry_id)]),
             )
             return True
-        except Exception as e:
-            logger.error(f"Qdrant 删除图向量失败 ({entry_id}): {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 图向量删除失败",
+                event_code="memory.qdrant.graph_vector_delete_failed",
+                entry_id=entry_id,
+            )
             return False
 
     # -- 集合管理工具 -------------------------------------------------------
@@ -574,8 +621,12 @@ class QdrantManager:
                 "vectors_count": info.points_count,
                 "status": info.status,
             }
-        except Exception as e:
-            logger.error(f"获取集合信息失败: {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 集合信息获取失败",
+                event_code="memory.qdrant.collection_info_failed",
+                collection=collection_name,
+            )
             return None
 
     async def delete_collection(self, collection_name: str) -> bool:
@@ -584,10 +635,14 @@ class QdrantManager:
             return False
         try:
             self._client.delete_collection(collection_name)
-            logger.info(f"Qdrant 集合 '{collection_name}' 已删除")
+            logger.info("Qdrant 集合已删除", event_code="memory.qdrant.collection_deleted", collection=collection_name)
             return True
-        except Exception as e:
-            logger.error(f"删除集合失败: {e}")
+        except Exception:
+            logger.exception(
+                "Qdrant 集合删除失败",
+                event_code="memory.qdrant.collection_delete_failed",
+                collection=collection_name,
+            )
             return False
 
 
@@ -638,7 +693,9 @@ class MemoryStore:
         initialize_database()
         await self.qdrant.initialize()
         self._initialized = True
-        logger.info("MemoryStore 初始化完成")
+        logger.info(
+            "MemoryStore 初始化完成", event_code="memory.store.initialized", sqlite_path=self.config.sqlite_path
+        )
 
     async def close(self) -> None:
         """关闭存储连接"""
@@ -647,7 +704,7 @@ class MemoryStore:
             memory_db.close()
         self._initialized = False
         type(self)._instance = None
-        logger.info("MemoryStore 已关闭")
+        logger.info("MemoryStore 已关闭", event_code="memory.store.closed")
 
     # -- 原子 CRUD ----------------------------------------------------------
 
@@ -671,12 +728,16 @@ class MemoryStore:
         try:
             with memory_db:
                 MemoryAtom.create(**atom_data)
-        except Exception as e:
-            logger.error(f"原子写入失败: {e}", atom_id=atom_id, exc_info=True)
+        except Exception:
+            logger.exception("记忆原子写入失败", event_code="memory.atom.insert_failed", atom_id=atom_id)
             raise
 
-        logger.debug("原子写入成功", atom_id=atom_id)
-        logger.debug(f"记忆原子已写入: {atom_id} ({atom_data.get('atom_type', 'unknown')})")
+        logger.debug(
+            "记忆原子写入完成",
+            event_code="memory.atom.inserted",
+            atom_id=atom_id,
+            atom_type=atom_data.get("atom_type", "unknown"),
+        )
         return atom_id
 
     async def update_atom(self, atom_id: str, updates: dict[str, Any]) -> bool:
@@ -700,10 +761,10 @@ class MemoryStore:
                 query = MemoryAtom.update(**updates).where(MemoryAtom.atom_id == atom_id)
                 rows = query.execute()
             if rows > 0:
-                logger.debug("原子更新成功", atom_id=atom_id)
+                logger.debug("记忆原子更新完成", event_code="memory.atom.updated", atom_id=atom_id, rows=rows)
             return rows > 0
-        except Exception as e:
-            logger.error(f"更新记忆原子失败 ({atom_id}): {e}")
+        except Exception:
+            logger.exception("记忆原子更新失败", event_code="memory.atom.update_failed", atom_id=atom_id)
             return False
 
     async def update_atoms_batch(
@@ -733,8 +794,10 @@ class MemoryStore:
                     query = MemoryAtom.update(**updates).where(MemoryAtom.atom_id == atom_id)
                     count += query.execute()
             return count
-        except Exception as e:
-            logger.error(f"批量更新记忆原子失败: {e}")
+        except Exception:
+            logger.exception(
+                "记忆原子批量更新失败", event_code="memory.atom.batch_update_failed", count=len(updates_list)
+            )
             return 0
 
     async def delete_atom(self, atom_id: str) -> bool:
@@ -761,10 +824,10 @@ class MemoryStore:
                 rows = query.execute()
             if rows > 0:
                 await self.qdrant.delete_atom_vector(atom_id)
-                logger.debug(f"记忆原子已删除: {atom_id}")
+                logger.debug("记忆原子已删除", event_code="memory.atom.deleted", atom_id=atom_id)
             return rows > 0
-        except Exception as e:
-            logger.error(f"删除记忆原子失败 ({atom_id}): {e}")
+        except Exception:
+            logger.exception("记忆原子删除失败", event_code="memory.atom.delete_failed", atom_id=atom_id)
             return False
 
     async def archive_atom(self, atom_id: str) -> bool:
@@ -772,7 +835,9 @@ class MemoryStore:
         try:
             atom = MemoryAtom.get_or_none(MemoryAtom.atom_id == atom_id)
             if atom is None:
-                logger.warning("归档记忆原子失败: 原子不存在", atom_id=atom_id)
+                logger.warning(
+                    "记忆原子归档失败，原子不存在", event_code="memory.atom.archive_missing", atom_id=atom_id
+                )
                 return False
 
             metadata: dict[str, Any] = {
@@ -808,26 +873,35 @@ class MemoryStore:
 
             if rows > 0:
                 await self.qdrant.delete_atom_vector(atom_id)
-                logger.debug("记忆原子已归档", atom_id=atom_id)
+                logger.debug("记忆原子已归档", event_code="memory.atom.archived", atom_id=atom_id)
             return rows > 0
-        except Exception as e:
-            logger.error(f"归档记忆原子失败 ({atom_id}): {e}", exc_info=True)
+        except Exception:
+            logger.exception("记忆原子归档失败", event_code="memory.atom.archive_failed", atom_id=atom_id)
             return False
 
     async def migrate_atom(self, atom_id: str, target_type: str) -> bool:
         """迁移记忆原子的类型，并同步 Qdrant payload。"""
         if not target_type:
-            logger.warning("迁移记忆原子失败: target_type 为空", atom_id=atom_id)
+            logger.warning(
+                "记忆原子迁移失败，目标类型为空", event_code="memory.atom.migrate_empty_target", atom_id=atom_id
+            )
             return False
 
         try:
             rows = MemoryAtom.update(atom_type=target_type).where(MemoryAtom.atom_id == atom_id).execute()
             if rows > 0:
                 await self.qdrant.set_atom_payload(atom_id, {"atom_type": target_type})
-                logger.debug("记忆原子类型已迁移", atom_id=atom_id, target_type=target_type)
+                logger.debug(
+                    "记忆原子类型已迁移", event_code="memory.atom.migrated", atom_id=atom_id, target_type=target_type
+                )
             return rows > 0
-        except Exception as e:
-            logger.error(f"迁移记忆原子失败 ({atom_id} -> {target_type}): {e}", exc_info=True)
+        except Exception:
+            logger.exception(
+                "记忆原子迁移失败",
+                event_code="memory.atom.migrate_failed",
+                atom_id=atom_id,
+                target_type=target_type,
+            )
             return False
 
     async def get_atom(self, atom_id: str) -> Optional[dict[str, Any]]:
@@ -844,8 +918,8 @@ class MemoryStore:
             if atom is None:
                 return None
             return self._atom_to_dict(atom)
-        except Exception as e:
-            logger.error(f"获取记忆原子失败 ({atom_id}): {e}")
+        except Exception:
+            logger.exception("记忆原子获取失败", event_code="memory.atom.get_failed", atom_id=atom_id)
             return None
 
     async def get_atoms_batch(self, atom_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -865,8 +939,8 @@ class MemoryStore:
         try:
             atoms = MemoryAtom.select().where(MemoryAtom.atom_id.in_(atom_ids))
             return {atom.atom_id: self._atom_to_dict(atom) for atom in atoms}
-        except Exception as e:
-            logger.error(f"批量获取记忆原子失败: {e}")
+        except Exception:
+            logger.exception("记忆原子批量获取失败", event_code="memory.atom.batch_get_failed", count=len(atom_ids))
             return {}
 
     async def list_atoms(
@@ -901,8 +975,15 @@ class MemoryStore:
                     query = MemoryAtom.select()
                 query = query.order_by(MemoryAtom.created_at.desc()).limit(limit).offset(offset)
                 return [self._atom_to_dict(a) for a in query]
-        except Exception as e:
-            logger.error(f"列出记忆原子失败: {e}")
+        except Exception:
+            logger.exception(
+                "记忆原子列表获取失败",
+                event_code="memory.atom.list_failed",
+                atom_type=atom_type,
+                status=status,
+                limit=limit,
+                offset=offset,
+            )
             return []
 
     # -- 向量检索 -----------------------------------------------------------
@@ -924,9 +1005,21 @@ class MemoryStore:
             list[dict]: 检索结果，含 payload 和 score
         """
         results = await self.qdrant.search_similar_atoms(query_vector, filters, limit)
-        logger.debug("向量搜索完成", query_len=len(query_vector), results_count=len(results))
+        logger.debug(
+            "记忆向量搜索完成",
+            event_code="memory.vector_search.completed",
+            query_len=len(query_vector),
+            results_count=len(results),
+            limit=limit,
+            has_filters=bool(filters),
+        )
         if not results:
-            logger.debug("向量搜索结果为空", query_len=len(query_vector))
+            logger.debug(
+                "记忆向量搜索结果为空",
+                event_code="memory.vector_search.empty",
+                query_len=len(query_vector),
+                limit=limit,
+            )
         return results
 
     # -- Qdrant 重建 --------------------------------------------------------
@@ -938,7 +1031,7 @@ class MemoryStore:
             int: 重建的向量数量
         """
         if not QDRANT_AVAILABLE:
-            logger.warning("qdrant-client 未安装，无法重建索引")
+            logger.warning("qdrant-client 未安装，无法重建索引", event_code="memory.qdrant.rebuild_unavailable")
             return 0
 
         count = 0
@@ -952,10 +1045,10 @@ class MemoryStore:
                     # 注意：这里需要外部提供 vector，无法凭空重建
                     # 此方法仅为框架，实际重建需要调用 embedding 模型
                     count += 1
-            logger.info(f"Qdrant 索引重建完成，共 {count} 条（需补充向量数据）")
+            logger.info("Qdrant 索引重建完成", event_code="memory.qdrant.index_rebuilt", count=count)
             return count
-        except Exception as e:
-            logger.error(f"Qdrant 索引重建失败: {e}")
+        except Exception:
+            logger.exception("Qdrant 索引重建失败", event_code="memory.qdrant.index_rebuild_failed")
             return 0
 
     # -- 统计信息 -----------------------------------------------------------
@@ -982,7 +1075,7 @@ class MemoryStore:
                 "qdrant_atoms_collection": qdrant_info,
             }
         except Exception as e:
-            logger.error(f"获取统计信息失败: {e}")
+            logger.exception("记忆存储统计信息获取失败", event_code="memory.store.stats_failed")
             return {"error": str(e)}
 
     # -- 内部工具 -----------------------------------------------------------

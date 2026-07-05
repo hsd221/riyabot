@@ -6,7 +6,6 @@ import random
 from enum import Enum
 from rich.traceback import install
 from typing import Tuple, List, Dict, Optional, Callable, Any, Set
-import traceback
 
 from src.common.logger import get_logger
 from src.config.config import model_config
@@ -59,9 +58,33 @@ class LLMRequest:
         if time_cost > threshold:
             request_type_display = self.request_type or "未知任务"
             logger.warning(
-                f"LLM请求耗时过长: {request_type_display} 使用模型 {model_name} 耗时 {time_cost:.1f}s（阈值: {threshold}s），请考虑使用更快的模型\n"
-                f"  如果你认为该警告出现得过于频繁，请调整model_config.toml中对应任务的slow_threshold至符合你实际情况的合理值"
+                "LLM 请求耗时超过阈值",
+                event_code="llm.request.slow",
+                request_type=request_type_display,
+                model_name=model_name,
+                duration_seconds=round(time_cost, 3),
+                threshold_seconds=threshold,
+                remediation="可调整 model_config.toml 中对应任务的 slow_threshold 或使用更快模型",
             )
+
+    def _log_response_debug(self, response: APIResponse, model_info: ModelInfo, duration_seconds: float) -> None:
+        usage = response.usage
+        logger.debug(
+            "LLM 响应完成",
+            event_code="llm.response.completed",
+            request_type=self.request_type,
+            model_name=model_info.name,
+            provider_name=model_info.api_provider,
+            duration_seconds=round(duration_seconds, 3),
+            content_length=len(response.content or ""),
+            reasoning_length=len(response.reasoning_content or ""),
+            tool_call_count=len(response.tool_calls or []),
+            prompt_tokens=usage.prompt_tokens if usage else None,
+            completion_tokens=usage.completion_tokens if usage else None,
+            total_tokens=usage.total_tokens if usage else None,
+            llm_response_content=response.content,
+            llm_response_reasoning=response.reasoning_content,
+        )
 
     async def generate_response_for_image(
         self,
@@ -165,8 +188,7 @@ class LLMRequest:
             tool_options=tool_built,
         )
 
-        logger.debug(f"LLM请求总耗时: {time.time() - start_time}")
-        logger.debug(f"LLM生成内容: {response}")
+        self._log_response_debug(response, model_info, time.time() - start_time)
 
         content = response.content
         reasoning_content = response.reasoning_content or ""
@@ -217,8 +239,7 @@ class LLMRequest:
         )
 
         time_cost = time.time() - start_time
-        logger.debug(f"LLM请求总耗时: {time_cost}")
-        logger.debug(f"LLM生成内容: {response}")
+        self._log_response_debug(response, model_info, time_cost)
 
         content = response.content
         reasoning_content = response.reasoning_content or ""
@@ -290,7 +311,12 @@ class LLMRequest:
             )
         else:
             # 默认使用负载均衡策略
-            logger.warning(f"未知的选择策略 '{strategy}'，使用默认的负载均衡策略")
+            logger.warning(
+                "未知模型选择策略，使用默认负载均衡策略",
+                event_code="llm.model_selection.unknown_strategy",
+                strategy=strategy,
+                fallback_strategy="balance",
+            )
             selected_model_name = min(
                 available_models,
                 key=lambda k: available_models[k][0] + available_models[k][1] * 300 + available_models[k][2] * 1000,
@@ -300,7 +326,14 @@ class LLMRequest:
         api_provider = model_config.get_provider(model_info.api_provider)
         force_new_client = self.request_type == "embedding"
         client = client_registry.get_client_class_instance(api_provider, force_new=force_new_client)
-        logger.debug(f"选择请求模型: {model_info.name} (策略: {strategy})")
+        logger.debug(
+            "LLM 请求模型已选择",
+            event_code="llm.model.selected",
+            model_name=model_info.name,
+            provider_name=model_info.api_provider,
+            strategy=strategy,
+            request_type=self.request_type,
+        )
         total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
         self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty + 1)
         return model_info, api_provider, client
@@ -379,11 +412,22 @@ class LLMRequest:
                 original_error_info = self._get_original_error_info(e)
                 retry_remain -= 1
                 if retry_remain <= 0:
-                    logger.error(f"模型 '{model_info.name}' 在多次出现空回复后仍然失败。{original_error_info}")
+                    logger.error(
+                        "LLM 模型空回复重试耗尽",
+                        event_code="llm.model.empty_response_retries_exhausted",
+                        model_name=model_info.name,
+                        provider_name=api_provider.name,
+                        original_error_info=original_error_info,
+                    )
                     raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
 
                 logger.warning(
-                    f"模型 '{model_info.name}' 返回空回复(可重试){original_error_info}。剩余重试次数: {retry_remain}"
+                    "LLM 模型返回空回复，准备重试",
+                    event_code="llm.model.empty_response_retry",
+                    model_name=model_info.name,
+                    provider_name=api_provider.name,
+                    retry_remaining=retry_remain,
+                    original_error_info=original_error_info,
                 )
                 await asyncio.sleep(api_provider.retry_interval)
 
@@ -394,14 +438,24 @@ class LLMRequest:
 
                 retry_remain -= 1
                 if retry_remain <= 0:
-                    logger.error(f"模型 '{model_info.name}' 在网络错误重试用尽后仍然失败。{original_error_info}")
+                    logger.error(
+                        "LLM 模型网络错误重试耗尽",
+                        event_code="llm.model.network_retries_exhausted",
+                        model_name=model_info.name,
+                        provider_name=api_provider.name,
+                        original_error_info=original_error_info,
+                    )
                     raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
 
                 logger.warning(
-                    f"模型 '{model_info.name}' 遇到网络错误(可重试): {str(e)}{original_error_info}\n"
-                    f"  常见原因: 如请求的API正常但APITimeoutError类型错误过多，请尝试调整模型配置中对应API Provider的timeout值\n"
-                    f"  其它可能原因: 网络波动、DNS 故障、连接超时、防火墙限制或代理问题\n"
-                    f"  剩余重试次数: {retry_remain}"
+                    "LLM 模型网络错误，准备重试",
+                    event_code="llm.model.network_retry",
+                    model_name=model_info.name,
+                    provider_name=api_provider.name,
+                    retry_remaining=retry_remain,
+                    error=str(e),
+                    original_error_info=original_error_info,
+                    remediation="如请求 API 正常但超时频繁，可调整对应 API Provider 的 timeout",
                 )
                 await asyncio.sleep(api_provider.retry_interval)
 
@@ -413,33 +467,64 @@ class LLMRequest:
                     retry_remain -= 1
                     if retry_remain <= 0:
                         logger.error(
-                            f"模型 '{model_info.name}' 在遇到 {e.status_code} 错误并用尽重试次数后仍然失败。{original_error_info}"
+                            "LLM 模型 HTTP 错误重试耗尽",
+                            event_code="llm.model.http_retries_exhausted",
+                            model_name=model_info.name,
+                            provider_name=api_provider.name,
+                            status_code=e.status_code,
+                            original_error_info=original_error_info,
                         )
                         raise ModelAttemptFailed(f"模型 '{model_info.name}' 重试耗尽", original_exception=e) from e
 
                     logger.warning(
-                        f"模型 '{model_info.name}' 遇到可重试的HTTP错误: {str(e)}{original_error_info}。剩余重试次数: {retry_remain}"
+                        "LLM 模型 HTTP 错误，准备重试",
+                        event_code="llm.model.http_retry",
+                        model_name=model_info.name,
+                        provider_name=api_provider.name,
+                        status_code=e.status_code,
+                        retry_remaining=retry_remain,
+                        error=str(e),
+                        original_error_info=original_error_info,
                     )
                     await asyncio.sleep(api_provider.retry_interval)
                     continue
 
                 # 特殊处理413，尝试压缩
                 if e.status_code == 413 and message_list and not compressed_messages:
-                    logger.warning(f"模型 '{model_info.name}' 返回413请求体过大，尝试压缩后重试...")
+                    logger.warning(
+                        "LLM 请求体过大，尝试压缩消息后重试",
+                        event_code="llm.model.request_too_large_compressing",
+                        model_name=model_info.name,
+                        provider_name=api_provider.name,
+                        status_code=e.status_code,
+                        message_count=len(message_list),
+                    )
                     # 压缩消息本身不消耗重试次数
                     compressed_messages = compress_messages(message_list)
                     continue
 
                 # 不可重试的HTTP错误
-                logger.warning(f"模型 '{model_info.name}' 遇到不可重试的HTTP错误: {str(e)}{original_error_info}")
+                logger.warning(
+                    "LLM 模型 HTTP 错误不可重试",
+                    event_code="llm.model.http_non_retryable",
+                    model_name=model_info.name,
+                    provider_name=api_provider.name,
+                    status_code=e.status_code,
+                    error=str(e),
+                    original_error_info=original_error_info,
+                )
                 raise ModelAttemptFailed(f"模型 '{model_info.name}' 遇到硬错误", original_exception=e) from e
 
             except Exception as e:
-                logger.error(traceback.format_exc())
-
                 original_error_info = self._get_original_error_info(e)
 
-                logger.warning(f"模型 '{model_info.name}' 遇到未知的不可重试错误: {str(e)}{original_error_info}")
+                logger.exception(
+                    "LLM 模型请求出现不可重试异常",
+                    event_code="llm.model.non_retryable_exception",
+                    model_name=model_info.name,
+                    provider_name=api_provider.name,
+                    original_error_info=original_error_info,
+                )
                 raise ModelAttemptFailed(f"模型 '{model_info.name}' 遇到硬错误", original_exception=e) from e
 
         raise ModelAttemptFailed(f"模型 '{model_info.name}' 未被尝试，因为重试次数已配置为0或更少。")
@@ -495,16 +580,33 @@ class LLMRequest:
 
             except ModelAttemptFailed as e:
                 last_exception = e.original_exception or e
-                logger.warning(f"模型 '{model_info.name}' 尝试失败，切换到下一个模型。原因: {e}")
+                logger.warning(
+                    "LLM 模型尝试失败，切换到下一个模型",
+                    event_code="llm.model.attempt_failed",
+                    model_name=model_info.name,
+                    request_type=request_type.value,
+                    error=str(e),
+                )
                 total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
                 self.model_usage[model_info.name] = (total_tokens, penalty + 1, usage_penalty - 1)
                 failed_models_this_request.add(model_info.name)
 
                 if isinstance(last_exception, RespNotOkException) and last_exception.status_code == 400:
-                    logger.warning("收到客户端错误 (400)，跳过当前模型并继续尝试其他模型。")
+                    logger.warning(
+                        "LLM 收到客户端错误，跳过当前模型",
+                        event_code="llm.model.client_error_skipped",
+                        model_name=model_info.name,
+                        status_code=400,
+                    )
                     continue
 
-        logger.error(f"所有 {max_attempts} 个模型均尝试失败。")
+        logger.error(
+            "LLM 请求所有模型均尝试失败",
+            event_code="llm.request.all_models_failed",
+            request_type=request_type.value,
+            max_attempts=max_attempts,
+            failed_models=list(failed_models_this_request),
+        )
         if last_exception:
             raise last_exception
         raise RuntimeError("请求失败，所有可用模型均已尝试失败。")
@@ -538,10 +640,12 @@ class LLMRequest:
                     )
                 except AssertionError as ae:
                     tool_legal = False
-                    logger.error(f"{param[0]} 参数定义错误: {str(ae)}")
-                except Exception as e:
+                    logger.error(
+                        "工具参数定义错误", event_code="llm.tool_param.invalid", param_name=param[0], error=str(ae)
+                    )
+                except Exception:
                     tool_legal = False
-                    logger.error(f"构建工具参数失败: {str(e)}")
+                    logger.exception("工具参数构建失败", event_code="llm.tool_param.build_failed")
             if tool_legal:
                 tool_options.append(tool_options_builder.build())
         return tool_options or None

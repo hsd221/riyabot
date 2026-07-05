@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from uvicorn import Config, Server as UvicornServer
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id, redact_secret
 
 logger = get_logger("webui_server")
 
@@ -61,7 +61,7 @@ class WebUIServer:
             ],  # 明确指定允许的头
             expose_headers=["Content-Length", "Content-Type"],  # 允许前端读取的响应头
         )
-        logger.debug("✅ CORS 中间件已配置")
+        logger.debug("CORS 中间件已配置", event_code="webui.cors.configured")
 
     def _show_access_token(self):
         """显示 WebUI Access Token"""
@@ -70,10 +70,14 @@ class WebUIServer:
 
             token_manager = get_token_manager()
             current_token = token_manager.get_token()
-            logger.info(f"🔑 WebUI Access Token: {current_token}")
-            logger.info("💡 请使用此 Token 登录 WebUI")
-        except Exception as e:
-            logger.error(f"❌ 获取 Access Token 失败: {e}")
+            logger.info(
+                "WebUI Access Token 已加载",
+                event_code="webui.access_token.loaded",
+                token_preview=redact_secret(current_token),
+                token_hash=hash_id(current_token),
+            )
+        except Exception:
+            logger.exception("WebUI Access Token 获取失败", event_code="webui.access_token.load_failed")
 
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -88,13 +92,21 @@ class WebUIServer:
         static_path = base_dir / "webui" / "dist"
 
         if not static_path.exists():
-            logger.warning(f"❌ WebUI 静态文件目录不存在: {static_path}")
-            logger.warning("💡 请先构建前端: cd webui && npm run build")
+            logger.warning(
+                "WebUI 静态文件目录不存在",
+                event_code="webui.static.missing_dist",
+                path=str(static_path),
+                remediation="cd webui && bun run build",
+            )
             return
 
         if not (static_path / "index.html").exists():
-            logger.warning(f"❌ 未找到 index.html: {static_path / 'index.html'}")
-            logger.warning("💡 请确认前端已正确构建")
+            logger.warning(
+                "WebUI 静态入口文件不存在",
+                event_code="webui.static.missing_index",
+                path=str(static_path / "index.html"),
+                remediation="cd webui && bun run build",
+            )
             return
 
         # 处理 SPA 路由 - 注意：这个路由优先级最低
@@ -123,7 +135,7 @@ class WebUIServer:
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
             return response
 
-        logger.info(f"✅ WebUI 静态文件服务已配置: {static_path}")
+        logger.info("WebUI 静态文件服务已配置", event_code="webui.static.configured", path=str(static_path))
 
     def _setup_anti_crawler(self):
         """配置防爬虫中间件"""
@@ -140,9 +152,14 @@ class WebUIServer:
 
             mode_descriptions = {"false": "已禁用", "strict": "严格模式", "loose": "宽松模式", "basic": "基础模式"}
             mode_desc = mode_descriptions.get(anti_crawler_mode, "基础模式")
-            logger.info(f"🛡️ 防爬虫中间件已配置: {mode_desc}")
-        except Exception as e:
-            logger.error(f"❌ 配置防爬虫中间件失败: {e}", exc_info=True)
+            logger.info(
+                "防爬虫中间件已配置",
+                event_code="webui.anti_crawler.configured",
+                mode=anti_crawler_mode,
+                mode_description=mode_desc,
+            )
+        except Exception:
+            logger.exception("防爬虫中间件配置失败", event_code="webui.anti_crawler.configure_failed")
 
     def _setup_robots_txt(self):
         """设置robots.txt路由"""
@@ -154,9 +171,9 @@ class WebUIServer:
                 """返回robots.txt，禁止所有爬虫"""
                 return create_robots_txt_response()
 
-            logger.debug("✅ robots.txt 路由已注册")
-        except Exception as e:
-            logger.error(f"❌ 注册robots.txt路由失败: {e}", exc_info=True)
+            logger.debug("robots.txt 路由已注册", event_code="webui.robots.registered")
+        except Exception:
+            logger.exception("robots.txt 路由注册失败", event_code="webui.robots.register_failed")
 
     def _register_api_routes(self):
         """注册所有 WebUI API 路由"""
@@ -183,20 +200,21 @@ class WebUIServer:
             self.app.include_router(planner_router)
             self.app.include_router(replier_router)
 
-            logger.info("✅ WebUI API 路由已注册")
-        except Exception as e:
-            logger.error(f"❌ 注册 WebUI API 路由失败: {e}", exc_info=True)
+            logger.info("WebUI API 路由已注册", event_code="webui.routes.registered")
+        except Exception:
+            logger.exception("WebUI API 路由注册失败", event_code="webui.routes.register_failed")
 
     async def start(self):
         """启动服务器"""
         # 预先检查端口是否可用
         if not self._check_port_available():
-            error_msg = f"❌ WebUI 服务器启动失败: 端口 {self.port} 已被占用"
-            logger.error(error_msg)
-            logger.error(f"💡 请检查是否有其他程序正在使用端口 {self.port}")
-            logger.error("💡 可以在 .env 文件中修改 WEBUI_PORT 来更改 WebUI 端口")
-            logger.error(f"💡 Windows 用户可以运行: netstat -ano | findstr :{self.port}")
-            logger.error(f"💡 Linux/Mac 用户可以运行: lsof -i :{self.port}")
+            logger.error(
+                "WebUI 服务器端口不可用",
+                event_code="webui.server.port_unavailable",
+                host=self.host,
+                port=self.port,
+                remediation="检查端口占用或通过 WEBUI_PORT 修改端口",
+            )
             raise OSError(f"端口 {self.port} 已被占用，无法启动 WebUI 服务器")
 
         config = Config(
@@ -208,36 +226,51 @@ class WebUIServer:
         )
         self._server = UvicornServer(config=config)
 
-        logger.info("🌐 WebUI 服务器启动中...")
+        logger.info("WebUI 服务器启动中", event_code="webui.server.starting", host=self.host, port=self.port)
 
         # 根据地址类型显示正确的访问地址
         if ":" in self.host:
             # IPv6 地址需要用方括号包裹
-            logger.info(f"🌐 访问地址: http://[{self.host}]:{self.port}")
+            logger.info("WebUI 访问地址", event_code="webui.server.address", url=f"http://[{self.host}]:{self.port}")
             if self.host == "::":
-                logger.info(f"💡 IPv6 本机访问: http://[::1]:{self.port}")
-                logger.info(f"💡 IPv4 本机访问: http://127.0.0.1:{self.port}")
+                logger.info(
+                    "WebUI 本机访问地址", event_code="webui.server.local_address", url=f"http://[::1]:{self.port}"
+                )
+                logger.info(
+                    "WebUI 本机访问地址",
+                    event_code="webui.server.local_address",
+                    url=f"http://127.0.0.1:{self.port}",
+                )
             elif self.host == "::1":
-                logger.info("💡 仅支持 IPv6 本地访问")
+                logger.info("WebUI 仅监听 IPv6 本机地址", event_code="webui.server.ipv6_local_only")
         else:
             # IPv4 地址
-            logger.info(f"🌐 访问地址: http://{self.host}:{self.port}")
+            logger.info("WebUI 访问地址", event_code="webui.server.address", url=f"http://{self.host}:{self.port}")
             if self.host == "0.0.0.0":
-                logger.info(f"💡 本机访问: http://localhost:{self.port} 或 http://127.0.0.1:{self.port}")
+                logger.info(
+                    "WebUI 本机访问地址",
+                    event_code="webui.server.local_address",
+                    url=f"http://localhost:{self.port}",
+                    alternate_url=f"http://127.0.0.1:{self.port}",
+                )
 
         try:
             await self._server.serve()
         except OSError as e:
             # 处理端口绑定相关的错误
             if "address already in use" in str(e).lower() or e.errno in (98, 10048):  # 98: Linux, 10048: Windows
-                logger.error(f"❌ WebUI 服务器启动失败: 端口 {self.port} 已被占用")
-                logger.error(f"💡 请检查是否有其他程序正在使用端口 {self.port}")
-                logger.error("💡 可以在 .env 文件中修改 WEBUI_PORT 来更改 WebUI 端口")
+                logger.error(
+                    "WebUI 服务器端口绑定失败",
+                    event_code="webui.server.bind_failed",
+                    host=self.host,
+                    port=self.port,
+                    remediation="检查端口占用或通过 WEBUI_PORT 修改端口",
+                )
             else:
-                logger.error(f"❌ WebUI 服务器启动失败 (网络错误): {e}")
+                logger.error("WebUI 服务器网络错误", event_code="webui.server.network_error", error=str(e))
             raise
-        except Exception as e:
-            logger.error(f"❌ WebUI 服务器运行错误: {e}", exc_info=True)
+        except Exception:
+            logger.exception("WebUI 服务器运行失败", event_code="webui.server.run_failed")
             raise
 
     def _check_port_available(self) -> bool:
@@ -266,15 +299,15 @@ class WebUIServer:
     async def shutdown(self):
         """关闭服务器"""
         if self._server:
-            logger.info("正在关闭 WebUI 服务器...")
+            logger.info("WebUI 服务器开始关闭", event_code="webui.server.shutdown_started")
             self._server.should_exit = True
             try:
                 await asyncio.wait_for(self._server.shutdown(), timeout=3.0)
-                logger.info("✅ WebUI 服务器已关闭")
+                logger.info("WebUI 服务器已关闭", event_code="webui.server.shutdown_completed")
             except asyncio.TimeoutError:
-                logger.warning("⚠️ WebUI 服务器关闭超时")
-            except Exception as e:
-                logger.error(f"❌ WebUI 服务器关闭失败: {e}")
+                logger.warning("WebUI 服务器关闭超时", event_code="webui.server.shutdown_timeout", timeout_seconds=3.0)
+            except Exception:
+                logger.exception("WebUI 服务器关闭失败", event_code="webui.server.shutdown_failed")
             finally:
                 self._server = None
 

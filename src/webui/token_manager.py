@@ -8,7 +8,7 @@ import secrets
 from pathlib import Path
 from typing import Optional
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id, redact_secret
 
 logger = get_logger("webui")
 
@@ -37,19 +37,30 @@ class TokenManager:
     def _ensure_config(self):
         """确保配置文件存在且包含有效的 token"""
         if not self.config_path.exists():
-            logger.info(f"WebUI 配置文件不存在，正在创建: {self.config_path}")
+            logger.info(
+                "WebUI 配置文件不存在，开始创建", event_code="webui.config.create_started", path=str(self.config_path)
+            )
             self._create_new_token()
         else:
             # 验证配置文件格式
             try:
                 config = self._load_config()
                 if not config.get("access_token"):
-                    logger.warning("WebUI 配置文件中缺少 access_token，正在重新生成")
+                    logger.warning(
+                        "WebUI 配置缺少访问令牌，开始重新生成",
+                        event_code="webui.config.access_token_missing",
+                        path=str(self.config_path),
+                    )
                     self._create_new_token()
                 else:
-                    logger.info(f"WebUI Token 已加载: {config['access_token'][:8]}...")
-            except Exception as e:
-                logger.error(f"读取 WebUI 配置文件失败: {e}，正在重新创建")
+                    logger.info(
+                        "WebUI 访问令牌已加载",
+                        event_code="webui.token.loaded",
+                        token_preview=redact_secret(config["access_token"]),
+                        token_hash=hash_id(config["access_token"]),
+                    )
+            except Exception:
+                logger.exception("WebUI 配置文件读取失败，开始重新创建", event_code="webui.config.load_failed")
                 self._create_new_token()
 
     def _load_config(self) -> dict:
@@ -57,8 +68,8 @@ class TokenManager:
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception as e:
-            logger.error(f"加载 WebUI 配置失败: {e}")
+        except Exception:
+            logger.exception("WebUI 配置加载失败", event_code="webui.config.load_failed", path=str(self.config_path))
             return {}
 
     def _save_config(self, config: dict):
@@ -66,9 +77,9 @@ class TokenManager:
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
-            logger.info(f"WebUI 配置已保存到: {self.config_path}")
-        except Exception as e:
-            logger.error(f"保存 WebUI 配置失败: {e}")
+            logger.info("WebUI 配置已保存", event_code="webui.config.saved", path=str(self.config_path))
+        except Exception:
+            logger.exception("WebUI 配置保存失败", event_code="webui.config.save_failed", path=str(self.config_path))
             raise
 
     def _create_new_token(self) -> str:
@@ -84,7 +95,12 @@ class TokenManager:
         }
 
         self._save_config(config)
-        logger.info(f"新的 WebUI Token 已生成: {token[:8]}...")
+        logger.info(
+            "WebUI 访问令牌已生成",
+            event_code="webui.token.generated",
+            token_preview=redact_secret(token),
+            token_hash=hash_id(token),
+        )
 
         return token
 
@@ -114,16 +130,16 @@ class TokenManager:
 
         current_token = self.get_token()
         if not current_token:
-            logger.error("系统中没有有效的 token")
+            logger.error("系统中没有有效的访问令牌", event_code="webui.token.unavailable")
             return False
 
         # 使用 secrets.compare_digest 防止时序攻击
         is_valid = secrets.compare_digest(token, current_token)
 
         if is_valid:
-            logger.debug("Token 验证成功")
+            logger.debug("WebUI 访问令牌验证成功", event_code="webui.token.verify_success", token_hash=hash_id(token))
         else:
-            logger.warning("Token 验证失败")
+            logger.warning("WebUI 访问令牌验证失败", event_code="webui.token.verify_failed", token_hash=hash_id(token))
 
         return is_valid
 
@@ -140,22 +156,27 @@ class TokenManager:
         # 验证新 token 格式
         is_valid, error_msg = self._validate_custom_token(new_token)
         if not is_valid:
-            logger.error(f"Token 格式无效: {error_msg}")
+            logger.error("WebUI 访问令牌格式无效", event_code="webui.token.invalid_format", reason=error_msg)
             return False, error_msg
 
         try:
             config = self._load_config()
-            old_token = config.get("access_token", "")[:8]
+            old_token = config.get("access_token", "")
 
             config["access_token"] = new_token
             config["updated_at"] = self._get_current_timestamp()
 
             self._save_config(config)
-            logger.info(f"Token 已更新: {old_token}... -> {new_token[:8]}...")
+            logger.info(
+                "WebUI 访问令牌已更新",
+                event_code="webui.token.updated",
+                old_token_hash=hash_id(old_token),
+                new_token_hash=hash_id(new_token),
+            )
 
             return True, "Token 更新成功"
         except Exception as e:
-            logger.error(f"更新 Token 失败: {e}")
+            logger.exception("WebUI 访问令牌更新失败", event_code="webui.token.update_failed")
             return False, f"更新失败: {str(e)}"
 
     def regenerate_token(self) -> str:
@@ -165,14 +186,14 @@ class TokenManager:
         Returns:
             str: 新生成的 token
         """
-        logger.info("正在重新生成 WebUI Token...")
+        logger.info("WebUI 访问令牌开始重新生成", event_code="webui.token.regenerate_started")
 
         # 生成新的 64 位十六进制字符串
         new_token = secrets.token_hex(32)
 
         # 加载现有配置，保留 first_setup_completed 状态
         config = self._load_config()
-        old_token = config.get("access_token", "")[:8] if config.get("access_token") else "无"
+        old_token = config.get("access_token", "")
         first_setup_completed = config.get("first_setup_completed", True)  # 默认为 True，表示已完成配置
 
         config["access_token"] = new_token
@@ -180,7 +201,12 @@ class TokenManager:
         config["first_setup_completed"] = first_setup_completed  # 保留原来的状态
 
         self._save_config(config)
-        logger.info(f"WebUI Token 已重新生成: {old_token}... -> {new_token[:8]}...")
+        logger.info(
+            "WebUI 访问令牌已重新生成",
+            event_code="webui.token.regenerated",
+            old_token_hash=hash_id(old_token),
+            new_token_hash=hash_id(new_token),
+        )
 
         return new_token
 
@@ -271,10 +297,10 @@ class TokenManager:
             config["first_setup_completed"] = True
             config["setup_completed_at"] = self._get_current_timestamp()
             self._save_config(config)
-            logger.info("首次配置已标记为完成")
+            logger.info("WebUI 首次配置已标记为完成", event_code="webui.setup.completed")
             return True
-        except Exception as e:
-            logger.error(f"标记首次配置完成失败: {e}")
+        except Exception:
+            logger.exception("WebUI 首次配置标记失败", event_code="webui.setup.complete_failed")
             return False
 
     def reset_setup_status(self) -> bool:
@@ -290,10 +316,10 @@ class TokenManager:
             if "setup_completed_at" in config:
                 del config["setup_completed_at"]
             self._save_config(config)
-            logger.info("首次配置状态已重置")
+            logger.info("WebUI 首次配置状态已重置", event_code="webui.setup.reset")
             return True
-        except Exception as e:
-            logger.error(f"重置首次配置状态失败: {e}")
+        except Exception:
+            logger.exception("WebUI 首次配置状态重置失败", event_code="webui.setup.reset_failed")
             return False
 
 

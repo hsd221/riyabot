@@ -23,8 +23,9 @@ from src.chat.utils.chat_message_builder import (
 from src.chat.utils.utils import get_chat_type_and_target_info
 from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.plugin_system.base.component_types import ActionInfo, ComponentType, ActionActivationType
+from src.plugin_system.base.component_types import ActionInfo, ComponentType, ActionActivationType, EventType
 from src.plugin_system.core.component_registry import component_registry
+from src.plugin_system.core.events_manager import events_manager
 
 if TYPE_CHECKING:
     from src.common.data_models.info_data_model import TargetPersonInfo
@@ -311,6 +312,21 @@ class BrainPlanner:
             message_id_list=message_id_list,
             prompt_key=prompt_key,
         )
+        continue_flag, modified_message = await events_manager.handle_mai_events(
+            EventType.ON_PLAN, None, prompt, None, self.chat_id
+        )
+        if not continue_flag:
+            return [
+                ActionPlannerInfo(
+                    action_type="complete_talk",
+                    reasoning="规划 hook 取消本轮规划",
+                    action_data={"loop_start_time": loop_start_time},
+                    action_message=None,
+                    available_actions=available_actions,
+                )
+            ]
+        if modified_message and modified_message._modify_flags.modify_llm_prompt:
+            prompt = modified_message.llm_prompt
         prompt_build_ms = (time.perf_counter() - prompt_build_start) * 1000
 
         # 调用LLM获取决策

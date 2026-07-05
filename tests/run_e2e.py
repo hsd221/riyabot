@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import signal
@@ -57,6 +58,10 @@ BOT_CONFIG_PATH = CONFIG_DIR / "bot_config.toml"
 MODEL_CONFIG_PATH = CONFIG_DIR / "model_config.toml"
 DATA_DIR = _PROJECT_ROOT / "data"
 ARTIFACTS_DIR = _PROJECT_ROOT / "tests" / "artifacts"
+EULA_PATH = _PROJECT_ROOT / "EULA.md"
+PRIVACY_PATH = _PROJECT_ROOT / "PRIVACY.md"
+EULA_CONFIRM_PATH = _PROJECT_ROOT / "eula.confirmed"
+PRIVACY_CONFIRM_PATH = _PROJECT_ROOT / "privacy.confirmed"
 
 SIMULATOR_PATH = _PROJECT_ROOT / "tests" / "simulator.py"
 MONITOR_PATH = _PROJECT_ROOT / "tests" / "monitor.py"
@@ -321,6 +326,11 @@ class E2EOrchestrator:
         else:
             results.append(("数据目录", False, "缺失（非致命，bot 会创建）"))
 
+        agreements_ok, agreements_detail = self._validate_agreements()
+        results.append(("EULA/隐私确认", agreements_ok, agreements_detail))
+        if not agreements_ok:
+            failed = True
+
         # 5. 辅助脚本（仅警告）
         for path, label in [
             (SIMULATOR_PATH, "simulator.py"),
@@ -344,6 +354,30 @@ class E2EOrchestrator:
         print("\n  ✅ 所有验证通过。")
         return True
 
+    @staticmethod
+    def _file_md5(path: Path) -> str:
+        return hashlib.md5(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _is_agreement_confirmed(cls, path: Path, confirm_path: Path, env_var: str) -> tuple[bool, str]:
+        if not path.exists():
+            return False, f"协议文件不存在: {path.name}"
+
+        current_hash = cls._file_md5(path)
+        if os.getenv(env_var) == current_hash:
+            return True, f"{env_var} 已匹配当前版本"
+
+        if confirm_path.exists() and confirm_path.read_text(encoding="utf-8").strip() == current_hash:
+            return True, f"{confirm_path.name} 已匹配当前版本"
+
+        return False, f'需确认 {path.name}: 设置 {env_var}={current_hash} 或运行 bot.py 后输入 "confirmed"'
+
+    @classmethod
+    def _validate_agreements(cls) -> tuple[bool, str]:
+        eula_ok, eula_detail = cls._is_agreement_confirmed(EULA_PATH, EULA_CONFIRM_PATH, "EULA_AGREE")
+        privacy_ok, privacy_detail = cls._is_agreement_confirmed(PRIVACY_PATH, PRIVACY_CONFIRM_PATH, "PRIVACY_AGREE")
+        return eula_ok and privacy_ok, f"{eula_detail}; {privacy_detail}"
+
     # ------------------------------------------------------------------
     # 阶段 1: Bot 启动
     # ------------------------------------------------------------------
@@ -366,6 +400,7 @@ class E2EOrchestrator:
 
             env = os.environ.copy()
             env["MAIBOT_WORKER_PROCESS"] = "1"
+            env["MAIBOT_ENABLE_INJECT_ENDPOINT"] = "1"
 
             self._bot_process = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -452,7 +487,7 @@ class E2EOrchestrator:
 
                     req = urllib.request.Request(
                         url + "/message/inject",
-                        data=b"{}",
+                        data=b'{"_probe": true}',
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )
@@ -655,10 +690,19 @@ class E2EOrchestrator:
         # 确保 bot 存活
         await self._ensure_bot_alive()
 
+        fake_data_root = ARTIFACTS_DIR / f"fake_data_{int(time.time())}"
+        fake_db_path = fake_data_root / "memory.db"
+        fake_qdrant_path = fake_data_root / "qdrant"
+        fake_qdrant_path.mkdir(parents=True, exist_ok=True)
+
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             str(FAKE_DATA_INJECTOR_PATH),
             "--trigger-encoding",
+            "--db-path",
+            str(fake_db_path),
+            "--qdrant-path",
+            str(fake_qdrant_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(_PROJECT_ROOT),
@@ -825,7 +869,7 @@ class E2EOrchestrator:
         loop = asyncio.get_event_loop()
         try:
             for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, self._signal_handler)
+                loop.add_signal_handler(sig, self._signal_handler, sig, None)
         except NotImplementedError:
             signal.signal(signal.SIGINT, self._signal_handler)
             signal.signal(signal.SIGTERM, self._signal_handler)

@@ -133,6 +133,8 @@ interface ChatMessage {
   type: 'user' | 'bot' | 'system' | 'error' | 'thinking'
   content: string
   timestamp: number
+  messageType?: 'text' | 'rich'
+  segments?: RichMessageSegment[] | null
   sender?: {
     name: string
     user_id?: string
@@ -140,10 +142,22 @@ interface ChatMessage {
   }
 }
 
+interface RichForwardNode {
+  content: RichMessageSegment[]
+}
+
+interface RichMessageSegment {
+  type: string
+  data?: string | Record<string, unknown> | RichForwardNode[]
+  original_type?: string
+}
+
 // WebSocket 消息类型
 interface WsMessage {
   type: string
   content?: string
+  message_type?: 'text' | 'rich'
+  segments?: RichMessageSegment[] | null
   message_id?: string
   timestamp?: number
   is_typing?: boolean
@@ -160,6 +174,8 @@ interface WsMessage {
   messages?: Array<{
     id?: string
     content: string
+    message_type?: 'text' | 'rich'
+    segments?: RichMessageSegment[] | null
     timestamp: number
     sender_name?: string
     sender_id?: string
@@ -375,6 +391,8 @@ export function ChatPage() {
               id: string
               type: string
               content: string
+              message_type?: 'text' | 'rich'
+              segments?: RichMessageSegment[] | null
               timestamp: number
               sender_name?: string
               user_id?: string
@@ -383,6 +401,8 @@ export function ChatPage() {
               id: msg.id,
               type: msg.type as 'user' | 'bot' | 'system' | 'error',
               content: msg.content,
+              messageType: msg.message_type,
+              segments: msg.segments,
               timestamp: msg.timestamp,
               sender: {
                 name: msg.sender_name || (msg.is_bot ? '璃夜' : 'WebUI用户'),
@@ -533,6 +553,8 @@ export function ChatPage() {
                     id: generateMessageId('bot'),
                     type: 'bot' as const,
                     content: data.content || '',
+                    messageType: data.message_type,
+                    segments: data.segments,
                     timestamp: data.timestamp || Date.now() / 1000,
                     sender: data.sender,
                   }]
@@ -580,6 +602,8 @@ export function ChatPage() {
                 const formattedMessages: ChatMessage[] = historyMessages.map((msg: {
                   id?: string
                   content: string
+                  message_type?: 'text' | 'rich'
+                  segments?: RichMessageSegment[] | null
                   timestamp: number
                   sender_name?: string
                   sender_id?: string
@@ -592,8 +616,10 @@ export function ChatPage() {
                   processedSet.add(contentHash)
                   return {
                     id: msgId,
-                    type: isBot ? 'bot' : 'user' as const,
+                    type: isBot ? 'bot' as const : 'user' as const,
                     content: msg.content,
+                    messageType: msg.message_type,
+                    segments: msg.segments,
                     timestamp: msg.timestamp,
                     sender: {
                       name: msg.sender_name || (isBot ? '璃夜' : '用户'),
@@ -811,6 +837,113 @@ export function ChatPage() {
       hour: '2-digit',
       minute: '2-digit',
     })
+  }
+
+  const segmentDataToText = (data: RichMessageSegment['data']) => {
+    if (data === undefined || data === null) return ''
+    if (typeof data === 'string') return data
+    try {
+      return JSON.stringify(data)
+    } catch {
+      return String(data)
+    }
+  }
+
+  const getRecordData = (data: RichMessageSegment['data']) => {
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return data as Record<string, unknown>
+    }
+    return null
+  }
+
+  const renderRichSegment = (segment: RichMessageSegment, index: number) => {
+    const dataText = segmentDataToText(segment.data)
+
+    switch (segment.type) {
+      case 'text':
+        return <span key={index} className="whitespace-pre-wrap break-words">{dataText}</span>
+      case 'image':
+        return dataText ? (
+          <img
+            key={index}
+            src={dataText}
+            alt="图片"
+            loading="lazy"
+            className="max-h-64 max-w-full rounded-md object-contain"
+          />
+        ) : null
+      case 'emoji':
+        return dataText ? (
+          <img
+            key={index}
+            src={dataText}
+            alt="表情包"
+            loading="lazy"
+            className="max-h-40 max-w-full rounded-md object-contain"
+          />
+        ) : null
+      case 'voice':
+        return dataText ? <audio key={index} src={dataText} controls className="max-w-full" /> : null
+      case 'video':
+        return dataText ? (
+          <video key={index} src={dataText} controls className="max-h-64 max-w-full rounded-md" />
+        ) : null
+      case 'at':
+        return <span key={index}>@{dataText}</span>
+      case 'reply': {
+        const record = getRecordData(segment.data)
+        const replyText = String(record?.text || record?.message_id || dataText)
+        return (
+          <div key={index} className="border-l-2 border-muted-foreground/30 pl-2 text-xs opacity-80">
+            {replyText}
+          </div>
+        )
+      }
+      case 'file': {
+        const record = getRecordData(segment.data)
+        const fileName = String(record?.name || record?.file || dataText || '文件')
+        const fileSize = record?.size || record?.file_size
+        const fileUrl = typeof record?.url === 'string' ? record.url : ''
+        const label = fileSize ? `${fileName} (${String(fileSize)})` : fileName
+        return fileUrl ? (
+          <a key={index} href={fileUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+            {label}
+          </a>
+        ) : (
+          <span key={index}>{label}</span>
+        )
+      }
+      case 'forward': {
+        const nodes = Array.isArray(segment.data) ? segment.data : []
+        return (
+          <div key={index} className="space-y-2 rounded-md border border-border/70 p-2">
+            {nodes.map((node, nodeIndex) => (
+              <div key={nodeIndex} className="border-l-2 border-muted-foreground/30 pl-2">
+                {node.content?.map((child, childIndex) => renderRichSegment(child, childIndex))}
+              </div>
+            ))}
+          </div>
+        )
+      }
+      default:
+        return (
+          <span key={index}>
+            [{segment.original_type || segment.type}
+            {dataText ? `: ${dataText}` : ''}]
+          </span>
+        )
+    }
+  }
+
+  const renderMessageContent = (message: ChatMessage) => {
+    if (!message.segments || message.segments.length === 0) {
+      return message.content
+    }
+    return (
+      <div className="flex max-w-full flex-col gap-2">
+        {message.segments.map((segment, index) => renderRichSegment(segment, index))}
+      </div>
+    )
   }
 
   // 重新连接当前标签页
@@ -1380,7 +1513,7 @@ export function ChatPage() {
                             : 'bg-primary text-primary-foreground rounded-tr-sm'
                         )}
                       >
-                        {message.content}
+                        {renderMessageContent(message)}
                       </div>
                     </div>
                   </>

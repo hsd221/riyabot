@@ -62,10 +62,15 @@ class EventType(Enum):
     ON_START = "on_start"  # 启动事件，用于调用按时任务
     ON_STOP = "on_stop"  # 停止事件，用于调用按时任务
     ON_MESSAGE_PRE_PROCESS = "on_message_pre_process"
+    ON_MESSAGE_BEFORE_PROCESS = "on_message_before_process"
+    ON_MESSAGE_AFTER_PROCESS = "on_message_after_process"
     ON_MESSAGE = "on_message"
+    ON_COMMAND_BEFORE_EXECUTE = "on_command_before_execute"
+    ON_COMMAND_AFTER_EXECUTE = "on_command_after_execute"
     ON_PLAN = "on_plan"
     POST_LLM = "post_llm"
     AFTER_LLM = "after_llm"
+    ON_SEND_AFTER_BUILD_MESSAGE = "on_send_after_build_message"
     POST_SEND_PRE_PROCESS = "post_send_pre_process"
     POST_SEND = "post_send"
     AFTER_SEND = "after_send"

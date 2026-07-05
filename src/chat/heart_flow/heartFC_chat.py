@@ -16,19 +16,14 @@ from src.chat.planner_actions.planner import ActionPlanner
 from src.chat.planner_actions.action_modifier import ActionModifier
 from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.heart_flow.hfc_utils import CycleDetail
+from src.chat.heart_flow.turn_scheduler import ReplyTurnScheduler
 from src.bw_learner.expression_learner import expression_learner_manager
-from src.chat.heart_flow.frequency_control import frequency_control_manager
 from src.bw_learner.reflect_tracker import reflect_tracker_manager
 from src.bw_learner.expression_reflector import expression_reflector_manager
 from src.bw_learner.message_recorder import extract_and_distribute_messages
 from src.common.person_stub import Person
-from src.plugin_system.base.component_types import EventType, ActionInfo
-from src.plugin_system.core import events_manager
+from src.plugin_system.base.component_types import ActionInfo
 from src.plugin_system.apis import generator_api, send_api, message_api, database_api
-from src.chat.utils.chat_message_builder import (
-    build_readable_messages_with_id,
-    get_raw_msg_before_timestamp_with_chat,
-)
 from src.chat.utils.utils import record_replyer_action_temp
 
 # 新记忆系统 — 原始消息归档 + 话题摘要
@@ -120,6 +115,7 @@ class HeartFChatting:
 
         # 跟踪连续 no_reply 次数，用于动态调整阈值
         self.consecutive_no_reply_count = 0
+        self.turn_scheduler = ReplyTurnScheduler()
 
         # 新记忆系统 — 原始消息归档器 + 话题摘要器
         self.message_archiver = _MessageArchiver() if _HAS_MEMORY_ARCHIVE else None
@@ -203,47 +199,22 @@ class HeartFChatting:
             filter_intercept_message_level=0,
         )
 
-        # 根据连续 no_reply 次数动态调整阈值
-        # 3次 no_reply 时，阈值调高到 1.5（50%概率为1，50%概率为2）
-        # 5次 no_reply 时，提高到 2（大于等于两条消息的阈值）
-        if self.consecutive_no_reply_count >= 5:
-            threshold = 2
-        elif self.consecutive_no_reply_count >= 3:
-            # 1.5 的含义：50%概率为1，50%概率为2
-            threshold = 2 if random.random() < 0.5 else 1
-        else:
-            threshold = 1
-
-        if len(recent_messages_list) >= threshold:
-            # for message in recent_messages_list:
-            # print(message.processed_plain_text)
-
+        decision = self.turn_scheduler.decide_group_turn(
+            stream_id=self.stream_id,
+            recent_messages=recent_messages_list,
+            consecutive_no_reply_count=self.consecutive_no_reply_count,
+        )
+        if decision.should_update_last_read_time:
             self.last_read_time = time.time()
 
-            # !此处使at或者提及必定回复
-            mentioned_message = None
-            for message in recent_messages_list:
-                if (message.is_mentioned or message.is_at) and global_config.chat.mentioned_bot_reply:
-                    mentioned_message = message
-
-            # logger.info(f"{self.log_prefix} 当前talk_value: {global_config.chat.get_talk_value(self.stream_id)}")
-
-            # *控制频率用
-            if mentioned_message:
-                await self._observe(recent_messages_list=recent_messages_list, force_reply_message=mentioned_message)
-            elif (
-                random.random()
-                < global_config.chat.get_talk_value(self.stream_id)
-                * frequency_control_manager.get_or_create_frequency_control(self.stream_id).get_talk_frequency_adjust()
-            ):
-                await self._observe(recent_messages_list=recent_messages_list)
-            else:
-                # 没有提到，继续保持沉默，等待5秒防止频繁触发
-                await asyncio.sleep(10)
-                return True
-        else:
-            await asyncio.sleep(0.2)
+        if not decision.should_observe:
+            await asyncio.sleep(decision.sleep_seconds)
             return True
+
+        await self._observe(
+            recent_messages_list=recent_messages_list,
+            force_reply_message=decision.force_reply_message,
+        )
         return True
 
     async def _send_and_store_reply(
@@ -356,47 +327,6 @@ class HeartFChatting:
                 available_actions = self.action_manager.get_using_actions()
             except Exception as e:
                 logger.error(f"{self.log_prefix} 动作修改失败: {e}")
-
-            # 执行planner
-            is_group_chat, chat_target_info, _ = self.action_planner.get_necessary_info()
-
-            message_list_before_now = get_raw_msg_before_timestamp_with_chat(
-                chat_id=self.stream_id,
-                timestamp=time.time(),
-                limit=int(global_config.chat.max_context_size * 0.6),
-                filter_intercept_message_level=1,
-            )
-            chat_content_block, message_id_list = build_readable_messages_with_id(
-                messages=message_list_before_now,
-                timestamp_mode="normal_no_YMD",
-                read_mark=self.action_planner.last_obs_time_mark,
-                truncate=True,
-                show_actions=True,
-            )
-
-            # 注入未闭合话题到 Prompt 上下文
-            if _restored_topics:
-                _lines = ["[上一轮未结束的话题]"]
-                for _t in _restored_topics:
-                    _name = _t.get("topic_name", "未知")
-                    _summary = _t.get("summary", "")
-                    _lines.append(f"  - {_name}: {_summary}")
-                chat_content_block = "\n".join(_lines) + "\n" + chat_content_block
-
-            prompt_info = await self.action_planner.build_planner_prompt(
-                is_group_chat=is_group_chat,
-                chat_target_info=chat_target_info,
-                current_available_actions=available_actions,
-                chat_content_block=chat_content_block,
-                message_id_list=message_id_list,
-            )
-            continue_flag, modified_message = await events_manager.handle_mai_events(
-                EventType.ON_PLAN, None, prompt_info[0], None, self.chat_stream.stream_id
-            )
-            if not continue_flag:
-                return False
-            if modified_message and modified_message._modify_flags.modify_llm_prompt:
-                prompt_info = (modified_message.llm_prompt, prompt_info[1])
 
             with Timer("规划器", cycle_timers):
                 action_to_use_info = await self.action_planner.plan(

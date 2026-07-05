@@ -16,16 +16,12 @@ from src.chat.brain_chat.brain_planner import BrainPlanner
 from src.chat.planner_actions.action_modifier import ActionModifier
 from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.heart_flow.hfc_utils import CycleDetail
+from src.chat.heart_flow.turn_scheduler import ReplyTurnScheduler
 from src.bw_learner.expression_learner import expression_learner_manager
 from src.bw_learner.message_recorder import extract_and_distribute_messages
 from src.common.person_stub import Person
-from src.plugin_system.base.component_types import EventType, ActionInfo
-from src.plugin_system.core import events_manager
+from src.plugin_system.base.component_types import ActionInfo
 from src.plugin_system.apis import generator_api, send_api, message_api, database_api
-from src.chat.utils.chat_message_builder import (
-    build_readable_messages_with_id,
-    get_raw_msg_before_timestamp_with_chat,
-)
 
 # 新记忆系统 — 原始消息归档 + 话题摘要（私聊用）
 try:
@@ -108,6 +104,7 @@ class BrainChatting:
         self.last_read_time = time.time() - 2
 
         self.more_plan = False
+        self.turn_scheduler = ReplyTurnScheduler()
 
         # 最近一次是否成功进行了 reply，用于选择 BrainPlanner 的 Prompt
         self._last_successful_reply: bool = False
@@ -189,9 +186,10 @@ class BrainChatting:
             filter_intercept_message_level=1,
         )
 
-        # 如果有新消息，更新 last_read_time 并触发事件以打断正在进行的 wait
-        if len(recent_messages_list) >= 1:
+        decision = self.turn_scheduler.decide_private_turn(recent_messages=recent_messages_list)
+        if decision.should_update_last_read_time:
             self.last_read_time = time.time()
+        if decision.should_set_new_message_event:
             self._new_message_event.set()  # 触发新消息事件，打断 wait
 
         # 总是执行一次思考迭代（不管有没有新消息）
@@ -204,7 +202,7 @@ class BrainChatting:
 
         # 继续下一次迭代（除非选择了 complete_talk）
         # 短暂等待后再继续，避免过于频繁的循环
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(decision.sleep_seconds)
 
         return True
 
@@ -320,49 +318,6 @@ class BrainChatting:
                 available_actions = self.action_manager.get_using_actions()
             except Exception as e:
                 logger.error(f"{self.log_prefix} 动作修改失败: {e}")
-
-            # 获取必要信息
-            is_group_chat, chat_target_info, _ = self.action_planner.get_necessary_info()
-
-            # 一次思考迭代：Think - Act - Observe
-            # 获取聊天上下文
-            message_list_before_now = get_raw_msg_before_timestamp_with_chat(
-                chat_id=self.stream_id,
-                timestamp=time.time(),
-                limit=int(global_config.chat.max_context_size * 0.6),
-                filter_intercept_message_level=1,
-            )
-            chat_content_block, message_id_list = build_readable_messages_with_id(
-                messages=message_list_before_now,
-                timestamp_mode="normal_no_YMD",
-                read_mark=self.action_planner.last_obs_time_mark,
-                truncate=True,
-                show_actions=True,
-            )
-
-            # 注入未闭合话题到 Prompt 上下文
-            if _restored_topics:
-                _lines = ["[上一轮未结束的话题]"]
-                for _t in _restored_topics:
-                    _name = _t.get("topic_name", "未知")
-                    _summary = _t.get("summary", "")
-                    _lines.append(f"  - {_name}: {_summary}")
-                chat_content_block = "\n".join(_lines) + "\n" + chat_content_block
-
-            prompt_info = await self.action_planner.build_planner_prompt(
-                chat_target_info=chat_target_info,
-                current_available_actions=available_actions,
-                chat_content_block=chat_content_block,
-                message_id_list=message_id_list,
-                prompt_key="brain_planner_prompt_react",
-            )
-            continue_flag, modified_message = await events_manager.handle_mai_events(
-                EventType.ON_PLAN, None, prompt_info[0], None, self.chat_stream.stream_id
-            )
-            if not continue_flag:
-                return False
-            if modified_message and modified_message._modify_flags.modify_llm_prompt:
-                prompt_info = (modified_message.llm_prompt, prompt_info[1])
 
             with Timer("规划器", cycle_timers):
                 action_to_use_info = await self.action_planner.plan(

@@ -2,7 +2,7 @@ from src.common.server import get_global_server
 import os
 import importlib.metadata
 from maim_message import MessageServer
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.config.config import global_config
 
 global_api = None
@@ -88,7 +88,11 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                     if api_key in allowed_keys:
                         return True
 
-                    api_logger.warning(f"Rejected connection with invalid API Key: {api_key}")
+                    api_logger.warning(
+                        "Additional API Server 连接认证失败",
+                        event_code="maim_message.api_server.auth_failed",
+                        api_key_hash=hash_id(api_key),
+                    )
                     return False
 
                 server_config.on_auth = auth_handler
@@ -125,8 +129,12 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                                 platform = msg_info.get("platform")
                                 if platform:
                                     global_api.platform_map[platform] = api_key
-                        except Exception as e:
-                            api_logger.warning(f"Failed to update platform map: {e}")
+                        except Exception:
+                            api_logger.warning(
+                                "Additional API Server 平台映射更新失败",
+                                event_code="maim_message.api_server.platform_map_update_failed",
+                                exc_info=True,
+                            )
 
                     # Compatibility Layer: Ensure raw_message exists (even if None) as it's part of MessageBase
                     if "raw_message" not in msg_dict:
@@ -145,7 +153,11 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
 
                 async def patched_run():
                     api_logger.info(
-                        f"Starting Additional API Server on {api_server_host}:{api_server_port} (WSS: {use_wss})"
+                        "Additional API Server 启动",
+                        event_code="maim_message.api_server.starting",
+                        host=api_server_host,
+                        port=api_server_port,
+                        wss=use_wss,
                     )
                     # Start the extra server (non-blocking start)
                     await extra_server.start()
@@ -153,7 +165,7 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                     await original_run()
 
                 async def patched_stop():
-                    api_logger.info("Stopping Additional API Server...")
+                    api_logger.info("Additional API Server 停止", event_code="maim_message.api_server.stopping")
                     await extra_server.stop()
                     await original_stop()
 
@@ -165,12 +177,14 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
 
             except ImportError:
                 get_logger("maim_message").error(
-                    "Cannot import maim_message.server components. Is maim_message >= 0.6.0 installed?"
+                    "Additional API Server 组件导入失败",
+                    event_code="maim_message.api_server.import_failed",
+                    required_version=">=0.6.0",
                 )
-            except Exception as e:
-                get_logger("maim_message").error(f"Failed to initialize Additional API Server: {e}")
-                import traceback
-
-                get_logger("maim_message").debug(traceback.format_exc())
+            except Exception:
+                get_logger("maim_message").exception(
+                    "Additional API Server 初始化失败",
+                    event_code="maim_message.api_server.init_failed",
+                )
 
     return global_api

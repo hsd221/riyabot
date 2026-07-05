@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class MessageAndActionModel(BaseDataModel):
+    message_id: str = field(default_factory=str)
     chat_id: str = field(default_factory=str)
     time: float = field(default_factory=float)
     user_id: str = field(default_factory=str)
@@ -27,6 +28,7 @@ class MessageAndActionModel(BaseDataModel):
     @classmethod
     def from_DatabaseMessages(cls, message: "DatabaseMessages"):
         return cls(
+            message_id=message.message_id,
             chat_id=message.chat_id,
             time=message.time,
             user_id=message.user_info.user_id,

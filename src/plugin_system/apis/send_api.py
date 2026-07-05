@@ -19,16 +19,11 @@
     await send_api.custom_message("video", video_data, "123456", True)
 """
 
-import traceback
-import time
 from typing import Optional, Union, Dict, List, TYPE_CHECKING, Tuple
 
 from src.common.logger import get_logger
 from src.common.data_models.message_data_model import ReplyContentType
-from src.config.config import global_config
-from src.chat.message_receive.chat_stream import get_chat_manager
-from src.chat.message_receive.uni_message_sender import UniversalMessageSender
-from src.chat.message_receive.message import MessageSending, MessageRecv
+from src.services import send_service
 from maim_message import Seg, UserInfo, MessageBase, BaseMessageInfo
 
 if TYPE_CHECKING:
@@ -68,85 +63,20 @@ async def _send_to_target(
     Returns:
         bool: 是否发送成功
     """
-    try:
-        if set_reply and not reply_message:
-            logger.warning("[SendAPI] 使用引用回复，但未提供回复消息")
-            return False
-
-        if show_log:
-            logger.debug(f"[SendAPI] 发送{message_segment.type}消息到 {stream_id}")
-
-        # 查找目标聊天流
-        target_stream = get_chat_manager().get_stream(stream_id)
-        if not target_stream:
-            logger.error(f"[SendAPI] 未找到聊天流: {stream_id}")
-            return False
-
-        # 创建发送器
-        message_sender = UniversalMessageSender()
-
-        # 生成消息ID
-        current_time = time.time()
-        message_id = f"send_api_{int(current_time * 1000)}"
-
-        # 构建机器人用户信息
-        bot_user_info = UserInfo(
-            user_id=global_config.bot.qq_account,
-            user_nickname=global_config.bot.nickname,
-            platform=target_stream.platform,
-        )
-
-        reply_to_platform_id = ""
-        anchor_message: Union["MessageRecv", None] = None
-        if reply_message:
-            anchor_message = db_message_to_message_recv(reply_message)
-            logger.debug(f"[SendAPI] 找到匹配的回复消息，发送者: {anchor_message.message_info.user_info.user_id}")  # type: ignore
-            if anchor_message:
-                anchor_message.update_chat_stream(target_stream)
-                assert anchor_message.message_info.user_info, "用户信息缺失"
-                reply_to_platform_id = (
-                    f"{anchor_message.message_info.platform}:{anchor_message.message_info.user_info.user_id}"
-                )
-
-        # 构建发送消息对象
-        bot_message = MessageSending(
-            message_id=message_id,
-            chat_stream=target_stream,
-            bot_user_info=bot_user_info,
-            sender_info=target_stream.user_info,
-            message_segment=message_segment,
-            display_message=display_message,
-            reply=anchor_message,
-            is_head=True,
-            is_emoji=(message_segment.type == "emoji"),
-            thinking_start_time=current_time,
-            reply_to=reply_to_platform_id,
-            selected_expressions=selected_expressions,
-        )
-
-        # 发送消息
-        sent_msg = await message_sender.send_message(
-            bot_message,
-            typing=typing,
-            set_reply=set_reply,
-            storage_message=storage_message,
-            show_log=show_log,
-        )
-
-        if sent_msg:
-            logger.debug(f"[SendAPI] 成功发送消息到 {stream_id}")
-            return True
-        else:
-            logger.error("[SendAPI] 发送消息失败")
-            return False
-
-    except Exception as e:
-        logger.error(f"[SendAPI] 发送消息时出错: {e}")
-        traceback.print_exc()
-        return False
+    return await send_service.message_to_stream(
+        message_segment=message_segment,
+        stream_id=stream_id,
+        display_message=display_message,
+        typing=typing,
+        set_reply=set_reply,
+        reply_message=reply_message,
+        storage_message=storage_message,
+        show_log=show_log,
+        selected_expressions=selected_expressions,
+    )
 
 
-def db_message_to_message_recv(message_obj: "DatabaseMessages") -> MessageRecv:
+def db_message_to_message_recv(message_obj: "DatabaseMessages"):
     """将数据库dict重建为MessageRecv对象
     Args:
         message_dict: 消息字典
@@ -154,43 +84,7 @@ def db_message_to_message_recv(message_obj: "DatabaseMessages") -> MessageRecv:
     Returns:
         Optional[MessageRecv]: 找到的消息，如果没找到则返回None
     """
-    # 构建MessageRecv对象
-    user_info = {
-        "platform": message_obj.user_info.platform or "",
-        "user_id": message_obj.user_info.user_id or "",
-        "user_nickname": message_obj.user_info.user_nickname or "",
-        "user_cardname": message_obj.user_info.user_cardname or "",
-    }
-
-    group_info = {}
-    if message_obj.chat_info.group_info:
-        group_info = {
-            "platform": message_obj.chat_info.group_info.group_platform or "",
-            "group_id": message_obj.chat_info.group_info.group_id or "",
-            "group_name": message_obj.chat_info.group_info.group_name or "",
-        }
-
-    format_info = {"content_format": "", "accept_format": ""}
-    template_info = {"template_items": {}}
-
-    message_info = {
-        "platform": message_obj.chat_info.platform or "",
-        "message_id": message_obj.message_id,
-        "time": message_obj.time,
-        "group_info": group_info,
-        "user_info": user_info,
-        "additional_config": message_obj.additional_config,
-        "format_info": format_info,
-        "template_info": template_info,
-    }
-
-    message_dict_recv = {
-        "message_info": message_info,
-        "raw_message": message_obj.processed_plain_text,
-        "processed_plain_text": message_obj.processed_plain_text,
-    }
-
-    return MessageRecv(message_dict_recv)
+    return send_service.db_message_to_message_recv(message_obj)
 
 
 # =============================================================================
@@ -219,10 +113,9 @@ async def text_to_stream(
     Returns:
         bool: 是否发送成功
     """
-    return await _send_to_target(
-        message_segment=Seg(type="text", data=text),
+    return await send_service.text_to_stream(
+        text=text,
         stream_id=stream_id,
-        display_message="",
         typing=typing,
         set_reply=set_reply,
         reply_message=reply_message,
@@ -248,14 +141,12 @@ async def emoji_to_stream(
     Returns:
         bool: 是否发送成功
     """
-    return await _send_to_target(
-        message_segment=Seg(type="emoji", data=emoji_base64),
+    return await send_service.emoji_to_stream(
+        emoji_base64=emoji_base64,
         stream_id=stream_id,
-        display_message="",
-        typing=False,
-        storage_message=storage_message,
         set_reply=set_reply,
         reply_message=reply_message,
+        storage_message=storage_message,
     )
 
 
@@ -276,14 +167,12 @@ async def image_to_stream(
     Returns:
         bool: 是否发送成功
     """
-    return await _send_to_target(
-        message_segment=Seg(type="image", data=image_base64),
+    return await send_service.image_to_stream(
+        image_base64=image_base64,
         stream_id=stream_id,
-        display_message="",
-        typing=False,
-        storage_message=storage_message,
         set_reply=set_reply,
         reply_message=reply_message,
+        storage_message=storage_message,
     )
 
 

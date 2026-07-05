@@ -218,7 +218,11 @@ def _process_delta(
                     )
                 )
             else:
-                logger.warning("工具调用索引号大于等于缓冲区长度，但缺少ID或函数信息。")
+                logger.warning(
+                    "工具调用增量缺少必要字段",
+                    event_code="llm.openai.tool_call_delta.invalid",
+                    index=tool_call_delta.index,
+                )
 
         if tool_call_delta.function and tool_call_delta.function.arguments:
             # 如果有工具调用参数，则添加到对应的工具调用的参数串缓冲区中
@@ -372,8 +376,12 @@ async def _default_stream_response_handler(
             except Exception:
                 model_dbg = None
 
-            # 统一日志格式
-            logger.info("模型%s因为超过最大max_token限制，可能仅输出部分内容，可视情况调整" % (model_dbg or ""))
+            logger.info(
+                "模型响应达到 max_tokens 限制",
+                event_code="llm.openai.response.max_tokens_reached",
+                model_name=model_dbg,
+                stream=True,
+            )
 
         return resp, _usage_record
     except Exception:
@@ -412,11 +420,14 @@ def _default_normal_response_parser(
                     "completion": getattr(resp.usage, "completion_tokens", None),
                     "total": getattr(resp.usage, "total_tokens", None),
                 }
-            try:
-                raw_snippet = str(resp)[:300]
-            except Exception:
-                raw_snippet = "<unserializable>"
-            logger.debug(f"empty choices: model={model_dbg} id={id_dbg} usage={usage_dbg} raw≈{raw_snippet}")
+            logger.debug(
+                "OpenAI 兼容响应 choices 为空",
+                event_code="llm.openai.response.empty_choices",
+                model_name=model_dbg,
+                response_id=id_dbg,
+                usage=usage_dbg,
+                raw_response=resp,
+            )
         except Exception:
             # 日志采集失败不应影响控制流
             pass
@@ -485,11 +496,15 @@ def _default_normal_response_parser(
         if reason and reason == "length":
             # print(resp)
             _model_name = resp.model
-            # 统一日志格式
-            logger.info("模型%s因为超过最大max_token限制，可能仅输出部分内容，可视情况调整" % (_model_name or ""))
+            logger.info(
+                "模型响应达到 max_tokens 限制",
+                event_code="llm.openai.response.max_tokens_reached",
+                model_name=_model_name,
+                stream=False,
+            )
             return api_response, _usage_record
-    except Exception as e:
-        logger.debug(f"检查 MAX_TOKENS 截断时异常: {e}")
+    except Exception:
+        logger.debug("检查 max_tokens 截断状态失败", event_code="llm.openai.max_tokens_check_failed", exc_info=True)
 
     if not api_response.content and not api_response.tool_calls:
         raise EmptyResponseException()
@@ -644,10 +659,15 @@ class OpenaiClient(BaseClient):
             )
         except APIConnectionError as e:
             # 添加详细的错误信息以便调试
-            logger.error(f"OpenAI API连接错误（嵌入模型）: {str(e)}")
-            logger.error(f"错误类型: {type(e)}")
-            if hasattr(e, "__cause__") and e.__cause__:
-                logger.error(f"底层错误: {str(e.__cause__)}")
+            logger.error(
+                "OpenAI 嵌入请求连接失败",
+                event_code="llm.openai.embedding.connection_failed",
+                model_name=model_info.name,
+                provider_name=model_info.api_provider,
+                error_type=type(e).__name__,
+                error=str(e),
+                cause=str(e.__cause__) if getattr(e, "__cause__", None) else None,
+            )
             raise NetworkConnectionError() from e
         except APIStatusError as e:
             # 重封装APIError为RespNotOkException

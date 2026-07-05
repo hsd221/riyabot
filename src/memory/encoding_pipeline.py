@@ -92,7 +92,10 @@ class EncodingPipeline:
         _encoding_pipeline = self
 
         logger.info(
-            f"EncodingPipeline 初始化完成 | trigger_count={trigger_count} trigger_seconds={trigger_seconds}",
+            "EncodingPipeline 初始化完成",
+            event_code="memory.encoding.pipeline_initialized",
+            trigger_count=trigger_count,
+            trigger_seconds=trigger_seconds,
         )
 
     def set_trace_recorder(self, recorder: TraceChainRecorder) -> None:
@@ -102,7 +105,7 @@ class EncodingPipeline:
             recorder: TraceChainRecorder 实例
         """
         self.trace_recorder = recorder
-        logger.info("TraceChainRecorder 已设置")
+        logger.info("TraceChainRecorder 已设置", event_code="memory.encoding.trace_recorder_set")
 
     async def ingest(
         self,
@@ -133,6 +136,7 @@ class EncodingPipeline:
         )
         logger.debug(
             "消息摄入编码管线",
+            event_code="memory.encoding.message_ingested",
             stream_id=stream_id,
             stream_type=stream_type,
         )
@@ -161,6 +165,7 @@ class EncodingPipeline:
 
         logger.debug(
             "开始编码周期",
+            event_code="memory.encoding.cycle_started",
             buffer_count=len(self.encoder.buffers),
         )
 
@@ -168,7 +173,7 @@ class EncodingPipeline:
             encoded = await self.encoder.encode_all_ready()
 
             if not encoded:
-                logger.debug("编码周期：无就绪流")
+                logger.debug("编码周期无就绪流", event_code="memory.encoding.no_ready_stream")
                 return stats
 
             stats["streams_processed"] = len(encoded)
@@ -212,10 +217,11 @@ class EncodingPipeline:
 
                             if check_result.recommendation == "reject":
                                 logger.info(
-                                    "客观性校验: 跳过原子 | atom_id=%s type=%s reason=%s",
-                                    atom.atom_id,
-                                    atom_type.value,
-                                    "噪声" if check_result.noise else "低一致性",
+                                    "客观性校验拒绝记忆原子",
+                                    event_code="memory.encoding.objectivity_rejected",
+                                    atom_id=atom.atom_id,
+                                    atom_type=atom_type.value,
+                                    reason="noise" if check_result.noise else "low_consistency",
                                 )
                                 continue
 
@@ -228,17 +234,27 @@ class EncodingPipeline:
                                 try:
                                     conflict.new_atom_id = atom.atom_id
                                     await checker.record_conflict(conflict)
-                                except Exception as exc:
-                                    logger.warning("记录冲突失败: %s", exc, exc_info=True)
+                                except Exception:
+                                    logger.warning(
+                                        "记忆冲突记录失败",
+                                        event_code="memory.encoding.conflict_record_failed",
+                                        atom_id=atom.atom_id,
+                                        exc_info=True,
+                                    )
                         except ImportError:
                             pass
-                        except Exception as exc:
-                            logger.warning("客观性校验异常: %s", exc)
+                        except Exception:
+                            logger.warning(
+                                "客观性校验异常",
+                                event_code="memory.encoding.objectivity_check_failed",
+                                exc_info=True,
+                            )
                             continue
 
                         if episodic_detail and episodic_detail.sensory_tags:
                             logger.debug(
                                 "感官标签",
+                                event_code="memory.encoding.sensory_tags",
                                 atom_id=atom.atom_id,
                                 sensory_tags=episodic_detail.sensory_tags,
                                 temporal_context=episodic_detail.temporal_context,
@@ -293,9 +309,12 @@ class EncodingPipeline:
                         written_atoms.append(atom)
                         stream_map[atom.atom_id] = stream_id
                         stream_atoms_written += 1
-                    except Exception as exc:
-                        logger.error(
-                            f"写入原子失败 | stream={stream_id} type={atom_type.value} error={exc}",
+                    except Exception:
+                        logger.exception(
+                            "编码结果写入记忆原子失败",
+                            event_code="memory.encoding.atom_write_failed",
+                            stream_id=stream_id,
+                            atom_type=atom_type.value,
                         )
                         stats["errors"] += 1
 
@@ -304,16 +323,20 @@ class EncodingPipeline:
 
             if stats["atoms_written"] > 0 or stats["errors"] > 0:
                 logger.info(
-                    f"编码周期完成 | streams={stats['streams_processed']} "
-                    f"atoms={stats['atoms_written']} errors={stats['errors']}",
+                    "编码周期写入阶段完成",
+                    event_code="memory.encoding.cycle_write_completed",
+                    streams_processed=stats["streams_processed"],
+                    atoms_written=stats["atoms_written"],
+                    errors=stats["errors"],
                 )
 
-        except Exception as exc:
-            logger.error(f"编码周期异常 | error={exc}")
+        except Exception:
+            logger.exception("编码周期异常", event_code="memory.encoding.cycle_failed")
             stats["errors"] += 1
 
         logger.info(
             "编码周期完成",
+            event_code="memory.encoding.cycle_completed",
             encoded_atoms=stats["atoms_written"],
             failed_atoms=stats["errors"],
         )
@@ -326,13 +349,18 @@ class EncodingPipeline:
                 resolved = await arbiter.check_and_resolve()
                 if resolved > 0:
                     logger.info(
-                        "冲突仲裁: 自动解决 %d 组冲突 (编码周期后)",
-                        resolved,
+                        "冲突仲裁完成",
+                        event_code="memory.encoding.conflict_arbitration_completed",
+                        resolved_count=resolved,
                     )
             except ImportError:
-                logger.debug("冲突仲裁模块未加载")
-            except Exception as exc:
-                logger.warning("冲突仲裁异常: %s", exc)
+                logger.debug("冲突仲裁模块未加载", event_code="memory.encoding.conflict_arbitration_unavailable")
+            except Exception:
+                logger.warning(
+                    "冲突仲裁异常",
+                    event_code="memory.encoding.conflict_arbitration_failed",
+                    exc_info=True,
+                )
 
         # ── 原子关联构建 ──────────────────────────────────────
         if stats["atoms_written"] > 0 and written_atoms:
@@ -342,11 +370,15 @@ class EncodingPipeline:
                 assoc_store = AtomAssociationStore()
                 created = assoc_store.build_from_batch(written_atoms, stream_map)
                 if created > 0:
-                    logger.info("记忆关联: 新增 %d 条原子关联 (编码周期后)", created)
+                    logger.info(
+                        "记忆原子关联构建完成",
+                        event_code="memory.encoding.association_completed",
+                        created_count=created,
+                    )
             except ImportError:
-                logger.debug("原子关联模块未加载")
-            except Exception as exc:
-                logger.warning("原子关联构建异常: %s", exc)
+                logger.debug("原子关联模块未加载", event_code="memory.encoding.association_unavailable")
+            except Exception:
+                logger.warning("原子关联构建异常", event_code="memory.encoding.association_failed", exc_info=True)
 
         return stats
 
@@ -445,7 +477,10 @@ class EncodingTask(AsyncTask):
             stats = await self._pipeline.run_cycle()
             if stats.get("atoms_written", 0) > 0:
                 logger.info(
-                    f"记忆编码任务 | 流数={stats['streams_processed']} 原子数={stats['atoms_written']}",
+                    "记忆编码任务完成",
+                    event_code="memory.encoding.task_completed",
+                    streams_processed=stats["streams_processed"],
+                    atoms_written=stats["atoms_written"],
                 )
-        except Exception as exc:
-            logger.error(f"记忆编码任务异常 | error={exc}")
+        except Exception:
+            logger.exception("记忆编码任务异常", event_code="memory.encoding.task_failed")

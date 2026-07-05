@@ -14,6 +14,7 @@ from src.common.database.database_model import ActionRecords
 from src.common.database.database_model import Images
 from src.common.person_stub import Person, get_person_id
 from src.chat.utils.utils import translate_timestamp_to_human_readable, assign_message_ids, is_bot_self
+from src.chat.message_receive.media_background import enhance_media_placeholders
 
 install(extra_lines=3)
 logger = get_logger("chat_message_builder")
@@ -451,6 +452,7 @@ def _build_readable_messages_internal(
 
         timestamp = message.time
         content = message.display_message or message.processed_plain_text or ""
+        content = enhance_media_placeholders(getattr(message, "message_id", None), content)
 
         # 处理图片ID
         if show_pic:
@@ -754,7 +756,7 @@ def build_readable_messages(
         filtered_messages = []
         for msg in messages:
             # 获取消息内容
-            content = msg.processed_plain_text
+            content = enhance_media_placeholders(msg.message_id, msg.processed_plain_text)
             # 移除表情包
             emoji_pattern = r"\[表情包：[^\]]+\]"
             content = re.sub(emoji_pattern, "", content)
@@ -772,6 +774,7 @@ def build_readable_messages(
             model = MessageAndActionModel.from_DatabaseMessages(msg)
             # 移除表情包
             if model.processed_plain_text:
+                model.processed_plain_text = enhance_media_placeholders(model.message_id, model.processed_plain_text)
                 model.processed_plain_text = re.sub(r"\[表情包：[^\]]+\]", "", model.processed_plain_text)
             copy_messages.append(model)
         else:
@@ -968,6 +971,7 @@ async def build_anonymous_messages(messages: List[DatabaseMessages], show_ids: b
             platform = msg.chat_info.platform
             user_id = msg.user_info.user_id
             content = msg.display_message or msg.processed_plain_text or ""
+            content = enhance_media_placeholders(msg.message_id, content)
 
             # 处理图片ID
             content = process_pic_ids(content)
@@ -1060,7 +1064,7 @@ async def build_bare_messages(messages: List[DatabaseMessages]) -> str:
 
     for msg in messages:
         # 获取纯文本内容
-        content = msg.processed_plain_text or ""
+        content = enhance_media_placeholders(msg.message_id, msg.processed_plain_text)
 
         # 处理图片ID
         pic_pattern = r"\[picid:[^\]]+\]"

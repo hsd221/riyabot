@@ -457,11 +457,11 @@ def api_ada_load_config(config_path: str) -> APIAdapterConfig:
 
 
 # 获取配置文件路径
-logger.info(f"RiyaBot当前版本: {MMC_VERSION}")
+logger.info("应用版本已加载", event_code="config.version.loaded", version=MMC_VERSION)
 update_config()
 update_model_config()
 
-logger.info("正在品鉴配置文件...")
+logger.info("配置文件开始加载", event_code="config.load.started")
 global_config = load_config(config_path=os.path.join(CONFIG_DIR, "bot_config.toml"))
 model_config = api_ada_load_config(config_path=os.path.join(CONFIG_DIR, "model_config.toml"))
-logger.info("非常的新鲜，非常的美味！")
+logger.info("配置文件加载完成", event_code="config.load.completed")

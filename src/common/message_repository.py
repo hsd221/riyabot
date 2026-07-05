@@ -1,5 +1,3 @@
-import traceback
-
 from typing import List, Any, Optional
 from peewee import Model  # 添加 Peewee Model 导入
 
@@ -66,12 +64,21 @@ def find_messages(
                             elif op == "$nin":
                                 conditions.append(field.not_in(op_value))
                             else:
-                                logger.warning(f"过滤器中遇到未知操作符 '{op}' (字段: '{key}')。将跳过此操作符。")
+                                logger.warning(
+                                    "消息查询过滤器包含未知操作符，已跳过",
+                                    event_code="message_repository.filter.unknown_operator",
+                                    field=key,
+                                    operator=op,
+                                )
                     else:
                         # 直接相等比较
                         conditions.append(field == value)
                 else:
-                    logger.warning(f"过滤器键 '{key}' 在 Messages 模型中未找到。将跳过此条件。")
+                    logger.warning(
+                        "消息查询过滤器字段不存在，已跳过",
+                        event_code="message_repository.filter.unknown_field",
+                        field=key,
+                    )
             if conditions:
                 query = query.where(*conditions)
 
@@ -112,20 +119,32 @@ def find_messages(
                         elif direction == -1:  # DESC
                             peewee_sort_terms.append(field.desc())
                         else:
-                            logger.warning(f"字段 '{field_name}' 的排序方向 '{direction}' 无效。将跳过此排序条件。")
+                            logger.warning(
+                                "消息查询排序方向无效，已跳过",
+                                event_code="message_repository.sort.invalid_direction",
+                                field=field_name,
+                                direction=direction,
+                            )
                     else:
-                        logger.warning(f"排序字段 '{field_name}' 在 Messages 模型中未找到。将跳过此排序条件。")
+                        logger.warning(
+                            "消息查询排序字段不存在，已跳过",
+                            event_code="message_repository.sort.unknown_field",
+                            field=field_name,
+                        )
                 if peewee_sort_terms:
                     query = query.order_by(*peewee_sort_terms)
             peewee_results = list(query)
 
         return [_model_to_instance(msg) for msg in peewee_results]
-    except Exception as e:
-        log_message = (
-            f"使用 Peewee 查找消息失败 (filter={message_filter}, sort={sort}, limit={limit}, limit_mode={limit_mode}): {e}\n"
-            + traceback.format_exc()
+    except Exception:
+        logger.exception(
+            "Peewee 消息查询失败",
+            event_code="message_repository.find_failed",
+            message_filter=message_filter,
+            sort=sort,
+            limit=limit,
+            limit_mode=limit_mode,
         )
-        logger.error(log_message)
         return []
 
 
@@ -167,13 +186,20 @@ def count_messages(message_filter: dict[str, Any]) -> int:
                                 conditions.append(field.not_in(op_value))
                             else:
                                 logger.warning(
-                                    f"计数时，过滤器中遇到未知操作符 '{op}' (字段: '{key}')。将跳过此操作符。"
+                                    "消息计数过滤器包含未知操作符，已跳过",
+                                    event_code="message_repository.count_filter.unknown_operator",
+                                    field=key,
+                                    operator=op,
                                 )
                     else:
                         # 直接相等比较
                         conditions.append(field == value)
                 else:
-                    logger.warning(f"计数时，过滤器键 '{key}' 在 Messages 模型中未找到。将跳过此条件。")
+                    logger.warning(
+                        "消息计数过滤器字段不存在，已跳过",
+                        event_code="message_repository.count_filter.unknown_field",
+                        field=key,
+                    )
             if conditions:
                 query = query.where(*conditions)
 
@@ -182,9 +208,12 @@ def count_messages(message_filter: dict[str, Any]) -> int:
 
         count = query.count()
         return count
-    except Exception as e:
-        log_message = f"使用 Peewee 计数消息失败 (message_filter={message_filter}): {e}\n{traceback.format_exc()}"
-        logger.error(log_message)
+    except Exception:
+        logger.exception(
+            "Peewee 消息计数失败",
+            event_code="message_repository.count_failed",
+            message_filter=message_filter,
+        )
         return 0
 
 

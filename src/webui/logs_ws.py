@@ -66,8 +66,8 @@ def load_recent_logs(limit: int = 100) -> list[dict]:
                         log_counter += 1
                     except (json.JSONDecodeError, KeyError):
                         continue
-        except Exception as e:
-            logger.error(f"读取日志文件失败 {log_file}: {e}")
+        except Exception:
+            logger.exception("日志文件读取失败", event_code="webui.logs.file_read_failed", path=str(log_file))
             continue
 
     # 反转列表，使其按时间顺序排列（旧到新）
@@ -91,7 +91,7 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
     # 方式 1: 尝试验证临时 WebSocket token（推荐方式）
     if token and verify_ws_token(token):
         is_authenticated = True
-        logger.debug("WebSocket 使用临时 token 认证成功")
+        logger.debug("日志 WebSocket 临时令牌认证成功", event_code="webui.logs_ws.auth_success", auth_method="ws_token")
 
     # 方式 2: 尝试从 Cookie 获取 session token
     if not is_authenticated:
@@ -100,33 +100,41 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
             token_manager = get_token_manager()
             if token_manager.verify_token(cookie_token):
                 is_authenticated = True
-                logger.debug("WebSocket 使用 Cookie 认证成功")
+                logger.debug(
+                    "日志 WebSocket Cookie 认证成功", event_code="webui.logs_ws.auth_success", auth_method="cookie"
+                )
 
     # 方式 3: 尝试直接验证 query 参数作为 session token（兼容旧方式）
     if not is_authenticated and token:
         token_manager = get_token_manager()
         if token_manager.verify_token(token):
             is_authenticated = True
-            logger.debug("WebSocket 使用 session token 认证成功")
+            logger.debug(
+                "日志 WebSocket session token 认证成功",
+                event_code="webui.logs_ws.auth_success",
+                auth_method="session_token",
+            )
 
     if not is_authenticated:
-        logger.warning("WebSocket 连接被拒绝：认证失败")
+        logger.warning("日志 WebSocket 连接被拒绝", event_code="webui.logs_ws.auth_failed")
         await websocket.close(code=4001, reason="认证失败，请重新登录")
         return
 
     await websocket.accept()
     active_connections.add(websocket)
-    logger.info(f"📡 WebSocket 客户端已连接（已认证），当前连接数: {len(active_connections)}")
+    logger.info(
+        "日志 WebSocket 客户端已连接", event_code="webui.logs_ws.connected", connection_count=len(active_connections)
+    )
 
     # 连接建立后，立即发送历史日志
     try:
         recent_logs = load_recent_logs(limit=100)
-        logger.info(f"发送 {len(recent_logs)} 条历史日志到客户端")
+        logger.info("历史日志已发送到客户端", event_code="webui.logs_ws.history_sent", count=len(recent_logs))
 
         for log_entry in recent_logs:
             await websocket.send_text(json.dumps(log_entry, ensure_ascii=False))
-    except Exception as e:
-        logger.error(f"发送历史日志失败: {e}")
+    except Exception:
+        logger.exception("历史日志发送失败", event_code="webui.logs_ws.history_send_failed")
 
     try:
         # 保持连接，等待客户端消息或断开
@@ -142,9 +150,13 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
 
     except WebSocketDisconnect:
         active_connections.discard(websocket)
-        logger.info(f"📡 WebSocket 客户端已断开，当前连接数: {len(active_connections)}")
-    except Exception as e:
-        logger.error(f"❌ WebSocket 错误: {e}")
+        logger.info(
+            "日志 WebSocket 客户端已断开",
+            event_code="webui.logs_ws.disconnected",
+            connection_count=len(active_connections),
+        )
+    except Exception:
+        logger.exception("日志 WebSocket 连接异常", event_code="webui.logs_ws.connection_failed")
         active_connections.discard(websocket)
 
 
@@ -174,4 +186,6 @@ async def broadcast_log(log_data: dict):
     # 清理断开的连接
     if disconnected:
         active_connections.difference_update(disconnected)
-        logger.debug(f"清理了 {len(disconnected)} 个断开的 WebSocket 连接")
+        logger.debug(
+            "断开的日志 WebSocket 连接已清理", event_code="webui.logs_ws.disconnected_cleaned", count=len(disconnected)
+        )

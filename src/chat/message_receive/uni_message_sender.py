@@ -6,6 +6,21 @@ from maim_message import Seg
 
 from src.common.message.api import get_global_api
 from src.common.logger import get_logger
+from src.common.data_models.message_component_model import (
+    AtComponent,
+    EmojiComponent,
+    FileComponent,
+    ForwardComponent,
+    ImageComponent,
+    MessageComponentSequence,
+    ReplyComponent,
+    SegmentListComponent,
+    TextComponent,
+    UnknownComponent,
+    VoiceComponent,
+    components_to_plain_text,
+    from_seg_to_components,
+)
 from src.chat.message_receive.message import MessageSending
 from src.chat.message_receive.storage import MessageStorage
 from src.chat.utils.utils import truncate_message
@@ -56,6 +71,15 @@ def parse_message_segments(segment) -> list:
 
     if segment is None:
         return result
+    if isinstance(segment, dict):
+        if "message_segment" in segment:
+            return parse_message_segments(segment.get("message_segment"))
+        try:
+            segment = Seg.from_dict(segment)
+        except Exception:
+            if segment.get("data") is not None:
+                return [{"type": "unknown", "original_type": segment.get("type", "unknown"), "data": str(segment["data"])}]
+            return result
 
     if segment.type == "seglist":
         # 处理消息段列表
@@ -111,11 +135,10 @@ def parse_message_segments(segment) -> list:
         forward_items = []
         if segment.data:
             for item in segment.data:
+                node_segment = item.get("message_segment") if isinstance(item, dict) else getattr(item, "message_segment", None)
                 forward_items.append(
                     {
-                        "content": parse_message_segments(item.get("message_segment", {}))
-                        if isinstance(item, dict)
-                        else []
+                        "content": parse_message_segments(node_segment),
                     }
                 )
         result.append({"type": "forward", "data": forward_items})
@@ -125,6 +148,84 @@ def parse_message_segments(segment) -> list:
             result.append({"type": "unknown", "original_type": segment.type, "data": str(segment.data)})
 
     return result
+
+
+def _base64_data_url(base64_data: str, media_type: str) -> str:
+    return base64_data if base64_data.startswith("data:") else f"data:{media_type};base64,{base64_data}"
+
+
+def parse_message_components(components: MessageComponentSequence | None) -> list:
+    """将内部消息组件转换为 WebUI 富文本段。"""
+    if not components:
+        return []
+
+    result = []
+    for component in components.components:
+        if isinstance(component, TextComponent):
+            if component.text:
+                result.append({"type": "text", "data": component.text})
+        elif isinstance(component, ImageComponent):
+            if component.base64_data:
+                result.append({"type": "image", "data": _base64_data_url(component.base64_data, "image/png")})
+            else:
+                result.append({"type": "text", "data": components_to_plain_text(MessageComponentSequence([component]))})
+        elif isinstance(component, EmojiComponent):
+            if component.base64_data:
+                result.append({"type": "emoji", "data": _base64_data_url(component.base64_data, "image/gif")})
+            else:
+                result.append({"type": "text", "data": components_to_plain_text(MessageComponentSequence([component]))})
+        elif isinstance(component, VoiceComponent):
+            if component.base64_data:
+                result.append({"type": "voice", "data": _base64_data_url(component.base64_data, "audio/wav")})
+            else:
+                result.append({"type": "text", "data": components_to_plain_text(MessageComponentSequence([component]))})
+        elif isinstance(component, AtComponent):
+            result.append({"type": "at", "data": component.target_name or component.target_user_id})
+        elif isinstance(component, ReplyComponent):
+            result.append(
+                {
+                    "type": "reply",
+                    "data": {
+                        "message_id": component.target_message_id,
+                        "text": component.target_text,
+                    },
+                }
+            )
+        elif isinstance(component, FileComponent):
+            result.append(
+                {
+                    "type": "file",
+                    "data": component.raw_data
+                    if component.raw_data is not None
+                    else {"name": component.name, "size": component.size, "url": component.url},
+                }
+            )
+        elif isinstance(component, ForwardComponent):
+            result.append(
+                {
+                    "type": "forward",
+                    "data": [{"content": parse_message_components(node)} for node in component.nodes],
+                }
+            )
+        elif isinstance(component, SegmentListComponent):
+            result.extend(parse_message_components(component.sequence))
+        elif isinstance(component, UnknownComponent):
+            if component.data is not None:
+                result.append(
+                    {"type": "unknown", "original_type": component.segment_type, "data": str(component.data)}
+                )
+
+    return result
+
+
+def _apply_modified_message(message: MessageSending, modified_message) -> None:
+    if not modified_message:
+        return
+    if modified_message._modify_flags.modify_message_segments:
+        message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
+        message.message_components = from_seg_to_components(message.message_segment)
+    if modified_message._modify_flags.modify_plain_text:
+        message.processed_plain_text = modified_message.plain_text
 
 
 async def _send_message(message: MessageSending, show_log=True) -> bool:
@@ -143,8 +244,10 @@ async def _send_message(message: MessageSending, show_log=True) -> bool:
             import time
             from src.config.config import global_config
 
-            # 解析消息段，获取富文本内容
-            message_segments = parse_message_segments(message.message_segment)
+            # 优先从内部组件生成富文本，兼容旧 Seg 作为 fallback
+            message_segments = parse_message_components(getattr(message, "message_components", None))
+            if not message_segments:
+                message_segments = parse_message_segments(message.message_segment)
 
             # 判断消息类型
             # 如果只有一个文本段，使用简单的 text 类型
@@ -297,11 +400,9 @@ class UniversalMessageSender:
                 logger.info(f"[{chat_id}] 消息发送被插件取消: {str(message.message_segment)[:100]}...")
                 return False
             if modified_message:
-                if modified_message._modify_flags.modify_message_segments:
-                    message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
                 if modified_message._modify_flags.modify_plain_text:
                     logger.warning(f"[{chat_id}] 插件修改了消息的纯文本内容，可能导致此内容被覆盖。")
-                    message.processed_plain_text = modified_message.plain_text
+                _apply_modified_message(message, modified_message)
 
             await message.process()
 
@@ -311,11 +412,7 @@ class UniversalMessageSender:
             if not continue_flag:
                 logger.info(f"[{chat_id}] 消息发送被插件取消: {str(message.message_segment)[:100]}...")
                 return False
-            if modified_message:
-                if modified_message._modify_flags.modify_message_segments:
-                    message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
-                if modified_message._modify_flags.modify_plain_text:
-                    message.processed_plain_text = modified_message.plain_text
+            _apply_modified_message(message, modified_message)
 
             if typing:
                 typing_time = calculate_typing_time(
@@ -335,11 +432,7 @@ class UniversalMessageSender:
             if not continue_flag:
                 logger.info(f"[{chat_id}] 消息发送后续处理被插件取消: {str(message.message_segment)[:100]}...")
                 return True
-            if modified_message:
-                if modified_message._modify_flags.modify_message_segments:
-                    message.message_segment = Seg(type="seglist", data=modified_message.message_segments)
-                if modified_message._modify_flags.modify_plain_text:
-                    message.processed_plain_text = modified_message.plain_text
+            _apply_modified_message(message, modified_message)
 
             if storage_message:
                 await self.storage.store_message(message, message.chat_stream)

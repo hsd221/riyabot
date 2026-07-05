@@ -2,7 +2,7 @@ import re
 
 from typing import Dict, List, Optional, Any, Pattern, Tuple, Union, Type
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.plugin_system.base.component_types import (
     ComponentInfo,
     ActionInfo,
@@ -61,7 +61,7 @@ class ComponentRegistry:
         self._enabled_event_handlers: Dict[str, Type[BaseEventHandler]] = {}
         """启用的事件处理器 event_handler名 -> event_handler类"""
 
-        logger.info("组件注册中心初始化完成")
+        logger.info("组件注册中心初始化完成", event_code="component_registry.initialized")
 
     # == 注册方法 ==
 
@@ -77,11 +77,16 @@ class ComponentRegistry:
         plugin_name = plugin_info.name
 
         if plugin_name in self._plugins:
-            logger.warning(f"插件 {plugin_name} 已存在，跳过注册")
+            logger.warning("插件已注册，跳过重复注册", event_code="plugin.registry.duplicate", plugin_name=plugin_name)
             return False
 
         self._plugins[plugin_name] = plugin_info
-        logger.debug(f"已注册插件: {plugin_name} (组件数量: {len(plugin_info.components)})")
+        logger.debug(
+            "插件已注册到组件中心",
+            event_code="plugin.registry.registered",
+            plugin_name=plugin_name,
+            component_count=len(plugin_info.components),
+        )
         return True
 
     def register_component(
@@ -102,10 +107,20 @@ class ComponentRegistry:
         component_type = component_info.component_type
         plugin_name = getattr(component_info, "plugin_name", "unknown")
         if "." in component_name:
-            logger.error(f"组件名称 '{component_name}' 包含非法字符 '.'，请使用下划线替代")
+            logger.error(
+                "组件名称包含非法字符",
+                event_code="component.name_invalid",
+                component_name=component_name,
+                invalid_char=".",
+            )
             return False
         if "." in plugin_name:
-            logger.error(f"插件名称 '{plugin_name}' 包含非法字符 '.'，请使用下划线替代")
+            logger.error(
+                "插件名称包含非法字符",
+                event_code="plugin.name_invalid",
+                plugin_name=plugin_name,
+                invalid_char=".",
+            )
             return False
 
         namespaced_name = f"{component_type}.{component_name}"
@@ -115,7 +130,12 @@ class ComponentRegistry:
             existing_plugin = getattr(existing_info, "plugin_name", "unknown")
 
             logger.warning(
-                f"组件名冲突: '{plugin_name}' 插件的 {component_type} 类型组件 '{component_name}' 已被插件 '{existing_plugin}' 注册，跳过此组件注册"
+                "组件名冲突，跳过注册",
+                event_code="component.register_conflict",
+                plugin_name=plugin_name,
+                existing_plugin=existing_plugin,
+                component_type=component_type.value,
+                component_name=component_name,
             )
             return False
 
@@ -143,23 +163,30 @@ class ComponentRegistry:
                 assert issubclass(component_class, BaseEventHandler)
                 ret = self._register_event_handler_component(component_info, component_class)
             case _:
-                logger.warning(f"未知组件类型: {component_type}")
+                logger.warning("未知组件类型", event_code="component.type_unknown", component_type=str(component_type))
 
         if not ret:
             return False
         logger.debug(
-            f"已注册{component_type}组件: '{component_name}' -> '{namespaced_name}' "
-            f"({component_class.__name__}) [插件: {plugin_name}]"
+            "组件已注册",
+            event_code="component.registered",
+            component_type=component_type.value,
+            component_name=component_name,
+            namespaced_name=namespaced_name,
+            component_class=component_class.__name__,
+            plugin_name=plugin_name,
         )
         return True
 
     def _register_action_component(self, action_info: ActionInfo, action_class: Type[BaseAction]) -> bool:
         """注册Action组件到Action特定注册表"""
         if not (action_name := action_info.name):
-            logger.error(f"Action组件 {action_class.__name__} 必须指定名称")
+            logger.error(
+                "Action 组件缺少名称", event_code="component.action.name_missing", component_class=action_class.__name__
+            )
             return False
         if not isinstance(action_info, ActionInfo) or not issubclass(action_class, BaseAction):
-            logger.error(f"注册失败: {action_name} 不是有效的Action")
+            logger.error("Action 组件类型无效", event_code="component.action.invalid", action_name=action_name)
             return False
 
         self._action_registry[action_name] = action_class
@@ -173,10 +200,14 @@ class ComponentRegistry:
     def _register_command_component(self, command_info: CommandInfo, command_class: Type[BaseCommand]) -> bool:
         """注册Command组件到Command特定注册表"""
         if not (command_name := command_info.name):
-            logger.error(f"Command组件 {command_class.__name__} 必须指定名称")
+            logger.error(
+                "Command 组件缺少名称",
+                event_code="component.command.name_missing",
+                component_class=command_class.__name__,
+            )
             return False
         if not isinstance(command_info, CommandInfo) or not issubclass(command_class, BaseCommand):
-            logger.error(f"注册失败: {command_name} 不是有效的Command")
+            logger.error("Command 组件类型无效", event_code="component.command.invalid", command_name=command_name)
             return False
 
         self._command_registry[command_name] = command_class
@@ -188,7 +219,10 @@ class ComponentRegistry:
                 self._command_patterns[pattern] = command_name
             else:
                 logger.warning(
-                    f"'{command_name}' 对应的命令模式与 '{self._command_patterns[pattern]}' 重复，忽略此命令"
+                    "命令模式重复，忽略此命令",
+                    event_code="component.command.pattern_duplicate",
+                    command_name=command_name,
+                    existing_command_name=self._command_patterns[pattern],
                 )
 
         return True
@@ -209,16 +243,26 @@ class ComponentRegistry:
         self, handler_info: EventHandlerInfo, handler_class: Type[BaseEventHandler]
     ) -> bool:
         if not (handler_name := handler_info.name):
-            logger.error(f"EventHandler组件 {handler_class.__name__} 必须指定名称")
+            logger.error(
+                "EventHandler 组件缺少名称",
+                event_code="component.event_handler.name_missing",
+                component_class=handler_class.__name__,
+            )
             return False
         if not isinstance(handler_info, EventHandlerInfo) or not issubclass(handler_class, BaseEventHandler):
-            logger.error(f"注册失败: {handler_name} 不是有效的EventHandler")
+            logger.error(
+                "EventHandler 组件类型无效",
+                event_code="component.event_handler.invalid",
+                handler_name=handler_name,
+            )
             return False
 
         self._event_handler_registry[handler_name] = handler_class
 
         if not handler_info.enabled:
-            logger.warning(f"EventHandler组件 {handler_name} 未启用")
+            logger.warning(
+                "EventHandler 组件未启用", event_code="component.event_handler.disabled", handler_name=handler_name
+            )
             return True  # 未启用，但是也是注册成功
 
         from .events_manager import events_manager  # 延迟导入防止循环导入问题
@@ -227,7 +271,9 @@ class ComponentRegistry:
             self._enabled_event_handlers[handler_name] = handler_class
             return True
         else:
-            logger.error(f"注册事件处理器 {handler_name} 失败")
+            logger.error(
+                "事件处理器注册失败", event_code="component.event_handler.register_failed", handler_name=handler_name
+            )
             return False
 
     # === 组件移除相关 ===
@@ -235,7 +281,12 @@ class ComponentRegistry:
     async def remove_component(self, component_name: str, component_type: ComponentType, plugin_name: str) -> bool:
         target_component_class = self.get_component_class(component_name, component_type)
         if not target_component_class:
-            logger.warning(f"组件 {component_name} 未注册，无法移除")
+            logger.warning(
+                "组件未注册，无法移除",
+                event_code="component.remove_not_registered",
+                component_name=component_name,
+                component_type=component_type.value,
+            )
             return False
         try:
             match component_type:
@@ -260,13 +311,30 @@ class ComponentRegistry:
             self._components.pop(namespaced_name)
             self._components_by_type[component_type].pop(component_name)
             self._components_classes.pop(namespaced_name)
-            logger.info(f"组件 {component_name} 已移除")
+            logger.info(
+                "组件已移除",
+                event_code="component.removed",
+                component_name=component_name,
+                component_type=component_type.value,
+                plugin_name=plugin_name,
+            )
             return True
         except KeyError as e:
-            logger.warning(f"移除组件时未找到组件: {component_name}, 发生错误: {e}")
+            logger.warning(
+                "组件移除时缺少注册项",
+                event_code="component.remove_key_missing",
+                component_name=component_name,
+                component_type=component_type.value,
+                missing_key=str(e),
+            )
             return False
-        except Exception as e:
-            logger.error(f"移除组件 {component_name} 时发生错误: {e}")
+        except Exception:
+            logger.exception(
+                "组件移除失败",
+                event_code="component.remove_failed",
+                component_name=component_name,
+                component_type=component_type.value,
+            )
             return False
 
     def remove_plugin_registry(self, plugin_name: str) -> bool:
@@ -279,10 +347,12 @@ class ComponentRegistry:
             bool: 是否成功移除
         """
         if plugin_name not in self._plugins:
-            logger.warning(f"插件 {plugin_name} 未注册，无法移除")
+            logger.warning(
+                "插件未注册，无法移除", event_code="plugin.registry.remove_not_registered", plugin_name=plugin_name
+            )
             return False
         del self._plugins[plugin_name]
-        logger.info(f"插件 {plugin_name} 已移除")
+        logger.info("插件注册信息已移除", event_code="plugin.registry.removed", plugin_name=plugin_name)
         return True
 
     # === 组件全局启用/禁用方法 ===
@@ -298,7 +368,12 @@ class ComponentRegistry:
         target_component_class = self.get_component_class(component_name, component_type)
         target_component_info = self.get_component_info(component_name, component_type)
         if not target_component_class or not target_component_info:
-            logger.warning(f"组件 {component_name} 未注册，无法启用")
+            logger.warning(
+                "组件未注册，无法启用",
+                event_code="component.enable_not_registered",
+                component_name=component_name,
+                component_type=component_type.value,
+            )
             return False
         target_component_info.enabled = True
         match component_type:
@@ -323,7 +398,12 @@ class ComponentRegistry:
         namespaced_name = f"{component_type}.{component_name}"
         self._components[namespaced_name].enabled = True
         self._components_by_type[component_type][component_name].enabled = True
-        logger.info(f"组件 {component_name} 已启用")
+        logger.info(
+            "组件已启用",
+            event_code="component.enabled",
+            component_name=component_name,
+            component_type=component_type.value,
+        )
         return True
 
     async def disable_component(self, component_name: str, component_type: ComponentType) -> bool:
@@ -337,7 +417,12 @@ class ComponentRegistry:
         target_component_class = self.get_component_class(component_name, component_type)
         target_component_info = self.get_component_info(component_name, component_type)
         if not target_component_class or not target_component_info:
-            logger.warning(f"组件 {component_name} 未注册，无法禁用")
+            logger.warning(
+                "组件未注册，无法禁用",
+                event_code="component.disable_not_registered",
+                component_name=component_name,
+                component_type=component_type.value,
+            )
             return False
         target_component_info.enabled = False
         try:
@@ -355,13 +440,29 @@ class ComponentRegistry:
                     await events_manager.unregister_event_subscriber(component_name)
             self._components[component_name].enabled = False
             self._components_by_type[component_type][component_name].enabled = False
-            logger.info(f"组件 {component_name} 已禁用")
+            logger.info(
+                "组件已禁用",
+                event_code="component.disabled",
+                component_name=component_name,
+                component_type=component_type.value,
+            )
             return True
         except KeyError as e:
-            logger.warning(f"禁用组件时未找到组件或已禁用: {component_name}, 发生错误: {e}")
+            logger.warning(
+                "组件禁用时缺少注册项",
+                event_code="component.disable_key_missing",
+                component_name=component_name,
+                component_type=component_type.value,
+                missing_key=str(e),
+            )
             return False
-        except Exception as e:
-            logger.error(f"禁用组件 {component_name} 时发生错误: {e}")
+        except Exception:
+            logger.exception(
+                "组件禁用失败",
+                event_code="component.disable_failed",
+                component_name=component_name,
+                component_type=component_type.value,
+            )
             return False
 
     # === 组件查询方法 ===
@@ -401,7 +502,11 @@ class ComponentRegistry:
             # 多个匹配，记录警告并返回第一个
             namespaces = [ns for ns, _, _ in candidates]
             logger.warning(
-                f"组件名称 '{component_name}' 在多个命名空间中存在: {namespaces}，使用第一个匹配项: {candidates[0][1]}"
+                "组件名称匹配多个命名空间",
+                event_code="component.lookup.ambiguous",
+                component_name=component_name,
+                namespaces=namespaces,
+                selected=candidates[0][1],
             )
             return candidates[0][2]
 
@@ -441,13 +546,22 @@ class ComponentRegistry:
         if len(candidates) == 1:
             # 只有一个匹配，直接返回
             _, full_name, cls = candidates[0]
-            logger.debug(f"自动解析组件: '{component_name}' -> '{full_name}'")
+            logger.debug(
+                "组件名称自动解析完成",
+                event_code="component.lookup.auto_resolved",
+                component_name=component_name,
+                namespaced_name=full_name,
+            )
             return cls
         elif len(candidates) > 1:
             # 多个匹配，记录警告并返回第一个
             namespaces = [ns for ns, _, _ in candidates]
             logger.warning(
-                f"组件名称 '{component_name}' 在多个命名空间中存在: {namespaces}，使用第一个匹配项: {candidates[0][1]}"
+                "组件类匹配多个命名空间",
+                event_code="component.class_lookup.ambiguous",
+                component_name=component_name,
+                namespaces=namespaces,
+                selected=candidates[0][1],
             )
             return candidates[0][2]
 
@@ -508,7 +622,14 @@ class ComponentRegistry:
         if not candidates:
             return None
         if len(candidates) > 1:
-            logger.warning(f"文本 '{text}' 匹配到多个命令模式: {candidates}，使用第一个匹配")
+            logger.warning(
+                "消息文本匹配多个命令模式，使用第一个匹配项",
+                event_code="component.command.match_ambiguous",
+                text_hash=hash_id(text),
+                text_length=len(text),
+                candidate_count=len(candidates),
+                selected_pattern=str(candidates[0].pattern),
+            )
         command_name = self._command_patterns[candidates[0]]
         command_info: CommandInfo = self.get_registered_command_info(command_name)  # type: ignore
         return (

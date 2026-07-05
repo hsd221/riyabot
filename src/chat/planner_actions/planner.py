@@ -21,8 +21,9 @@ from src.chat.utils.chat_message_builder import (
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
 from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.plugin_system.base.component_types import ActionInfo, ComponentType, ActionActivationType
+from src.plugin_system.base.component_types import ActionInfo, ComponentType, ActionActivationType, EventType
 from src.plugin_system.core.component_registry import component_registry
+from src.plugin_system.core.events_manager import events_manager
 from src.plugin_system.apis.message_api import translate_pid_to_description
 from src.common.person_stub import Person
 from src.memory.prompt_integration import build_memory_retrieval_prompt
@@ -386,6 +387,21 @@ class ActionPlanner:
             chat_content_block=chat_content_block,
             message_id_list=message_id_list,
         )
+        continue_flag, modified_message = await events_manager.handle_mai_events(
+            EventType.ON_PLAN, None, prompt, None, self.chat_id
+        )
+        if not continue_flag:
+            return [
+                ActionPlannerInfo(
+                    action_type="no_reply",
+                    reasoning="规划 hook 取消本轮规划",
+                    action_data={"loop_start_time": loop_start_time},
+                    action_message=None,
+                    available_actions=available_actions,
+                )
+            ]
+        if modified_message and modified_message._modify_flags.modify_llm_prompt:
+            prompt = modified_message.llm_prompt
         prompt_build_ms = (time.perf_counter() - prompt_build_start) * 1000
 
         # 调用LLM获取决策
@@ -573,9 +589,12 @@ class ActionPlanner:
             )
 
             return prompt, message_id_list
-        except Exception as e:
-            logger.error(f"构建 Planner 提示词时出错: {e}")
-            logger.error(traceback.format_exc())
+        except Exception:
+            logger.exception(
+                "构建 Planner 提示词失败",
+                event_code="planner.prompt_build_failed",
+                chat_id=self.chat_id,
+            )
             return "构建 Planner Prompt 时出错", []
 
     async def _build_planner_memory_context(

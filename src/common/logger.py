@@ -2,13 +2,15 @@
 
 import logging
 import json
+import hashlib
+import re
 import threading
 import time
 import structlog
 import tomlkit
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from datetime import datetime, timedelta
 
 # 创建logs目录
@@ -23,6 +25,62 @@ _ws_handler = None
 # 全局标志，防止重复初始化
 _logging_initialized = False
 _cleanup_task_started = False
+
+SENSITIVE_FIELD_NAMES = {
+    "api_key",
+    "apikey",
+    "access_token",
+    "auth_token",
+    "authorization",
+    "cookie",
+    "maibot_session",
+    "password",
+    "qdrant_api_key",
+    "secret",
+    "session",
+    "token",
+}
+PLAINTEXT_FIELD_NAMES = {
+    "content",
+    "message",
+    "plain_text",
+    "prompt",
+    "raw",
+    "raw_message",
+    "raw_response",
+    "reasoning",
+    "response",
+    "return_message",
+    "llm_prompt",
+    "llm_response",
+    "llm_response_content",
+    "llm_response_reasoning",
+    "text",
+}
+BASE64_RE = re.compile(r"(?i)(?:data:[\w/+.-]+;base64,)?[A-Za-z0-9+/]{80,}={0,2}")
+SECRET_INLINE_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|auth[_-]?token|authorization|password|secret|token)\b"
+    r"(\s*[:=]\s*)([^\s,;]+)"
+)
+TOKEN_LIKE_RE = re.compile(r"\b[A-Za-z0-9_\-]{24,}\.[A-Za-z0-9_\-]{12,}\.[A-Za-z0-9_\-]{12,}\b")
+LONG_HEX_RE = re.compile(r"\b[0-9a-fA-F]{48,}\b")
+SENSITIVE_EVENT_MARKERS = (
+    "llm prompt",
+    "llm response",
+    "prompt:",
+    "response:",
+    "replyer_prompt",
+    "traceback",
+    "完整提示词",
+    "原始提示词",
+    "最终提示词",
+    "生成提示词",
+    "提示词:",
+    "提示词：",
+    "原始响应",
+    "原始返回",
+    "完整错误信息",
+)
 
 
 def get_file_handler():
@@ -73,6 +131,119 @@ def get_ws_handler():
     return _ws_handler
 
 
+def _get_bool_config(key: str, default: bool = False) -> bool:
+    value = LOG_CONFIG.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _get_int_config(key: str, default: int) -> int:
+    try:
+        return int(LOG_CONFIG.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def hash_id(value: Any, *, length: int = 12) -> str:
+    """返回稳定短哈希，用于在日志中关联敏感标识符。"""
+    if value is None:
+        return ""
+    digest = hashlib.sha256(str(value).encode("utf-8", errors="ignore")).hexdigest()
+    return digest[:length]
+
+
+def redact_secret(value: Any, *, visible_prefix: int = 4, visible_suffix: int = 4) -> str:
+    """脱敏 token、API key 等密钥类字段。"""
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= visible_prefix + visible_suffix:
+        return "***"
+    return f"{text[:visible_prefix]}***{text[-visible_suffix:]}"
+
+
+def summarize_text(value: Any, *, max_length: Optional[int] = None) -> str:
+    """将长文本压缩为可检索的日志摘要。"""
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\\r").replace("\n", "\\n")
+    if max_length is None:
+        max_length = _get_int_config("max_debug_text_length", 500)
+    if len(text) <= max_length:
+        return text
+    return f"{text[:max_length]}...<truncated chars={len(text)} sha256={hash_id(text, length=16)}>"
+
+
+def redact_text(value: Any, *, allow_plaintext: bool = False, max_length: Optional[int] = None) -> str:
+    """脱敏日志文本，保护密钥、base64 和过长内容。"""
+    if value is None:
+        return ""
+    text = str(value)
+    text = SECRET_INLINE_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}{redact_secret(match.group(3))}", text)
+    text = TOKEN_LIKE_RE.sub(lambda match: redact_secret(match.group(0)), text)
+    text = LONG_HEX_RE.sub(lambda match: f"<hex sha256={hash_id(match.group(0), length=16)}>", text)
+    text = BASE64_RE.sub(
+        lambda match: f"<base64 chars={len(match.group(0))} sha256={hash_id(match.group(0), length=16)}>", text
+    )
+    if allow_plaintext:
+        return summarize_text(text, max_length=max_length)
+    return summarize_text(text, max_length=_get_int_config("max_log_field_length", 2000))
+
+
+def _normalize_field_name(key: Any) -> str:
+    return str(key).lower().replace("-", "_")
+
+
+def _sanitize_value(key: str, value: Any, *, allow_plaintext: bool) -> Any:
+    normalized_key = _normalize_field_name(key)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if normalized_key in SENSITIVE_FIELD_NAMES or any(part in normalized_key for part in SENSITIVE_FIELD_NAMES):
+        return redact_secret(value)
+    if normalized_key in PLAINTEXT_FIELD_NAMES and not allow_plaintext:
+        text = str(value)
+        return f"<text chars={len(text)} sha256={hash_id(text, length=16)}>"
+    if isinstance(value, str):
+        if normalized_key == "event" and not allow_plaintext:
+            value_lower = value.lower()
+            has_sensitive_marker = any(marker in value_lower or marker in value for marker in SENSITIVE_EVENT_MARKERS)
+            looks_like_large_payload = len(value) > 500 and ("\n" in value or "{" in value or "[" in value)
+            if has_sensitive_marker or looks_like_large_payload:
+                return f"<event chars={len(value)} sha256={hash_id(value, length=16)}>"
+        return redact_text(value, allow_plaintext=allow_plaintext)
+    if isinstance(value, Path):
+        return summarize_text(str(value), max_length=_get_int_config("max_log_field_length", 2000))
+    if isinstance(value, (list, tuple, set)):
+        max_items = 20
+        sanitized = [_sanitize_value(key, item, allow_plaintext=allow_plaintext) for item in list(value)[:max_items]]
+        if len(value) > max_items:
+            sanitized.append(f"<truncated items={len(value)}>")
+        return sanitized
+    if isinstance(value, dict):
+        max_items = 50
+        sanitized_dict = {}
+        for index, (child_key, child_value) in enumerate(value.items()):
+            if index >= max_items:
+                sanitized_dict["<truncated>"] = f"items={len(value)}"
+                break
+            sanitized_dict[child_key] = _sanitize_value(str(child_key), child_value, allow_plaintext=allow_plaintext)
+        return sanitized_dict
+    return redact_text(value, allow_plaintext=allow_plaintext)
+
+
+def sanitize_log_event(logger, method_name, event_dict):
+    """统一脱敏、截断日志字段，兼容旧的字符串日志和新的结构化日志。"""
+    allow_plaintext = method_name == "debug" and _get_bool_config("debug_plaintext_logging", False)
+    for key in list(event_dict.keys()):
+        if key in {"exc_info", "stack_info"}:
+            continue
+        event_dict[key] = _sanitize_value(key, event_dict[key], allow_plaintext=allow_plaintext)
+    return event_dict
+
+
 def initialize_ws_handler(loop):
     """初始化 WebSocket handler 的事件循环
 
@@ -89,7 +260,7 @@ def initialize_ws_handler(loop):
     root_logger = logging.getLogger()
     if handler not in root_logger.handlers:
         root_logger.addHandler(handler)
-        print("[日志系统] ✅ WebSocket 日志推送已启用")
+        print("[日志系统] WebSocket 日志推送已启用")
 
 
 class TimestampedFileHandler(logging.Handler):
@@ -296,6 +467,9 @@ def load_log_config():  # sourcery skip: use-contextlib-suppress
         "log_level": "INFO",  # 全局日志级别（向下兼容）
         "console_log_level": "INFO",  # 控制台日志级别
         "file_log_level": "DEBUG",  # 文件日志级别
+        "debug_plaintext_logging": False,  # DEBUG 级别是否允许截断明文
+        "max_debug_text_length": 500,  # DEBUG 明文最大长度
+        "max_log_field_length": 2000,  # 普通日志字段最大长度
         "suppress_libraries": [
             "faiss",
             "httpx",
@@ -815,6 +989,7 @@ def configure_structlog():
                 ]
             ),
             convert_pathname_to_module,
+            sanitize_log_event,
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
             structlog.processors.TimeStamper(fmt=get_timestamp_format(), utc=False),
@@ -843,6 +1018,7 @@ file_formatter = structlog.stdlib.ProcessorFormatter(
             parameters=[structlog.processors.CallsiteParameter.PATHNAME, structlog.processors.CallsiteParameter.LINENO]
         ),
         convert_pathname_to_module,
+        sanitize_log_event,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ],
@@ -856,6 +1032,7 @@ console_formatter = structlog.stdlib.ProcessorFormatter(
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt=get_timestamp_format(), utc=False),
+        sanitize_log_event,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ],
