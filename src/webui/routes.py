@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Header, Response, Request, Cookie,
 from pydantic import BaseModel, Field
 from typing import Optional
 from src.common.logger import get_logger
+from src.common.agreement import are_agreements_confirmed, confirm_agreements, get_agreement_status
 from .token_manager import get_token_manager
 from .auth import set_auth_cookie, clear_auth_cookie
 from .rate_limiter import get_rate_limiter, check_auth_rate_limit
@@ -94,6 +95,44 @@ class FirstSetupStatusResponse(BaseModel):
 
     is_first_setup: bool = Field(..., description="是否为首次配置")
     message: str = Field(..., description="状态消息")
+    agreement_required: bool = Field(False, description="是否需要确认 EULA 或隐私条款")
+    created_config_files: list[str] = Field(default_factory=list, description="本次启动新创建的配置文件")
+    model_config_required: bool = Field(False, description="是否需要补全模型配置")
+    model_config_message: str = Field("", description="模型配置待补全原因")
+
+
+class AgreementDocumentResponse(BaseModel):
+    """协议文件状态响应"""
+
+    title: str = Field(..., description="协议标题")
+    file_name: str = Field(..., description="协议文件名")
+    hash: str = Field(..., description="当前协议内容哈希")
+    confirmed: bool = Field(..., description="是否已确认")
+    environment_confirmed: bool = Field(False, description="是否由环境变量确认")
+    content: str = Field("", description="协议内容")
+
+
+class AgreementStatusResponse(BaseModel):
+    """协议确认状态响应"""
+
+    agreement_required: bool = Field(..., description="是否需要确认协议")
+    eula: AgreementDocumentResponse = Field(..., description="EULA 状态")
+    privacy: AgreementDocumentResponse = Field(..., description="隐私条款状态")
+
+
+class AgreementConfirmRequest(BaseModel):
+    """协议确认请求"""
+
+    eula_hash: str = Field(..., description="用户确认时看到的 EULA 哈希")
+    privacy_hash: str = Field(..., description="用户确认时看到的隐私条款哈希")
+
+
+class AgreementConfirmResponse(BaseModel):
+    """协议确认响应"""
+
+    success: bool = Field(..., description="是否成功")
+    message: str = Field(..., description="结果消息")
+    agreement: AgreementStatusResponse = Field(..., description="更新后的协议状态")
 
 
 class CompleteSetupResponse(BaseModel):
@@ -113,7 +152,41 @@ class ResetSetupResponse(BaseModel):
 @router.get("/health")
 async def health_check():
     """健康检查"""
-    return {"status": "healthy", "service": "MaiBot WebUI"}
+    return {"status": "healthy", "service": "RiyaBot WebUI"}
+
+
+def _build_agreement_status_response(include_content: bool = True) -> AgreementStatusResponse:
+    """构造协议状态响应。"""
+    status = get_agreement_status(include_content=include_content)
+
+    def to_response(key: str) -> AgreementDocumentResponse:
+        document = status[key]
+        return AgreementDocumentResponse(
+            title=document.title,
+            file_name=document.file_name,
+            hash=document.hash,
+            confirmed=document.confirmed,
+            environment_confirmed=document.environment_confirmed,
+            content=document.content,
+        )
+
+    return AgreementStatusResponse(
+        agreement_required=not all(document.confirmed for document in status.values()),
+        eula=to_response("eula"),
+        privacy=to_response("privacy"),
+    )
+
+
+def _get_model_config_readiness_error() -> str:
+    """读取磁盘上的模型配置并返回未完成原因。"""
+    from src.config.config import CONFIG_DIR, api_ada_load_config
+    import os
+
+    try:
+        current_model_config = api_ada_load_config(os.path.join(CONFIG_DIR, "model_config.toml"))
+        return current_model_config.get_runtime_readiness_error() or ""
+    except Exception as e:
+        return f"模型配置文件解析失败: {e}"
 
 
 @router.post("/auth/verify", response_model=TokenVerifyResponse)
@@ -146,7 +219,11 @@ async def verify_token(
             # 设置 HttpOnly Cookie（传入 request 以检测协议）
             set_auth_cookie(response, request_body.token, request)
             # 同时返回首次配置状态，避免额外请求
-            is_first_setup = token_manager.is_first_setup()
+            is_first_setup = (
+                token_manager.is_first_setup()
+                or not are_agreements_confirmed()
+                or bool(_get_model_config_readiness_error())
+            )
             return TokenVerifyResponse(valid=True, message="Token 验证成功", is_first_setup=is_first_setup)
         else:
             # 记录失败尝试
@@ -365,14 +442,93 @@ async def get_setup_status(
             raise HTTPException(status_code=401, detail="Token 无效")
 
         # 检查是否为首次配置
-        is_first = token_manager.is_first_setup()
+        from src.config.config import get_created_config_files
 
-        return FirstSetupStatusResponse(is_first_setup=is_first, message="首次配置" if is_first else "已完成配置")
+        agreement_required = not are_agreements_confirmed()
+        created_config_files = get_created_config_files()
+        model_config_message = _get_model_config_readiness_error()
+        model_config_required = bool(model_config_message)
+        is_first = token_manager.is_first_setup() or agreement_required or bool(created_config_files) or model_config_required
+
+        return FirstSetupStatusResponse(
+            is_first_setup=is_first,
+            message="首次配置" if is_first else "已完成配置",
+            agreement_required=agreement_required,
+            created_config_files=created_config_files,
+            model_config_required=model_config_required,
+            model_config_message=model_config_message,
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"获取配置状态失败: {e}")
         raise HTTPException(status_code=500, detail="获取配置状态失败") from e
+
+
+@router.get("/setup/agreement", response_model=AgreementStatusResponse)
+async def get_setup_agreement(
+    request: Request,
+    maibot_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+):
+    """获取 EULA 和隐私条款内容及确认状态。"""
+    try:
+        current_token = None
+        if maibot_session:
+            current_token = maibot_session
+        elif authorization and authorization.startswith("Bearer "):
+            current_token = authorization.replace("Bearer ", "")
+
+        if not current_token:
+            raise HTTPException(status_code=401, detail="未提供有效的认证信息")
+
+        token_manager = get_token_manager()
+        if not token_manager.verify_token(current_token):
+            raise HTTPException(status_code=401, detail="Token 无效")
+
+        return _build_agreement_status_response(include_content=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取协议状态失败: {e}")
+        raise HTTPException(status_code=500, detail="获取协议状态失败") from e
+
+
+@router.post("/setup/agreement/confirm", response_model=AgreementConfirmResponse)
+async def confirm_setup_agreement(
+    request_body: AgreementConfirmRequest,
+    request: Request,
+    maibot_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+):
+    """确认当前 EULA 和隐私条款。"""
+    try:
+        current_token = None
+        if maibot_session:
+            current_token = maibot_session
+        elif authorization and authorization.startswith("Bearer "):
+            current_token = authorization.replace("Bearer ", "")
+
+        if not current_token:
+            raise HTTPException(status_code=401, detail="未提供有效的认证信息")
+
+        token_manager = get_token_manager()
+        if not token_manager.verify_token(current_token):
+            raise HTTPException(status_code=401, detail="Token 无效")
+
+        confirm_agreements(request_body.eula_hash, request_body.privacy_hash)
+        return AgreementConfirmResponse(
+            success=True,
+            message="协议已确认",
+            agreement=_build_agreement_status_response(include_content=True),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"确认协议失败: {e}")
+        raise HTTPException(status_code=500, detail="确认协议失败") from e
 
 
 @router.post("/setup/complete", response_model=CompleteSetupResponse)
@@ -406,6 +562,14 @@ async def complete_setup(
 
         if not token_manager.verify_token(current_token):
             raise HTTPException(status_code=401, detail="Token 无效")
+
+        if not are_agreements_confirmed():
+            raise HTTPException(status_code=400, detail="请先阅读并同意 EULA 和隐私条款")
+
+        model_config_message = _get_model_config_readiness_error()
+
+        if model_config_message:
+            raise HTTPException(status_code=400, detail=model_config_message)
 
         # 标记配置完成
         success = token_manager.mark_setup_completed()

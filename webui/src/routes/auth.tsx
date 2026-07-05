@@ -28,6 +28,7 @@ import { WavesBackground } from '@/components/waves-background'
 import { useAnimation } from '@/hooks/use-animation'
 import { useTheme } from '@/components/use-theme'
 import { checkAuthStatus } from '@/lib/fetch-with-auth'
+import { checkFirstSetup } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
 import { APP_FULL_NAME } from '@/lib/version'
 
@@ -46,7 +47,8 @@ export function AuthPage() {
       try {
         const isAuth = await checkAuthStatus()
         if (isAuth) {
-          navigate({ to: '/' })
+          const needsSetup = await checkFirstSetup()
+          navigate({ to: needsSetup ? '/setup' : '/' })
         }
       } catch {
         // 忽略错误，保持在登录页

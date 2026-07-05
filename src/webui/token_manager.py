@@ -296,6 +296,7 @@ class TokenManager:
             config = self._load_config()
             config["first_setup_completed"] = True
             config["setup_completed_at"] = self._get_current_timestamp()
+            config.pop("setup_required_reason", None)
             self._save_config(config)
             logger.info("WebUI 首次配置已标记为完成", event_code="webui.setup.completed")
             return True

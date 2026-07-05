@@ -46,12 +46,12 @@ class StatusResponse(BaseModel):
 
 
 @router.post("/restart", response_model=RestartResponse)
-async def restart_maibot(_auth: bool = Depends(require_auth)):
+async def restart_riyabot(_auth: bool = Depends(require_auth)):
     """
-    重启麦麦主程序
+    重启璃夜主程序
 
     请求重启当前进程，配置更改将在重启后生效。
-    注意：此操作会使麦麦暂时离线。
+    注意：此操作会使璃夜暂时离线。
     """
     import asyncio
 
@@ -71,17 +71,17 @@ async def restart_maibot(_auth: bool = Depends(require_auth)):
         asyncio.create_task(delayed_restart())
 
         # 立即返回成功响应
-        return RestartResponse(success=True, message="麦麦正在重启中...")
+        return RestartResponse(success=True, message="璃夜正在重启中...")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重启失败: {str(e)}") from e
 
 
 @router.get("/status", response_model=StatusResponse)
-async def get_maibot_status(_auth: bool = Depends(require_auth)):
+async def get_riyabot_status(_auth: bool = Depends(require_auth)):
     """
-    获取麦麦运行状态
+    获取璃夜运行状态
 
-    返回麦麦的运行状态、运行时长和版本信息。
+    返回璃夜的运行状态、运行时长和版本信息。
     """
     try:
         uptime = time.time() - _start_time

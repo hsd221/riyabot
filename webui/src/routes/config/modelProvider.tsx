@@ -55,7 +55,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Pencil, Trash2, Save, Eye, EyeOff, Copy, Search, Info, Power, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Check, ChevronsUpDown, Zap, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import { getModelConfig, updateModelConfig, updateModelConfigSection, testProviderConnection, type TestConnectionResult } from '@/lib/config-api'
-import { restartMaiBot } from '@/lib/system-api'
+import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useTour } from '@/components/tour'
@@ -214,7 +214,7 @@ export function ModelProviderConfigPage() {
     try {
       setRestarting(true)
       // 发送重启请求（不等待响应，因为服务器会立即关闭）
-      restartMaiBot().catch(() => {
+      restartRiyaBot().catch(() => {
         // 忽略网络错误，这是预期行为
       })
       // 立即显示遮罩层并开始状态检测

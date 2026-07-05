@@ -9,8 +9,9 @@ import {
   User,
   Smile,
   Settings,
-  Key,
   Loader2,
+  ShieldCheck,
+  Server,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -31,34 +32,34 @@ import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/version'
 import { useToast } from '@/hooks/use-toast'
 import type {
+  AgreementStatus,
   SetupStep,
   BotBasicConfig,
   PersonalityConfig,
   EmojiConfig,
   OtherBasicConfig,
-  SiliconFlowConfig,
 } from './setup/types'
 import {
+  AgreementForm,
   BotBasicForm,
   PersonalityForm,
   EmojiForm,
   OtherBasicForm,
-  SiliconFlowForm,
 } from './setup/StepForms'
 import {
+  loadAgreementStatus,
   loadBotBasicConfig,
   loadPersonalityConfig,
   loadEmojiConfig,
   loadOtherBasicConfig,
-  loadSiliconFlowConfig,
   saveBotBasicConfig,
   savePersonalityConfig,
   saveEmojiConfig,
   saveOtherBasicConfig,
-  saveSiliconFlowConfig,
+  confirmAgreement,
   completeSetup,
 } from './setup/api'
-import { restartMaiBot, getMaiBotStatus } from '@/lib/system-api'
+import { restartRiyaBot, getRiyaBotStatus } from '@/lib/system-api'
 
 export function SetupPage() {
   const navigate = useNavigate()
@@ -68,14 +69,18 @@ export function SetupPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // 步骤1：Bot基础信息
+  const [agreementStatus, setAgreementStatus] = useState<AgreementStatus | null>(null)
+  const [acceptedEula, setAcceptedEula] = useState(false)
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false)
+
+  // Bot基础信息
   const [botBasic, setBotBasic] = useState<BotBasicConfig>({
     qq_account: 0,
     nickname: '',
     alias_names: [],
   })
 
-  // 步骤2：人格配置
+  // 人格配置
   const [personality, setPersonality] = useState<PersonalityConfig>({
     personality: '是一个女大学生，现在在读大二，会刷贴吧。',
     reply_style:
@@ -84,7 +89,7 @@ export function SetupPage() {
       '1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用\n2.如果相同的内容已经被执行，请不要重复执行\n3.请控制你的发言频率，不要太过频繁的发言\n4.如果有人对你感到厌烦，请减少回复\n5.如果有人对你进行攻击，或者情绪激动，请你以合适的方法应对',
   })
 
-  // 步骤3：表情包配置
+  // 表情包配置
   const [emoji, setEmoji] = useState<EmojiConfig>({
     emoji_chance: 0.4,
     max_reg_num: 40,
@@ -95,15 +100,10 @@ export function SetupPage() {
     filtration_prompt: '符合公序良俗',
   })
 
-  // 步骤4：其他基础配置
+  // 其他基础配置
   const [otherBasic, setOtherBasic] = useState<OtherBasicConfig>({
     enable_tool: true,
     all_global_jargon: true,
-  })
-
-  // 步骤5：硅基流动API配置
-  const [siliconFlow, setSiliconFlow] = useState<SiliconFlowConfig>({
-    api_key: '',
   })
 
   // 重启相关状态
@@ -111,6 +111,12 @@ export function SetupPage() {
   const [restartProgress, setRestartProgress] = useState('')
 
   const steps: SetupStep[] = [
+    {
+      id: 'agreement',
+      title: '协议确认',
+      description: '阅读并同意许可协议和隐私条款',
+      icon: ShieldCheck,
+    },
     {
       id: 'bot-basic',
       title: 'Bot基础',
@@ -136,10 +142,10 @@ export function SetupPage() {
       icon: Settings,
     },
     {
-      id: 'siliconflow',
-      title: 'API配置',
-      description: '配置硅基流动API密钥',
-      icon: Key,
+      id: 'model-config',
+      title: '模型配置',
+      description: '添加模型厂商、模型和任务分配',
+      icon: Server,
     },
   ]
 
@@ -152,19 +158,21 @@ export function SetupPage() {
         setIsLoading(true)
 
         // 并行加载所有配置
-        const [bot, personality, emoji, other, silicon] = await Promise.all([
+        const [agreement, bot, personality, emoji, other] = await Promise.all([
+          loadAgreementStatus(),
           loadBotBasicConfig(),
           loadPersonalityConfig(),
           loadEmojiConfig(),
           loadOtherBasicConfig(),
-          loadSiliconFlowConfig(),
         ])
 
+        setAgreementStatus(agreement)
+        setAcceptedEula(agreement.eula.confirmed)
+        setAcceptedPrivacy(agreement.privacy.confirmed)
         setBotBasic(bot)
         setPersonality(personality)
         setEmoji(emoji)
         setOtherBasic(other)
-        setSiliconFlow(silicon)
       } catch (error) {
         toast({
           title: '加载配置失败',
@@ -186,22 +194,45 @@ export function SetupPage() {
   const saveCurrentStep = async () => {
     setIsSaving(true)
     try {
-      switch (currentStep) {
-        case 0: // Bot基础
+      const step = steps[currentStep]
+
+      switch (step.id) {
+        case 'agreement':
+          if (!agreementStatus) {
+            throw new Error('协议状态尚未加载')
+          }
+
+          if (agreementStatus.eula.confirmed && agreementStatus.privacy.confirmed) {
+            return true
+          }
+
+          if (!acceptedEula || !acceptedPrivacy) {
+            toast({
+              title: '请先确认协议',
+              description: '需要同时同意最终用户许可协议和隐私条款后才能继续',
+              variant: 'destructive',
+            })
+            return false
+          }
+
+          setAgreementStatus(
+            await confirmAgreement(agreementStatus.eula.hash, agreementStatus.privacy.hash)
+          )
+          break
+        case 'bot-basic':
           await saveBotBasicConfig(botBasic)
           break
-        case 1: // 人格配置
+        case 'personality':
           await savePersonalityConfig(personality)
           break
-        case 2: // 表情包
+        case 'emoji':
           await saveEmojiConfig(emoji)
           break
-        case 3: // 其他设置
+        case 'other':
           await saveOtherBasicConfig(otherBasic)
           break
-        case 4: // 硅基流动API
-          await saveSiliconFlowConfig(siliconFlow)
-          break
+        case 'model-config':
+          return true
       }
 
       toast({
@@ -243,8 +274,8 @@ export function SetupPage() {
     setIsRestarting(true)
 
     try {
-      // 1. 保存最后一步的配置(硅基流动API Key)
-      setRestartProgress('正在保存API配置...')
+      // 1. 保存最后一步的配置
+      setRestartProgress('正在保存基础配置...')
       const saved = await saveCurrentStep()
       if (!saved) {
         setIsCompleting(false)
@@ -258,7 +289,7 @@ export function SetupPage() {
 
       // 3. 触发璃夜重启
       setRestartProgress('正在重启璃夜...')
-      await restartMaiBot()
+      await restartRiyaBot()
 
       toast({
         title: '配置完成',
@@ -275,7 +306,7 @@ export function SetupPage() {
         await new Promise(resolve => setTimeout(resolve, 1000)) // 每秒检查一次
         
         try {
-          const status = await getMaiBotStatus()
+          const status = await getRiyaBotStatus()
           if (status.running) {
             restartSuccess = true
             setRestartProgress('重启成功！正在跳转...')
@@ -308,6 +339,16 @@ export function SetupPage() {
 
   const handleSkip = async () => {
     try {
+      if (agreementStatus?.agreement_required) {
+        setCurrentStep(0)
+        toast({
+          title: '请先确认协议',
+          description: '协议确认完成后才可以跳过配置向导',
+          variant: 'destructive',
+        })
+        return
+      }
+
       await completeSetup()
       navigate({ to: '/' })
     } catch (error) {
@@ -321,19 +362,63 @@ export function SetupPage() {
 
   // 渲染当前步骤的表单
   const renderStepForm = () => {
-    switch (currentStep) {
-      case 0:
+    switch (steps[currentStep].id) {
+      case 'agreement':
+        return (
+          <AgreementForm
+            status={agreementStatus}
+            acceptedEula={acceptedEula}
+            acceptedPrivacy={acceptedPrivacy}
+            onAcceptedEulaChange={setAcceptedEula}
+            onAcceptedPrivacyChange={setAcceptedPrivacy}
+          />
+        )
+      case 'bot-basic':
         return <BotBasicForm config={botBasic} onChange={setBotBasic} />
-      case 1:
+      case 'personality':
         return (
           <PersonalityForm config={personality} onChange={setPersonality} />
         )
-      case 2:
+      case 'emoji':
         return <EmojiForm config={emoji} onChange={setEmoji} />
-      case 3:
+      case 'other':
         return <OtherBasicForm config={otherBasic} onChange={setOtherBasic} />
-      case 4:
-        return <SiliconFlowForm config={siliconFlow} onChange={setSiliconFlow} />
+      case 'model-config':
+        return (
+          <div className="space-y-6">
+            <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+              模型配置不再预设任何厂商。请按自己的服务商和模型名称完成配置后，再返回此向导完成初始化。
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto justify-start p-4 text-left"
+                onClick={() => navigate({ to: '/config/modelProvider' })}
+              >
+                <div>
+                  <div className="font-medium">AI模型厂商配置</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    添加 API Base URL、Key 和客户端类型
+                  </div>
+                </div>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto justify-start p-4 text-left"
+                onClick={() => navigate({ to: '/config/model' })}
+              >
+                <div>
+                  <div className="font-medium">模型管理与分配</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    添加模型并分配给回复、规划、工具等任务
+                  </div>
+                </div>
+              </Button>
+            </div>
+          </div>
+        )
       default:
         return null
     }

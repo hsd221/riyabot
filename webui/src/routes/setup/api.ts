@@ -2,12 +2,49 @@
 
 import { fetchWithAuth, getAuthHeaders } from '@/lib/fetch-with-auth'
 import type {
+  AgreementStatus,
   BotBasicConfig,
   PersonalityConfig,
   EmojiConfig,
   OtherBasicConfig,
-  SiliconFlowConfig,
 } from './types'
+
+// ===== 协议确认 =====
+
+export async function loadAgreementStatus(): Promise<AgreementStatus> {
+  const response = await fetchWithAuth('/api/webui/setup/agreement', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error('读取协议状态失败')
+  }
+
+  return await response.json()
+}
+
+export async function confirmAgreement(
+  eulaHash: string,
+  privacyHash: string
+): Promise<AgreementStatus> {
+  const response = await fetchWithAuth('/api/webui/setup/agreement/confirm', {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      eula_hash: eulaHash,
+      privacy_hash: privacyHash,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '确认协议失败')
+  }
+
+  const data = await response.json()
+  return data.agreement
+}
 
 // ===== 读取配置 =====
 
@@ -101,31 +138,6 @@ export async function loadOtherBasicConfig(): Promise<OtherBasicConfig> {
   }
 }
 
-// 读取硅基流动API配置
-export async function loadSiliconFlowConfig(): Promise<SiliconFlowConfig> {
-  const response = await fetchWithAuth('/api/webui/config/model', {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  })
-
-  if (!response.ok) {
-    throw new Error('读取模型配置失败')
-  }
-
-  const data = await response.json()
-  const modelConfig = data.config
-
-  // 获取SiliconFlow提供商的API Key
-  const apiProviders = modelConfig.api_providers || []
-  const siliconFlowProvider = apiProviders.find(
-    (p: Record<string, unknown>) => p.name === 'SiliconFlow'
-  )
-
-  return {
-    api_key: siliconFlowProvider?.api_key || '',
-  }
-}
-
 // ===== 保存配置 =====
 
 // 保存Bot基础配置
@@ -212,75 +224,11 @@ export async function saveOtherBasicConfig(config: OtherBasicConfig) {
   return { success: true }
 }
 
-// 保存硅基流动API配置
-export async function saveSiliconFlowConfig(config: SiliconFlowConfig) {
-  // 1. 读取现有配置
-  const response = await fetchWithAuth('/api/webui/config/model', {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  })
-
-  if (!response.ok) {
-    throw new Error('读取模型配置失败')
-  }
-
-  const currentModelConfig = await response.json()
-  const modelConfig = currentModelConfig.config
-
-  // 2. 更新SiliconFlow提供商的API Key
-  const apiProviders = modelConfig.api_providers || []
-  const siliconFlowIndex = apiProviders.findIndex(
-    (p: Record<string, unknown>) => p.name === 'SiliconFlow'
-  )
-
-  if (siliconFlowIndex >= 0) {
-    // 更新现有提供商的API Key
-    apiProviders[siliconFlowIndex] = {
-      ...apiProviders[siliconFlowIndex],
-      api_key: config.api_key,
-    }
-  } else {
-    // 如果不存在,创建新的SiliconFlow提供商
-    apiProviders.push({
-      name: 'SiliconFlow',
-      base_url: 'https://api.siliconflow.cn/v1',
-      api_key: config.api_key,
-      client_type: 'openai',
-      max_retry: 3,
-      timeout: 120,
-      retry_interval: 5,
-    })
-  }
-
-  // 3. 保存更新后的配置
-  const updatedConfig = {
-    ...modelConfig,
-    api_providers: apiProviders,
-  }
-
-  const saveResponse = await fetchWithAuth('/api/webui/config/model', {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(updatedConfig),
-  })
-
-  if (!saveResponse.ok) {
-    const error = await saveResponse.json()
-    throw new Error(error.detail || '保存模型配置失败')
-  }
-
-  return await saveResponse.json()
-}
-
 // 标记设置完成
 export async function completeSetup() {
-  const token = localStorage.getItem('access-token')
-
   const response = await fetchWithAuth('/api/webui/setup/complete', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: getAuthHeaders(),
   })
 
   if (!response.ok) {

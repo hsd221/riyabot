@@ -30,7 +30,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Save, Power, Code2, Layout } from 'lucide-react'
 import { getBotConfig, updateBotConfig, getBotConfigRaw, updateBotConfigRaw } from '@/lib/config-api'
-import { restartMaiBot } from '@/lib/system-api'
+import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Info } from 'lucide-react'
@@ -459,7 +459,7 @@ export function BotConfigPage() {
     try {
       setRestarting(true)
       // 发送重启请求（不等待响应，因为服务器会立即关闭）
-      restartMaiBot().catch(() => {
+      restartRiyaBot().catch(() => {
         // 忽略网络错误，这是预期行为
       })
       // 立即显示遮罩层并开始状态检测

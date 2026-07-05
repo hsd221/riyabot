@@ -9,9 +9,10 @@ from src.chat.utils.statistic import OnlineTimeRecordTask, StatisticOutputTask
 # from src.chat.utils.token_statistics import TokenStatisticsTask
 from src.chat.emoji_system.emoji_manager import get_emoji_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.config.config import global_config
+from src.config.config import global_config, get_created_config_files, model_config
 from src.chat.message_receive.bot import chat_bot
 from src.common.logger import get_logger
+from src.common.agreement import are_agreements_confirmed
 from src.common.prompt_manager import prompt_manager
 from src.common.server import get_global_server, Server
 from rich.traceback import install
@@ -38,17 +39,49 @@ class MainSystem:
         self.app: MessageServer = get_global_api()
         self.server: Server = get_global_server()
         self.webui_server = None  # 独立的 WebUI 服务器
+        self.setup_required = self._is_setup_required()
 
         # 设置独立的 WebUI 服务器
         self._setup_webui_server()
+
+    def _is_setup_required(self) -> bool:
+        """判断是否需要先进入 WebUI 首次配置向导。"""
+        try:
+            from src.webui.token_manager import get_token_manager
+
+            created_config_files = get_created_config_files()
+            agreements_pending = not are_agreements_confirmed()
+            first_setup = get_token_manager().is_first_setup()
+            model_config_error = model_config.get_runtime_readiness_error()
+            setup_required = agreements_pending or first_setup or bool(created_config_files) or bool(model_config_error)
+
+            if setup_required:
+                logger.warning(
+                    "首次配置未完成，将仅启动 WebUI 向导",
+                    event_code="system.setup.required",
+                    agreements_pending=agreements_pending,
+                    first_setup=first_setup,
+                    created_config_files=created_config_files,
+                    model_config_error=model_config_error,
+                )
+
+            return setup_required
+        except Exception:
+            logger.exception("首次配置状态检测失败，将仅启动 WebUI", event_code="system.setup.check_failed")
+            return True
 
     def _setup_webui_server(self):
         """设置独立的 WebUI 服务器"""
         from src.config.config import global_config
 
-        if not global_config.webui.enabled:
+        if not global_config.webui.enabled and not self.setup_required:
             logger.info("WebUI 已禁用", event_code="webui.disabled")
             return
+        if not global_config.webui.enabled and self.setup_required:
+            logger.warning(
+                "首次配置未完成，已临时忽略 webui.enabled=false 并启动 WebUI",
+                event_code="webui.setup.force_enabled",
+            )
 
         try:
             from src.webui.webui_server import get_webui_server
@@ -60,6 +93,10 @@ class MainSystem:
 
     async def initialize(self):
         """初始化系统组件"""
+        if self.setup_required:
+            logger.info("跳过主系统组件初始化，等待 WebUI 首次配置完成", event_code="system.setup.init_skipped")
+            return
+
         logger.info("系统初始化开始", event_code="system.initialize.started", bot_name=global_config.bot.nickname)
 
         # 其他初始化任务
@@ -251,6 +288,17 @@ class MainSystem:
     async def schedule_tasks(self):
         """调度定时任务"""
         try:
+            if self.setup_required:
+                if self.webui_server:
+                    logger.info("首次配置模式下启动 WebUI", event_code="system.setup.webui_only")
+                    await self.webui_server.start()
+                else:
+                    logger.error(
+                        "首次配置未完成且 WebUI 未启用，无法继续",
+                        event_code="system.setup.webui_unavailable",
+                    )
+                return
+
             tasks = [
                 get_emoji_manager().start_periodic_check_register(),
                 self.app.run(),

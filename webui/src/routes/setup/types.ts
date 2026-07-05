@@ -7,6 +7,21 @@ export interface SetupStep {
   icon: React.ComponentType<{ className?: string }>
 }
 
+export interface AgreementDocument {
+  title: string
+  file_name: string
+  hash: string
+  confirmed: boolean
+  environment_confirmed: boolean
+  content: string
+}
+
+export interface AgreementStatus {
+  agreement_required: boolean
+  eula: AgreementDocument
+  privacy: AgreementDocument
+}
+
 // 步骤1：Bot基础信息
 export interface BotBasicConfig {
   qq_account: number
@@ -36,9 +51,4 @@ export interface EmojiConfig {
 export interface OtherBasicConfig {
   enable_tool: boolean
   all_global_jargon: boolean
-}
-
-// 步骤5：硅基流动API配置
-export interface SiliconFlowConfig {
-  api_key: string
 }

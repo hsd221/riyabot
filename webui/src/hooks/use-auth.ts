@@ -14,6 +14,20 @@ export function useAuthGuard() {
         const isAuth = await checkAuthStatus()
         if (!cancelled && !isAuth) {
           navigate({ to: '/auth' })
+          return
+        }
+
+        if (!cancelled && isAuth) {
+          const needsSetup = await checkFirstSetup()
+          const setupAllowedPaths = [
+            '/setup',
+            '/config/bot',
+            '/config/modelProvider',
+            '/config/model',
+          ]
+          if (needsSetup && !setupAllowedPaths.includes(window.location.pathname)) {
+            navigate({ to: '/setup' })
+          }
         }
       } catch {
         // 发生错误时也跳转到登录页

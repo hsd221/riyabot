@@ -1490,7 +1490,7 @@ function AboutTab() {
         <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-sm font-medium">RiyaBot Core</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">Forked from MaiBot/MaiCore</p>
+            <p className="text-xs sm:text-sm text-muted-foreground">独立维护的 RiyaBot 核心</p>
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">WebUI</p>

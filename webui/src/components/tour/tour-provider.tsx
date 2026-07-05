@@ -3,7 +3,7 @@ import type { Step, CallBackProps, Status } from 'react-joyride'
 import { TourContext } from './tour-context'
 import type { TourId, TourState } from './types'
 
-const COMPLETED_TOURS_KEY = 'maibot-completed-tours'
+const COMPLETED_TOURS_KEY = 'riyabot-completed-tours'
 
 // 从 localStorage 读取已完成的 Tours
 function getCompletedTours(): Set<TourId> {

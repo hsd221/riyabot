@@ -123,7 +123,7 @@ def require_auth(
 
 @router.get("/schema/bot")
 async def get_bot_config_schema(_auth: bool = Depends(require_auth)):
-    """获取麦麦主程序配置架构"""
+    """获取璃夜主程序配置架构"""
     try:
         # Config 类包含所有子配置
         schema = ConfigSchemaGenerator.generate_config_schema(Config)
@@ -203,7 +203,7 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
 
 @router.get("/bot")
 async def get_bot_config(_auth: bool = Depends(require_auth)):
-    """获取麦麦主程序配置"""
+    """获取璃夜主程序配置"""
     try:
         config_path = os.path.join(CONFIG_DIR, "bot_config.toml")
         if not os.path.exists(config_path):
@@ -244,7 +244,7 @@ async def get_model_config(_auth: bool = Depends(require_auth)):
 
 @router.post("/bot")
 async def update_bot_config(config_data: ConfigBody, _auth: bool = Depends(require_auth)):
-    """更新麦麦主程序配置"""
+    """更新璃夜主程序配置"""
     try:
         _prune_legacy_bot_config_keys(config_data)
 
@@ -258,7 +258,7 @@ async def update_bot_config(config_data: ConfigBody, _auth: bool = Depends(requi
         config_path = os.path.join(CONFIG_DIR, "bot_config.toml")
         save_toml_with_format(config_data, config_path)
 
-        logger.info("麦麦主程序配置已更新")
+        logger.info("璃夜主程序配置已更新")
         return {"success": True, "message": "配置已保存"}
     except HTTPException:
         raise
@@ -295,7 +295,7 @@ async def update_model_config(config_data: ConfigBody, _auth: bool = Depends(req
 
 @router.post("/bot/section/{section_name}")
 async def update_bot_config_section(section_name: str, section_data: SectionBody, _auth: bool = Depends(require_auth)):
-    """更新麦麦主程序配置的指定节（保留注释和格式）"""
+    """更新璃夜主程序配置的指定节（保留注释和格式）"""
     try:
         # 读取现有配置
         config_path = os.path.join(CONFIG_DIR, "bot_config.toml")
@@ -346,7 +346,7 @@ async def update_bot_config_section(section_name: str, section_data: SectionBody
 
 @router.get("/bot/raw")
 async def get_bot_config_raw(_auth: bool = Depends(require_auth)):
-    """获取麦麦主程序配置的原始 TOML 内容"""
+    """获取璃夜主程序配置的原始 TOML 内容"""
     try:
         config_path = os.path.join(CONFIG_DIR, "bot_config.toml")
         if not os.path.exists(config_path):
@@ -365,7 +365,7 @@ async def get_bot_config_raw(_auth: bool = Depends(require_auth)):
 
 @router.post("/bot/raw")
 async def update_bot_config_raw(raw_content: RawContentBody, _auth: bool = Depends(require_auth)):
-    """更新麦麦主程序配置（直接保存原始 TOML 内容，会先验证格式）"""
+    """更新璃夜主程序配置（直接保存原始 TOML 内容，会先验证格式）"""
     try:
         # 验证 TOML 格式
         try:
@@ -384,7 +384,7 @@ async def update_bot_config_raw(raw_content: RawContentBody, _auth: bool = Depen
         with open(config_path, "w", encoding="utf-8") as f:
             f.write(raw_content)
 
-        logger.info("麦麦主程序配置已更新（原始模式）")
+        logger.info("璃夜主程序配置已更新（原始模式）")
         return {"success": True, "message": "配置已保存"}
     except HTTPException:
         raise

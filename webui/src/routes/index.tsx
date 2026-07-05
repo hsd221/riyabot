@@ -524,7 +524,7 @@ export function IndexPage() {
                 </Link>
               </Button>
               <Button variant="outline" size="sm" asChild className="gap-2">
-                <Link to="/survey/maibot-feedback">
+                <Link to="/survey/riyabot-feedback">
                   <MessageSquare className="h-4 w-4" />
                   璃夜反馈
                 </Link>

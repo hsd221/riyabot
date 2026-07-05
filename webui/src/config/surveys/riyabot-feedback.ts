@@ -1,13 +1,13 @@
 import type { SurveyConfig } from '@/types/survey'
 
-export const maibotFeedbackSurvey: SurveyConfig = {
-  id: 'maibot-feedback-v1',
+export const riyabotFeedbackSurvey: SurveyConfig = {
+  id: 'riyabot-feedback-v1',
   version: '1.0.0',
   title: '璃夜使用体验反馈问卷',
   description: '感谢您使用璃夜！您的反馈将帮助我们打造更好的 AI 伙伴。',
   questions: [
     {
-      id: 'maibot_version',
+      id: 'riyabot_version',
       type: 'text',
       title: '你正在使用的璃夜版本',
       description: '此项由系统自动填写',

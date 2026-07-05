@@ -1,14 +1,14 @@
 import os
+import json
 import tomlkit
 import shutil
-import sys
 
 from datetime import datetime
 from tomlkit import TOMLDocument
 from tomlkit.items import Table, KeyType
-from dataclasses import field, dataclass
+from dataclasses import field, dataclass, fields
 from rich.traceback import install
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 
 from src.common.logger import get_logger
 from src.common.toml_utils import format_toml_string
@@ -42,6 +42,7 @@ from .api_ada_configs import (
     ModelTaskConfig,
     ModelInfo,
     APIProvider,
+    TaskConfig,
 )
 
 
@@ -59,6 +60,35 @@ TEMPLATE_DIR = os.path.join(PROJECT_ROOT, "template")
 # 考虑到，实际上配置文件中的mai_version是不会自动更新的,所以采用硬编码
 # 对该字段的更新，请严格参照语义化版本规范：https://semver.org/lang/zh-CN/
 MMC_VERSION = "0.13.0"
+
+_CREATED_CONFIG_FILES: list[str] = []
+
+
+def get_created_config_files() -> list[str]:
+    """返回本次启动期间由模板新创建的配置文件。"""
+    return list(_CREATED_CONFIG_FILES)
+
+
+def _mark_webui_setup_required(reason: str) -> None:
+    """配置文件被重新创建时，要求 WebUI 重新进入首次配置。"""
+    webui_config_path = os.path.join(PROJECT_ROOT, "data", "webui.json")
+    if not os.path.exists(webui_config_path):
+        return
+
+    try:
+        with open(webui_config_path, "r", encoding="utf-8") as f:
+            webui_config = json.load(f)
+
+        webui_config["first_setup_completed"] = False
+        webui_config["setup_required_reason"] = reason
+        webui_config.pop("setup_completed_at", None)
+
+        with open(webui_config_path, "w", encoding="utf-8") as f:
+            json.dump(webui_config, f, ensure_ascii=False, indent=2)
+
+        logger.info("已标记 WebUI 需要重新进行首次配置", event_code="webui.setup.required", reason=reason)
+    except Exception:
+        logger.exception("标记 WebUI 首次配置状态失败", event_code="webui.setup.mark_required_failed")
 
 
 def get_key_comment(toml_table, key):
@@ -184,6 +214,11 @@ def _update_dict(target: TOMLDocument | dict | Table, source: TOMLDocument | dic
                     target[key] = value
 
 
+def _is_blank_model_template(config_data: TOMLDocument | dict) -> bool:
+    """判断 model_config 模板是否为首次配置用的空白模板。"""
+    return config_data.get("api_providers") == [] and config_data.get("models") == []
+
+
 def _update_config_generic(config_name: str, template_name: str):
     """
     通用的配置文件更新函数
@@ -213,9 +248,11 @@ def _update_config_generic(config_name: str, template_name: str):
         logger.info(f"{config_name}.toml配置文件不存在，从模板创建新配置")
         os.makedirs(CONFIG_DIR, exist_ok=True)  # 创建文件夹
         shutil.copy2(template_path, old_config_path)  # 复制模板文件
-        logger.info(f"已创建新{config_name}配置文件，请填写后重新运行: {old_config_path}")
-        # 新创建配置文件，退出
-        sys.exit(0)
+        created_file = f"{config_name}.toml"
+        _CREATED_CONFIG_FILES.append(created_file)
+        _mark_webui_setup_required(f"{created_file} 已从模板创建")
+        logger.info(f"已创建新{config_name}配置文件，可在 WebUI 首次配置向导中继续填写: {old_config_path}")
+        return
 
     compare_config = None
     new_config = None
@@ -231,7 +268,7 @@ def _update_config_generic(config_name: str, template_name: str):
         new_config = tomlkit.load(f)
 
     # 检查默认值变化并处理（只有 compare_config 存在时才做）
-    if compare_config:
+    if compare_config and not (config_name == "model_config" and _is_blank_model_template(new_config)):
         # 读取旧配置
         with open(old_config_path, "r", encoding="utf-8") as f:
             old_config = tomlkit.load(f)
@@ -258,6 +295,8 @@ def _update_config_generic(config_name: str, template_name: str):
                 logger.info(f"已保存更新后的{config_name}配置文件")
         else:
             logger.info(f"未检测到{config_name}模板默认值变动")
+    elif compare_config:
+        logger.info(f"检测到{config_name}使用空白模型模板，跳过默认值自动迁移")
 
     # 检查 compare 下没有模板，或新模板版本更高，则复制
     if not os.path.exists(compare_path):
@@ -365,6 +404,8 @@ class Config(ConfigBase):
 class APIAdapterConfig(ConfigBase):
     """API Adapter配置类"""
 
+    RUNTIME_REQUIRED_TASKS: ClassVar[tuple[str, ...]] = ("utils", "tool_use", "replyer", "planner")
+
     models: List[ModelInfo]
     """模型列表"""
 
@@ -375,10 +416,18 @@ class APIAdapterConfig(ConfigBase):
     """API提供商列表"""
 
     def __post_init__(self):
-        if not self.models:
-            raise ValueError("模型列表不能为空，请在配置中设置有效的模型列表。")
-        if not self.api_providers:
-            raise ValueError("API提供商列表不能为空，请在配置中设置有效的API提供商列表。")
+        self.validate_integrity()
+
+    def validate_integrity(self, require_complete: bool = False) -> None:
+        """校验模型配置结构。
+
+        首次配置阶段允许 api_providers/models 为空；真正运行前可通过
+        require_complete=True 要求至少配置一个提供商和一个模型。
+        """
+        if require_complete and not self.models:
+            raise ValueError("模型列表不能为空，请在 WebUI 中添加至少一个模型。")
+        if require_complete and not self.api_providers:
+            raise ValueError("API提供商列表不能为空，请在 WebUI 中添加至少一个API提供商。")
 
         # 检查API提供商名称是否重复
         provider_names = [provider.name for provider in self.api_providers]
@@ -396,8 +445,63 @@ class APIAdapterConfig(ConfigBase):
         for model in self.models:
             if not model.model_identifier:
                 raise ValueError(f"模型 '{model.name}' 的 model_identifier 不能为空")
-            if not model.api_provider or model.api_provider not in self.api_providers_dict:
+            if require_complete and (not model.api_provider or model.api_provider not in self.api_providers_dict):
                 raise ValueError(f"模型 '{model.name}' 的 api_provider '{model.api_provider}' 不存在")
+
+        if require_complete:
+            for task_name, unknown_models in self.get_unknown_task_models().items():
+                if unknown_models:
+                    raise ValueError(
+                        f"任务 '{task_name}' 引用了不存在的模型: {', '.join(unknown_models)}。"
+                        "请先在模型管理中添加这些模型，或从任务配置中移除。"
+                    )
+
+            missing_tasks = self.get_missing_runtime_tasks()
+            if missing_tasks:
+                raise ValueError(
+                    "以下运行必需任务尚未分配模型: "
+                    f"{', '.join(missing_tasks)}。请在 WebUI 的模型管理与分配中完成配置。"
+                )
+
+    def get_unknown_task_models(self) -> dict[str, list[str]]:
+        """返回任务配置中引用但未定义的模型名称。"""
+        if not hasattr(self, "models_dict"):
+            self.models_dict = {model.name: model for model in self.models}
+
+        unknown: dict[str, list[str]] = {}
+        for config_field in fields(self.model_task_config):
+            task_config = getattr(self.model_task_config, config_field.name, None)
+            if not isinstance(task_config, TaskConfig):
+                continue
+            missing = [model_name for model_name in task_config.model_list if model_name not in self.models_dict]
+            if missing:
+                unknown[config_field.name] = missing
+        return unknown
+
+    def is_runtime_ready(self) -> bool:
+        """判断模型配置是否具备启动主系统的最低条件。"""
+        try:
+            self.validate_integrity(require_complete=True)
+        except ValueError:
+            return False
+        return True
+
+    def get_runtime_readiness_error(self) -> Optional[str]:
+        """返回模型配置无法启动主系统的原因。"""
+        try:
+            self.validate_integrity(require_complete=True)
+        except ValueError as e:
+            return str(e)
+        return None
+
+    def get_missing_runtime_tasks(self) -> list[str]:
+        """返回尚未分配模型的运行必需任务。"""
+        missing: list[str] = []
+        for task_name in self.RUNTIME_REQUIRED_TASKS:
+            task_config = getattr(self.model_task_config, task_name, None)
+            if not isinstance(task_config, TaskConfig) or not task_config.model_list:
+                missing.append(task_name)
+        return missing
 
     def get_model_info(self, model_name: str) -> ModelInfo:
         """根据模型名称获取模型信息"""

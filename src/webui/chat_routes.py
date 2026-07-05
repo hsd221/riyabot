@@ -1,8 +1,8 @@
-"""本地聊天室路由 - WebUI 与麦麦直接对话
+"""本地聊天室路由 - WebUI 与璃夜直接对话
 
 支持两种模式：
 1. WebUI 模式：使用 WebUI 平台独立身份聊天
-2. 虚拟身份模式：使用真实平台用户的身份，在虚拟群聊中与麦麦对话
+2. 虚拟身份模式：使用真实平台用户的身份，在虚拟群聊中与璃夜对话
 """
 
 import time
@@ -201,7 +201,7 @@ def create_message_data(
     is_at_bot: bool = True,
     virtual_config: Optional[VirtualIdentityConfig] = None,
 ) -> Dict[str, Any]:
-    """创建符合麦麦消息格式的消息数据
+    """创建符合璃夜消息格式的消息数据
 
     Args:
         content: 消息内容
@@ -517,7 +517,7 @@ async def websocket_chat(
                     }
                 )
 
-                # 创建麦麦消息格式
+                # 创建璃夜消息格式
                 message_data = create_message_data(
                     content=content,
                     user_id=user_id,
@@ -536,7 +536,7 @@ async def websocket_chat(
                         }
                     )
 
-                    # 调用麦麦的消息处理
+                    # 调用璃夜的消息处理
                     await chat_bot.message_process(message_data)
 
                 except Exception as e:

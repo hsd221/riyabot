@@ -7,29 +7,29 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertCircle, FileQuestion } from 'lucide-react'
 import { SurveyRenderer } from '@/components/survey'
-import { maibotFeedbackSurvey } from '@/config/surveys'
-import { getMaiBotStatus } from '@/lib/system-api'
+import { riyabotFeedbackSurvey } from '@/config/surveys'
+import { getRiyaBotStatus } from '@/lib/system-api'
 import type { SurveyConfig, QuestionAnswer } from '@/types/survey'
 
-export function MaiBotFeedbackSurveyPage() {
+export function RiyaBotFeedbackSurveyPage() {
   const [surveyConfig, setSurveyConfig] = useState<SurveyConfig | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [maibotVersion, setMaibotVersion] = useState<string>('未知版本')
+  const [riyabotVersion, setRiyabotVersion] = useState<string>('未知版本')
 
   // 初始化问卷配置，获取璃夜版本
   useEffect(() => {
     const init = async () => {
       try {
         // 获取璃夜版本
-        const status = await getMaiBotStatus()
-        setMaibotVersion(status.version || '未知版本')
+        const status = await getRiyaBotStatus()
+        setRiyabotVersion(status.version || '未知版本')
       } catch (error) {
         console.error('Failed to get RiyaBot version:', error)
-        setMaibotVersion('获取失败')
+        setRiyabotVersion('获取失败')
       }
 
       // 深拷贝配置以避免修改原始对象
-      const config = JSON.parse(JSON.stringify(maibotFeedbackSurvey)) as SurveyConfig
+      const config = JSON.parse(JSON.stringify(riyabotFeedbackSurvey)) as SurveyConfig
       setSurveyConfig(config)
       setIsLoading(false)
     }
@@ -40,10 +40,10 @@ export function MaiBotFeedbackSurveyPage() {
   // 预填充的答案（版本号自动填写）
   const initialAnswers: QuestionAnswer[] = useMemo(() => [
     {
-      questionId: 'maibot_version',
-      value: maibotVersion,
+      questionId: 'riyabot_version',
+      value: riyabotVersion,
     },
-  ], [maibotVersion])
+  ], [riyabotVersion])
 
   // 提交成功回调
   const handleSubmitSuccess = useCallback((submissionId: string) => {
@@ -107,4 +107,4 @@ export function MaiBotFeedbackSurveyPage() {
   )
 }
 
-export default MaiBotFeedbackSurveyPage
+export default RiyaBotFeedbackSurveyPage

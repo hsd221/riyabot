@@ -18,7 +18,7 @@ class WebUIServer:
     def __init__(self, host: str = "0.0.0.0", port: int = 8001):
         self.host = host
         self.port = port
-        self.app = FastAPI(title="MaiBot WebUI")
+        self.app = FastAPI(title="RiyaBot WebUI")
         self._server = None
 
         # 配置防爬虫中间件（需要在CORS之前注册）

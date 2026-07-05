@@ -1,6 +1,5 @@
 // 设置向导各步骤表单组件
 
-import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -8,14 +7,124 @@ import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { X, ExternalLink, Eye, EyeOff } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Markdown } from '@/components/ui/markdown'
+import { X, FileText, ShieldCheck } from 'lucide-react'
 import type {
+  AgreementStatus,
   BotBasicConfig,
   PersonalityConfig,
   EmojiConfig,
   OtherBasicConfig,
-  SiliconFlowConfig,
 } from './types'
+
+// ====== 步骤0：协议确认 ======
+interface AgreementFormProps {
+  status: AgreementStatus | null
+  acceptedEula: boolean
+  acceptedPrivacy: boolean
+  onAcceptedEulaChange: (checked: boolean) => void
+  onAcceptedPrivacyChange: (checked: boolean) => void
+}
+
+export function AgreementForm({
+  status,
+  acceptedEula,
+  acceptedPrivacy,
+  onAcceptedEulaChange,
+  onAcceptedPrivacyChange,
+}: AgreementFormProps) {
+  if (!status) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        正在读取协议内容...
+      </div>
+    )
+  }
+
+  const allConfirmed = status.eula.confirmed && status.privacy.confirmed
+
+  return (
+    <div className="space-y-6">
+      {allConfirmed ? (
+        <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>协议已确认</AlertTitle>
+          <AlertDescription>
+            当前版本的最终用户许可协议和隐私条款已经确认。
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <Alert>
+          <FileText className="h-4 w-4" />
+          <AlertTitle>需要确认协议</AlertTitle>
+          <AlertDescription>
+            请阅读并同意当前版本的最终用户许可协议和隐私条款后继续。
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Tabs defaultValue="eula" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="eula">许可协议</TabsTrigger>
+          <TabsTrigger value="privacy">隐私条款</TabsTrigger>
+        </TabsList>
+        <TabsContent value="eula" className="mt-4">
+          <div className="rounded-md border bg-background">
+            <ScrollArea className="h-[320px] p-4">
+              <Markdown className="prose-sm dark:prose-invert max-w-none">
+                {status.eula.content}
+              </Markdown>
+            </ScrollArea>
+          </div>
+        </TabsContent>
+        <TabsContent value="privacy" className="mt-4">
+          <div className="rounded-md border bg-background">
+            <ScrollArea className="h-[320px] p-4">
+              <Markdown className="prose-sm dark:prose-invert max-w-none">
+                {status.privacy.content}
+              </Markdown>
+            </ScrollArea>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      <div className="space-y-3 rounded-md border bg-muted/30 p-4">
+        <label className="flex items-start gap-3 text-sm">
+          <Checkbox
+            checked={status.eula.confirmed || acceptedEula}
+            disabled={status.eula.confirmed}
+            onCheckedChange={(checked) => onAcceptedEulaChange(checked === true)}
+            className="mt-0.5"
+          />
+          <span>
+            我已阅读并同意《{status.eula.title}》
+            <span className="block text-xs text-muted-foreground">
+              当前版本哈希：{status.eula.hash}
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-3 text-sm">
+          <Checkbox
+            checked={status.privacy.confirmed || acceptedPrivacy}
+            disabled={status.privacy.confirmed}
+            onCheckedChange={(checked) => onAcceptedPrivacyChange(checked === true)}
+            className="mt-0.5"
+          />
+          <span>
+            我已阅读并同意《{status.privacy.title}》
+            <span className="block text-xs text-muted-foreground">
+              当前版本哈希：{status.privacy.hash}
+            </span>
+          </span>
+        </label>
+      </div>
+    </div>
+  )
+}
 
 // ====== 步骤1：Bot基础配置 ======
 interface BotBasicFormProps {
@@ -351,97 +460,6 @@ export function OtherBasicForm({ config, onChange }: OtherBasicFormProps) {
             onChange({ ...config, all_global_jargon: checked })
           }
         />
-      </div>
-    </div>
-  )
-}
-
-// ====== 步骤5：硅基流动API配置 ======
-interface SiliconFlowFormProps {
-  config: SiliconFlowConfig
-  onChange: (config: SiliconFlowConfig) => void
-}
-
-export function SiliconFlowForm({ config, onChange }: SiliconFlowFormProps) {
-  const [showApiKey, setShowApiKey] = useState(false)
-
-  return (
-    <div className="space-y-6">
-      <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5">
-            <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="flex-1 text-sm">
-            <p className="font-medium text-blue-900 dark:text-blue-100 mb-1">
-              关于硅基流动 (SiliconFlow)
-            </p>
-            <p className="text-blue-700 dark:text-blue-300 mb-2">
-              硅基流动提供了完整的模型覆盖，包括 DeepSeek V3、Qwen、视觉模型、语音识别和嵌入模型。
-              只需一个 API Key 即可使用璃夜的所有功能！
-            </p>
-            <a
-              href="https://cloud.siliconflow.cn"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-            >
-              前往硅基流动获取 API Key
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <Label htmlFor="siliconflow_api_key">SiliconFlow API Key *</Label>
-        <div className="relative">
-          <Input
-            id="siliconflow_api_key"
-            type={showApiKey ? 'text' : 'password'}
-            placeholder="sk-..."
-            value={config.api_key}
-            onChange={(e) => onChange({ api_key: e.target.value })}
-            className="font-mono pr-10"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-            onClick={() => setShowApiKey(!showApiKey)}
-          >
-            {showApiKey ? (
-              <EyeOff className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <Eye className="h-4 w-4 text-muted-foreground" />
-            )}
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          请输入您的硅基流动 API 密钥。获取后，璃夜将自动配置所有必需的模型。
-        </p>
-      </div>
-
-      <div className="rounded-lg bg-muted/50 p-4 text-sm space-y-2">
-        <p className="font-medium">将自动配置以下模型：</p>
-        <ul className="list-disc list-inside space-y-1 text-muted-foreground ml-2">
-          <li>DeepSeek V3 - 主要对话和工具模型</li>
-          <li>Qwen3 30B - 高频小任务和工具调用</li>
-          <li>Qwen3 VL 30B - 图像识别</li>
-          <li>SenseVoice - 语音识别</li>
-          <li>BGE-M3 - 文本嵌入</li>
-          <li>知识库相关模型 (LPMM)</li>
-        </ul>
-      </div>
-
-      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4">
-        <p className="text-sm text-amber-900 dark:text-amber-100">
-          <span className="font-medium">💡 提示：</span>
-          完成向导后，您可以在"系统设置 → 模型配置"中添加更多 API 提供商和模型。
-        </p>
       </div>
     </div>
   )
