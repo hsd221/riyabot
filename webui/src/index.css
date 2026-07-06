@@ -83,6 +83,16 @@
       fixed;
   }
 
+  .dark body {
+    background: linear-gradient(
+        180deg,
+        hsl(240 6% 8%) 0%,
+        hsl(240 5% 10%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+  }
+
   /* 隐藏数字输入框的默认上下箭头 */
   input[type='number']::-webkit-inner-spin-button,
   input[type='number']::-webkit-outer-spin-button {
@@ -135,6 +145,16 @@
     padding-bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 1.25rem));
   }
 
+  .dark .ios-page {
+    background: linear-gradient(
+        180deg,
+        hsl(240 6% 8%) 0%,
+        hsl(240 5% 10%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+  }
+
   .ios-content {
     @apply mx-auto w-full max-w-7xl space-y-5 sm:space-y-7;
   }
@@ -172,6 +192,10 @@
     left: 3.75rem;
     height: 1px;
     background: rgb(60 60 67 / 0.14);
+  }
+
+  .dark .ios-row::after {
+    background: rgb(84 84 88 / 0.48);
   }
 
   .ios-row:last-child::after {

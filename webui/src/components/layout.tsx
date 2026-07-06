@@ -248,7 +248,7 @@ export function Layout({ children }: LayoutProps) {
                     )}
 
                     {/* 菜单项列表 */}
-                    <ul className="ios-group overflow-hidden lg:space-y-1 lg:overflow-visible lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none">
+                    <ul className="ios-group overflow-hidden lg:space-y-1 lg:overflow-visible lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none dark:lg:border-0 dark:lg:bg-transparent dark:lg:shadow-none">
                       {section.items.map((item) => {
                         const isActive = matchRoute({ to: item.path })
                         const Icon = item.icon
