@@ -40,7 +40,6 @@ import {
   FileText,
   Settings,
   Puzzle,
-  ClipboardList,
   Check,
   ChevronRight,
 } from 'lucide-react'
@@ -801,35 +800,10 @@ export function IndexPage() {
               </Link>
             </div>
 
-            <div className="ios-group overflow-hidden">
-              <Link to="/survey/webui-feedback" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
-                    <ClipboardList className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-medium leading-tight">WebUI 反馈</span>
-                    <span className="mt-1 block text-[13px] leading-tight text-muted-foreground">
-                      帮助改进产品体验
-                    </span>
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-              <Link to="/survey/riyabot-feedback" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-pink">
-                    <MessageSquare className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-medium">Bot 反馈</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-            </div>
           </div>
 
           {/* 机器人状态和快捷入口 */}
-          <div className="hidden grid-cols-1 gap-5 sm:grid lg:grid-cols-3 lg:gap-6">
+          <div className="hidden grid-cols-1 gap-5 sm:grid lg:grid-cols-2 lg:gap-6">
             <div className="ios-group overflow-hidden">
               <div className="ios-row min-h-[76px]">
                 <span className="flex min-w-0 items-center gap-3">
@@ -923,36 +897,6 @@ export function IndexPage() {
               </Link>
             </div>
 
-            <div className="ios-group overflow-hidden">
-              <Link to="/survey/webui-feedback" className="ios-row ios-touch min-h-[76px]">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-orange">
-                    <ClipboardList className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-semibold leading-5">WebUI 反馈</span>
-                    <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
-                      帮助改进产品体验
-                    </span>
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-              <Link to="/survey/riyabot-feedback" className="ios-row ios-touch min-h-[76px]">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-pink">
-                    <MessageSquare className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-semibold leading-5">RiyaBot 反馈</span>
-                    <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
-                      提交使用感受和问题
-                    </span>
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-            </div>
           </div>
 
           {/* 核心指标 */}
