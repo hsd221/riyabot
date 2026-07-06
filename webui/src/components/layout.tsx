@@ -258,7 +258,7 @@ export function Layout({ children }: LayoutProps) {
                           <>
                             {/* 左侧高亮条 */}
                             {isActive && (
-                              <div className="absolute inset-y-3 left-0 w-1 rounded-full bg-primary transition-opacity duration-[360ms] lg:inset-y-1 lg:left-1" />
+                              <div className="absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-primary/95 transition-opacity duration-[360ms] lg:left-2 lg:h-5" />
                             )}
                             <div
                               className={cn(
@@ -303,10 +303,10 @@ export function Layout({ children }: LayoutProps) {
                                   to={item.path}
                                   data-tour={item.tourId}
                                   className={cn(
-                                    'group relative flex min-h-[58px] items-center border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-lg lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
+                                    'group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-lg lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
                                     'hover:bg-accent/45 hover:text-accent-foreground dark:hover:bg-white/[0.08] lg:hover:bg-white/55 lg:hover:shadow-[0_4px_14px_rgba(31,41,55,0.045)]',
                                     isActive
-                                      ? 'lg:bg-white/62 bg-primary/[0.075] text-foreground dark:bg-white/[0.08] lg:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025),0_6px_18px_rgba(31,41,55,0.055)]'
+                                      ? 'bg-[rgb(120_120_128_/_0.12)] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.58)] dark:bg-white/[0.08] lg:bg-[rgb(120_120_128_/_0.11)] lg:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025),0_6px_18px_rgba(31,41,55,0.055)]'
                                       : 'text-muted-foreground hover:text-foreground',
                                     sidebarOpen
                                       ? 'px-4 lg:px-3'
