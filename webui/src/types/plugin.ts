@@ -1,6 +1,6 @@
 /**
  * 插件清单文件类型定义
- * 基于 RiyaBot 插件系统 manifest 规范
+ * 基于插件系统 manifest 规范
  */
 
 export interface PluginAuthor {
@@ -11,9 +11,9 @@ export interface PluginAuthor {
 }
 
 export interface HostApplication {
-  /** 插件适配璃夜最低版本 */
+  /** 插件适配主程序最低版本 */
   min_version: string
-  /** 插件适配璃夜最高版本（可选） */
+  /** 插件适配主程序最高版本（可选） */
   max_version?: string
 }
 

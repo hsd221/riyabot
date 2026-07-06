@@ -5,14 +5,6 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -46,20 +38,48 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Save, Eye, EyeOff, Copy, Search, Info, Power, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Check, ChevronsUpDown, Zap, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
-import { getModelConfig, updateModelConfig, updateModelConfigSection, testProviderConnection, type TestConnectionResult } from '@/lib/config-api'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Save,
+  Eye,
+  EyeOff,
+  Copy,
+  Search,
+  Power,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Check,
+  ChevronsUpDown,
+  Zap,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Server,
+} from 'lucide-react'
+import {
+  getModelConfig,
+  updateModelConfig,
+  updateModelConfigSection,
+  testProviderConnection,
+  type TestConnectionResult,
+} from '@/lib/config-api'
 import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useTour } from '@/components/tour'
-import { MODEL_ASSIGNMENT_TOUR_ID, modelAssignmentTourSteps, STEP_ROUTE_MAP } from '@/components/tour/tours/model-assignment-tour'
+import {
+  MODEL_ASSIGNMENT_TOUR_ID,
+  modelAssignmentTourSteps,
+  STEP_ROUTE_MAP,
+} from '@/components/tour/tours/model-assignment-tour'
 import { useNavigate } from '@tanstack/react-router'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
 import { PROVIDER_TEMPLATES } from './providerTemplates'
@@ -96,22 +116,22 @@ export function ModelProviderConfigPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [jumpToPage, setJumpToPage] = useState('')
-  
+
   // 表单验证错误状态
   const [formErrors, setFormErrors] = useState<{
     name?: string
     base_url?: string
     api_key?: string
   }>({})
-  
+
   // 测试连接状态
   const [testingProviders, setTestingProviders] = useState<Set<string>>(new Set())
   const [testResults, setTestResults] = useState<Map<string, TestConnectionResult>>(new Map())
-  
+
   const { toast } = useToast()
   const navigate = useNavigate()
   const { state: tourState, goToStep, registerTour } = useTour()
-  
+
   // 用于防抖的定时器
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialLoadRef = useRef(true)
@@ -138,12 +158,12 @@ export function ModelProviderConfigPage() {
     if (tourState.activeTourId === MODEL_ASSIGNMENT_TOUR_ID && tourState.isRunning) {
       const prevStep = prevTourStepRef.current
       const currentStep = tourState.stepIndex
-      
+
       // 如果从弹窗内步骤 (3-9) 回退到弹窗外步骤 (0-2)，关闭弹窗
       if (prevStep >= 3 && prevStep <= 9 && currentStep < 3) {
         setEditDialogOpen(false)
       }
-      
+
       // 如果从弹窗外步骤 (10+) 回退到弹窗内步骤 (3-9)，重新打开弹窗
       // 这处理了从模型管理页面第 11 步点击"上一步"回到提供商弹窗的情况
       if (prevStep >= 10 && currentStep >= 3 && currentStep <= 9) {
@@ -163,7 +183,7 @@ export function ModelProviderConfigPage() {
         setShowApiKey(false)
         setEditDialogOpen(true)
       }
-      
+
       prevTourStepRef.current = currentStep
     }
   }, [tourState.stepIndex, tourState.activeTourId, tourState.isRunning])
@@ -209,7 +229,7 @@ export function ModelProviderConfigPage() {
     }
   }
 
-  // 重启璃夜
+  // 重启主程序
   const handleRestart = async () => {
     try {
       setRestarting(true)
@@ -244,7 +264,7 @@ export function ModelProviderConfigPage() {
       setHasUnsavedChanges(false)
       toast({
         title: '保存成功',
-        description: '正在重启璃夜...',
+        description: '正在重启主程序...',
       })
       await handleRestart()
     } catch (error) {
@@ -279,7 +299,7 @@ export function ModelProviderConfigPage() {
   // 自动保存函数（使用增量 API）
   const autoSaveProviders = useCallback(async (newProviders: APIProvider[]) => {
     if (initialLoadRef.current) return // 初始加载时不自动保存
-    
+
     try {
       setAutoSaving(true)
       await updateModelConfigSection('api_providers', newProviders)
@@ -321,7 +341,7 @@ export function ModelProviderConfigPage() {
   const saveConfig = async () => {
     try {
       setSaving(true)
-      
+
       // 先取消自动保存定时器
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current)
@@ -351,11 +371,11 @@ export function ModelProviderConfigPage() {
   const openEditDialog = (provider: APIProvider | null, index: number | null) => {
     // 清除表单验证错误
     setFormErrors({})
-    
+
     if (provider) {
       // 编辑现有提供商 - 检测匹配的模板
       const matchedTemplate = PROVIDER_TEMPLATES.find(
-        t => t.base_url === provider.base_url && t.client_type === provider.client_type
+        (t) => t.base_url === provider.base_url && t.client_type === provider.client_type
       )
       setSelectedTemplate(matchedTemplate?.id || 'custom')
       setEditingProvider(provider)
@@ -376,15 +396,15 @@ export function ModelProviderConfigPage() {
     setShowApiKey(false)
     setEditDialogOpen(true)
   }
-  
+
   // 处理模板选择变化
   const handleTemplateChange = (templateId: string) => {
     setSelectedTemplate(templateId)
     setTemplateComboboxOpen(false)
-    const template = PROVIDER_TEMPLATES.find(t => t.id === templateId)
+    const template = PROVIDER_TEMPLATES.find((t) => t.id === templateId)
     if (template && template.id !== 'custom') {
       // 应用模板配置
-      setEditingProvider(prev => ({
+      setEditingProvider((prev) => ({
         ...prev!,
         name: template.name,
         base_url: template.base_url,
@@ -392,7 +412,7 @@ export function ModelProviderConfigPage() {
       }))
     } else if (template?.id === 'custom') {
       // 切换到自定义模板 - 清空URL和客户端类型(保留其他字段)
-      setEditingProvider(prev => ({
+      setEditingProvider((prev) => ({
         ...prev!,
         name: '',
         base_url: '',
@@ -400,7 +420,7 @@ export function ModelProviderConfigPage() {
       }))
     }
   }
-  
+
   // 判断当前是否使用模板(非自定义)
   const isUsingTemplate = useMemo(() => {
     return selectedTemplate !== 'custom'
@@ -522,8 +542,8 @@ export function ModelProviderConfigPage() {
     if (selectedProviders.size === filteredProviders.length) {
       setSelectedProviders(new Set())
     } else {
-      const allIndices = filteredProviders.map((_, idx) => 
-        providers.findIndex(p => p === filteredProviders[idx])
+      const allIndices = filteredProviders.map((_, idx) =>
+        providers.findIndex((p) => p === filteredProviders[idx])
       )
       setSelectedProviders(new Set(allIndices))
     }
@@ -567,10 +587,7 @@ export function ModelProviderConfigPage() {
 
   // 分页逻辑
   const totalPages = Math.ceil(filteredProviders.length / pageSize)
-  const paginatedProviders = filteredProviders.slice(
-    (page - 1) * pageSize,
-    page * pageSize
-  )
+  const paginatedProviders = filteredProviders.slice((page - 1) * pageSize, page * pageSize)
 
   // 页码跳转
   const handleJumpToPage = () => {
@@ -584,12 +601,12 @@ export function ModelProviderConfigPage() {
   // 测试单个提供商连接
   const handleTestConnection = async (providerName: string) => {
     // 标记正在测试
-    setTestingProviders(prev => new Set(prev).add(providerName))
-    
+    setTestingProviders((prev) => new Set(prev).add(providerName))
+
     try {
       const result = await testProviderConnection(providerName)
-      setTestResults(prev => new Map(prev).set(providerName, result))
-      
+      setTestResults((prev) => new Map(prev).set(providerName, result))
+
       // 显示结果 toast
       if (result.network_ok) {
         if (result.api_key_valid === true) {
@@ -623,7 +640,7 @@ export function ModelProviderConfigPage() {
         variant: 'destructive',
       })
     } finally {
-      setTestingProviders(prev => {
+      setTestingProviders((prev) => {
         const newSet = new Set(prev)
         newSet.delete(providerName)
         return newSet
@@ -642,36 +659,42 @@ export function ModelProviderConfigPage() {
   const renderTestStatus = (providerName: string) => {
     const isTesting = testingProviders.has(providerName)
     const result = testResults.get(providerName)
-    
+
     if (isTesting) {
       return (
-        <Badge variant="secondary" className="gap-1">
+        <Badge
+          variant="secondary"
+          className="gap-1 border-0 bg-secondary/80 text-muted-foreground shadow-none"
+        >
           <Loader2 className="h-3 w-3 animate-spin" />
           测试中
         </Badge>
       )
     }
-    
+
     if (!result) return null
-    
+
     if (result.network_ok) {
       if (result.api_key_valid === true) {
         return (
-          <Badge className="gap-1 bg-green-600 hover:bg-green-700">
+          <Badge className="gap-1 border-0 bg-[rgb(52_199_89_/_0.11)] text-[rgb(36_138_61)] shadow-none hover:bg-[rgb(52_199_89_/_0.15)] dark:text-[rgb(48_209_88)]">
             <CheckCircle2 className="h-3 w-3" />
             正常
           </Badge>
         )
       } else if (result.api_key_valid === false) {
         return (
-          <Badge variant="destructive" className="gap-1">
+          <Badge
+            variant="destructive"
+            className="gap-1 border-0 bg-[rgb(255_59_48_/_0.11)] text-[rgb(174_37_31)] shadow-none hover:bg-[rgb(255_59_48_/_0.15)] dark:text-[rgb(255_105_97)]"
+          >
             <AlertCircle className="h-3 w-3" />
             Key无效
           </Badge>
         )
       } else {
         return (
-          <Badge className="gap-1 bg-blue-600 hover:bg-blue-700">
+          <Badge className="gap-1 border-0 bg-[rgb(0_122_255_/_0.11)] text-[rgb(0_102_204)] shadow-none hover:bg-[rgb(0_122_255_/_0.15)] dark:text-[rgb(100_210_255)]">
             <CheckCircle2 className="h-3 w-3" />
             可访问
           </Badge>
@@ -679,7 +702,10 @@ export function ModelProviderConfigPage() {
       }
     } else {
       return (
-        <Badge variant="destructive" className="gap-1">
+        <Badge
+          variant="destructive"
+          className="gap-1 border-0 bg-[rgb(255_59_48_/_0.11)] text-[rgb(174_37_31)] shadow-none hover:bg-[rgb(255_59_48_/_0.15)] dark:text-[rgb(255_105_97)]"
+        >
           <XCircle className="h-3 w-3" />
           离线
         </Badge>
@@ -689,86 +715,170 @@ export function ModelProviderConfigPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">加载中...</p>
+      <div className="ios-page">
+        <div className="ios-content">
+          <div className="space-y-2 px-1">
+            <Skeleton className="h-9 w-64 rounded-[12px]" />
+            <Skeleton className="h-5 w-52 rounded-[10px]" />
+          </div>
+          <div className="ios-group overflow-hidden p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-32 rounded-[10px]" />
+                <Skeleton className="h-4 w-48 rounded-[9px]" />
+              </div>
+              <Skeleton className="h-9 w-28 rounded-full" />
+            </div>
+            <div className="mt-5 space-y-3">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="flex min-h-[70px] items-center gap-3">
+                  <Skeleton className="h-9 w-9 shrink-0 rounded-[10px]" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Skeleton className="h-4 w-2/5 rounded-[8px]" />
+                    <Skeleton className="h-3.5 w-3/5 rounded-[8px]" />
+                  </div>
+                  <Skeleton className="h-7 w-16 rounded-full" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
+  const saveLabel = saving
+    ? '保存中...'
+    : autoSaving
+      ? '自动保存中...'
+      : hasUnsavedChanges
+        ? '保存配置'
+        : '已保存'
+  const restartLabel = restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启主程序'
+  const saveDescription = hasUnsavedChanges ? '有更改等待写入配置' : '当前配置已写入'
+  const renderProviderMeta = (provider: APIProvider) => (
+    <span className="mt-1.5 flex flex-wrap gap-1.5">
+      {[provider.client_type, `重试 ${provider.max_retry}`, `超时 ${provider.timeout}s`].map(
+        (item) => (
+          <span
+            key={item}
+            className="rounded-full bg-secondary/70 px-2 py-0.5 text-[11.5px] font-medium leading-4 text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.5)_inset]"
+          >
+            {item}
+          </span>
+        )
+      )}
+    </span>
+  )
+
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+    <div className="ios-page space-y-6 sm:space-y-8">
       {/* 页面标题 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">AI模型厂商配置</h1>
-          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">管理 AI 模型厂商的 API 配置</p>
+          <h1 className="ios-title">AI 模型厂商配置</h1>
+          <p className="ios-subtitle">管理 AI 模型厂商的 API 配置</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
+        <div className="hidden w-full grid-cols-[2.75rem_minmax(0,1fr)_2.75rem_2.75rem] gap-2 sm:flex sm:w-auto sm:flex-row">
           {selectedProviders.size > 0 && (
-            <Button 
-              onClick={openBatchDeleteDialog} 
-              size="sm" 
-              variant="destructive" 
-              className="w-full sm:w-auto"
+            <Button
+              onClick={openBatchDeleteDialog}
+              size="sm"
+              variant="destructive"
+              className="col-span-4 h-11 w-full sm:h-9 sm:w-auto"
             >
               <Trash2 className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
               批量删除 ({selectedProviders.size})
             </Button>
           )}
-          <Button 
-            onClick={handleTestAllConnections} 
-            size="sm" 
+          <Button
+            onClick={handleTestAllConnections}
+            size="sm"
             variant="outline"
-            className="w-full sm:w-auto"
+            className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:px-4"
             disabled={providers.length === 0 || testingProviders.size > 0}
+            aria-label={
+              testingProviders.size > 0
+                ? `测试中，剩余 ${testingProviders.size} 个`
+                : '测试全部提供商'
+            }
+            title={testingProviders.size > 0 ? `测试中 (${testingProviders.size})` : '测试全部'}
           >
-            <Zap className="mr-2 h-4 w-4" />
-            {testingProviders.size > 0 ? `测试中 (${testingProviders.size})` : '测试全部'}
+            <Zap className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">
+              {testingProviders.size > 0 ? `测试中 (${testingProviders.size})` : '测试全部'}
+            </span>
           </Button>
-          <Button onClick={() => openEditDialog(null, null)} size="sm" className="w-full sm:w-auto" data-tour="add-provider-button">
+          <Button
+            onClick={() => openEditDialog(null, null)}
+            size="sm"
+            className="h-11 min-w-0 px-4 sm:h-9 sm:w-auto"
+            data-tour="add-provider-button"
+          >
             <Plus className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
-            添加提供商
+            <span className="truncate">添加提供商</span>
           </Button>
-          <Button 
-            onClick={saveConfig} 
-            disabled={saving || autoSaving || !hasUnsavedChanges || restarting} 
-            size="sm" 
+          <Button
+            onClick={saveConfig}
+            disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
+            size="sm"
             variant="outline"
-            className="w-full sm:w-auto sm:min-w-[120px]"
+            className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[120px] sm:px-4"
+            aria-label={
+              saving
+                ? '保存中'
+                : autoSaving
+                  ? '自动保存中'
+                  : hasUnsavedChanges
+                    ? '保存配置'
+                    : '已保存'
+            }
+            title={
+              saving
+                ? '保存中...'
+                : autoSaving
+                  ? '自动保存中...'
+                  : hasUnsavedChanges
+                    ? '保存配置'
+                    : '已保存'
+            }
           >
-            <Save className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
-            {saving ? '保存中...' : autoSaving ? '自动保存中...' : hasUnsavedChanges ? '保存配置' : '已保存'}
+            <Save className="h-4 w-4 sm:mr-2" strokeWidth={2} fill="none" />
+            <span className="hidden sm:inline">{saveLabel}</span>
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
                 disabled={saving || autoSaving || restarting}
                 size="sm"
-                className="w-full sm:w-auto sm:min-w-[120px]"
+                className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[120px] sm:px-4"
+                aria-label={restarting ? '重启中' : hasUnsavedChanges ? '保存并重启' : '重启主程序'}
+                title={restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启主程序'}
               >
-                <Power className="mr-2 h-4 w-4" />
-                {restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启璃夜'}
+                <Power className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">
+                  {restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启主程序'}
+                </span>
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>确认重启璃夜？</AlertDialogTitle>
+                <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
                 <AlertDialogDescription asChild>
                   <div>
                     <p>
                       {hasUnsavedChanges
-                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启璃夜使新配置生效。重启过程中璃夜将暂时离线。'
-                        : '即将重启璃夜主程序。重启过程中璃夜将暂时离线,配置将在重启后生效。'
-                      }
+                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
+                        : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
                     </p>
                   </div>
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}>
+                <AlertDialogAction
+                  onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}
+                >
                   {hasUnsavedChanges ? '保存并重启' : '确认重启'}
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -777,542 +887,742 @@ export function ModelProviderConfigPage() {
         </div>
       </div>
 
-      {/* 重启提示 */}
-      <Alert>
-        <Info className="h-4 w-4" />
-        <AlertDescription>
-          配置更新后需要<strong>重启璃夜</strong>才能生效。你可以点击右上角的"保存并重启"按钮一键完成保存和重启。
-        </AlertDescription>
-      </Alert>
-
-      <ScrollArea className="h-[calc(100vh-260px)]">
-        {/* 搜索框 */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4">
-          <div className="relative w-full sm:flex-1 sm:max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="搜索提供商名称、URL 或类型..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          {searchQuery && (
-            <p className="text-sm text-muted-foreground whitespace-nowrap">
-              找到 {filteredProviders.length} 个结果
-            </p>
-          )}
-        </div>
-
-        {/* 提供商列表 - 移动端卡片视图 */}
-        <div className="md:hidden space-y-3">
-          {filteredProviders.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8 rounded-lg border bg-card">
-              {searchQuery ? '未找到匹配的提供商' : '暂无提供商配置，点击"添加提供商"开始配置'}
+      <div className="ios-group overflow-hidden sm:hidden">
+        <button
+          type="button"
+          onClick={() => openEditDialog(null, null)}
+          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+          data-tour="add-provider-button"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+              <Plus className="h-4 w-4" strokeWidth={2} fill="none" />
+            </span>
+            <span className="text-[15px] font-medium leading-5">添加提供商</span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+        </button>
+        <button
+          type="button"
+          onClick={handleTestAllConnections}
+          disabled={providers.length === 0 || testingProviders.size > 0}
+          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+              {testingProviders.size > 0 ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium leading-5">
+                {testingProviders.size > 0 ? `测试中 (${testingProviders.size})` : '测试全部'}
+              </span>
+              <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                检查所有提供商连接状态
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+        </button>
+        <button
+          type="button"
+          onClick={saveConfig}
+          disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
+          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
+              <Save className="h-4 w-4" strokeWidth={2} fill="none" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium leading-5">{saveLabel}</span>
+              <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                {saveDescription}
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+        </button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              type="button"
+              disabled={saving || autoSaving || restarting}
+              className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                  <Power className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium leading-5">{restartLabel}</span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div>
+                  <p>
+                    {hasUnsavedChanges
+                      ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
+                      : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}>
+                {hasUnsavedChanges ? '保存并重启' : '确认重启'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {selectedProviders.size > 0 && (
+          <button
+            type="button"
+            onClick={openBatchDeleteDialog}
+            className="ios-row ios-touch text-destructive w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-red">
+                <Trash2 className="h-4 w-4" strokeWidth={2} fill="none" />
+              </span>
+              <span className="text-[15px] font-medium leading-5">
+                批量删除 ({selectedProviders.size})
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+          </button>
+        )}
+      </div>
+      <ScrollArea className="ios-scrollbar-none h-[calc(100vh-318px)]">
+        <div className="space-y-5 pr-1">
+          {/* 搜索框 */}
+          <div className="ios-group overflow-hidden px-4 py-3 sm:hidden">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="搜索提供商"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-11 rounded-[12px] border-0 bg-muted pl-10 text-[16px] shadow-none focus-visible:ring-0"
+              />
             </div>
-          ) : (
-            paginatedProviders.map((provider, displayIndex) => {
-              const actualIndex = providers.findIndex(p => p === provider)
-              return (
-              <div key={displayIndex} className="rounded-lg border bg-card p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-base truncate">{provider.name}</h3>
-                      {renderTestStatus(provider.name)}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 break-all">{provider.base_url}</p>
+          </div>
+          <div className="hidden items-center gap-3 sm:flex">
+            <div className="relative w-full sm:max-w-sm sm:flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="搜索提供商名称、URL 或类型..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-10 rounded-[12px] border-0 bg-muted/75 pl-9 shadow-none focus-visible:ring-0"
+              />
+            </div>
+            {searchQuery && (
+              <p className="whitespace-nowrap text-sm text-muted-foreground">
+                找到 {filteredProviders.length} 个结果
+              </p>
+            )}
+          </div>
+
+          {/* 提供商列表 - 移动端卡片视图 */}
+          <div className="ios-group overflow-hidden md:hidden">
+            {filteredProviders.length === 0 ? (
+              <div className="ios-empty-state">
+                <span className="ios-empty-illustration">
+                  <Server className="h-7 w-7 text-primary" />
+                </span>
+                <span className="space-y-1.5">
+                  <span className="block text-[15px] font-semibold leading-5 text-foreground">
+                    {searchQuery ? '未找到匹配的提供商' : '暂无提供商配置'}
+                  </span>
+                  <span className="block text-[13px] leading-5 text-muted-foreground">
+                    {searchQuery ? '换个关键词再试试' : '添加提供商后会显示在这里'}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              paginatedProviders.map((provider, displayIndex) => {
+                const actualIndex = providers.findIndex((p) => p === provider)
+
+                return (
+                  <div
+                    key={displayIndex}
+                    className="relative grid min-h-[92px] grid-cols-[minmax(0,1fr)_80px] items-center after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openEditDialog(provider, actualIndex)}
+                      className="ios-touch grid min-h-[92px] w-full grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 pr-1 text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+                    >
+                      <span className="ios-symbol ios-symbol-md ios-symbol-purple">
+                        <Server className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-[16px] font-semibold leading-6">
+                            {provider.name}
+                          </span>
+                          {renderTestStatus(provider.name)}
+                        </span>
+                        <span
+                          className="block truncate text-[13px] leading-5 text-muted-foreground"
+                          title={provider.base_url}
+                        >
+                          {provider.base_url}
+                        </span>
+                        {renderProviderMeta(provider)}
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                    </button>
+                    <span className="mr-2 flex shrink-0 items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleTestConnection(provider.name)}
+                        disabled={testingProviders.has(provider.name)}
+                        className="ios-touch grid h-9 w-9 place-items-center rounded-full text-foreground hover:bg-accent/70 focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+                        aria-label={`测试提供商 ${provider.name}`}
+                        title="测试连接"
+                      >
+                        {testingProviders.has(provider.name) ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Zap className="h-4 w-4" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openDeleteDialog(actualIndex)}
+                        className="ios-touch grid h-9 w-9 place-items-center rounded-full text-muted-foreground/55 hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(215_0_21)] focus-visible:bg-[rgb(255_59_48_/_0.08)] focus-visible:text-[rgb(215_0_21)] focus-visible:ring-0 dark:hover:bg-[rgb(255_69_58_/_0.12)] dark:hover:text-[rgb(255_105_97)]"
+                        aria-label={`删除提供商 ${provider.name}`}
+                        title="删除"
+                      >
+                        <Trash2 className="h-4 w-4" strokeWidth={2} fill="none" />
+                      </button>
+                    </span>
                   </div>
-                  <div className="flex gap-1 flex-shrink-0">
+                )
+              })
+            )}
+          </div>
+
+          {/* 提供商列表 - 桌面端分组列表视图 */}
+          <div className="ios-group hidden overflow-hidden md:block">
+            {filteredProviders.length > 0 && (
+              <div className="flex min-h-12 items-center justify-between gap-4 border-b border-border/45 px-5 text-[13px] leading-5 text-muted-foreground">
+                <label className="ios-touch flex items-center gap-2 rounded-full pr-2">
+                  <span className="sr-only">选择全部提供商</span>
+                  <Checkbox
+                    checked={
+                      selectedProviders.size === filteredProviders.length &&
+                      filteredProviders.length > 0
+                    }
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="选择全部提供商"
+                  />
+                  <span>选择全部</span>
+                </label>
+                <span>{filteredProviders.length} 个提供商</span>
+              </div>
+            )}
+            {paginatedProviders.length === 0 ? (
+              <div className="ios-empty-state">
+                <span className="ios-empty-illustration">
+                  <Server className="h-7 w-7 text-primary" />
+                </span>
+                <span className="space-y-1.5">
+                  <span className="block text-[15px] font-semibold leading-5 text-foreground">
+                    {searchQuery ? '未找到匹配的提供商' : '暂无提供商配置'}
+                  </span>
+                  <span className="block text-[13px] leading-5 text-muted-foreground">
+                    {searchQuery ? '换个关键词再试试' : '添加提供商后会显示在这里'}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              paginatedProviders.map((provider, displayIndex) => {
+                const actualIndex = providers.findIndex((p) => p === provider)
+                return (
+                  <div
+                    key={displayIndex}
+                    className="ios-touch flex min-h-[76px] items-center gap-4 border-b border-border/45 px-5 py-3 last:border-b-0 hover:bg-[rgb(120_120_128_/_0.06)]"
+                  >
+                    <div className="w-11 shrink-0">
+                      <Checkbox
+                        checked={selectedProviders.has(actualIndex)}
+                        onCheckedChange={() => toggleProviderSelection(actualIndex)}
+                        aria-label={`选择提供商 ${provider.name}`}
+                      />
+                    </div>
+                    <span className="ios-symbol ios-symbol-md ios-symbol-purple">
+                      <Server className="h-4 w-4" />
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openEditDialog(provider, actualIndex)}
+                      className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+                    >
+                      <span className="block truncate text-[15px] font-semibold leading-6 text-foreground">
+                        {provider.name}
+                      </span>
+                      <span
+                        className="mt-0.5 block truncate text-[13px] leading-5 text-muted-foreground"
+                        title={provider.base_url}
+                      >
+                        {provider.base_url}
+                      </span>
+                      {renderProviderMeta(provider)}
+                    </button>
+                    <div className="flex w-28 shrink-0 justify-end lg:w-32">
+                      {renderTestStatus(provider.name) || (
+                        <Badge
+                          variant="secondary"
+                          className="border-0 bg-secondary/80 text-muted-foreground shadow-none"
+                        >
+                          未测试
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex w-32 shrink-0 justify-end gap-2 lg:w-36">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleTestConnection(provider.name)}
+                        disabled={testingProviders.has(provider.name)}
+                        className="h-9 w-9 rounded-full"
+                        aria-label={`测试提供商 ${provider.name}`}
+                        title="测试连接"
+                      >
+                        {testingProviders.has(provider.name) ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Zap className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => openEditDialog(provider, actualIndex)}
+                        className="h-9 w-9 rounded-full"
+                        aria-label={`编辑提供商 ${provider.name}`}
+                        title="编辑"
+                      >
+                        <Pencil className="h-4 w-4" strokeWidth={2} fill="none" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openDeleteDialog(actualIndex)}
+                        className="h-9 w-9 rounded-full text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)] dark:hover:bg-[rgb(255_69_58_/_0.12)]"
+                        aria-label={`删除提供商 ${provider.name}`}
+                        title="删除"
+                      >
+                        <Trash2 className="h-4 w-4" strokeWidth={2} fill="none" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {/* 分页 - 增强版 */}
+          {filteredProviders.length > 0 && (
+            <>
+              <div className="mt-4 md:hidden">
+                <div className="ios-group flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-medium">
+                      第 {page} / {totalPages} 页
+                    </p>
+                    <p className="mt-1 truncate text-[13px] text-muted-foreground">
+                      显示 {(page - 1) * pageSize + 1} 到{' '}
+                      {Math.min(page * pageSize, filteredProviders.length)} 条，共{' '}
+                      {filteredProviders.length} 条
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={page === 1}
+                      className="h-9 w-9 rounded-full"
+                      aria-label="上一页"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage((p) => p + 1)}
+                      disabled={page >= totalPages}
+                      className="h-9 w-9 rounded-full"
+                      aria-label="下一页"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="ios-group hidden items-center justify-between gap-4 px-5 py-3 md:flex">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="page-size-provider" className="whitespace-nowrap text-sm">
+                    每页显示
+                  </Label>
+                  <Select
+                    value={pageSize.toString()}
+                    onValueChange={(value) => {
+                      setPageSize(parseInt(value))
+                      setPage(1)
+                      setSelectedProviders(new Set())
+                    }}
+                  >
+                    <SelectTrigger id="page-size-provider" className="w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-sm text-muted-foreground">
+                    显示 {(page - 1) * pageSize + 1} 到{' '}
+                    {Math.min(page * pageSize, filteredProviders.length)} 条，共{' '}
+                    {filteredProviders.length} 条
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                    className="hidden sm:flex"
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">上一页</span>
+                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      value={jumpToPage}
+                      onChange={(e) => setJumpToPage(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
+                      placeholder={page.toString()}
+                      className="h-8 w-16 text-center"
+                      min={1}
+                      max={totalPages}
+                    />
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleTestConnection(provider.name)}
-                      disabled={testingProviders.has(provider.name)}
-                      title="测试连接"
+                      onClick={handleJumpToPage}
+                      disabled={!jumpToPage}
+                      className="h-8"
                     >
-                      {testingProviders.has(provider.name) ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Zap className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => openEditDialog(provider, actualIndex)}
-                    >
-                      <Pencil className="h-4 w-4" strokeWidth={2} fill="none" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => openDeleteDialog(actualIndex)}
-                      className="bg-red-600 hover:bg-red-700 text-white"
-                    >
-                      <Trash2 className="h-4 w-4" strokeWidth={2} fill="none" />
+                      跳转
                     </Button>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <span className="text-muted-foreground text-xs">客户端类型</span>
-                    <p className="font-medium">{provider.client_type}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground text-xs">最大重试</span>
-                    <p className="font-medium">{provider.max_retry}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground text-xs">超时(秒)</span>
-                    <p className="font-medium">{provider.timeout}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground text-xs">重试间隔(秒)</span>
-                    <p className="font-medium">{provider.retry_interval}</p>
-                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={page >= totalPages}
+                  >
+                    <span className="hidden sm:inline">下一页</span>
+                    <ChevronRight className="h-4 w-4 sm:ml-1" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page >= totalPages}
+                    className="hidden sm:flex"
+                  >
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
-              )
-            })
+            </>
           )}
         </div>
-
-        {/* 提供商列表 - 桌面端表格视图 */}
-        <div className="hidden md:block rounded-lg border bg-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={selectedProviders.size === filteredProviders.length && filteredProviders.length > 0}
-                      onCheckedChange={toggleSelectAll}
-                    />
-                  </TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>名称</TableHead>
-                  <TableHead>基础URL</TableHead>
-                  <TableHead>客户端类型</TableHead>
-                  <TableHead className="text-right">最大重试</TableHead>
-                  <TableHead className="text-right">超时(秒)</TableHead>
-                  <TableHead className="text-right">重试间隔(秒)</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-            <TableBody>
-              {paginatedProviders.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                    {searchQuery ? '未找到匹配的提供商' : '暂无提供商配置，点击"添加提供商"开始配置'}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedProviders.map((provider, displayIndex) => {
-                  const actualIndex = providers.findIndex(p => p === provider)
-                  return (
-                    <TableRow key={displayIndex}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedProviders.has(actualIndex)}
-                          onCheckedChange={() => toggleProviderSelection(actualIndex)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {renderTestStatus(provider.name) || (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            未测试
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-medium">{provider.name}</TableCell>
-                      <TableCell className="max-w-xs truncate" title={provider.base_url}>
-                        {provider.base_url}
-                      </TableCell>
-                      <TableCell>{provider.client_type}</TableCell>
-                      <TableCell className="text-right">{provider.max_retry}</TableCell>
-                      <TableCell className="text-right">{provider.timeout}</TableCell>
-                      <TableCell className="text-right">{provider.retry_interval}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleTestConnection(provider.name)}
-                            disabled={testingProviders.has(provider.name)}
-                            title="测试连接"
-                          >
-                            {testingProviders.has(provider.name) ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Zap className="h-4 w-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => openEditDialog(provider, actualIndex)}
-                          >
-                            <Pencil className="h-4 w-4 mr-1" strokeWidth={2} fill="none" />
-                            编辑
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => openDeleteDialog(actualIndex)}
-                            className="bg-red-600 hover:bg-red-700 text-white"
-                          >
-                            <Trash2 className="h-4 w-4 mr-1" strokeWidth={2} fill="none" />
-                            删除
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })
-              )}
-            </TableBody>
-          </Table>
-          </div>
-        </div>
-
-        {/* 分页 - 增强版 */}
-        {filteredProviders.length > 0 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="page-size-provider" className="text-sm whitespace-nowrap">每页显示</Label>
-              <Select
-                value={pageSize.toString()}
-                onValueChange={(value) => {
-                  setPageSize(parseInt(value))
-                  setPage(1)
-                  setSelectedProviders(new Set())
-                }}
-              >
-                <SelectTrigger id="page-size-provider" className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
-              <span className="text-sm text-muted-foreground">
-                显示 {(page - 1) * pageSize + 1} 到{' '}
-                {Math.min(page * pageSize, filteredProviders.length)} 条，共 {filteredProviders.length} 条
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(1)}
-                disabled={page === 1}
-                className="hidden sm:flex"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-              >
-                <ChevronLeft className="h-4 w-4 sm:mr-1" />
-                <span className="hidden sm:inline">上一页</span>
-              </Button>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={jumpToPage}
-                  onChange={(e) => setJumpToPage(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
-                  placeholder={page.toString()}
-                  className="w-16 h-8 text-center"
-                  min={1}
-                  max={totalPages}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleJumpToPage}
-                  disabled={!jumpToPage}
-                  className="h-8"
-                >
-                  跳转
-                </Button>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => p + 1)}
-                disabled={page >= totalPages}
-              >
-                <span className="hidden sm:inline">下一页</span>
-                <ChevronRight className="h-4 w-4 sm:ml-1" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(totalPages)}
-                disabled={page >= totalPages}
-                className="hidden sm:flex"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
       </ScrollArea>
 
       {/* 编辑对话框 */}
       <Dialog open={editDialogOpen} onOpenChange={handleEditDialogClose}>
-        <DialogContent 
-          className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto" 
+        <DialogContent
+          className="max-h-[90vh] max-w-[95vw] overflow-y-auto sm:max-w-2xl"
           data-tour="provider-dialog"
           preventOutsideClose={tourState.isRunning}
         >
           <DialogHeader>
-            <DialogTitle>
-              {editingIndex !== null ? '编辑提供商' : '添加提供商'}
-            </DialogTitle>
-            <DialogDescription>
-              配置 API 提供商的连接信息和参数
-            </DialogDescription>
+            <DialogTitle>{editingIndex !== null ? '编辑提供商' : '添加提供商'}</DialogTitle>
+            <DialogDescription>配置 API 提供商的连接信息和参数</DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={(e) => { e.preventDefault(); handleSaveEdit(); }} autoComplete="off">
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2" data-tour="provider-template-select">
-              <Label htmlFor="template">提供商模板</Label>
-              <Popover open={templateComboboxOpen} onOpenChange={setTemplateComboboxOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={templateComboboxOpen}
-                    className="w-full justify-between"
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleSaveEdit()
+            }}
+            autoComplete="off"
+          >
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2" data-tour="provider-template-select">
+                <Label htmlFor="template">提供商模板</Label>
+                <Popover open={templateComboboxOpen} onOpenChange={setTemplateComboboxOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={templateComboboxOpen}
+                      className="w-full justify-between"
+                    >
+                      {selectedTemplate
+                        ? PROVIDER_TEMPLATES.find((template) => template.id === selectedTemplate)
+                            ?.display_name
+                        : '选择提供商模板...'}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="p-0"
+                    align="start"
+                    style={{ width: 'var(--radix-popover-trigger-width)' }}
                   >
-                    {selectedTemplate
-                      ? PROVIDER_TEMPLATES.find((template) => template.id === selectedTemplate)?.display_name
-                      : "选择提供商模板..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
-                  <Command>
-                    <CommandInput placeholder="搜索提供商模板..." />
-                    <ScrollArea className="h-[300px]">
-                      <CommandList className="max-h-none overflow-visible">
-                        <CommandEmpty>未找到匹配的模板</CommandEmpty>
-                        <CommandGroup>
-                          {PROVIDER_TEMPLATES.map((template) => (
-                            <CommandItem
-                              key={template.id}
-                              value={template.display_name}
-                              onSelect={() => handleTemplateChange(template.id)}
-                            >
-                              <Check
-                                className={`mr-2 h-4 w-4 ${
-                                  selectedTemplate === template.id ? "opacity-100" : "opacity-0"
-                                }`}
-                              />
-                              {template.display_name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </ScrollArea>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <p className="text-xs text-muted-foreground">
-                选择预设模板可自动填充 URL 和客户端类型,支持搜索
-              </p>
-            </div>
-
-            <div className="grid gap-2" data-tour="provider-name-input">
-              <Label htmlFor="name" className={formErrors.name ? 'text-destructive' : ''}>名称 *</Label>
-              <Input
-                id="name"
-                value={editingProvider?.name || ''}
-                onChange={(e) => {
-                  setEditingProvider((prev) =>
-                    prev ? { ...prev, name: e.target.value } : null
-                  )
-                  if (formErrors.name) {
-                    setFormErrors((prev) => ({ ...prev, name: undefined }))
-                  }
-                }}
-                placeholder="例如: DeepSeek, SiliconFlow"
-                className={formErrors.name ? 'border-destructive focus-visible:ring-destructive' : ''}
-              />
-              {formErrors.name && (
-                <p className="text-xs text-destructive">{formErrors.name}</p>
-              )}
-            </div>
-
-            <div className="grid gap-2" data-tour="provider-url-input">
-              <Label htmlFor="base_url" className={formErrors.base_url ? 'text-destructive' : ''}>基础 URL *</Label>
-              <Input
-                id="base_url"
-                value={editingProvider?.base_url || ''}
-                onChange={(e) => {
-                  setEditingProvider((prev) =>
-                    prev ? { ...prev, base_url: e.target.value } : null
-                  )
-                  if (formErrors.base_url) {
-                    setFormErrors((prev) => ({ ...prev, base_url: undefined }))
-                  }
-                }}
-                placeholder="https://api.example.com/v1"
-                disabled={isUsingTemplate}
-                className={`${isUsingTemplate ? 'bg-muted cursor-not-allowed' : ''} ${formErrors.base_url ? 'border-destructive focus-visible:ring-destructive' : ''}`}
-              />
-              {formErrors.base_url && (
-                <p className="text-xs text-destructive">{formErrors.base_url}</p>
-              )}
-              {isUsingTemplate && !formErrors.base_url && (
+                    <Command>
+                      <CommandInput placeholder="搜索提供商模板..." />
+                      <ScrollArea className="h-[300px]">
+                        <CommandList className="max-h-none overflow-visible">
+                          <CommandEmpty>未找到匹配的模板</CommandEmpty>
+                          <CommandGroup>
+                            {PROVIDER_TEMPLATES.map((template) => (
+                              <CommandItem
+                                key={template.id}
+                                value={template.display_name}
+                                onSelect={() => handleTemplateChange(template.id)}
+                              >
+                                <Check
+                                  className={`mr-2 h-4 w-4 ${
+                                    selectedTemplate === template.id ? 'opacity-100' : 'opacity-0'
+                                  }`}
+                                />
+                                {template.display_name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </ScrollArea>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 <p className="text-xs text-muted-foreground">
-                  使用模板时 URL 不可编辑,切换到"自定义"以手动配置
+                  选择预设模板可自动填充 URL 和客户端类型,支持搜索
                 </p>
-              )}
-            </div>
+              </div>
 
-            <div className="grid gap-2" data-tour="provider-apikey-input">
-              <Label htmlFor="api_key" className={formErrors.api_key ? 'text-destructive' : ''}>API Key *</Label>
-              <div className="flex gap-2">
+              <div className="grid gap-2" data-tour="provider-name-input">
+                <Label htmlFor="name" className={formErrors.name ? 'text-destructive' : ''}>
+                  名称 *
+                </Label>
                 <Input
-                  id="api_key"
-                  type={showApiKey ? 'text' : 'password'}
-                  value={editingProvider?.api_key || ''}
+                  id="name"
+                  value={editingProvider?.name || ''}
                   onChange={(e) => {
-                    setEditingProvider((prev) =>
-                      prev ? { ...prev, api_key: e.target.value } : null
-                    )
-                    if (formErrors.api_key) {
-                      setFormErrors((prev) => ({ ...prev, api_key: undefined }))
+                    setEditingProvider((prev) => (prev ? { ...prev, name: e.target.value } : null))
+                    if (formErrors.name) {
+                      setFormErrors((prev) => ({ ...prev, name: undefined }))
                     }
                   }}
-                  placeholder="sk-..."
-                  className={`flex-1 ${formErrors.api_key ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                  placeholder="例如: DeepSeek, SiliconFlow"
+                  className={
+                    formErrors.name ? 'border-destructive focus-visible:ring-destructive' : ''
+                  }
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  title={showApiKey ? '隐藏密钥' : '显示密钥'}
-                >
-                  {showApiKey ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={copyApiKey}
-                  title="复制密钥"
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
+                {formErrors.name && <p className="text-destructive text-xs">{formErrors.name}</p>}
               </div>
-              {formErrors.api_key && (
-                <p className="text-xs text-destructive">{formErrors.api_key}</p>
-              )}
+
+              <div className="grid gap-2" data-tour="provider-url-input">
+                <Label htmlFor="base_url" className={formErrors.base_url ? 'text-destructive' : ''}>
+                  基础 URL *
+                </Label>
+                <Input
+                  id="base_url"
+                  value={editingProvider?.base_url || ''}
+                  onChange={(e) => {
+                    setEditingProvider((prev) =>
+                      prev ? { ...prev, base_url: e.target.value } : null
+                    )
+                    if (formErrors.base_url) {
+                      setFormErrors((prev) => ({ ...prev, base_url: undefined }))
+                    }
+                  }}
+                  placeholder="https://api.example.com/v1"
+                  disabled={isUsingTemplate}
+                  className={`${isUsingTemplate ? 'cursor-not-allowed bg-muted' : ''} ${formErrors.base_url ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                />
+                {formErrors.base_url && (
+                  <p className="text-destructive text-xs">{formErrors.base_url}</p>
+                )}
+                {isUsingTemplate && !formErrors.base_url && (
+                  <p className="text-xs text-muted-foreground">
+                    使用模板时 URL 不可编辑,切换到"自定义"以手动配置
+                  </p>
+                )}
+              </div>
+
+              <div className="grid gap-2" data-tour="provider-apikey-input">
+                <Label htmlFor="api_key" className={formErrors.api_key ? 'text-destructive' : ''}>
+                  API Key *
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="api_key"
+                    type={showApiKey ? 'text' : 'password'}
+                    value={editingProvider?.api_key || ''}
+                    onChange={(e) => {
+                      setEditingProvider((prev) =>
+                        prev ? { ...prev, api_key: e.target.value } : null
+                      )
+                      if (formErrors.api_key) {
+                        setFormErrors((prev) => ({ ...prev, api_key: undefined }))
+                      }
+                    }}
+                    placeholder="sk-..."
+                    className={`flex-1 ${formErrors.api_key ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    title={showApiKey ? '隐藏密钥' : '显示密钥'}
+                  >
+                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={copyApiKey}
+                    title="复制密钥"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                {formErrors.api_key && (
+                  <p className="text-destructive text-xs">{formErrors.api_key}</p>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="client_type">客户端类型</Label>
+                <Select
+                  value={editingProvider?.client_type || 'openai'}
+                  onValueChange={(value) =>
+                    setEditingProvider((prev) => (prev ? { ...prev, client_type: value } : null))
+                  }
+                  disabled={isUsingTemplate}
+                >
+                  <SelectTrigger
+                    id="client_type"
+                    className={isUsingTemplate ? 'cursor-not-allowed bg-muted' : ''}
+                  >
+                    <SelectValue placeholder="选择客户端类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="gemini">Gemini</SelectItem>
+                  </SelectContent>
+                </Select>
+                {isUsingTemplate && (
+                  <p className="text-xs text-muted-foreground">
+                    使用模板时客户端类型不可编辑,切换到"自定义"以手动配置
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="max_retry">最大重试</Label>
+                  <Input
+                    id="max_retry"
+                    type="number"
+                    min="0"
+                    value={editingProvider?.max_retry ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? null : parseInt(e.target.value)
+                      setEditingProvider((prev) => (prev ? { ...prev, max_retry: val } : null))
+                    }}
+                    placeholder="默认: 2"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="timeout">超时(秒)</Label>
+                  <Input
+                    id="timeout"
+                    type="number"
+                    min="1"
+                    value={editingProvider?.timeout ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? null : parseInt(e.target.value)
+                      setEditingProvider((prev) => (prev ? { ...prev, timeout: val } : null))
+                    }}
+                    placeholder="默认: 30"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="retry_interval">重试间隔(秒)</Label>
+                  <Input
+                    id="retry_interval"
+                    type="number"
+                    min="1"
+                    value={editingProvider?.retry_interval ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? null : parseInt(e.target.value)
+                      setEditingProvider((prev) => (prev ? { ...prev, retry_interval: val } : null))
+                    }}
+                    placeholder="默认: 10"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="client_type">客户端类型</Label>
-              <Select
-                value={editingProvider?.client_type || 'openai'}
-                onValueChange={(value) =>
-                  setEditingProvider((prev) =>
-                    prev ? { ...prev, client_type: value } : null
-                  )
-                }
-                disabled={isUsingTemplate}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditDialogOpen(false)}
+                data-tour="provider-cancel-button"
               >
-                <SelectTrigger id="client_type" className={isUsingTemplate ? 'bg-muted cursor-not-allowed' : ''}>
-                  <SelectValue placeholder="选择客户端类型" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="gemini">Gemini</SelectItem>
-                </SelectContent>
-              </Select>
-              {isUsingTemplate && (
-                <p className="text-xs text-muted-foreground">
-                  使用模板时客户端类型不可编辑,切换到"自定义"以手动配置
-                </p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="max_retry">最大重试</Label>
-                <Input
-                  id="max_retry"
-                  type="number"
-                  min="0"
-                  value={editingProvider?.max_retry ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? null : parseInt(e.target.value)
-                    setEditingProvider((prev) =>
-                      prev ? { ...prev, max_retry: val } : null
-                    )
-                  }}
-                  placeholder="默认: 2"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="timeout">超时(秒)</Label>
-                <Input
-                  id="timeout"
-                  type="number"
-                  min="1"
-                  value={editingProvider?.timeout ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? null : parseInt(e.target.value)
-                    setEditingProvider((prev) =>
-                      prev ? { ...prev, timeout: val } : null
-                    )
-                  }}
-                  placeholder="默认: 30"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="retry_interval">重试间隔(秒)</Label>
-                <Input
-                  id="retry_interval"
-                  type="number"
-                  min="1"
-                  value={editingProvider?.retry_interval ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? null : parseInt(e.target.value)
-                    setEditingProvider((prev) =>
-                      prev
-                        ? { ...prev, retry_interval: val }
-                        : null
-                    )
-                  }}
-                  placeholder="默认: 10"
-                />
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} data-tour="provider-cancel-button">
-              取消
-            </Button>
-            <Button type="submit" data-tour="provider-save-button">保存</Button>
-          </DialogFooter>
+                取消
+              </Button>
+              <Button type="submit" data-tour="provider-save-button">
+                保存
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -1340,13 +1650,15 @@ export function ModelProviderConfigPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认批量删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除选中的 {selectedProviders.size} 个提供商吗？
-              此操作无法撤销。
+              确定要删除选中的 {selectedProviders.size} 个提供商吗？ 此操作无法撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmBatchDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleConfirmBatchDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               批量删除
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1355,7 +1667,7 @@ export function ModelProviderConfigPage() {
 
       {/* 重启遮罩层 */}
       {showRestartOverlay && (
-        <RestartingOverlay 
+        <RestartingOverlay
           onRestartComplete={handleRestartComplete}
           onRestartFailed={handleRestartFailed}
         />

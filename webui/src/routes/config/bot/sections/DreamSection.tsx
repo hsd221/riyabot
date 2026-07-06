@@ -29,7 +29,7 @@ export const DreamSection = React.memo(function DreamSection({ config, onChange 
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+    <div className="ios-group p-4 sm:p-6 space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">Dream 配置</h3>
         <div className="grid gap-4">

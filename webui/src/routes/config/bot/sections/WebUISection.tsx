@@ -18,7 +18,7 @@ interface WebUISectionProps {
 
 export const WebUISection = React.memo(function WebUISection({ config, onChange }: WebUISectionProps) {
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+    <div className="ios-group p-4 sm:p-6 space-y-4">
       <div>
         <h3 className="text-lg font-semibold mb-4">WebUI 服务配置</h3>
         <div className="grid gap-4">

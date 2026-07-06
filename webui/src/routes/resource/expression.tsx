@@ -1,4 +1,19 @@
-import { MessageSquare, Search, Edit, Trash2, Eye, Plus, Clock, Hash, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import {
+  MessageSquare,
+  Search,
+  Edit,
+  Trash2,
+  Eye,
+  Plus,
+  Clock,
+  Hash,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  CalendarDays,
+  SlidersHorizontal,
+} from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -6,14 +21,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   Dialog,
   DialogContent,
@@ -40,8 +47,23 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import type { Expression, ExpressionCreateRequest, ExpressionUpdateRequest, ChatInfo } from '@/types/expression'
-import { getExpressionList, getExpressionDetail, createExpression, updateExpression, deleteExpression, batchDeleteExpressions, getExpressionStats, getChatList } from '@/lib/expression-api'
+import { IosListSkeleton } from '@/components/ui/skeleton'
+import type {
+  Expression,
+  ExpressionCreateRequest,
+  ExpressionUpdateRequest,
+  ChatInfo,
+} from '@/types/expression'
+import {
+  getExpressionList,
+  getExpressionDetail,
+  createExpression,
+  updateExpression,
+  deleteExpression,
+  batchDeleteExpressions,
+  getExpressionStats,
+  getChatList,
+} from '@/lib/expression-api'
 
 export function ExpressionManagementPage() {
   const [expressions, setExpressions] = useState<Expression[]>([])
@@ -58,7 +80,12 @@ export function ExpressionManagementPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
   const [jumpToPage, setJumpToPage] = useState('')
-  const [stats, setStats] = useState({ total: 0, recent_7days: 0, chat_count: 0, top_chats: {} as Record<string, number> })
+  const [stats, setStats] = useState({
+    total: 0,
+    recent_7days: 0,
+    chat_count: 0,
+    top_chats: {} as Record<string, number>,
+  })
   const [chatList, setChatList] = useState<ChatInfo[]>([])
   const [chatNameMap, setChatNameMap] = useState<Map<string, string>>(new Map())
   const { toast } = useToast()
@@ -185,7 +212,7 @@ export function ExpressionManagementPage() {
     if (selectedIds.size === expressions.length && expressions.length > 0) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(expressions.map(e => e.id)))
+      setSelectedIds(new Set(expressions.map((e) => e.id)))
     }
   }
 
@@ -225,22 +252,43 @@ export function ExpressionManagementPage() {
       })
     }
   }
+  const expressionStatItems = [
+    {
+      label: '总数量',
+      value: stats.total,
+      detail: '全部模板',
+      Icon: MessageSquare,
+      symbolClassName: 'ios-symbol-orange',
+    },
+    {
+      label: '近7天新增',
+      value: stats.recent_7days,
+      detail: '最近学习',
+      Icon: CalendarDays,
+      symbolClassName: 'ios-symbol-green',
+    },
+    {
+      label: '关联聊天数',
+      value: stats.chat_count,
+      detail: '覆盖范围',
+      Icon: Hash,
+      symbolClassName: 'ios-symbol-purple',
+    },
+  ]
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-              <MessageSquare className="h-8 w-8" strokeWidth={2} />
-              表达方式管理
-            </h1>
-            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              管理璃夜的表达方式和话术模板
-            </p>
+            <h1 className="ios-title">表达方式管理</h1>
+            <p className="ios-subtitle">管理当前实例的表达方式和话术模板</p>
           </div>
-          <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+          <Button
+            onClick={() => setIsCreateDialogOpen(true)}
+            className="hidden gap-2 sm:inline-flex"
+          >
             <Plus className="h-4 w-4" />
             新增表达方式
           </Button>
@@ -248,340 +296,315 @@ export function ExpressionManagementPage() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 pr-4">
+        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+          <button
+            type="button"
+            onClick={() => setIsCreateDialogOpen(true)}
+            className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                <Plus className="h-4 w-4" />
+              </span>
+              <span className="block min-w-0 truncate text-[16px] font-normal leading-6">
+                新增表达方式
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
 
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">总数量</div>
-          <div className="text-2xl font-bold mt-1">{stats.total}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">近7天新增</div>
-          <div className="text-2xl font-bold mt-1 text-green-600">{stats.recent_7days}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">关联聊天数</div>
-          <div className="text-2xl font-bold mt-1 text-blue-600">{stats.chat_count}</div>
-        </div>
-      </div>
+          {/* 统计 */}
+          <div className="ios-stat-grid sm:grid-cols-3">
+            {expressionStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
+              <div key={label} className="ios-stat-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                      {label}
+                    </p>
+                    <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                      {detail}
+                    </p>
+                  </div>
+                  <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
+                  {value}
+                </p>
+              </div>
+            ))}
+          </div>
 
-      {/* 搜索和批量操作 */}
-      <div className="rounded-lg border bg-card p-4">
-        <Label htmlFor="search">搜索</Label>
-        <div className="flex flex-col sm:flex-row gap-2 mt-1.5">
-          <div className="flex-1 relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <div className="ios-search-field">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="search"
-              placeholder="搜索情境、风格或上下文..."
+              placeholder="搜索情境、风格或上下文"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
+              onChange={(e) => {
+                setSearch(e.target.value)
+                setPage(1)
+              }}
+              className="ios-search-input"
             />
           </div>
-        </div>
 
-        {/* 批量操作工具栏 */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-4 pt-4 border-t">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {selectedIds.size > 0 && (
-              <span>已选择 {selectedIds.size} 个表达方式</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="page-size" className="text-sm whitespace-nowrap">每页显示</Label>
-            <Select
-              value={pageSize.toString()}
-              onValueChange={(value) => {
-                setPageSize(parseInt(value))
-                setPage(1)
-                setSelectedIds(new Set())
-              }}
+          {/* 显示和批量操作 */}
+          <div className="ios-group overflow-hidden">
+            <div
+              className={cn(
+                'ios-row min-h-[64px]',
+                selectedIds.size > 0 &&
+                  'flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between'
+              )}
             >
-              <SelectTrigger id="page-size" className="w-20">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="20">20</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-                <SelectItem value="100">100</SelectItem>
-              </SelectContent>
-            </Select>
-            {selectedIds.size > 0 && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelectedIds(new Set())}
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">显示设置</span>
+                  <span className="block text-[13px] leading-5 text-muted-foreground">
+                    已选 {selectedIds.size}
+                  </span>
+                </span>
+              </span>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                <Select
+                  value={pageSize.toString()}
+                  onValueChange={(value) => {
+                    setPageSize(parseInt(value))
+                    setPage(1)
+                    setSelectedIds(new Set())
+                  }}
                 >
-                  取消选择
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setIsBatchDeleteDialogOpen(true)}
-                >
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  批量删除
-                </Button>
-              </>
-            )}
+                  <SelectTrigger
+                    id="page-size"
+                    className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10 条</SelectItem>
+                    <SelectItem value="20">20 条</SelectItem>
+                    <SelectItem value="50">50 条</SelectItem>
+                    <SelectItem value="100">100 条</SelectItem>
+                  </SelectContent>
+                </Select>
+                {selectedIds.size > 0 && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedIds(new Set())}
+                      className="h-10 rounded-full px-4"
+                    >
+                      取消选择
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setIsBatchDeleteDialogOpen(true)}
+                      className="h-10 rounded-full px-4"
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" />
+                      批量删除
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* 表达方式列表 */}
-      <div className="rounded-lg border bg-card">
-        {/* 桌面端表格视图 */}
-        <div className="hidden md:block">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">
-                  <Checkbox
-                    checked={selectedIds.size === expressions.length && expressions.length > 0}
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </TableHead>
-                <TableHead>情境</TableHead>
-                <TableHead>风格</TableHead>
-                <TableHead>聊天</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          {/* 表达方式列表 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                表达方式列表
+              </p>
+              {expressions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                >
+                  {selectedIds.size === expressions.length ? '取消全选' : '全选'}
+                </button>
+              )}
+            </div>
+            <div className="ios-group overflow-hidden">
               {loading ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                    加载中...
-                  </TableCell>
-                </TableRow>
+                <IosListSkeleton rows={4} />
               ) : expressions.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                    暂无数据
-                  </TableCell>
-                </TableRow>
+                <div className="ios-empty-state">
+                  <span className="ios-empty-illustration">
+                    <MessageSquare className="relative z-10 h-7 w-7 text-primary" />
+                  </span>
+                  <div>
+                    <p className="text-[16px] font-semibold leading-6 text-foreground">
+                      暂无表达方式
+                    </p>
+                    <p className="mt-1 max-w-sm text-[13px] leading-5">
+                      新增模板后，这里会显示可复用的情境、风格和关联聊天。
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => setIsCreateDialogOpen(true)}
+                    size="sm"
+                    className="h-9 px-4"
+                  >
+                    <Plus className="mr-1 h-4 w-4" />
+                    新增表达方式
+                  </Button>
+                </div>
               ) : (
                 expressions.map((expression) => (
-                  <TableRow key={expression.id}>
-                    <TableCell>
+                  <div
+                    key={expression.id}
+                    className="ios-row min-h-[92px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
                       <Checkbox
                         checked={selectedIds.has(expression.id)}
                         onCheckedChange={() => toggleSelect(expression.id)}
+                        className="mt-2"
                       />
-                    </TableCell>
-                    <TableCell className="font-medium max-w-xs truncate">
-                      {expression.situation}
-                    </TableCell>
-                    <TableCell className="max-w-xs truncate">{expression.style}</TableCell>
-                    <TableCell 
-                      className="max-w-[200px] truncate" 
-                      title={getChatName(expression.chat_id)}
-                      style={{ wordBreak: 'keep-all' }}
-                    >
-                      <span className="whitespace-nowrap overflow-hidden text-ellipsis block">
-                        {getChatName(expression.chat_id)}
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-orange mt-0.5">
+                        <MessageSquare className="h-4 w-4" />
                       </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleEdit(expression)}
+                      <div className="min-w-0 flex-1">
+                        <h3
+                          className="line-clamp-1 text-[15px] font-semibold leading-5 text-foreground"
+                          title={expression.situation}
                         >
-                          <Edit className="h-4 w-4 mr-1" />
-                          编辑
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => handleViewDetail(expression)}
-                          title="查看详情"
+                          {expression.situation}
+                        </h3>
+                        <p
+                          className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground"
+                          title={expression.style}
                         >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => setDeleteConfirmExpression(expression)}
-                          className="bg-red-600 hover:bg-red-700 text-white"
+                          {expression.style}
+                        </p>
+                        <p
+                          className="mt-1 truncate text-[12px] leading-4 text-muted-foreground/80"
+                          title={getChatName(expression.chat_id)}
+                          style={{ wordBreak: 'keep-all' }}
                         >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          删除
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {/* 移动端卡片视图 */}
-        <div className="md:hidden space-y-3 p-4">
-          {loading ? (
-            <div className="text-center py-8 text-muted-foreground">
-              加载中...
-            </div>
-          ) : expressions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              暂无数据
-            </div>
-          ) : (
-            expressions.map((expression) => (
-                  <div key={expression.id} className="rounded-lg border bg-card p-4 space-y-3 overflow-hidden">
-                    {/* 复选框和情境 */}
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={selectedIds.has(expression.id)}
-                        onCheckedChange={() => toggleSelect(expression.id)}
-                        className="mt-1"
-                      />
-                      <div className="min-w-0 flex-1 overflow-hidden space-y-2">
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">情境</div>
-                          <h3 className="font-semibold text-sm line-clamp-2 w-full break-all" title={expression.situation}>
-                            {expression.situation}
-                          </h3>
-                        </div>
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">风格</div>
-                          <p className="text-sm line-clamp-2 w-full break-all" title={expression.style}>
-                            {expression.style}
-                          </p>
-                        </div>
+                          {getChatName(expression.chat_id)}
+                        </p>
                       </div>
                     </div>
 
-                    {/* 聊天名称 */}
-                    <div className="text-sm">
-                      <div className="text-xs text-muted-foreground mb-1">聊天</div>
-                      <p 
-                        className="text-sm truncate" 
-                        title={getChatName(expression.chat_id)}
-                        style={{ wordBreak: 'keep-all' }}
-                      >
-                        {getChatName(expression.chat_id)}
-                      </p>
-                    </div>
-
-                    {/* 操作按钮 */}
-                    <div className="flex flex-wrap gap-1 pt-2 border-t overflow-hidden">
+                    <div className="flex shrink-0 flex-wrap gap-2 pl-14 sm:pl-0">
                       <Button
-                        variant="outline"
+                        variant="default"
                         size="sm"
                         onClick={() => handleEdit(expression)}
-                        className="text-xs px-2 py-1 h-auto flex-shrink-0"
+                        className="h-9 rounded-full px-4"
                       >
-                        <Edit className="h-3 w-3 mr-1" />
+                        <Edit className="mr-1 h-4 w-4" />
                         编辑
                       </Button>
                       <Button
                         variant="outline"
-                        size="sm"
+                        size="icon"
+                        className="h-9 w-9 rounded-full"
                         onClick={() => handleViewDetail(expression)}
-                        className="text-xs px-2 py-1 h-auto flex-shrink-0"
+                        title="查看详情"
                       >
-                        <Eye className="h-3 w-3" />
+                        <Eye className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setDeleteConfirmExpression(expression)}
-                        className="text-xs px-2 py-1 h-auto flex-shrink-0 text-destructive hover:text-destructive"
+                        className="text-destructive hover:text-destructive h-9 rounded-full px-4"
                       >
-                        <Trash2 className="h-3 w-3 mr-1" />
+                        <Trash2 className="mr-1 h-4 w-4" />
                         删除
                       </Button>
                     </div>
                   </div>
                 ))
               )}
-        </div>
 
-        {/* 分页 - 增强版 */}
-        {total > 0 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t">
-            <div className="text-sm text-muted-foreground">
-              共 {total} 条记录，第 {page} / {Math.ceil(total / pageSize)} 页
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 首页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(1)}
-                disabled={page === 1}
-                className="hidden sm:flex"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              
-              {/* 上一页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(page - 1)}
-                disabled={page === 1}
-              >
-                <ChevronLeft className="h-4 w-4 sm:mr-1" />
-                <span className="hidden sm:inline">上一页</span>
-              </Button>
+              {/* 分页 */}
+              {total > 0 && (
+                <div className="ios-row ios-row-plain min-h-[68px] flex-col !items-stretch !justify-start gap-3 border-t border-border/60 sm:flex-row sm:!items-center sm:!justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    共 {total} 条记录，第 {page} / {Math.ceil(total / pageSize)} 页
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(1)}
+                      disabled={page === 1}
+                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
 
-              {/* 页码跳转 */}
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={jumpToPage}
-                  onChange={(e) => setJumpToPage(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
-                  placeholder={page.toString()}
-                  className="w-16 h-8 text-center"
-                  min={1}
-                  max={Math.ceil(total / pageSize)}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleJumpToPage}
-                  disabled={!jumpToPage}
-                  className="h-8"
-                >
-                  跳转
-                </Button>
-              </div>
-              
-              {/* 下一页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(page + 1)}
-                disabled={page >= Math.ceil(total / pageSize)}
-              >
-                <span className="hidden sm:inline">下一页</span>
-                <ChevronRight className="h-4 w-4 sm:ml-1" />
-              </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(page - 1)}
+                      disabled={page === 1}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <ChevronLeft className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">上一页</span>
+                    </Button>
 
-              {/* 末页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(Math.ceil(total / pageSize))}
-                disabled={page >= Math.ceil(total / pageSize)}
-                className="hidden sm:flex"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        value={jumpToPage}
+                        onChange={(e) => setJumpToPage(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
+                        placeholder={page.toString()}
+                        className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                        min={1}
+                        max={Math.ceil(total / pageSize)}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleJumpToPage}
+                        disabled={!jumpToPage}
+                        className="h-9 rounded-full px-3"
+                      >
+                        跳转
+                      </Button>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(page + 1)}
+                      disabled={page >= Math.ceil(total / pageSize)}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <span className="hidden sm:inline">下一页</span>
+                      <ChevronRight className="h-4 w-4 sm:ml-1" />
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(Math.ceil(total / pageSize))}
+                      disabled={page >= Math.ceil(total / pageSize)}
+                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        )}
-      </div>
-
         </div>
       </ScrollArea>
 
@@ -627,8 +650,7 @@ export function ExpressionManagementPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除表达方式 "{deleteConfirmExpression?.situation}" 吗？
-              此操作不可撤销。
+              确定要删除表达方式 "{deleteConfirmExpression?.situation}" 吗？ 此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -679,22 +701,17 @@ function ExpressionDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>表达方式详情</DialogTitle>
-          <DialogDescription>
-            查看表达方式的完整信息
-          </DialogDescription>
+          <DialogDescription>查看表达方式的完整信息</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <InfoItem label="情境" value={expression.situation} />
             <InfoItem label="风格" value={expression.style} />
-            <InfoItem 
-              label="聊天" 
-              value={getChatName(expression.chat_id)} 
-            />
+            <InfoItem label="聊天" value={getChatName(expression.chat_id)} />
             <InfoItem icon={Hash} label="记录ID" value={expression.id.toString()} mono />
           </div>
 
@@ -725,7 +742,7 @@ function InfoItem({
 }) {
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+      <Label className="flex items-center gap-1 text-xs text-muted-foreground">
         {Icon && <Icon className="h-3 w-3" />}
         {label}
       </Label>
@@ -793,12 +810,10 @@ function ExpressionCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>新增表达方式</DialogTitle>
-          <DialogDescription>
-            创建新的表达方式记录
-          </DialogDescription>
+          <DialogDescription>创建新的表达方式记录</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -843,7 +858,7 @@ function ExpressionCreateDialog({
                   <SelectItem key={chat.chat_id} value={chat.chat_id}>
                     <span className="truncate" style={{ wordBreak: 'keep-all' }}>
                       {chat.chat_name}
-                      {chat.is_group && <span className="text-muted-foreground ml-1">(群聊)</span>}
+                      {chat.is_group && <span className="ml-1 text-muted-foreground">(群聊)</span>}
                     </span>
                   </SelectItem>
                 ))}
@@ -919,12 +934,10 @@ function ExpressionEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>编辑表达方式</DialogTitle>
-          <DialogDescription>
-            修改表达方式的信息
-          </DialogDescription>
+          <DialogDescription>修改表达方式的信息</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -963,7 +976,7 @@ function ExpressionEditDialog({
                   <SelectItem key={chat.chat_id} value={chat.chat_id}>
                     <span className="truncate" style={{ wordBreak: 'keep-all' }}>
                       {chat.chat_name}
-                      {chat.is_group && <span className="text-muted-foreground ml-1">(群聊)</span>}
+                      {chat.is_group && <span className="ml-1 text-muted-foreground">(群聊)</span>}
                     </span>
                   </SelectItem>
                 ))}
@@ -1008,7 +1021,10 @@ function BatchDeleteConfirmDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
             确认删除
           </AlertDialogAction>
         </AlertDialogFooter>

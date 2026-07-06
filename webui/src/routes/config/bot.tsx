@@ -27,15 +27,39 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Save, Power, Code2, Layout } from 'lucide-react'
-import { getBotConfig, updateBotConfig, getBotConfigRaw, updateBotConfigRaw } from '@/lib/config-api'
+import {
+  Bot,
+  Check,
+  ChevronRight,
+  CloudMoon,
+  Filter,
+  FlaskConical,
+  Layers3,
+  MessageCircle,
+  Mic2,
+  Power,
+  Save,
+  Server,
+  Settings2,
+  SlidersHorizontal,
+  Sparkles,
+  UserRound,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { getBotConfig, updateBotConfig } from '@/lib/config-api'
 import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Info } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
-import { CodeEditor } from '@/components'
 
 // 导入模块化的类型定义
 import type {
@@ -76,6 +100,115 @@ type LegacyExpressionConfig = Partial<ExpressionConfig> & {
   reflect_operator_id?: string
 }
 
+type BotConfigTab =
+  | 'bot'
+  | 'personality'
+  | 'chat'
+  | 'expression'
+  | 'features'
+  | 'processing'
+  | 'message_receive'
+  | 'voice'
+  | 'service'
+  | 'experimental'
+  | 'dream'
+  | 'other'
+
+type ConfigTabItem = {
+  value: BotConfigTab
+  label: string
+  description: string
+  Icon: LucideIcon
+  color: string
+}
+
+const CONFIG_TABS: ConfigTabItem[] = [
+  {
+    value: 'bot',
+    label: '基本信息',
+    description: '平台账号与昵称',
+    Icon: Bot,
+    color: 'ios-symbol-blue',
+  },
+  {
+    value: 'personality',
+    label: '人格',
+    description: '特质、风格与状态',
+    Icon: UserRound,
+    color: 'ios-symbol-purple',
+  },
+  {
+    value: 'chat',
+    label: '聊天',
+    description: '回复频率与上下文',
+    Icon: MessageCircle,
+    color: 'ios-symbol-green',
+  },
+  {
+    value: 'expression',
+    label: '表达',
+    description: '表达学习与黑话',
+    Icon: Sparkles,
+    color: 'ios-symbol-pink',
+  },
+  {
+    value: 'features',
+    label: '功能',
+    description: '表情、记忆与工具',
+    Icon: Layers3,
+    color: 'ios-symbol-purple',
+  },
+  {
+    value: 'processing',
+    label: '处理',
+    description: '关键词和回复后处理',
+    Icon: SlidersHorizontal,
+    color: 'ios-symbol-orange',
+  },
+  {
+    value: 'message_receive',
+    label: '过滤',
+    description: '消息接收规则',
+    Icon: Filter,
+    color: 'ios-symbol-teal',
+  },
+  {
+    value: 'voice',
+    label: '语音',
+    description: '语音合成与播放',
+    Icon: Mic2,
+    color: 'ios-symbol-green',
+  },
+  {
+    value: 'service',
+    label: '服务',
+    description: 'WebUI 与通信服务',
+    Icon: Server,
+    color: 'ios-symbol-gray',
+  },
+  {
+    value: 'experimental',
+    label: '实验',
+    description: '实验性能力开关',
+    Icon: FlaskConical,
+    color: 'ios-symbol-purple',
+  },
+  {
+    value: 'dream',
+    label: 'Dream',
+    description: '梦境调度设置',
+    Icon: CloudMoon,
+    color: 'ios-symbol-teal',
+  },
+  {
+    value: 'other',
+    label: '其他',
+    description: '日志与调试选项',
+    Icon: Settings2,
+    color: 'ios-symbol-gray',
+  },
+]
+
 export function BotConfigPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -83,10 +216,10 @@ export function BotConfigPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [showRestartOverlay, setShowRestartOverlay] = useState(false)
-  const [editMode, setEditMode] = useState<'visual' | 'source'>('visual')
-  const [sourceCode, setSourceCode] = useState<string>('')
-  const [hasTomlError, setHasTomlError] = useState(false)
+  const [activeTab, setActiveTab] = useState<BotConfigTab>('bot')
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
   const { toast } = useToast()
+  const activeTabItem = CONFIG_TABS.find((item) => item.value === activeTab) ?? CONFIG_TABS[0]
 
   // 配置状态
   const [botConfig, setBotConfig] = useState<BotConfig | null>(null)
@@ -97,11 +230,17 @@ export function BotConfigPage() {
   const [memoryConfig, setMemoryConfig] = useState<MemoryConfig | null>(null)
   const [toolConfig, setToolConfig] = useState<ToolConfig | null>(null)
   const [voiceConfig, setVoiceConfig] = useState<VoiceConfig | null>(null)
-  const [messageReceiveConfig, setMessageReceiveConfig] = useState<MessageReceiveConfig | null>(null)
-  const [keywordReactionConfig, setKeywordReactionConfig] = useState<KeywordReactionConfig | null>(null)
-  const [responsePostProcessConfig, setResponsePostProcessConfig] = useState<ResponsePostProcessConfig | null>(null)
+  const [messageReceiveConfig, setMessageReceiveConfig] = useState<MessageReceiveConfig | null>(
+    null
+  )
+  const [keywordReactionConfig, setKeywordReactionConfig] = useState<KeywordReactionConfig | null>(
+    null
+  )
+  const [responsePostProcessConfig, setResponsePostProcessConfig] =
+    useState<ResponsePostProcessConfig | null>(null)
   const [chineseTypoConfig, setChineseTypoConfig] = useState<ChineseTypoConfig | null>(null)
-  const [responseSplitterConfig, setResponseSplitterConfig] = useState<ResponseSplitterConfig | null>(null)
+  const [responseSplitterConfig, setResponseSplitterConfig] =
+    useState<ResponseSplitterConfig | null>(null)
   const [logConfig, setLogConfig] = useState<LogConfig | null>(null)
   const [debugConfig, setDebugConfig] = useState<DebugConfig | null>(null)
   const [maimMessageConfig, setMaimMessageConfig] = useState<MaimMessageConfig | null>(null)
@@ -115,7 +254,7 @@ export function BotConfigPage() {
   const configRef = useRef<Record<string, unknown>>({})
 
   // ==================== 辅助函数 ====================
-  
+
   /**
    * 解析并设置所有配置状态
    * 抽取自 loadConfig 和 handleModeChange 中的重复逻辑
@@ -155,8 +294,10 @@ export function BotConfigPage() {
       learning_list: expression.learning_list ?? [],
       expression_groups: expression.expression_groups ?? [],
       expression_self_reflect: expression.expression_self_reflect ?? false,
-      expression_manual_reflect: expression.expression_manual_reflect ?? expression.reflect ?? false,
-      manual_reflect_operator_id: expression.manual_reflect_operator_id ?? expression.reflect_operator_id ?? '',
+      expression_manual_reflect:
+        expression.expression_manual_reflect ?? expression.reflect ?? false,
+      manual_reflect_operator_id:
+        expression.manual_reflect_operator_id ?? expression.reflect_operator_id ?? '',
       allow_reflect: expression.allow_reflect ?? [],
       all_global_jargon: expression.all_global_jargon ?? false,
       enable_jargon_explanation: expression.enable_jargon_explanation ?? true,
@@ -201,7 +342,7 @@ export function BotConfigPage() {
     const log = (config.log ?? {}) as Partial<LogConfig>
     setLogConfig({
       date_style: log.date_style ?? 'm-d H:i:s',
-      log_level_style: log.log_level_style === 'FULL' ? 'full' : log.log_level_style ?? 'lite',
+      log_level_style: log.log_level_style === 'FULL' ? 'full' : (log.log_level_style ?? 'lite'),
       color_text: log.color_text ?? 'full',
       log_level: log.log_level ?? 'INFO',
       console_log_level: log.console_log_level ?? 'INFO',
@@ -249,7 +390,8 @@ export function BotConfigPage() {
     const experimental = (config.experimental ?? {}) as Partial<ExperimentalConfig>
     const legacyPersonality = (config.personality ?? {}) as Partial<ExperimentalConfig>
     setExperimentalConfig({
-      private_plan_style: experimental.private_plan_style ?? legacyPersonality.private_plan_style ?? '',
+      private_plan_style:
+        experimental.private_plan_style ?? legacyPersonality.private_plan_style ?? '',
       chat_prompts: experimental.chat_prompts ?? [],
     })
 
@@ -293,27 +435,27 @@ export function BotConfigPage() {
       dream: dreamConfig,
     }
   }, [
-    botConfig, personalityConfig, chatConfig, expressionConfig,
-    emojiConfig, memoryConfig, toolConfig,
-    voiceConfig, messageReceiveConfig, keywordReactionConfig, responsePostProcessConfig,
-    chineseTypoConfig, responseSplitterConfig, logConfig, debugConfig,
-    maimMessageConfig, telemetryConfig, webuiConfig, experimentalConfig, dreamConfig
+    botConfig,
+    personalityConfig,
+    chatConfig,
+    expressionConfig,
+    emojiConfig,
+    memoryConfig,
+    toolConfig,
+    voiceConfig,
+    messageReceiveConfig,
+    keywordReactionConfig,
+    responsePostProcessConfig,
+    chineseTypoConfig,
+    responseSplitterConfig,
+    logConfig,
+    debugConfig,
+    maimMessageConfig,
+    telemetryConfig,
+    webuiConfig,
+    experimentalConfig,
+    dreamConfig,
   ])
-
-  // 加载源代码
-  const loadSourceCode = useCallback(async () => {
-    try {
-      const raw = await getBotConfigRaw()
-      setSourceCode(raw)
-      setHasTomlError(false)
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: '加载失败',
-        description: error instanceof Error ? error.message : '加载源代码失败',
-      })
-    }
-  }, [toast])
 
   // 加载配置
   const loadConfig = useCallback(async () => {
@@ -323,9 +465,6 @@ export function BotConfigPage() {
       parseAndSetConfig(config)
       setHasUnsavedChanges(false)
       initialLoadRef.current = false
-      
-      // 同时加载源代码
-      await loadSourceCode()
     } catch (error) {
       console.error('加载配置失败:', error)
       toast({
@@ -336,7 +475,7 @@ export function BotConfigPage() {
     } finally {
       setLoading(false)
     }
-  }, [toast, loadSourceCode, parseAndSetConfig])
+  }, [toast, parseAndSetConfig])
 
   useEffect(() => {
     loadConfig()
@@ -360,11 +499,31 @@ export function BotConfigPage() {
   useConfigAutoSave(memoryConfig, 'memory', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(toolConfig, 'tool', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(messageReceiveConfig, 'message_receive', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(keywordReactionConfig, 'keyword_reaction', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(responsePostProcessConfig, 'response_post_process', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(
+    messageReceiveConfig,
+    'message_receive',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
+  useConfigAutoSave(
+    keywordReactionConfig,
+    'keyword_reaction',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
+  useConfigAutoSave(
+    responsePostProcessConfig,
+    'response_post_process',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
   useConfigAutoSave(chineseTypoConfig, 'chinese_typo', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(responseSplitterConfig, 'response_splitter', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(
+    responseSplitterConfig,
+    'response_splitter',
+    initialLoadRef.current,
+    triggerAutoSave
+  )
   useConfigAutoSave(logConfig, 'log', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(debugConfig, 'debug', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(maimMessageConfig, 'maim_message', initialLoadRef.current, triggerAutoSave)
@@ -373,74 +532,18 @@ export function BotConfigPage() {
   useConfigAutoSave(experimentalConfig, 'experimental', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(dreamConfig, 'dream', initialLoadRef.current, triggerAutoSave)
 
-  // 保存源代码
-  const saveSourceCode = async () => {
-    try {
-      setSaving(true)
-      await updateBotConfigRaw(sourceCode)
-      setHasUnsavedChanges(false)
-      setHasTomlError(false)
-      toast({
-        title: '保存成功',
-        description: '配置已保存',
-      })
-      // 重新加载可视化配置
-      await loadConfig()
-    } catch (error) {
-      setHasTomlError(true)
-      toast({
-        variant: 'destructive',
-        title: '保存失败',
-        description: error instanceof Error ? error.message : '保存配置失败',
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // 处理模式切换
-  const handleModeChange = async (mode: 'visual' | 'source') => {
-    if (hasUnsavedChanges) {
-      toast({
-        variant: 'destructive',
-        title: '切换失败',
-        description: '请先保存当前更改',
-      })
-      return
-    }
-
-    setEditMode(mode)
-    if (mode === 'source') {
-      await loadSourceCode()
-    } else {
-      // 切换回可视化时,直接重新加载配置但不显示全局 loading
-      try {
-        const config = await getBotConfig()
-        parseAndSetConfig(config)
-        setHasUnsavedChanges(false)
-      } catch (error) {
-        console.error('加载配置失败:', error)
-        toast({
-          title: '加载失败',
-          description: '无法加载配置文件',
-          variant: 'destructive',
-        })
-      }
-    }
-  }
-
   // 手动保存
   const saveConfig = async () => {
     try {
       setSaving(true)
       // 取消待处理的自动保存
       cancelPendingAutoSave()
-      
+
       await updateBotConfig(buildFullConfig())
       setHasUnsavedChanges(false)
       toast({
         title: '保存成功',
-        description: '璃夜主程序配置已保存',
+        description: '主程序配置已保存',
       })
     } catch (error) {
       console.error('保存配置失败:', error)
@@ -454,7 +557,7 @@ export function BotConfigPage() {
     }
   }
 
-  // 重启璃夜
+  // 重启主程序
   const handleRestart = async () => {
     try {
       setRestarting(true)
@@ -482,15 +585,15 @@ export function BotConfigPage() {
       setSaving(true)
       // 取消待处理的自动保存
       cancelPendingAutoSave()
-      
+
       await updateBotConfig(buildFullConfig())
       setHasUnsavedChanges(false)
       toast({
         title: '保存成功',
-        description: '配置已保存，即将重启璃夜...',
+        description: '配置已保存，即将重启主程序...',
       })
       // 等待一下让用户看到保存成功的提示
-      await new Promise(resolve => setTimeout(resolve, TOAST_DISPLAY_DELAY))
+      await new Promise((resolve) => setTimeout(resolve, TOAST_DISPLAY_DELAY))
       await handleRestart()
     } catch (error) {
       console.error('保存失败:', error)
@@ -525,8 +628,8 @@ export function BotConfigPage() {
   if (loading) {
     return (
       <ScrollArea className="h-full">
-        <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-          <div className="flex items-center justify-center h-64">
+        <div className="ios-page">
+          <div className="ios-card flex h-64 items-center justify-center">
             <p className="text-muted-foreground">加载中...</p>
           </div>
         </div>
@@ -536,25 +639,43 @@ export function BotConfigPage() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+      <div className="ios-page space-y-5 sm:space-y-6">
         {/* 页面标题 */}
         <div className="flex flex-col gap-3 sm:gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-row items-start justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">璃夜主程序配置</h1>
-              <p className="text-muted-foreground mt-1 text-xs sm:text-sm">管理璃夜的核心功能和行为设置</p>
+              <h1 className="ios-title">主程序配置</h1>
+              <p className="ios-subtitle hidden sm:block">管理当前实例的核心功能和行为设置</p>
             </div>
             {/* 按钮组 - 桌面端靠右 */}
-            <div className="flex gap-2 flex-shrink-0">
+            <div className="hidden flex-shrink-0 gap-2 sm:flex">
               <Button
-                onClick={editMode === 'visual' ? saveConfig : saveSourceCode}
+                onClick={saveConfig}
                 disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
                 size="sm"
                 variant="outline"
-                className="w-20 sm:w-24"
+                className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-24 sm:px-4"
+                aria-label={
+                  saving
+                    ? '保存中'
+                    : autoSaving
+                      ? '自动保存中'
+                      : hasUnsavedChanges
+                        ? '保存配置'
+                        : '已保存'
+                }
+                title={
+                  saving
+                    ? '保存中...'
+                    : autoSaving
+                      ? '自动保存中...'
+                      : hasUnsavedChanges
+                        ? '保存配置'
+                        : '已保存'
+                }
               >
-                <Save className="h-4 w-4 flex-shrink-0" strokeWidth={2} fill="none" />
-                <span className="ml-1 truncate text-xs sm:text-sm">
+                <Save className="h-4 w-4 flex-shrink-0 sm:mr-2" strokeWidth={2} fill="none" />
+                <span className="hidden sm:inline">
                   {saving ? '保存中' : autoSaving ? '自动' : hasUnsavedChanges ? '保存' : '已保存'}
                 </span>
               </Button>
@@ -563,216 +684,345 @@ export function BotConfigPage() {
                   <Button
                     disabled={saving || autoSaving || restarting}
                     size="sm"
-                    className="w-20 sm:w-28"
+                    className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-28 sm:px-4"
+                    aria-label={
+                      restarting ? '重启中' : hasUnsavedChanges ? '保存并重启' : '重启主程序'
+                    }
+                    title={
+                      restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启主程序'
+                    }
                   >
-                    <Power className="h-4 w-4 flex-shrink-0" />
-                    <span className="ml-1 truncate text-xs sm:text-sm">
-                      {restarting ? '重启中' : hasUnsavedChanges ? '保存重启' : '重启'}
+                    <Power className="h-4 w-4 flex-shrink-0 sm:mr-2" />
+                    <span className="hidden sm:inline">
+                      {restarting ? '重启中' : hasUnsavedChanges ? '保存并重启' : '重启主程序'}
                     </span>
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>确认重启璃夜？</AlertDialogTitle>
-                  <AlertDialogDescription asChild>
-                    <div>
-                      <p>
-                        {hasUnsavedChanges 
-                          ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启璃夜使新配置生效。重启过程中璃夜将暂时离线。'
-                          : '即将重启璃夜主程序。重启过程中璃夜将暂时离线,配置将在重启后生效。'
-                        }
-                      </p>
-                    </div>
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}>
-                    {hasUnsavedChanges ? '保存并重启' : '确认重启'}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
+                    <AlertDialogDescription asChild>
+                      <div>
+                        <p>
+                          {hasUnsavedChanges
+                            ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
+                            : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
+                        </p>
+                      </div>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}
+                    >
+                      {hasUnsavedChanges ? '保存并重启' : '确认重启'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
-          </div>
-          
-          {/* 模式切换 - 单独一行 */}
-          <div className="flex">
-            <Tabs value={editMode} onValueChange={(v) => handleModeChange(v as 'visual' | 'source')} className="w-full">
-              <TabsList className="h-8 sm:h-9 w-full grid grid-cols-2">
-                <TabsTrigger value="visual" className="text-xs sm:text-sm">
-                  <Layout className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  可视化编辑
-                </TabsTrigger>
-                <TabsTrigger value="source" className="text-xs sm:text-sm">
-                  <Code2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  源代码编辑
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
           </div>
         </div>
 
-        {/* 重启提示 */}
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertDescription>
-            配置更新后需要<strong>重启璃夜</strong>才能生效。你可以点击右上角的"保存并重启"按钮一键完成保存和重启。
-          </AlertDescription>
-        </Alert>
+        <div className="ios-group overflow-hidden sm:hidden">
+          <button
+            type="button"
+            onClick={saveConfig}
+            disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
+            className="ios-row ios-touch min-h-[62px] w-full text-left disabled:opacity-50 disabled:active:scale-100"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                <Save className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[16px] font-medium leading-6">保存配置</span>
+                <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                  {saving
+                    ? '正在写入配置'
+                    : autoSaving
+                      ? '自动保存中'
+                      : hasUnsavedChanges
+                        ? '有更改等待写入'
+                        : '当前配置已保存'}
+                </span>
+              </span>
+            </span>
+            <span className="shrink-0 text-[15px] leading-6 text-muted-foreground">
+              {hasUnsavedChanges ? '待保存' : '已保存'}
+            </span>
+          </button>
 
-        {/* 源代码模式 */}
-        {editMode === 'source' && (
-          <div className="space-y-4">
-            <Alert>
-              <Info className="h-4 w-4" />
-              <AlertDescription>
-                <strong>源代码模式（高级功能）：</strong>直接编辑 TOML 配置文件。此功能仅适用于熟悉 TOML 语法的高级用户。保存时会在后端验证格式，只有格式完全正确才能保存。
-                {hasTomlError && (
-                  <span className="text-destructive font-semibold ml-2">⚠️ 上次保存失败，请检查 TOML 格式</span>
-                )}
-              </AlertDescription>
-            </Alert>
-            
-            <CodeEditor
-              value={sourceCode}
-              onChange={(value) => {
-                setSourceCode(value)
-                setHasUnsavedChanges(true)
-                // 清除之前的错误状态
-                if (hasTomlError) {
-                  setHasTomlError(false)
-                }
-              }}
-              language="toml"
-              theme="dark"
-              height="calc(100vh - 280px)"
-              minHeight="500px"
-              placeholder="TOML 配置内容"
-            />
-          </div>
-        )}
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                disabled={saving || autoSaving || restarting}
+                className="ios-row ios-touch min-h-[62px] w-full text-left disabled:opacity-50 disabled:active:scale-100"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                    <Power className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[16px] font-medium leading-6">
+                      {hasUnsavedChanges ? '保存并重启' : '重启主程序'}
+                    </span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      重启后新配置才会完整生效
+                    </span>
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div>
+                    <p>
+                      {hasUnsavedChanges
+                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
+                        : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
+                    </p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}
+                >
+                  {hasUnsavedChanges ? '保存并重启' : '确认重启'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
 
-        {/* 可视化模式 */}
-        {editMode === 'visual' && (
-          <>
+        <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.color)}>
+                  <activeTabItem.Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium leading-5 text-foreground">
+                    当前分类
+                  </span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {activeTabItem.label} · {activeTabItem.description}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </DialogTrigger>
+          <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+            <DialogHeader className="px-5 pb-1 pt-5">
+              <DialogTitle>配置分类</DialogTitle>
+              <DialogDescription>选择要编辑的主程序配置</DialogDescription>
+            </DialogHeader>
+            <div className="ios-scrollbar-none max-h-[min(64vh,560px)] overflow-y-auto px-5 pb-5">
+              <div className="ios-group overflow-hidden">
+                {CONFIG_TABS.map((item) => {
+                  const selected = item.value === activeTab
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
+                      aria-current={selected ? 'page' : undefined}
+                      onClick={() => {
+                        setActiveTab(item.value)
+                        setCategoryDialogOpen(false)
+                      }}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className={cn('ios-symbol ios-symbol-sm', item.color)}>
+                          <item.Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[15px] font-medium leading-5 text-foreground">
+                            {item.label}
+                          </span>
+                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                            {item.description}
+                          </span>
+                        </span>
+                      </span>
+                      {selected ? (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* 标签页 */}
-        <Tabs defaultValue="bot" className="w-full">
-          <TabsList className="flex flex-wrap h-auto gap-1 p-1 sm:grid sm:grid-cols-5 lg:grid-cols-12">
-            <TabsTrigger value="bot" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">基本信息</TabsTrigger>
-            <TabsTrigger value="personality" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">人格</TabsTrigger>
-            <TabsTrigger value="chat" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">聊天</TabsTrigger>
-            <TabsTrigger value="expression" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">表达</TabsTrigger>
-            <TabsTrigger value="features" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">功能</TabsTrigger>
-            <TabsTrigger value="processing" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">处理</TabsTrigger>
-            <TabsTrigger value="message_receive" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">过滤</TabsTrigger>
-            <TabsTrigger value="voice" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">语音</TabsTrigger>
-            <TabsTrigger value="service" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">服务</TabsTrigger>
-            <TabsTrigger value="experimental" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">实验</TabsTrigger>
-            <TabsTrigger value="dream" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">Dream</TabsTrigger>
-            <TabsTrigger value="other" className="text-xs px-2 py-1.5 sm:px-3 sm:py-2 data-[state=active]:shadow-sm">其他</TabsTrigger>
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as BotConfigTab)}
+          className="w-full space-y-1"
+        >
+          <TabsList className="hidden h-auto w-fit max-w-full flex-wrap justify-start gap-1 rounded-[16px] p-1 sm:inline-flex">
+            <TabsTrigger value="bot" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              基本信息
+            </TabsTrigger>
+            <TabsTrigger value="personality" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              人格
+            </TabsTrigger>
+            <TabsTrigger value="chat" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              聊天
+            </TabsTrigger>
+            <TabsTrigger value="expression" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              表达
+            </TabsTrigger>
+            <TabsTrigger value="features" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              功能
+            </TabsTrigger>
+            <TabsTrigger value="processing" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              处理
+            </TabsTrigger>
+            <TabsTrigger value="message_receive" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              过滤
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              语音
+            </TabsTrigger>
+            <TabsTrigger value="service" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              服务
+            </TabsTrigger>
+            <TabsTrigger value="experimental" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              实验
+            </TabsTrigger>
+            <TabsTrigger value="dream" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              Dream
+            </TabsTrigger>
+            <TabsTrigger value="other" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              其他
+            </TabsTrigger>
           </TabsList>
           {/* 基本信息 */}
-          <TabsContent value="bot" className="space-y-4">
+          <TabsContent value="bot" className="mt-5 space-y-5 sm:mt-6">
             {botConfig && <BotInfoSection config={botConfig} onChange={setBotConfig} />}
           </TabsContent>
 
-        {/* 人格配置 */}
-        <TabsContent value="personality" className="space-y-4">
-          {personalityConfig && (
-            <PersonalitySection config={personalityConfig} onChange={setPersonalityConfig} />
-          )}
-        </TabsContent>
+          {/* 人格配置 */}
+          <TabsContent value="personality" className="mt-5 space-y-5 sm:mt-6">
+            {personalityConfig && (
+              <PersonalitySection config={personalityConfig} onChange={setPersonalityConfig} />
+            )}
+          </TabsContent>
 
-        {/* 聊天配置 */}
-        <TabsContent value="chat" className="space-y-4">
-          {chatConfig && <ChatSection config={chatConfig} onChange={setChatConfig} />}
-        </TabsContent>
+          {/* 聊天配置 */}
+          <TabsContent value="chat" className="mt-5 space-y-5 sm:mt-6">
+            {chatConfig && <ChatSection config={chatConfig} onChange={setChatConfig} />}
+          </TabsContent>
 
-        {/* 表达配置 */}
-        <TabsContent value="expression" className="space-y-4">
-          {expressionConfig && (
-            <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
-          )}
-        </TabsContent>
+          {/* 表达配置 */}
+          <TabsContent value="expression" className="mt-5 space-y-5 sm:mt-6">
+            {expressionConfig && (
+              <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
+            )}
+          </TabsContent>
 
-        {/* 功能配置（合并表情、记忆、工具） */}
-        <TabsContent value="features" className="space-y-4">
-          {emojiConfig && memoryConfig && toolConfig && (
-            <FeaturesSection
-              emojiConfig={emojiConfig}
-              memoryConfig={memoryConfig}
-              toolConfig={toolConfig}
-              onEmojiChange={setEmojiConfig}
-              onMemoryChange={setMemoryConfig}
-              onToolChange={setToolConfig}
-            />
-          )}
-        </TabsContent>
+          {/* 功能配置（合并表情、记忆、工具） */}
+          <TabsContent value="features" className="mt-5 space-y-5 sm:mt-6">
+            {emojiConfig && memoryConfig && toolConfig && (
+              <FeaturesSection
+                emojiConfig={emojiConfig}
+                memoryConfig={memoryConfig}
+                toolConfig={toolConfig}
+                onEmojiChange={setEmojiConfig}
+                onMemoryChange={setMemoryConfig}
+                onToolChange={setToolConfig}
+              />
+            )}
+          </TabsContent>
 
-        {/* 处理配置（关键词反应和回复后处理） */}
-        <TabsContent value="processing" className="space-y-4">
-          {keywordReactionConfig && responsePostProcessConfig && chineseTypoConfig && responseSplitterConfig && (
-            <ProcessingSection
-              keywordReactionConfig={keywordReactionConfig}
-              responsePostProcessConfig={responsePostProcessConfig}
-              chineseTypoConfig={chineseTypoConfig}
-              responseSplitterConfig={responseSplitterConfig}
-              onKeywordReactionChange={setKeywordReactionConfig}
-              onResponsePostProcessChange={setResponsePostProcessConfig}
-              onChineseTypoChange={setChineseTypoConfig}
-              onResponseSplitterChange={setResponseSplitterConfig}
-            />
-          )}
-        </TabsContent>
+          {/* 处理配置（关键词反应和回复后处理） */}
+          <TabsContent value="processing" className="mt-5 space-y-5 sm:mt-6">
+            {keywordReactionConfig &&
+              responsePostProcessConfig &&
+              chineseTypoConfig &&
+              responseSplitterConfig && (
+                <ProcessingSection
+                  keywordReactionConfig={keywordReactionConfig}
+                  responsePostProcessConfig={responsePostProcessConfig}
+                  chineseTypoConfig={chineseTypoConfig}
+                  responseSplitterConfig={responseSplitterConfig}
+                  onKeywordReactionChange={setKeywordReactionConfig}
+                  onResponsePostProcessChange={setResponsePostProcessConfig}
+                  onChineseTypoChange={setChineseTypoConfig}
+                  onResponseSplitterChange={setResponseSplitterConfig}
+                />
+              )}
+          </TabsContent>
 
-        {/* 语音配置 */}
-        <TabsContent value="voice" className="space-y-4">
-          {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
-        </TabsContent>
+          {/* 语音配置 */}
+          <TabsContent value="voice" className="mt-5 space-y-5 sm:mt-6">
+            {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
+          </TabsContent>
 
-        {/* 消息过滤配置 */}
-        <TabsContent value="message_receive" className="space-y-4">
-          {messageReceiveConfig && (
-            <MessageReceiveSection config={messageReceiveConfig} onChange={setMessageReceiveConfig} />
-          )}
-        </TabsContent>
+          {/* 消息过滤配置 */}
+          <TabsContent value="message_receive" className="mt-5 space-y-5 sm:mt-6">
+            {messageReceiveConfig && (
+              <MessageReceiveSection
+                config={messageReceiveConfig}
+                onChange={setMessageReceiveConfig}
+              />
+            )}
+          </TabsContent>
 
-        {/* 服务配置 */}
-        <TabsContent value="service" className="space-y-4">
-          {webuiConfig && <WebUISection config={webuiConfig} onChange={setWebuiConfig} />}
-          {maimMessageConfig && <MaimMessageSection config={maimMessageConfig} onChange={setMaimMessageConfig} />}
-          {telemetryConfig && <TelemetrySection config={telemetryConfig} onChange={setTelemetryConfig} />}
-        </TabsContent>
+          {/* 服务配置 */}
+          <TabsContent value="service" className="mt-5 space-y-5 sm:mt-6">
+            {webuiConfig && <WebUISection config={webuiConfig} onChange={setWebuiConfig} />}
+            {maimMessageConfig && (
+              <MaimMessageSection config={maimMessageConfig} onChange={setMaimMessageConfig} />
+            )}
+            {telemetryConfig && (
+              <TelemetrySection config={telemetryConfig} onChange={setTelemetryConfig} />
+            )}
+          </TabsContent>
 
-        {/* 实验配置 */}
-        <TabsContent value="experimental" className="space-y-4">
-          {experimentalConfig && (
-            <ExperimentalSection config={experimentalConfig} onChange={setExperimentalConfig} />
-          )}
-        </TabsContent>
+          {/* 实验配置 */}
+          <TabsContent value="experimental" className="mt-5 space-y-5 sm:mt-6">
+            {experimentalConfig && (
+              <ExperimentalSection config={experimentalConfig} onChange={setExperimentalConfig} />
+            )}
+          </TabsContent>
 
-        {/* Dream 配置 */}
-        <TabsContent value="dream" className="space-y-4">
-          {dreamConfig && <DreamSection config={dreamConfig} onChange={setDreamConfig} />}
-        </TabsContent>
+          {/* Dream 配置 */}
+          <TabsContent value="dream" className="mt-5 space-y-5 sm:mt-6">
+            {dreamConfig && <DreamSection config={dreamConfig} onChange={setDreamConfig} />}
+          </TabsContent>
 
-        {/* 其他配置 */}
-        <TabsContent value="other" className="space-y-4">
-          {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
-          {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
-        </TabsContent>
+          {/* 其他配置 */}
+          <TabsContent value="other" className="mt-5 space-y-5 sm:mt-6">
+            {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
+            {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
+          </TabsContent>
         </Tabs>
-        </>
-        )}
 
         {/* 重启遮罩层 */}
-      {showRestartOverlay && (
-        <RestartingOverlay 
-          onRestartComplete={handleRestartComplete}
-          onRestartFailed={handleRestartFailed}
-        />
-      )}
+        {showRestartOverlay && (
+          <RestartingOverlay
+            onRestartComplete={handleRestartComplete}
+            onRestartFailed={handleRestartFailed}
+          />
+        )}
       </div>
     </ScrollArea>
   )

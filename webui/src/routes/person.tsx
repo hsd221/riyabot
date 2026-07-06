@@ -1,4 +1,19 @@
-import { Users, Search, Edit, Trash2, Eye, User, MessageSquare, Hash, Clock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import {
+  Users,
+  Search,
+  Edit,
+  Trash2,
+  Eye,
+  User,
+  MessageSquare,
+  Hash,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  SlidersHorizontal,
+} from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -7,14 +22,7 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { IosListSkeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogContent,
@@ -43,7 +51,14 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import type { PersonInfo, PersonUpdateRequest } from '@/types/person'
-import { getPersonList, getPersonDetail, updatePerson, deletePerson, getPersonStats, batchDeletePersons } from '@/lib/person-api'
+import {
+  getPersonList,
+  getPersonDetail,
+  updatePerson,
+  deletePerson,
+  getPersonStats,
+  batchDeletePersons,
+} from '@/lib/person-api'
 
 function getProfileDisplayName(person: PersonInfo): string {
   return person.person_name || person.nickname || person.user_id
@@ -70,6 +85,12 @@ function objectCount(value: Record<string, unknown> | Record<string, string> | u
   return value ? Object.keys(value).length : 0
 }
 
+const PERSON_STATUS_OPTIONS = [
+  { value: 'all', label: '全部', description: '显示所有用户画像' },
+  { value: 'true', label: '可用于回复', description: '只看参与回复参考的画像' },
+  { value: 'false', label: '隐藏画像', description: '只看不参与回复的画像' },
+] as const
+
 export function PersonManagementPage() {
   const [persons, setPersons] = useState<PersonInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,7 +104,12 @@ export function PersonManagementPage() {
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [deleteConfirmPerson, setDeleteConfirmPerson] = useState<PersonInfo | null>(null)
-  const [stats, setStats] = useState({ total: 0, known: 0, unknown: 0, platforms: {} as Record<string, number> })
+  const [stats, setStats] = useState({
+    total: 0,
+    known: 0,
+    unknown: 0,
+    platforms: {} as Record<string, number>,
+  })
   const [selectedPersons, setSelectedPersons] = useState<Set<string>>(new Set())
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false)
   const [jumpToPage, setJumpToPage] = useState('')
@@ -177,6 +203,10 @@ export function PersonManagementPage() {
   const platforms = useMemo(() => {
     return Object.keys(stats.platforms)
   }, [stats.platforms])
+  const currentKnownValue = filterKnown === undefined ? 'all' : filterKnown.toString()
+  const currentKnownLabel =
+    PERSON_STATUS_OPTIONS.find((option) => option.value === currentKnownValue)?.label ?? '全部'
+  const currentPlatformLabel = filterPlatform || '全部平台'
 
   // 切换单个人物选择
   const togglePersonSelection = (personId: string) => {
@@ -194,7 +224,7 @@ export function PersonManagementPage() {
     if (selectedPersons.size === persons.length && persons.length > 0) {
       setSelectedPersons(new Set())
     } else {
-      setSelectedPersons(new Set(persons.map(p => p.person_id)))
+      setSelectedPersons(new Set(persons.map((p) => p.person_id)))
     }
   }
 
@@ -255,442 +285,388 @@ export function PersonManagementPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-              <Users className="h-8 w-8" strokeWidth={2} />
-              用户画像
-            </h1>
-            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              查看璃夜从新记忆系统聚合出的用户画像
-            </p>
+            <h1 className="ios-title">用户画像</h1>
+            <p className="ios-subtitle">查看当前实例从新记忆系统聚合出的用户画像</p>
           </div>
         </div>
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 pr-4">
-
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">画像总数</div>
-          <div className="text-2xl font-bold mt-1">{stats.total}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">可用于回复</div>
-          <div className="text-2xl font-bold mt-1 text-green-600">{stats.known}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">隐藏画像</div>
-          <div className="text-2xl font-bold mt-1 text-muted-foreground">{stats.unknown}</div>
-        </div>
-      </div>
-
-      {/* 搜索和过滤 */}
-      <div className="rounded-lg border bg-card p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <div className="sm:col-span-2">
-            <Label htmlFor="search">搜索</Label>
-            <div className="relative mt-1.5">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                id="search"
-                placeholder="搜索用户、印象、兴趣、偏好或事实..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+          {/* 统计 */}
+          <div className="ios-group overflow-hidden">
+            <div className="ios-row">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                  <Users className="h-4 w-4" />
+                </span>
+                <span className="text-[16px] font-normal leading-6">画像总数</span>
+              </span>
+              <span className="ios-value">{stats.total}</span>
+            </div>
+            <div className="ios-row">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                  <Eye className="h-4 w-4" />
+                </span>
+                <span className="text-[16px] font-normal leading-6">可用于回复</span>
+              </span>
+              <span className="ios-value">{stats.known}</span>
+            </div>
+            <div className="ios-row">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
+                  <User className="h-4 w-4" />
+                </span>
+                <span className="text-[16px] font-normal leading-6">隐藏画像</span>
+              </span>
+              <span className="ios-value">{stats.unknown}</span>
             </div>
           </div>
-          <div>
-            <Label htmlFor="filter-known">画像状态</Label>
-            <Select
-              value={filterKnown === undefined ? 'all' : filterKnown.toString()}
-              onValueChange={(value) => {
-                setFilterKnown(value === 'all' ? undefined : value === 'true')
-                setPage(1)
-              }}
-            >
-              <SelectTrigger id="filter-known" className="mt-1.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
-                <SelectItem value="true">可用于回复</SelectItem>
-                <SelectItem value="false">隐藏画像</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="filter-platform">平台</Label>
-            <Select
-              value={filterPlatform || 'all'}
-              onValueChange={(value) => {
-                setFilterPlatform(value === 'all' ? undefined : value)
-                setPage(1)
-              }}
-            >
-              <SelectTrigger id="filter-platform" className="mt-1.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部平台</SelectItem>
-                {platforms.map((platform) => (
-                  <SelectItem key={platform} value={platform}>
-                    {platform} ({stats.platforms[platform]})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
 
-        {/* 批量操作工具栏 */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-4 pt-4 border-t">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            {selectedPersons.size > 0 && (
-              <span>已选择 {selectedPersons.size} 个画像</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="page-size" className="text-sm whitespace-nowrap">每页显示</Label>
-            <Select
-              value={pageSize.toString()}
-              onValueChange={(value) => {
-                setPageSize(parseInt(value))
+          <div className="ios-search-field">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="search"
+              placeholder="搜索用户、印象、兴趣、偏好或事实"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value)
                 setPage(1)
-                setSelectedPersons(new Set())
               }}
-            >
-              <SelectTrigger id="page-size" className="w-20">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="20">20</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-                <SelectItem value="100">100</SelectItem>
-              </SelectContent>
-            </Select>
-            {selectedPersons.size > 0 && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelectedPersons(new Set())}
-                >
-                  取消选择
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={openBatchDeleteDialog}
-                >
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  批量删除画像
-                </Button>
-              </>
-            )}
+              className="ios-search-input"
+            />
           </div>
-        </div>
-      </div>
 
-      {/* 人物列表 */}
-      <div className="rounded-lg border bg-card">
-        {/* 桌面端表格视图 */}
-        <div className="hidden md:block">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">
-                  <Checkbox
-                    checked={persons.length > 0 && selectedPersons.size === persons.length}
-                    onCheckedChange={toggleSelectAll}
-                    aria-label="全选"
-                  />
-                </TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>用户</TableHead>
-                <TableHead>画像摘要</TableHead>
-                <TableHead>平台</TableHead>
-                <TableHead>兴趣/偏好</TableHead>
-                <TableHead>事实/情绪</TableHead>
-                <TableHead>最后更新</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    加载中...
-                  </TableCell>
-                </TableRow>
-              ) : persons.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    暂无数据
-                  </TableCell>
-                </TableRow>
-              ) : (
-                persons.map((person) => (
-                  <TableRow key={person.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedPersons.has(person.person_id)}
-                        onCheckedChange={() => togglePersonSelection(person.person_id)}
-                        aria-label={`选择 ${getProfileDisplayName(person)}`}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className={cn(
-                        'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium',
-                        person.is_known
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
-                      )}>
-                        {person.is_known ? '可用' : '隐藏'}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <div className="font-medium max-w-[12rem] truncate" title={getProfileDisplayName(person)}>
-                          {getProfileDisplayName(person)}
-                        </div>
-                        <div className="font-mono text-xs text-muted-foreground max-w-[12rem] truncate" title={person.user_id}>
-                          {person.user_id}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="max-w-[22rem]">
-                      <div className="text-sm line-clamp-2" title={getProfileSummary(person)}>
-                        {getProfileSummary(person)}
-                      </div>
-                    </TableCell>
-                    <TableCell>{person.platform}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {person.profile_interests?.length || 0} 兴趣 / {objectCount(person.profile_preferences)} 偏好
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {objectCount(person.profile_facts)} 事实 / {person.mood_history_count || 0} 情绪
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatTime(person.last_know)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleViewDetail(person)}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          详情
-                        </Button>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleEdit(person)}
-                        >
-                          <Edit className="h-4 w-4 mr-1" />
-                          备注
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => setDeleteConfirmPerson(person)}
-                          className="bg-red-600 hover:bg-red-700 text-white"
-                        >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          删除
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+          {/* 筛选和显示 */}
+          <div className="ios-group overflow-hidden">
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="block truncate text-[16px] font-normal leading-6">画像状态</span>
+              </span>
+              <Select
+                value={currentKnownValue}
+                onValueChange={(value) => {
+                  setFilterKnown(value === 'all' ? undefined : value === 'true')
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger
+                  id="filter-known"
+                  className="h-auto min-h-0 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERSON_STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
+                  <MessageSquare className="h-4 w-4" />
+                </span>
+                <span className="block truncate text-[16px] font-normal leading-6">平台</span>
+              </span>
+              <Select
+                value={filterPlatform || 'all'}
+                onValueChange={(value) => {
+                  setFilterPlatform(value === 'all' ? undefined : value)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger
+                  id="filter-platform"
+                  className="h-auto min-h-0 w-auto max-w-[11rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部平台</SelectItem>
+                  {platforms.map((platform) => (
+                    <SelectItem key={platform} value={platform}>
+                      {platform} ({stats.platforms[platform]})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div
+              className={cn(
+                'ios-row min-h-[64px]',
+                selectedPersons.size > 0 &&
+                  'flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between'
               )}
-            </TableBody>
-          </Table>
-        </div>
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">显示设置</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {currentKnownLabel} · {currentPlatformLabel} · 已选 {selectedPersons.size}
+                  </span>
+                </span>
+              </span>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                <Select
+                  value={pageSize.toString()}
+                  onValueChange={(value) => {
+                    setPageSize(parseInt(value))
+                    setPage(1)
+                    setSelectedPersons(new Set())
+                  }}
+                >
+                  <SelectTrigger
+                    id="page-size"
+                    className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10 条</SelectItem>
+                    <SelectItem value="20">20 条</SelectItem>
+                    <SelectItem value="50">50 条</SelectItem>
+                    <SelectItem value="100">100 条</SelectItem>
+                  </SelectContent>
+                </Select>
+                {selectedPersons.size > 0 && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedPersons(new Set())}
+                      className="h-9 rounded-full px-4"
+                    >
+                      取消选择
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={openBatchDeleteDialog}
+                      className="h-9 rounded-full px-4"
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" />
+                      批量删除
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
 
-        {/* 移动端卡片视图 */}
-        <div className="md:hidden space-y-3 p-4">
-          {loading ? (
-            <div className="text-center py-8 text-muted-foreground">
-              加载中...
+          {/* 人物列表 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[13px] font-medium leading-5 text-muted-foreground">画像列表</p>
+              {persons.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                >
+                  {selectedPersons.size === persons.length ? '取消全选' : '全选'}
+                </button>
+              )}
             </div>
-          ) : persons.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              暂无数据
-            </div>
-          ) : (
-            persons.map((person) => (
-              <div key={person.id} className="rounded-lg border bg-card p-4 space-y-3 overflow-hidden">
-                {/* 复选框和状态 */}
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    checked={selectedPersons.has(person.person_id)}
-                    onCheckedChange={() => togglePersonSelection(person.person_id)}
-                    className="mt-1"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className={cn(
-                      'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium mb-2',
-                      person.is_known
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
-                    )}>
-                      {person.is_known ? '可用于回复' : '隐藏画像'}
-                    </div>
-                    <h3 className="font-semibold text-sm line-clamp-1 w-full break-all">
-                      {getProfileDisplayName(person)}
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2 w-full break-all">
-                      {getProfileSummary(person)}
+            <div className="ios-group overflow-hidden">
+              {loading ? (
+                <IosListSkeleton rows={4} />
+              ) : persons.length === 0 ? (
+                <div className="ios-empty-state">
+                  <span className="ios-empty-illustration">
+                    <Users className="relative z-10 h-7 w-7 text-primary" />
+                  </span>
+                  <div>
+                    <p className="text-[16px] font-semibold leading-6 text-foreground">
+                      暂无用户画像
+                    </p>
+                    <p className="mt-1 max-w-sm text-[13px] leading-5">
+                      有新的会话画像后，这里会显示用户信息、兴趣和记忆摘要。
                     </p>
                   </div>
                 </div>
+              ) : (
+                persons.map((person) => (
+                  <div
+                    key={person.id}
+                    className="ios-row min-h-[96px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <Checkbox
+                        checked={selectedPersons.has(person.person_id)}
+                        onCheckedChange={() => togglePersonSelection(person.person_id)}
+                        className="mt-2 shrink-0"
+                        aria-label={`选择 ${getProfileDisplayName(person)}`}
+                      />
+                      <span
+                        className={cn(
+                          'ios-symbol ios-symbol-sm mt-0.5',
+                          person.is_known ? 'ios-symbol-green' : 'ios-symbol-gray'
+                        )}
+                      >
+                        <User className="h-4 w-4" />
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleViewDetail(person)}
+                        className="ios-touch min-w-0 flex-1 rounded-[12px] text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="block truncate text-[15px] font-semibold leading-5 text-foreground"
+                            title={getProfileDisplayName(person)}
+                          >
+                            {getProfileDisplayName(person)}
+                          </span>
+                          <span
+                            className={cn(
+                              'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4',
+                              person.is_known
+                                ? 'bg-[rgb(52_199_89_/_0.12)] text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
+                                : 'bg-muted text-muted-foreground'
+                            )}
+                          >
+                            {person.is_known ? '可用' : '隐藏'}
+                          </span>
+                        </span>
+                        <span
+                          className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground"
+                          title={getProfileSummary(person)}
+                        >
+                          {getProfileSummary(person)}
+                        </span>
+                        <span className="mt-1 block truncate text-[12px] leading-4 text-muted-foreground/80">
+                          {person.platform} · {person.profile_interests?.length || 0} 兴趣 ·{' '}
+                          {objectCount(person.profile_preferences)} 偏好 ·{' '}
+                          {objectCount(person.profile_facts)} 事实 · {formatTime(person.last_know)}
+                        </span>
+                      </button>
+                    </div>
 
-                {/* 平台和用户信息 */}
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">平台</div>
-                    <p className="font-medium text-xs">{person.platform}</p>
+                    <div className="flex shrink-0 flex-wrap gap-2 pl-14 sm:pl-0">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => handleViewDetail(person)}
+                        className="h-9 rounded-full px-4"
+                      >
+                        <Eye className="mr-1 h-4 w-4" />
+                        详情
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEdit(person)}
+                        className="h-9 rounded-full px-4"
+                      >
+                        <Edit className="mr-1 h-4 w-4" />
+                        备注
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeleteConfirmPerson(person)}
+                        className="text-destructive hover:text-destructive h-9 rounded-full px-4"
+                      >
+                        <Trash2 className="mr-1 h-4 w-4" />
+                        删除
+                      </Button>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">用户ID</div>
-                    <p className="font-mono text-xs truncate" title={person.user_id}>{person.user_id}</p>
+                ))
+              )}
+
+              {total > 0 && (
+                <div className="ios-row ios-row-plain min-h-[68px] flex-col !items-stretch !justify-start gap-3 border-t border-border/60 sm:flex-row sm:!items-center sm:!justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    共 {total} 条记录，第 {page} / {Math.ceil(total / pageSize)} 页
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">兴趣/偏好</div>
-                    <p className="text-xs">{person.profile_interests?.length || 0} / {objectCount(person.profile_preferences)}</p>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">事实/情绪</div>
-                    <p className="text-xs">{objectCount(person.profile_facts)} / {person.mood_history_count || 0}</p>
-                  </div>
-                  <div className="col-span-2">
-                    <div className="text-xs text-muted-foreground mb-1">最后更新</div>
-                    <p className="text-xs">{formatTime(person.last_know)}</p>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(1)}
+                      disabled={page === 1}
+                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(page - 1)}
+                      disabled={page === 1}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <ChevronLeft className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">上一页</span>
+                    </Button>
+
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        value={jumpToPage}
+                        onChange={(e) => setJumpToPage(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
+                        placeholder={page.toString()}
+                        className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                        min={1}
+                        max={Math.ceil(total / pageSize)}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleJumpToPage}
+                        disabled={!jumpToPage}
+                        className="h-9 rounded-full px-3"
+                      >
+                        跳转
+                      </Button>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(page + 1)}
+                      disabled={page >= Math.ceil(total / pageSize)}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <span className="hidden sm:inline">下一页</span>
+                      <ChevronRight className="h-4 w-4 sm:ml-1" />
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(Math.ceil(total / pageSize))}
+                      disabled={page >= Math.ceil(total / pageSize)}
+                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-
-                {/* 操作按钮 */}
-                <div className="flex flex-wrap gap-1 pt-2 border-t overflow-hidden">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleViewDetail(person)}
-                    className="text-xs px-2 py-1 h-auto flex-shrink-0"
-                  >
-                    <Eye className="h-3 w-3 mr-1" />
-                    查看
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleEdit(person)}
-                    className="text-xs px-2 py-1 h-auto flex-shrink-0"
-                  >
-                    <Edit className="h-3 w-3 mr-1" />
-                    备注
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDeleteConfirmPerson(person)}
-                    className="text-xs px-2 py-1 h-auto flex-shrink-0 text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-3 w-3 mr-1" />
-                    删除
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* 分页 - 增强版 */}
-        {total > 0 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t">
-            <div className="text-sm text-muted-foreground">
-              共 {total} 条记录，第 {page} / {Math.ceil(total / pageSize)} 页
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 首页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(1)}
-                disabled={page === 1}
-                className="hidden sm:flex"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              
-              {/* 上一页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(page - 1)}
-                disabled={page === 1}
-              >
-                <ChevronLeft className="h-4 w-4 sm:mr-1" />
-                <span className="hidden sm:inline">上一页</span>
-              </Button>
-
-              {/* 页码跳转 */}
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={jumpToPage}
-                  onChange={(e) => setJumpToPage(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
-                  placeholder={page.toString()}
-                  className="w-16 h-8 text-center"
-                  min={1}
-                  max={Math.ceil(total / pageSize)}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleJumpToPage}
-                  disabled={!jumpToPage}
-                  className="h-8"
-                >
-                  跳转
-                </Button>
-              </div>
-              
-              {/* 下一页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(page + 1)}
-                disabled={page >= Math.ceil(total / pageSize)}
-              >
-                <span className="hidden sm:inline">下一页</span>
-                <ChevronRight className="h-4 w-4 sm:ml-1" />
-              </Button>
-
-              {/* 末页 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage(Math.ceil(total / pageSize))}
-                disabled={page >= Math.ceil(total / pageSize)}
-                className="hidden sm:flex"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
+              )}
             </div>
           </div>
-        )}
-      </div>
-
         </div>
       </ScrollArea>
 
@@ -714,15 +690,13 @@ export function PersonManagementPage() {
       />
 
       {/* 删除确认对话框 */}
-      <AlertDialog
-        open={!!deleteConfirmPerson}
-        onOpenChange={() => setDeleteConfirmPerson(null)}
-      >
+      <AlertDialog open={!!deleteConfirmPerson} onOpenChange={() => setDeleteConfirmPerson(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除用户画像 "{deleteConfirmPerson ? getProfileDisplayName(deleteConfirmPerson) : ''}" 吗？
+              确定要删除用户画像 "
+              {deleteConfirmPerson ? getProfileDisplayName(deleteConfirmPerson) : ''}" 吗？
               此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -744,8 +718,7 @@ export function PersonManagementPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认批量删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除选中的 {selectedPersons.size} 个用户画像吗？
-              此操作不可撤销。
+              确定要删除选中的 {selectedPersons.size} 个用户画像吗？ 此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -782,12 +755,10 @@ function PersonDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>用户画像详情</DialogTitle>
-          <DialogDescription>
-            查看 {getProfileDisplayName(person)} 的结构化画像
-          </DialogDescription>
+          <DialogDescription>查看 {getProfileDisplayName(person)} 的结构化画像</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -803,16 +774,16 @@ function PersonDetailDialog({
 
           {/* 印象 */}
           {person.memory_points && (
-            <div className="rounded-lg border bg-muted/50 p-3">
+            <div className="ios-group p-4">
               <Label className="text-xs text-muted-foreground">画像印象</Label>
-              <p className="mt-1 text-sm whitespace-pre-wrap">{person.memory_points}</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{person.memory_points}</p>
             </div>
           )}
 
           {person.profile_expression_style && (
-            <div className="rounded-lg border bg-muted/50 p-3">
+            <div className="ios-group p-4">
               <Label className="text-xs text-muted-foreground">表达风格</Label>
-              <p className="mt-1 text-sm whitespace-pre-wrap">{person.profile_expression_style}</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{person.profile_expression_style}</p>
             </div>
           )}
 
@@ -855,11 +826,17 @@ function InfoItem({
 }) {
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+      <Label className="flex items-center gap-1 text-xs text-muted-foreground">
         {Icon && <Icon className="h-3 w-3" />}
         {label}
       </Label>
-      <div className={cn('text-sm break-words', mono && 'font-mono', !value && 'text-muted-foreground')}>
+      <div
+        className={cn(
+          'break-words text-sm',
+          mono && 'font-mono',
+          !value && 'text-muted-foreground'
+        )}
+      >
         {value || '-'}
       </div>
     </div>
@@ -870,11 +847,11 @@ function ProfileListSection({ title, items }: { title: string; items?: string[] 
   if (!items || items.length === 0) return null
 
   return (
-    <div className="rounded-lg border bg-muted/50 p-3">
+    <div className="ios-group p-4">
       <Label className="text-xs text-muted-foreground">{title}</Label>
       <div className="mt-2 flex flex-wrap gap-2">
         {items.map((item) => (
-          <span key={item} className="rounded-md bg-background px-2 py-1 text-xs border">
+          <span key={item} className="rounded-full bg-muted/70 px-2.5 py-1 text-xs">
             {item}
           </span>
         ))}
@@ -888,13 +865,13 @@ function ProfileMapSection({ title, data }: { title: string; data?: Record<strin
   if (entries.length === 0) return null
 
   return (
-    <div className="rounded-lg border bg-muted/50 p-3">
+    <div className="ios-group p-4">
       <Label className="text-xs text-muted-foreground">{title}</Label>
-      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {entries.map(([key, value]) => (
-          <div key={key} className="rounded-md bg-background border p-2 min-w-0">
-            <div className="text-xs text-muted-foreground break-all">{key}</div>
-            <div className="mt-1 text-sm break-words">{formatProfileValue(value)}</div>
+          <div key={key} className="min-w-0 rounded-[12px] bg-muted/55 p-3">
+            <div className="break-all text-xs text-muted-foreground">{key}</div>
+            <div className="mt-1 break-words text-sm">{formatProfileValue(value)}</div>
           </div>
         ))}
       </div>
@@ -907,11 +884,11 @@ function ProfileTraitSection({ traits }: { traits?: Record<string, number> }) {
   if (entries.length === 0) return null
 
   return (
-    <div className="rounded-lg border bg-muted/50 p-3">
+    <div className="ios-group p-4">
       <Label className="text-xs text-muted-foreground">特征</Label>
-      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {entries.map(([name, confidence]) => (
-          <div key={name} className="rounded-md bg-background border p-2">
+          <div key={name} className="rounded-[12px] bg-muted/55 p-3">
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="break-words">{name}</span>
               <span className="text-xs text-muted-foreground">{Math.round(confidence * 100)}%</span>
@@ -984,11 +961,12 @@ function PersonEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>编辑显示备注</DialogTitle>
           <DialogDescription>
-            为 {getProfileDisplayName(person)} 设置 WebUI 显示信息，不修改自动提取的画像事实、偏好和兴趣
+            为 {getProfileDisplayName(person)} 设置 WebUI
+            显示信息，不修改自动提取的画像事实、偏好和兴趣
           </DialogDescription>
         </DialogHeader>
 
@@ -1036,7 +1014,7 @@ function PersonEditDialog({
             />
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border p-3">
+          <div className="ios-group flex items-center justify-between gap-4 p-4">
             <div>
               <Label htmlFor="is_known" className="text-base font-medium">
                 可用于回复

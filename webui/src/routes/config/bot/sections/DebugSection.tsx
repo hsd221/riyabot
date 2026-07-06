@@ -10,7 +10,7 @@ interface DebugSectionProps {
 
 export const DebugSection = React.memo(function DebugSection({ config, onChange }: DebugSectionProps) {
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+    <div className="ios-group p-4 sm:p-6 space-y-4">
       <h3 className="text-lg font-semibold">调试配置</h3>
       <div className="space-y-4">
         <div className="flex items-center justify-between">

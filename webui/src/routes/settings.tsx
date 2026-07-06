@@ -1,7 +1,28 @@
-import { Palette, Info, Shield, Eye, EyeOff, Copy, RefreshCw, Check, CheckCircle2, XCircle, AlertTriangle, Settings, RotateCcw, Database, Download, Upload, Trash2, HardDrive } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Copy,
+  Download,
+  Eye,
+  EyeOff,
+  HardDrive,
+  Info,
+  Palette,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  Shield,
+  Trash2,
+  Upload,
+  XCircle,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useTheme } from '@/components/use-theme'
 import { useAnimation } from '@/hooks/use-animation'
 import { useState, useMemo, useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
@@ -33,6 +54,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   AlertDialog,
@@ -46,56 +68,187 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 
+type SettingsTab = 'appearance' | 'security' | 'other' | 'about'
+
+type SettingsTabItem = {
+  value: SettingsTab
+  label: string
+  description: string
+  Icon: LucideIcon
+  symbolClass: string
+}
+
+const SETTINGS_TABS: SettingsTabItem[] = [
+  {
+    value: 'appearance',
+    label: '外观',
+    description: '主题、强调色与动画',
+    Icon: Palette,
+    symbolClass: 'ios-symbol-blue',
+  },
+  {
+    value: 'security',
+    label: '安全',
+    description: '访问令牌与登录状态',
+    Icon: Shield,
+    symbolClass: 'ios-symbol-green',
+  },
+  {
+    value: 'other',
+    label: '其他',
+    description: '缓存、导入导出与重置',
+    Icon: Settings,
+    symbolClass: 'ios-symbol-gray',
+  },
+  {
+    value: 'about',
+    label: '关于',
+    description: '版本与开源许可',
+    Icon: Info,
+    symbolClass: 'ios-symbol-purple',
+  },
+]
+
 export function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
+  const [tabDialogOpen, setTabDialogOpen] = useState(false)
+  const activeTabItem = SETTINGS_TABS.find((item) => item.value === activeTab) ?? SETTINGS_TABS[0]
+
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-      {/* 页面标题 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">系统设置</h1>
-          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">管理您的应用偏好设置</p>
+    <div className="ios-page">
+      <div className="ios-content">
+        {/* 页面标题 */}
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div>
+            <h1 className="ios-title">系统设置</h1>
+            <p className="ios-subtitle">管理您的应用偏好设置</p>
+          </div>
         </div>
+
+        <Dialog open={tabDialogOpen} onOpenChange={setTabDialogOpen}>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.symbolClass)}>
+                  <activeTabItem.Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium leading-5 text-foreground">
+                    当前分类
+                  </span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {activeTabItem.label} · {activeTabItem.description}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </DialogTrigger>
+          <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+            <DialogHeader className="px-5 pb-1 pt-5">
+              <DialogTitle>设置分类</DialogTitle>
+              <DialogDescription>选择要管理的偏好设置</DialogDescription>
+            </DialogHeader>
+            <div className="px-5 pb-5">
+              <div className="ios-group overflow-hidden">
+                {SETTINGS_TABS.map((item) => {
+                  const selected = item.value === activeTab
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
+                      aria-current={selected ? 'page' : undefined}
+                      onClick={() => {
+                        setActiveTab(item.value)
+                        setTabDialogOpen(false)
+                      }}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className={cn('ios-symbol ios-symbol-sm', item.symbolClass)}>
+                          <item.Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[15px] font-medium leading-5 text-foreground">
+                            {item.label}
+                          </span>
+                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                            {item.description}
+                          </span>
+                        </span>
+                      </span>
+                      {selected ? (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* 标签页 */}
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as SettingsTab)}
+          className="w-full"
+        >
+          <TabsList className="hidden h-auto w-full grid-cols-2 gap-0.5 p-1 sm:grid sm:grid-cols-4 sm:gap-1">
+            <TabsTrigger
+              value="appearance"
+              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+            >
+              <Palette className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+              <span>外观</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="security"
+              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+            >
+              <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+              <span>安全</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="other"
+              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+            >
+              <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+              <span>其他</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="about"
+              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+            >
+              <Info className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+              <span>关于</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <ScrollArea className="mt-4 h-auto sm:mt-6 sm:h-[calc(100vh-280px)]">
+            <TabsContent value="appearance" className="mt-0">
+              <AppearanceTab />
+            </TabsContent>
+
+            <TabsContent value="security" className="mt-0">
+              <SecurityTab />
+            </TabsContent>
+
+            <TabsContent value="other" className="mt-0">
+              <OtherTab />
+            </TabsContent>
+
+            <TabsContent value="about" className="mt-0">
+              <AboutTab />
+            </TabsContent>
+          </ScrollArea>
+        </Tabs>
       </div>
-
-      {/* 标签页 */}
-      <Tabs defaultValue="appearance" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-0.5 sm:gap-1 h-auto p-1">
-          <TabsTrigger value="appearance" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3 py-2">
-            <Palette className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-            <span>外观</span>
-          </TabsTrigger>
-          <TabsTrigger value="security" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3 py-2">
-            <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-            <span>安全</span>
-          </TabsTrigger>
-          <TabsTrigger value="other" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3 py-2">
-            <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-            <span>其他</span>
-          </TabsTrigger>
-          <TabsTrigger value="about" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3 py-2">
-            <Info className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-            <span>关于</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <ScrollArea className="h-[calc(100vh-240px)] sm:h-[calc(100vh-280px)] mt-4 sm:mt-6">
-          <TabsContent value="appearance" className="mt-0">
-            <AppearanceTab />
-          </TabsContent>
-
-          <TabsContent value="security" className="mt-0">
-            <SecurityTab />
-          </TabsContent>
-
-          <TabsContent value="other" className="mt-0">
-            <OtherTab />
-          </TabsContent>
-
-          <TabsContent value="about" className="mt-0">
-            <AboutTab />
-          </TabsContent>
-        </ScrollArea>
-      </Tabs>
     </div>
   )
 }
@@ -103,79 +256,80 @@ export function SettingsPage() {
 // 应用主题色的辅助函数
 function applyAccentColor(color: string) {
   const root = document.documentElement
-  
+
   // 预设颜色配置
   const colors = {
     // 单色
-    blue: { 
-      hsl: '221.2 83.2% 53.3%', 
-      darkHsl: '217.2 91.2% 59.8%',
-      gradient: null
+    blue: {
+      hsl: '211.29 100% 50%',
+      darkHsl: '210.12 100% 51.96%',
+      gradient: null,
     },
-    purple: { 
-      hsl: '271 91% 65%', 
-      darkHsl: '270 95% 75%',
-      gradient: null
+    purple: {
+      hsl: '240.94 60.95% 58.82%',
+      darkHsl: '240.87 73.4% 63.14%',
+      gradient: null,
     },
-    green: { 
-      hsl: '142 71% 45%', 
-      darkHsl: '142 76% 36%',
-      gradient: null
+    green: {
+      hsl: '135.1 58.57% 49.22%',
+      darkHsl: '134.91 63.64% 50.39%',
+      gradient: null,
     },
-    orange: { 
-      hsl: '25 95% 53%', 
-      darkHsl: '20 90% 48%',
-      gradient: null
+    orange: {
+      hsl: '35.06 100% 50%',
+      darkHsl: '36.49 100% 51.96%',
+      gradient: null,
     },
-    pink: { 
-      hsl: '330 81% 60%', 
-      darkHsl: '330 85% 70%',
-      gradient: null
+    pink: {
+      hsl: '348.57 100% 58.82%',
+      darkHsl: '348 100% 60.78%',
+      gradient: null,
     },
-    red: { 
-      hsl: '0 84% 60%', 
-      darkHsl: '0 90% 70%',
-      gradient: null
+    red: {
+      hsl: '3.19 100% 59.41%',
+      darkHsl: '3.35 100% 61.37%',
+      gradient: null,
     },
-    
+
     // 渐变色
-    'gradient-sunset': { 
-      hsl: '15 95% 60%', 
-      darkHsl: '15 95% 65%',
-      gradient: 'linear-gradient(135deg, hsl(25 95% 53%) 0%, hsl(330 81% 60%) 100%)'
+    'gradient-sunset': {
+      hsl: '35.06 100% 50%',
+      darkHsl: '36.49 100% 51.96%',
+      gradient: 'linear-gradient(135deg, #FF9500 0%, #FF2D55 100%)',
     },
-    'gradient-ocean': { 
-      hsl: '200 90% 55%', 
-      darkHsl: '200 90% 60%',
-      gradient: 'linear-gradient(135deg, hsl(221.2 83.2% 53.3%) 0%, hsl(189 94% 43%) 100%)'
+    'gradient-ocean': {
+      hsl: '211.29 100% 50%',
+      darkHsl: '210.12 100% 51.96%',
+      gradient: 'linear-gradient(135deg, #007AFF 0%, #5AC8FA 100%)',
     },
-    'gradient-forest': { 
-      hsl: '150 70% 45%', 
-      darkHsl: '150 75% 40%',
-      gradient: 'linear-gradient(135deg, hsl(142 71% 45%) 0%, hsl(158 64% 52%) 100%)'
+    'gradient-forest': {
+      hsl: '135.1 58.57% 49.22%',
+      darkHsl: '134.91 63.64% 50.39%',
+      gradient: 'linear-gradient(135deg, #34C759 0%, #00C7BE 100%)',
     },
-    'gradient-aurora': { 
-      hsl: '310 85% 65%', 
-      darkHsl: '310 90% 70%',
-      gradient: 'linear-gradient(135deg, hsl(271 91% 65%) 0%, hsl(330 81% 60%) 100%)'
+    'gradient-aurora': {
+      hsl: '240.94 60.95% 58.82%',
+      darkHsl: '240.87 73.4% 63.14%',
+      gradient: 'linear-gradient(135deg, #5856D6 0%, #FF2D55 100%)',
     },
-    'gradient-fire': { 
-      hsl: '15 95% 55%', 
-      darkHsl: '15 95% 60%',
-      gradient: 'linear-gradient(135deg, hsl(0 84% 60%) 0%, hsl(25 95% 53%) 100%)'
+    'gradient-fire': {
+      hsl: '3.19 100% 59.41%',
+      darkHsl: '3.35 100% 61.37%',
+      gradient: 'linear-gradient(135deg, #FF3B30 0%, #FF9500 100%)',
     },
-    'gradient-twilight': { 
-      hsl: '250 90% 60%', 
-      darkHsl: '250 95% 65%',
-      gradient: 'linear-gradient(135deg, hsl(239 84% 67%) 0%, hsl(271 91% 65%) 100%)'
+    'gradient-twilight': {
+      hsl: '240.94 60.95% 58.82%',
+      darkHsl: '240.87 73.4% 63.14%',
+      gradient: 'linear-gradient(135deg, #5856D6 0%, #AF52DE 100%)',
     },
   }
 
   const selectedColor = colors[color as keyof typeof colors]
   if (selectedColor) {
+    const isDark = root.classList.contains('dark')
     // 设置主色
-    root.style.setProperty('--primary', selectedColor.hsl)
-    
+    root.style.setProperty('--primary', isDark ? selectedColor.darkHsl : selectedColor.hsl)
+
     // 设置渐变（如果有）
     if (selectedColor.gradient) {
       root.style.setProperty('--primary-gradient', selectedColor.gradient)
@@ -189,32 +343,38 @@ function applyAccentColor(color: string) {
     const hexToHsl = (hex: string) => {
       // 移除 # 号
       hex = hex.replace('#', '')
-      
+
       // 转换为 RGB
       const r = parseInt(hex.substring(0, 2), 16) / 255
       const g = parseInt(hex.substring(2, 4), 16) / 255
       const b = parseInt(hex.substring(4, 6), 16) / 255
-      
+
       const max = Math.max(r, g, b)
       const min = Math.min(r, g, b)
       let h = 0
       let s = 0
       const l = (max + min) / 2
-      
+
       if (max !== min) {
         const d = max - min
         s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
-        
+
         switch (max) {
-          case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break
-          case g: h = ((b - r) / d + 2) / 6; break
-          case b: h = ((r - g) / d + 4) / 6; break
+          case r:
+            h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+            break
+          case g:
+            h = ((b - r) / d + 2) / 6
+            break
+          case b:
+            h = ((r - g) / d + 4) / 6
+            break
         }
       }
-      
+
       return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`
     }
-    
+
     root.style.setProperty('--primary', hexToHsl(color))
     root.style.removeProperty('--primary-gradient')
     root.classList.remove('has-gradient')
@@ -224,10 +384,12 @@ function applyAccentColor(color: string) {
 // 外观设置标签页
 function AppearanceTab() {
   const { theme, setTheme } = useTheme()
-  const { enableAnimations, setEnableAnimations, enableWavesBackground, setEnableWavesBackground } = useAnimation()
+  const { enableAnimations, setEnableAnimations, enableWavesBackground, setEnableWavesBackground } =
+    useAnimation()
   const [accentColor, setAccentColor] = useState(() => {
     return localStorage.getItem('accent-color') || 'blue'
   })
+  const [accentDialogOpen, setAccentDialogOpen] = useState(false)
 
   // 页面加载时应用保存的主题色
   useEffect(() => {
@@ -241,209 +403,385 @@ function AppearanceTab() {
     applyAccentColor(color)
   }
 
+  const themeOptions: ThemeOptionProps[] = [
+    {
+      value: 'light',
+      current: theme,
+      onChange: setTheme,
+      label: '浅色',
+      description: '始终使用浅色主题',
+    },
+    {
+      value: 'dark',
+      current: theme,
+      onChange: setTheme,
+      label: '深色',
+      description: '始终使用深色主题',
+    },
+    {
+      value: 'system',
+      current: theme,
+      onChange: setTheme,
+      label: '跟随系统',
+      description: '根据系统设置自动切换',
+    },
+  ]
+
+  const solidColorOptions: ColorPresetOptionProps[] = [
+    {
+      value: 'blue',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '蓝色',
+      colorClass: '',
+      swatchStyle: { background: 'hsl(211.29 100% 50%)' },
+    },
+    {
+      value: 'purple',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '紫色',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(180deg, #706EF0 0%, #5856D6 100%)' },
+    },
+    {
+      value: 'green',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '绿色',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(180deg, #4ADE6C 0%, #34C759 100%)' },
+    },
+    {
+      value: 'orange',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '橙色',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(180deg, #FFAD32 0%, #FF9500 100%)' },
+    },
+    {
+      value: 'pink',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '粉色',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(180deg, #FF5D86 0%, #FF2D55 100%)' },
+    },
+    {
+      value: 'red',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '红色',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(180deg, #FF5A4F 0%, #FF3B30 100%)' },
+    },
+  ]
+
+  const gradientColorOptions: ColorPresetOptionProps[] = [
+    {
+      value: 'gradient-sunset',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '日落',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(135deg, #FF9500 0%, #FF2D55 100%)' },
+    },
+    {
+      value: 'gradient-ocean',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '海洋',
+      colorClass: '',
+      swatchStyle: {
+        background: 'linear-gradient(135deg, #007AFF 0%, #5AC8FA 100%)',
+      },
+    },
+    {
+      value: 'gradient-forest',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '森林',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(135deg, #34C759 0%, #00C7BE 100%)' },
+    },
+    {
+      value: 'gradient-aurora',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '极光',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(135deg, #5856D6 0%, #FF2D55 100%)' },
+    },
+    {
+      value: 'gradient-fire',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '烈焰',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(135deg, #FF3B30 0%, #FF9500 100%)' },
+    },
+    {
+      value: 'gradient-twilight',
+      current: accentColor,
+      onChange: handleAccentColorChange,
+      label: '暮光',
+      colorClass: '',
+      swatchStyle: { background: 'linear-gradient(135deg, #5856D6 0%, #AF52DE 100%)' },
+    },
+  ]
+
+  const allColorOptions = [...solidColorOptions, ...gradientColorOptions]
+  const selectedAccentOption = allColorOptions.find((option) => option.value === accentColor)
+  const selectedAccentLabel = accentColor.startsWith('#')
+    ? '自定义颜色'
+    : (selectedAccentOption?.label ?? '蓝色')
+  const selectedAccentValue = accentColor.startsWith('#')
+    ? accentColor.toUpperCase()
+    : selectedAccentOption?.value.startsWith('gradient-')
+      ? '渐变预设'
+      : accentColor === 'blue'
+        ? '#007AFF'
+        : '预设颜色'
+
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="space-y-5 sm:space-y-8">
       {/* 主题模式 */}
       <div>
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">主题模式</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-          <ThemeOption
-            value="light"
-            current={theme}
-            onChange={setTheme}
-            label="浅色"
-            description="始终使用浅色主题"
-          />
-          <ThemeOption
-            value="dark"
-            current={theme}
-            onChange={setTheme}
-            label="深色"
-            description="始终使用深色主题"
-          />
-          <ThemeOption
-            value="system"
-            current={theme}
-            onChange={setTheme}
-            label="跟随系统"
-            description="根据系统设置自动切换"
-          />
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          主题模式
+        </h3>
+        <div className="ios-group overflow-hidden">
+          {themeOptions.map((option) => (
+            <ThemeListOption key={option.value} {...option} />
+          ))}
         </div>
       </div>
 
       {/* 主题色 */}
       <div>
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">主题色</h3>
-        
-        {/* 单色预设 */}
-        <div className="space-y-3 sm:space-y-4">
-          <div>
-            <h4 className="text-xs sm:text-sm font-medium mb-2 sm:mb-3">单色</h4>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-3">
-              <ColorPresetOption
-                value="blue"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="蓝色"
-                colorClass="bg-blue-500"
-              />
-              <ColorPresetOption
-                value="purple"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="紫色"
-                colorClass="bg-purple-500"
-              />
-              <ColorPresetOption
-                value="green"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="绿色"
-                colorClass="bg-green-500"
-              />
-              <ColorPresetOption
-                value="orange"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="橙色"
-                colorClass="bg-orange-500"
-              />
-              <ColorPresetOption
-                value="pink"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="粉色"
-                colorClass="bg-pink-500"
-              />
-              <ColorPresetOption
-                value="red"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="红色"
-                colorClass="bg-red-500"
-              />
-            </div>
-          </div>
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          主题色
+        </h3>
 
-          {/* 渐变色预设 */}
-          <div>
-            <h4 className="text-xs sm:text-sm font-medium mb-2 sm:mb-3">渐变色</h4>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-3">
-              <ColorPresetOption
-                value="gradient-sunset"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="日落"
-                colorClass="bg-gradient-to-r from-orange-500 to-pink-500"
+        <div className="ios-group overflow-hidden sm:hidden">
+          <button
+            type="button"
+            onClick={() => setAccentDialogOpen(true)}
+            className="ios-row ios-touch min-h-[62px] w-full text-left"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <AccentSwatch
+                option={selectedAccentOption}
+                value={accentColor}
+                className="h-8 w-8 rounded-[9px] shadow-[0_4px_10px_hsl(var(--primary)_/_0.22)]"
               />
-              <ColorPresetOption
-                value="gradient-ocean"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="海洋"
-                colorClass="bg-gradient-to-r from-blue-500 to-cyan-500"
-              />
-              <ColorPresetOption
-                value="gradient-forest"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="森林"
-                colorClass="bg-gradient-to-r from-green-500 to-emerald-500"
-              />
-              <ColorPresetOption
-                value="gradient-aurora"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="极光"
-                colorClass="bg-gradient-to-r from-purple-500 to-pink-500"
-              />
-              <ColorPresetOption
-                value="gradient-fire"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="烈焰"
-                colorClass="bg-gradient-to-r from-red-500 to-orange-500"
-              />
-              <ColorPresetOption
-                value="gradient-twilight"
-                current={accentColor}
-                onChange={handleAccentColorChange}
-                label="暮光"
-                colorClass="bg-gradient-to-r from-indigo-500 to-purple-500"
-              />
-            </div>
-          </div>
+              <span className="min-w-0">
+                <span className="block text-[16px] font-medium leading-6">当前强调色</span>
+                <span className="hidden truncate text-[13px] leading-5 text-muted-foreground sm:block">
+                  {selectedAccentLabel} · {selectedAccentValue}
+                </span>
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-3">
+              <span className="font-mono text-[15px] leading-6 text-muted-foreground">
+                {selectedAccentValue}
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </span>
+          </button>
+        </div>
 
-          {/* 自定义颜色选择器 */}
-          <div>
-            <h4 className="text-xs sm:text-sm font-medium mb-2 sm:mb-3">自定义颜色</h4>
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-              <div className="flex-1">
-                <input
-                  type="color"
-                  value={accentColor.startsWith('#') ? accentColor : '#3b82f6'}
-                  onChange={(e) => handleAccentColorChange(e.target.value)}
-                  className="h-10 sm:h-12 w-full rounded-lg border-2 border-border cursor-pointer"
-                  title="选择自定义颜色"
-                />
+        <Dialog open={accentDialogOpen} onOpenChange={setAccentDialogOpen}>
+          <DialogContent className="bottom-0 left-0 top-auto max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1rem,env(safe-area-inset-bottom))] sm:hidden">
+            <DialogHeader className="px-5 pb-1 pt-5">
+              <DialogTitle>主题色</DialogTitle>
+              <DialogDescription className="sr-only">选择主题强调色</DialogDescription>
+            </DialogHeader>
+            <div className="ios-scrollbar-none max-h-[calc(86vh-7rem)] space-y-5 overflow-y-auto px-5 pb-5">
+              <div>
+                <h4 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+                  单色
+                </h4>
+                <div className="ios-group overflow-hidden">
+                  {solidColorOptions.map((option) => (
+                    <ColorSheetOption
+                      key={option.value}
+                      {...option}
+                      onSelected={() => setAccentDialogOpen(false)}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="flex-1">
+
+              <div>
+                <h4 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+                  渐变色
+                </h4>
+                <div className="ios-group overflow-hidden">
+                  {gradientColorOptions.map((option) => (
+                    <ColorSheetOption
+                      key={option.value}
+                      {...option}
+                      onSelected={() => setAccentDialogOpen(false)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+                  自定义颜色
+                </h4>
+                <div className="ios-group overflow-hidden">
+                  <div className="ios-row min-h-[58px] py-3">
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-medium leading-5">颜色</span>
+                      <span className="block truncate font-mono text-[13px] leading-5 text-muted-foreground">
+                        {accentColor.startsWith('#') ? accentColor.toUpperCase() : '#007AFF'}
+                      </span>
+                    </span>
+                    <label className="ios-touch relative h-9 w-9 shrink-0 overflow-hidden rounded-[10px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
+                      <span
+                        className="absolute inset-0 rounded-[10px]"
+                        style={{
+                          background: accentColor.startsWith('#')
+                            ? accentColor
+                            : 'hsl(211.29 100% 50%)',
+                        }}
+                      />
+                      <input
+                        type="color"
+                        value={accentColor.startsWith('#') ? accentColor : '#007AFF'}
+                        onChange={(e) => handleAccentColorChange(e.target.value)}
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        aria-label="选择自定义颜色"
+                      />
+                    </label>
+                  </div>
+                  <div className="ios-row min-h-[58px] py-3">
+                    <span className="text-[15px] font-medium leading-5">HEX</span>
+                    <Input
+                      type="text"
+                      value={accentColor}
+                      onChange={(e) => handleAccentColorChange(e.target.value)}
+                      placeholder="#007AFF"
+                      className="h-9 max-w-[9.5rem] rounded-[10px] border-0 bg-muted px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* 桌面端强调色列表 */}
+        <div className="hidden space-y-5 sm:block">
+          <div>
+            <h4 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+              单色
+            </h4>
+            <div className="ios-group overflow-hidden">
+              {solidColorOptions.map((option) => (
+                <ColorSheetOption key={option.value} {...option} />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+              渐变色
+            </h4>
+            <div className="ios-group overflow-hidden">
+              {gradientColorOptions.map((option) => (
+                <ColorSheetOption key={option.value} {...option} />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+              自定义颜色
+            </h4>
+            <div className="ios-group overflow-hidden">
+              <div className="ios-row min-h-[58px] py-3">
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium leading-5">颜色</span>
+                  <span className="block truncate font-mono text-[13px] leading-5 text-muted-foreground">
+                    {accentColor.startsWith('#') ? accentColor.toUpperCase() : '#007AFF'}
+                  </span>
+                </span>
+                <label className="ios-touch relative h-9 w-9 shrink-0 overflow-hidden rounded-[10px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
+                  <span
+                    className="absolute inset-0 rounded-[10px]"
+                    style={{
+                      background: accentColor.startsWith('#')
+                        ? accentColor
+                        : 'hsl(211.29 100% 50%)',
+                    }}
+                  />
+                  <input
+                    type="color"
+                    value={accentColor.startsWith('#') ? accentColor : '#007AFF'}
+                    onChange={(e) => handleAccentColorChange(e.target.value)}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label="选择自定义颜色"
+                  />
+                </label>
+              </div>
+              <div className="ios-row min-h-[58px] py-3">
+                <span className="text-[15px] font-medium leading-5">HEX</span>
                 <Input
                   type="text"
                   value={accentColor}
                   onChange={(e) => handleAccentColorChange(e.target.value)}
-                  placeholder="#3b82f6"
-                  className="font-mono text-sm"
+                  placeholder="#007AFF"
+                  className="h-9 max-w-[11rem] rounded-[10px] border-0 bg-muted px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
                 />
               </div>
             </div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-2">
-              点击色块选择颜色，或手动输入 HEX 颜色代码
-            </p>
           </div>
         </div>
       </div>
 
       {/* 动效设置 */}
       <div>
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">动画效果</h3>
-        <div className="space-y-2 sm:space-y-3">
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          动画效果
+        </h3>
+        <div className="ios-group overflow-hidden">
           {/* 全局动画开关 */}
-          <div className="rounded-lg border bg-card p-3 sm:p-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5 flex-1">
-                <Label htmlFor="animations" className="text-base font-medium cursor-pointer">
-                  启用动画效果
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  关闭后将禁用所有过渡动画和特效，提升性能
-                </p>
-              </div>
-              <Switch
-                id="animations"
-                checked={enableAnimations}
-                onCheckedChange={setEnableAnimations}
-              />
+          <div className="ios-row">
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <Label htmlFor="animations" className="cursor-pointer text-base font-medium">
+                启用动画效果
+              </Label>
+              <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
+                关闭后将禁用所有过渡动画和特效，提升性能
+              </p>
             </div>
+            <Switch
+              id="animations"
+              checked={enableAnimations}
+              onCheckedChange={setEnableAnimations}
+            />
           </div>
 
           {/* 波浪背景开关 */}
-          <div className="rounded-lg border bg-card p-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5 flex-1">
-                <Label htmlFor="waves-background" className="text-base font-medium cursor-pointer">
-                  登录页波浪背景
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  关闭后登录页将使用纯色背景，适合低性能设备
-                </p>
-              </div>
-              <Switch
-                id="waves-background"
-                checked={enableWavesBackground}
-                onCheckedChange={setEnableWavesBackground}
-              />
+          <div className="ios-row">
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <Label htmlFor="waves-background" className="cursor-pointer text-base font-medium">
+                登录页波浪背景
+              </Label>
+              <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
+                关闭后登录页将使用纯色背景，适合低性能设备
+              </p>
             </div>
+            <Switch
+              id="waves-background"
+              checked={enableWavesBackground}
+              onCheckedChange={setEnableWavesBackground}
+            />
           </div>
         </div>
       </div>
@@ -513,7 +851,7 @@ function SecurityTab() {
         .filter((rule) => !rule.passed)
         .map((rule) => rule.label)
         .join(', ')
-      
+
       toast({
         title: '格式错误',
         description: `Token 不符合要求: ${failedRules}`,
@@ -539,10 +877,10 @@ function SecurityTab() {
       if (response.ok && data.success) {
         // 清空输入框
         setNewToken('')
-        
+
         // 更新当前显示的 Token
         setCurrentToken(newToken.trim())
-        
+
         toast({
           title: '更新成功',
           description: 'Access Token 已更新，即将跳转到登录页',
@@ -589,12 +927,12 @@ function SecurityTab() {
       if (response.ok && data.success) {
         // 更新当前显示的 Token
         setCurrentToken(data.token)
-        
+
         // 显示弹窗展示新 Token
         setGeneratedToken(data.token)
         setShowTokenDialog(true)
         setTokenCopied(false)
-        
+
         toast({
           title: '生成成功',
           description: '新的 Access Token 已生成，请及时保存',
@@ -644,7 +982,7 @@ function SecurityTab() {
       setGeneratedToken('')
       setTokenCopied(false)
     }, 300)
-    
+
     // 跳转到登录页
     setTimeout(() => {
       navigate({ to: '/auth' })
@@ -662,7 +1000,7 @@ function SecurityTab() {
     <div className="space-y-4 sm:space-y-6">
       {/* Token 生成成功弹窗 */}
       <Dialog open={showTokenDialog} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="ios-sheet w-[calc(100vw-2rem)] rounded-[26px] p-5 sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-yellow-500" />
@@ -675,22 +1013,22 @@ function SecurityTab() {
 
           <div className="space-y-4">
             {/* Token 显示区域 */}
-            <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4">
-              <Label className="text-xs text-muted-foreground mb-2 block">
+            <div className="ios-group border-primary/20 bg-primary/5 p-4">
+              <Label className="mb-2 block text-xs text-muted-foreground">
                 您的新 Token (64位安全令牌)
               </Label>
-              <div className="font-mono text-sm break-all select-all bg-background p-3 rounded border">
+              <div className="select-all break-all rounded-[12px] bg-muted/70 p-3 font-mono text-sm">
                 {generatedToken}
               </div>
             </div>
 
             {/* 警告提示 */}
-            <div className="rounded-lg border border-yellow-200 dark:border-yellow-900 bg-yellow-50 dark:bg-yellow-950/30 p-3">
+            <div className="ios-group border-yellow-200 bg-yellow-50/80 p-3 dark:border-yellow-900 dark:bg-yellow-950/30">
               <div className="flex gap-2">
-                <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-yellow-800 dark:text-yellow-300 space-y-1">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-yellow-600 dark:text-yellow-500" />
+                <div className="space-y-1 text-sm text-yellow-800 dark:text-yellow-300">
                   <p className="font-semibold">重要提示</p>
-                  <ul className="list-disc list-inside space-y-0.5 text-xs">
+                  <ul className="list-inside list-disc space-y-0.5 text-xs">
                     <li>此 Token 仅显示一次，关闭后无法再查看</li>
                     <li>请立即复制并保存到安全的位置</li>
                     <li>关闭窗口后将自动跳转到登录页面</li>
@@ -702,11 +1040,7 @@ function SecurityTab() {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={copyGeneratedToken}
-              className="gap-2"
-            >
+            <Button variant="outline" onClick={copyGeneratedToken} className="gap-2 rounded-full">
               {tokenCopied ? (
                 <>
                   <Check className="h-4 w-4 text-green-500" />
@@ -719,7 +1053,7 @@ function SecurityTab() {
                 </>
               )}
             </Button>
-            <Button onClick={handleCloseDialog}>
+            <Button onClick={handleCloseDialog} className="rounded-full">
               我已保存，关闭
             </Button>
           </DialogFooter>
@@ -727,157 +1061,173 @@ function SecurityTab() {
       </Dialog>
 
       {/* 当前 Token */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">当前 Access Token</h3>
-        <div className="space-y-3 sm:space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="current-token" className="text-sm">您的访问令牌</Label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <Input
-                  id="current-token"
-                  type={showCurrentToken ? 'text' : 'password'}
-                  value={currentToken || '••••••••••••••••••••••••••••••••'}
-                  readOnly
-                  className="pr-10 font-mono text-sm"
-                  placeholder="Token 存储在安全 Cookie 中"
-                />
-                <button
-                  onClick={() => {
-                    if (currentToken) {
-                      setShowCurrentToken(!showCurrentToken)
-                    } else {
-                      toast({
-                        title: '无法查看',
-                        description: 'Token 存储在安全 Cookie 中，如需新 Token 请点击"重新生成"',
-                      })
-                    }
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-accent rounded"
-                  title={showCurrentToken ? '隐藏' : '显示'}
-                >
-                  {showCurrentToken ? (
-                    <EyeOff className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <Eye className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </button>
-              </div>
-              <div className="flex gap-2 w-full sm:w-auto">
+      <div className="ios-group overflow-hidden">
+        <div className="ios-row ios-row-plain min-h-[60px]">
+          <div>
+            <h3 className="text-[15px] font-semibold leading-5 text-foreground sm:text-base">
+              当前 Access Token
+            </h3>
+            <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">由安全 Cookie 保存</p>
+          </div>
+        </div>
+        <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+          <Label htmlFor="current-token" className="text-[15px] font-normal leading-5">
+            访问令牌
+          </Label>
+          <div className="relative w-full sm:max-w-xl">
+            <Input
+              id="current-token"
+              type={showCurrentToken ? 'text' : 'password'}
+              value={currentToken || '••••••••••••••••••••••••••••••••'}
+              readOnly
+              className="h-11 rounded-[12px] border-0 bg-muted/70 pr-10 font-mono text-sm shadow-none focus-visible:ring-0"
+              placeholder="Token 存储在安全 Cookie 中"
+            />
+            <button
+              onClick={() => {
+                if (currentToken) {
+                  setShowCurrentToken(!showCurrentToken)
+                } else {
+                  toast({
+                    title: '无法查看',
+                    description: 'Token 存储在安全 Cookie 中，如需新 Token 请点击"重新生成"',
+                  })
+                }
+              }}
+              className="ios-touch absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 hover:bg-accent"
+              title={showCurrentToken ? '隐藏' : '显示'}
+            >
+              {showCurrentToken ? (
+                <EyeOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+          </div>
+        </div>
+        <div className="ios-row ios-row-plain min-h-[62px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+          <div>
+            <p className="text-[15px] leading-5 text-foreground">Token 操作</p>
+            <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+              重新生成后旧令牌立即失效
+            </p>
+          </div>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => copyToClipboard(currentToken)}
+              title="复制到剪贴板"
+              className="h-10 w-10 flex-shrink-0 rounded-full"
+              disabled={!currentToken}
+            >
+              {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
                 <Button
                   variant="outline"
-                  size="icon"
-                  onClick={() => copyToClipboard(currentToken)}
-                  title="复制到剪贴板"
-                  className="flex-shrink-0"
-                  disabled={!currentToken}
+                  disabled={isRegenerating}
+                  className="h-10 flex-1 gap-2 rounded-full px-5 sm:flex-none"
                 >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )}
+                  <RefreshCw className={cn('h-4 w-4', isRegenerating && 'animate-spin')} />
+                  <span>重新生成</span>
                 </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      disabled={isRegenerating}
-                      className="gap-2 flex-1 sm:flex-none"
-                    >
-                      <RefreshCw className={cn('h-4 w-4', isRegenerating && 'animate-spin')} />
-                      <span className="hidden sm:inline">重新生成</span>
-                      <span className="sm:hidden">生成</span>
-                    </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>确认重新生成 Token</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      这将生成一个新的 64 位安全令牌，并使当前 Token 立即失效。
-                      您需要使用新 Token 重新登录系统。此操作不可撤销，确定要继续吗？
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>取消</AlertDialogCancel>
-                    <AlertDialogAction onClick={executeRegenerateToken}>
-                      确认生成
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              </div>
-            </div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">
-              请妥善保管您的 Access Token，不要泄露给他人
-            </p>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>确认重新生成 Token</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    这将生成一个新的 64 位安全令牌，并使当前 Token 立即失效。 您需要使用新 Token
+                    重新登录系统。此操作不可撤销，确定要继续吗？
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="rounded-full">取消</AlertDialogCancel>
+                  <AlertDialogAction onClick={executeRegenerateToken} className="rounded-full">
+                    确认生成
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </div>
 
       {/* 更新 Token */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">自定义 Access Token</h3>
-        <div className="space-y-3 sm:space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="new-token" className="text-sm">新的访问令牌</Label>
-            <div className="relative">
-              <Input
-                id="new-token"
-                type={showNewToken ? 'text' : 'password'}
-                value={newToken}
-                onChange={(e) => setNewToken(e.target.value)}
-                className="pr-10 font-mono text-sm"
-                placeholder="输入自定义 Token"
-              />
-              <button
-                onClick={() => setShowNewToken(!showNewToken)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 hover:bg-accent rounded"
-                title={showNewToken ? '隐藏' : '显示'}
-              >
-                {showNewToken ? (
-                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <Eye className="h-4 w-4 text-muted-foreground" />
-                )}
-              </button>
-            </div>
-            
-            {/* Token 验证规则显示 */}
-            {newToken && (
-              <div className="mt-3 space-y-2 p-3 rounded-lg bg-muted/50">
-                <p className="text-sm font-medium text-foreground">Token 安全要求:</p>
-                <div className="space-y-1.5">
-                  {tokenValidation.rules.map((rule) => (
-                    <div key={rule.id} className="flex items-center gap-2 text-sm">
-                      {rule.passed ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      )}
-                      <span className={cn(
-                        rule.passed ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
-                      )}>
-                        {rule.label}
-                      </span>
-                    </div>
-                  ))}
+      <div className="ios-group overflow-hidden">
+        <div className="ios-row ios-row-plain min-h-[60px]">
+          <div>
+            <h3 className="text-[15px] font-semibold leading-5 text-foreground sm:text-base">
+              自定义 Access Token
+            </h3>
+            <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+              使用自定义令牌登录 WebUI
+            </p>
+          </div>
+        </div>
+        <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+          <Label htmlFor="new-token" className="text-[15px] font-normal leading-5">
+            新令牌
+          </Label>
+          <div className="relative w-full sm:max-w-xl">
+            <Input
+              id="new-token"
+              type={showNewToken ? 'text' : 'password'}
+              value={newToken}
+              onChange={(e) => setNewToken(e.target.value)}
+              className="h-11 rounded-[12px] border-0 bg-muted/70 pr-10 font-mono text-sm shadow-none focus-visible:ring-0"
+              placeholder="输入自定义 Token"
+            />
+            <button
+              onClick={() => setShowNewToken(!showNewToken)}
+              className="ios-touch absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 hover:bg-accent"
+              title={showNewToken ? '隐藏' : '显示'}
+            >
+              {showNewToken ? (
+                <EyeOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Token 验证规则显示 */}
+        {newToken && (
+          <div className="ios-row ios-row-plain min-h-[58px] flex-col !items-stretch !justify-start gap-2">
+            <p className="text-[15px] leading-5 text-foreground">安全要求</p>
+            <div className="grid gap-2 pt-1 sm:grid-cols-2">
+              {tokenValidation.rules.map((rule) => (
+                <div key={rule.id} className="flex items-center gap-2 text-sm">
+                  {rule.passed ? (
+                    <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  )}
+                  <span
+                    className={cn(
+                      rule.passed ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
+                    )}
+                  >
+                    {rule.label}
+                  </span>
                 </div>
-                {tokenValidation.isValid && (
-                  <div className="mt-2 pt-2 border-t border-border">
-                    <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                      <Check className="h-4 w-4" />
-                      <span className="font-medium">Token 格式正确，可以使用</span>
-                    </div>
-                  </div>
-                )}
+              ))}
+            </div>
+            {tokenValidation.isValid && (
+              <div className="mt-1 flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <Check className="h-4 w-4" />
+                <span className="font-medium">Token 格式正确，可以使用</span>
               </div>
             )}
           </div>
-          <Button 
-            onClick={handleUpdateToken} 
-            disabled={isUpdating || !tokenValidation.isValid || !newToken} 
-            className="w-full sm:w-auto"
+        )}
+        <div className="ios-row ios-row-plain min-h-[62px] !items-stretch sm:!items-center">
+          <Button
+            onClick={handleUpdateToken}
+            disabled={isUpdating || !tokenValidation.isValid || !newToken}
+            className="ml-auto h-10 w-full rounded-full sm:w-auto sm:px-5"
           >
             {isUpdating ? '更新中...' : '更新自定义 Token'}
           </Button>
@@ -885,9 +1235,11 @@ function SecurityTab() {
       </div>
 
       {/* 安全提示 */}
-      <div className="rounded-lg border border-yellow-200 dark:border-yellow-900 bg-yellow-50 dark:bg-yellow-950/30 p-3 sm:p-4">
-        <h4 className="text-sm sm:text-base font-semibold text-yellow-900 dark:text-yellow-200 mb-2">安全提示</h4>
-        <ul className="text-xs sm:text-sm text-yellow-800 dark:text-yellow-300 space-y-1 list-disc list-inside">
+      <div className="px-1 text-[13px] leading-6 text-muted-foreground sm:px-2">
+        <h4 className="mb-1 text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+          安全提示
+        </h4>
+        <ul className="list-disc space-y-1 pl-4">
           <li>重新生成 Token 会创建系统随机生成的 64 位安全令牌</li>
           <li>自定义 Token 必须满足所有安全要求才能使用</li>
           <li>更新 Token 后，旧的 Token 将立即失效</li>
@@ -906,14 +1258,18 @@ function OtherTab() {
   const { toast } = useToast()
   const [isResetting, setIsResetting] = useState(false)
   const [shouldThrowError, setShouldThrowError] = useState(false)
-  
+
   // 性能与存储设置状态
   const [logCacheSize, setLogCacheSize] = useState(() => getSetting('logCacheSize'))
-  const [wsReconnectInterval, setWsReconnectInterval] = useState(() => getSetting('wsReconnectInterval'))
-  const [wsMaxReconnectAttempts, setWsMaxReconnectAttempts] = useState(() => getSetting('wsMaxReconnectAttempts'))
+  const [wsReconnectInterval, setWsReconnectInterval] = useState(() =>
+    getSetting('wsReconnectInterval')
+  )
+  const [wsMaxReconnectAttempts, setWsMaxReconnectAttempts] = useState(() =>
+    getSetting('wsMaxReconnectAttempts')
+  )
   const [dataSyncInterval, setDataSyncInterval] = useState(() => getSetting('dataSyncInterval'))
   const [storageUsage, setStorageUsage] = useState(() => getStorageUsage())
-  
+
   // 导入/导出状态
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -986,7 +1342,7 @@ function OtherTab() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `riyabot-console-settings-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `webui-console-settings-${new Date().toISOString().slice(0, 10)}.json`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -1019,7 +1375,7 @@ function OtherTab() {
         const content = e.target?.result as string
         const settings = JSON.parse(content)
         const result = importSettings(settings)
-        
+
         if (result.success) {
           // 刷新页面状态
           setLogCacheSize(getSetting('logCacheSize'))
@@ -1027,12 +1383,12 @@ function OtherTab() {
           setWsMaxReconnectAttempts(getSetting('wsMaxReconnectAttempts'))
           setDataSyncInterval(getSetting('dataSyncInterval'))
           refreshStorageUsage()
-          
+
           toast({
             title: '导入成功',
             description: `成功导入 ${result.imported.length} 项设置${result.skipped.length > 0 ? `，跳过 ${result.skipped.length} 项` : ''}`,
           })
-          
+
           // 提示用户刷新页面以应用所有更改
           if (result.imported.includes('theme') || result.imported.includes('accentColor')) {
             toast({
@@ -1126,34 +1482,47 @@ function OtherTab() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-5 sm:space-y-7">
       {/* 性能与存储 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
-          <Database className="h-5 w-5" />
+      <div>
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
           性能与存储
         </h3>
-        <div className="space-y-4 sm:space-y-5">
+        <div className="ios-group overflow-hidden">
           {/* 存储使用情况 */}
-          <div className="rounded-lg bg-muted/50 p-3 sm:p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium flex items-center gap-2">
+          <div className="ios-row min-h-[72px]">
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
                 <HardDrive className="h-4 w-4" />
-                本地存储使用
               </span>
-              <Button variant="ghost" size="sm" onClick={refreshStorageUsage} className="h-7 px-2">
-                <RefreshCw className="h-3 w-3" />
+              <span className="min-w-0">
+                <span className="block text-[15px] font-medium leading-5">本地存储使用</span>
+                <span className="block text-[13px] leading-5 text-muted-foreground">
+                  {storageUsage.items} 个存储项
+                </span>
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-right text-[17px] font-semibold tabular-nums leading-6 text-primary">
+                {formatBytes(storageUsage.used)}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={refreshStorageUsage}
+                className="h-9 w-9 rounded-full"
+                title="刷新存储使用情况"
+              >
+                <RefreshCw className="h-4 w-4" />
               </Button>
-            </div>
-            <div className="text-2xl font-bold text-primary">{formatBytes(storageUsage.used)}</div>
-            <p className="text-xs text-muted-foreground mt-1">{storageUsage.items} 个存储项</p>
+            </span>
           </div>
 
           {/* 日志缓存大小 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">日志缓存大小</Label>
-              <span className="text-sm text-muted-foreground">{logCacheSize} 条</span>
+          <div className="ios-row ios-row-plain min-h-[86px] flex-col !items-stretch !justify-start gap-3 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-[15px] font-medium leading-5">日志缓存大小</Label>
+              <span className="ios-value">{logCacheSize} 条</span>
             </div>
             <Slider
               value={[logCacheSize]}
@@ -1163,16 +1532,16 @@ function OtherTab() {
               step={100}
               className="w-full"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[13px] leading-5 text-muted-foreground">
               控制日志查看器最多缓存的日志条数，较大的值会占用更多内存
             </p>
           </div>
 
           {/* 数据刷新间隔 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">首页数据刷新间隔</Label>
-              <span className="text-sm text-muted-foreground">{dataSyncInterval} 秒</span>
+          <div className="ios-row ios-row-plain min-h-[86px] flex-col !items-stretch !justify-start gap-3 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-[15px] font-medium leading-5">首页数据刷新间隔</Label>
+              <span className="ios-value">{dataSyncInterval} 秒</span>
             </div>
             <Slider
               value={[dataSyncInterval]}
@@ -1182,16 +1551,16 @@ function OtherTab() {
               step={5}
               className="w-full"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[13px] leading-5 text-muted-foreground">
               控制首页统计数据的自动刷新间隔
             </p>
           </div>
 
           {/* WebSocket 重连间隔 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">WebSocket 重连间隔</Label>
-              <span className="text-sm text-muted-foreground">{wsReconnectInterval / 1000} 秒</span>
+          <div className="ios-row ios-row-plain min-h-[86px] flex-col !items-stretch !justify-start gap-3 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-[15px] font-medium leading-5">WebSocket 重连间隔</Label>
+              <span className="ios-value">{wsReconnectInterval / 1000} 秒</span>
             </div>
             <Slider
               value={[wsReconnectInterval]}
@@ -1201,16 +1570,16 @@ function OtherTab() {
               step={500}
               className="w-full"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[13px] leading-5 text-muted-foreground">
               日志 WebSocket 连接断开后的重连基础间隔
             </p>
           </div>
 
           {/* WebSocket 最大重连次数 */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium">WebSocket 最大重连次数</Label>
-              <span className="text-sm text-muted-foreground">{wsMaxReconnectAttempts} 次</span>
+          <div className="ios-row ios-row-plain min-h-[86px] flex-col !items-stretch !justify-start gap-3 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-[15px] font-medium leading-5">WebSocket 最大重连次数</Label>
+              <span className="ios-value">{wsMaxReconnectAttempts} 次</span>
             </div>
             <Slider
               value={[wsMaxReconnectAttempts]}
@@ -1220,91 +1589,115 @@ function OtherTab() {
               step={1}
               className="w-full"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[13px] leading-5 text-muted-foreground">
               连接失败后的最大重连尝试次数
             </p>
           </div>
 
           {/* 清理按钮 */}
-          <div className="flex flex-wrap gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={handleClearLogCache} className="gap-2">
-              <Trash2 className="h-4 w-4" />
-              清除日志缓存
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Trash2 className="h-4 w-4" />
-                  清除本地缓存
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>确认清除本地缓存</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    这将清除所有本地缓存的设置和数据（不包括登录凭证）。
-                    您可能需要重新配置部分偏好设置。确定要继续吗？
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleClearLocalCache}>
-                    确认清除
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+          <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+            <div className="min-w-0">
+              <p className="text-[15px] font-medium leading-5 text-foreground">缓存清理</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+                清除日志缓存或本地偏好数据
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearLogCache}
+                className="gap-2 rounded-full"
+              >
+                <Trash2 className="h-4 w-4" />
+                清除日志
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2 rounded-full">
+                    <Trash2 className="h-4 w-4" />
+                    清除本地缓存
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认清除本地缓存</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      这将清除所有本地缓存的设置和数据（不包括登录凭证）。
+                      您可能需要重新配置部分偏好设置。确定要继续吗？
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleClearLocalCache}>确认清除</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           </div>
         </div>
       </div>
 
       {/* 导入/导出设置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
-          <Download className="h-5 w-5" />
+      <div>
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
           导入/导出设置
         </h3>
-        <div className="space-y-4">
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            导出当前的界面设置以便备份，或从之前导出的文件中恢复设置。
-          </p>
-          
-          <div className="flex flex-wrap gap-2">
-            <Button 
-              variant="outline" 
-              onClick={handleExportSettings} 
-              disabled={isExporting}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              {isExporting ? '导出中...' : '导出设置'}
-            </Button>
-            
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleImportSettings}
-              className="hidden"
-            />
-            <Button 
-              variant="outline" 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImporting}
-              className="gap-2"
-            >
-              <Upload className="h-4 w-4" />
-              {isImporting ? '导入中...' : '导入设置'}
-            </Button>
+        <div className="ios-group overflow-hidden">
+          <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+            <div className="min-w-0">
+              <p className="text-[15px] font-medium leading-5 text-foreground">设置备份</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+                导出当前界面设置，或从 JSON 文件恢复设置
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={handleExportSettings}
+                disabled={isExporting}
+                className="gap-2 rounded-full"
+              >
+                <Download className="h-4 w-4" />
+                {isExporting ? '导出中...' : '导出设置'}
+              </Button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportSettings}
+                className="hidden"
+              />
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isImporting}
+                className="gap-2 rounded-full"
+              >
+                <Upload className="h-4 w-4" />
+                {isImporting ? '导入中...' : '导入设置'}
+              </Button>
+            </div>
           </div>
 
           {/* 重置所有设置 */}
-          <div className="pt-2 border-t">
+          <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+            <div className="min-w-0">
+              <p className="text-[15px] font-medium leading-5 text-foreground">恢复默认设置</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+                重置主题、颜色、动画等本地偏好
+              </p>
+            </div>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 text-destructive hover:text-destructive">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive gap-2 rounded-full"
+                >
                   <RotateCcw className="h-4 w-4" />
-                  重置所有设置为默认值
+                  重置为默认值
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
@@ -1317,9 +1710,7 @@ function OtherTab() {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleResetAllSettings}>
-                    确认重置
-                  </AlertDialogAction>
+                  <AlertDialogAction onClick={handleResetAllSettings}>确认重置</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
@@ -1328,77 +1719,82 @@ function OtherTab() {
       </div>
 
       {/* 配置向导 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">配置向导</h3>
-        <div className="space-y-3 sm:space-y-4">
-          <div className="space-y-2">
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              重新进行初次配置向导，可以帮助您重新设置系统的基础配置。
-            </p>
+      <div>
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
+          配置向导
+        </h3>
+        <div className="ios-group overflow-hidden">
+          <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+            <div className="min-w-0">
+              <p className="text-[15px] font-medium leading-5 text-foreground">初次配置向导</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+                重新设置系统的基础配置项
+              </p>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" disabled={isResetting} className="gap-2 rounded-full">
+                  <RotateCcw className={cn('h-4 w-4', isResetting && 'animate-spin')} />
+                  重新配置
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>确认重新配置</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    这将带您重新进入初次配置向导。您可以重新设置系统的基础配置项。确定要继续吗？
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleResetSetup}>确认重置</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" disabled={isResetting} className="gap-2">
-                <RotateCcw className={cn('h-4 w-4', isResetting && 'animate-spin')} />
-                重新进行初次配置
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>确认重新配置</AlertDialogTitle>
-                <AlertDialogDescription>
-                  这将带您重新进入初次配置向导。您可以重新设置系统的基础配置项。确定要继续吗？
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction onClick={handleResetSetup}>
-                  确认重置
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       </div>
 
       {/* 开发者工具 */}
-      <div className="rounded-lg border border-dashed border-yellow-500/50 bg-yellow-500/5 p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-yellow-500" />
+      <div>
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
           开发者工具
         </h3>
-        <div className="space-y-3 sm:space-y-4">
-          <div className="space-y-2">
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              以下功能仅供开发调试使用，可能会导致页面崩溃或异常。
-            </p>
+        <div className="ios-group overflow-hidden border-yellow-500/30 bg-yellow-500/5">
+          <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
+            <div className="min-w-0">
+              <p className="text-[15px] font-medium leading-5 text-foreground">错误边界测试</p>
+              <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
+                仅供开发调试使用，可能会导致页面崩溃或异常
+              </p>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="gap-2 rounded-full">
+                  <AlertTriangle className="h-4 w-4" />
+                  触发测试错误
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>确认触发错误</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    这将手动触发一个 React 错误，用于测试错误边界组件的显示效果。
+                    页面将显示错误界面，您可以通过刷新页面或点击返回首页来恢复。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => setShouldThrowError(true)}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    确认触发
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" className="gap-2">
-                <AlertTriangle className="h-4 w-4" />
-                触发测试错误
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>确认触发错误</AlertDialogTitle>
-                <AlertDialogDescription>
-                  这将手动触发一个 React 错误，用于测试错误边界组件的显示效果。
-                  页面将显示错误界面，您可以通过刷新页面或点击返回首页来恢复。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction 
-                  onClick={() => setShouldThrowError(true)}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                >
-                  确认触发
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       </div>
     </div>
@@ -1410,11 +1806,11 @@ function AboutTab() {
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* GitHub 开源地址 */}
-      <div className="rounded-lg border-2 border-primary/30 bg-gradient-to-r from-primary/5 to-primary/10 p-4 sm:p-6">
+      <div className="ios-group bg-primary/5 p-4 sm:p-6">
         <div className="flex items-start gap-3 sm:gap-4">
-          <div className="flex-shrink-0 rounded-lg bg-primary/10 p-2 sm:p-3">
+          <div className="flex-shrink-0 rounded-[12px] bg-primary/10 p-2 sm:p-3">
             <svg
-              className="h-6 w-6 sm:h-8 sm:w-8 text-primary"
+              className="h-6 w-6 text-primary sm:h-8 sm:w-8"
               fill="currentColor"
               viewBox="0 0 24 24"
               aria-hidden="true"
@@ -1426,11 +1822,9 @@ function AboutTab() {
               />
             </svg>
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2">
-              开源项目
-            </h3>
-            <p className="text-sm sm:text-base text-muted-foreground mb-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="mb-2 text-lg font-bold text-foreground sm:text-xl">开源项目</h3>
+            <p className="mb-3 text-sm text-muted-foreground sm:text-base">
               本项目在 GitHub 开源，欢迎 Star ⭐ 支持！
             </p>
             <a
@@ -1438,18 +1832,13 @@ function AboutTab() {
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                "inline-flex items-center gap-2 px-4 py-2 rounded-lg",
-                "bg-primary text-primary-foreground font-medium text-sm",
-                "hover:bg-primary/90 transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                'inline-flex items-center gap-2 rounded-full px-4 py-2',
+                'bg-primary text-sm font-medium text-primary-foreground',
+                'transition-colors hover:bg-primary/90',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
               )}
             >
-              <svg
-                className="h-4 w-4"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
+              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   fillRule="evenodd"
                   d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
@@ -1457,12 +1846,7 @@ function AboutTab() {
                 />
               </svg>
               前往 GitHub
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -1476,36 +1860,52 @@ function AboutTab() {
       </div>
 
       {/* 应用信息 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">关于 {APP_NAME}</h3>
-        <div className="space-y-2 text-xs sm:text-sm text-muted-foreground">
+      <div className="ios-group p-4 sm:p-6">
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          关于 {APP_NAME}
+        </h3>
+        <div className="space-y-2 text-xs text-muted-foreground sm:text-sm">
           <p>版本: {APP_VERSION}</p>
-          <p>璃夜（RiyaBot）的现代化 Web 管理界面</p>
+          <p>RiyaBot 的现代化 Web 管理界面</p>
         </div>
       </div>
 
       {/* 作者信息 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">作者</h3>
+      <div className="ios-group p-4 sm:p-6">
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          作者
+        </h3>
         <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-sm font-medium">RiyaBot Core</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">独立维护的 RiyaBot 核心</p>
+            <p className="text-xs text-muted-foreground sm:text-sm">独立维护的 RiyaBot 核心</p>
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">WebUI</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">Based on the upstream WebUI by Mai-with-u and <a href="https://github.com/DrSmoothl" target="_blank" rel="noopener noreferrer" className="text-primary underline">@MotricSeven</a></p>
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              Based on the upstream WebUI by Mai-with-u and{' '}
+              <a
+                href="https://github.com/DrSmoothl"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                @MotricSeven
+              </a>
+            </p>
           </div>
         </div>
       </div>
 
       {/* 技术栈 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">技术栈</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm text-muted-foreground">
+      <div className="ios-group p-4 sm:p-6">
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          技术栈
+        </h3>
+        <div className="grid grid-cols-1 gap-3 text-xs text-muted-foreground sm:grid-cols-2 sm:text-sm">
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">前端框架</p>
-            <ul className="space-y-0.5 list-disc list-inside">
+            <ul className="list-inside list-disc space-y-0.5">
               <li>React 19.2.0</li>
               <li>TypeScript 5.7.2</li>
               <li>Vite 6.0.7</li>
@@ -1514,7 +1914,7 @@ function AboutTab() {
           </div>
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">UI 组件</p>
-            <ul className="space-y-0.5 list-disc list-inside">
+            <ul className="list-inside list-disc space-y-0.5">
               <li>shadcn/ui</li>
               <li>Radix UI</li>
               <li>Tailwind CSS 3.4.17</li>
@@ -1523,7 +1923,7 @@ function AboutTab() {
           </div>
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">后端</p>
-            <ul className="space-y-0.5 list-disc list-inside">
+            <ul className="list-inside list-disc space-y-0.5">
               <li>Python 3.12+</li>
               <li>FastAPI</li>
               <li>Uvicorn</li>
@@ -1532,7 +1932,7 @@ function AboutTab() {
           </div>
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">构建工具</p>
-            <ul className="space-y-0.5 list-disc list-inside">
+            <ul className="list-inside list-disc space-y-0.5">
               <li>Bun / npm</li>
               <li>ESLint 9.17.0</li>
               <li>PostCSS</li>
@@ -1542,9 +1942,11 @@ function AboutTab() {
       </div>
 
       {/* 开源感谢 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">开源库感谢</h3>
-        <p className="text-xs sm:text-sm text-muted-foreground mb-3">
+      <div className="ios-group p-4 sm:p-6">
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          开源库感谢
+        </h3>
+        <p className="mb-3 text-xs text-muted-foreground sm:text-sm">
           本项目使用了以下优秀的开源库，感谢他们的贡献：
         </p>
         <ScrollArea className="h-[300px] sm:h-[400px]">
@@ -1584,8 +1986,16 @@ function AboutTab() {
               <p className="text-sm font-medium text-foreground">工具库</p>
               <div className="grid gap-2 text-xs sm:text-sm">
                 <LibraryItem name="clsx" description="条件 className 构建工具" license="MIT" />
-                <LibraryItem name="tailwind-merge" description="Tailwind 类名合并工具" license="MIT" />
-                <LibraryItem name="class-variance-authority" description="组件变体管理" license="Apache-2.0" />
+                <LibraryItem
+                  name="tailwind-merge"
+                  description="Tailwind 类名合并工具"
+                  license="MIT"
+                />
+                <LibraryItem
+                  name="class-variance-authority"
+                  description="组件变体管理"
+                  license="Apache-2.0"
+                />
                 <LibraryItem name="date-fns" description="现代化日期处理库" license="MIT" />
               </div>
             </div>
@@ -1606,7 +2016,11 @@ function AboutTab() {
                 <LibraryItem name="FastAPI" description="现代化 Python Web 框架" license="MIT" />
                 <LibraryItem name="Uvicorn" description="ASGI 服务器" license="BSD-3-Clause" />
                 <LibraryItem name="Pydantic" description="数据验证库" license="MIT" />
-                <LibraryItem name="python-multipart" description="文件上传支持" license="Apache-2.0" />
+                <LibraryItem
+                  name="python-multipart"
+                  description="文件上传支持"
+                  license="Apache-2.0"
+                />
               </div>
             </div>
 
@@ -1614,7 +2028,11 @@ function AboutTab() {
             <div className="space-y-2">
               <p className="text-sm font-medium text-foreground">开发工具</p>
               <div className="grid gap-2 text-xs sm:text-sm">
-                <LibraryItem name="TypeScript" description="JavaScript 的超集" license="Apache-2.0" />
+                <LibraryItem
+                  name="TypeScript"
+                  description="JavaScript 的超集"
+                  license="Apache-2.0"
+                />
                 <LibraryItem name="Vite" description="下一代前端构建工具" license="MIT" />
                 <LibraryItem name="ESLint" description="JavaScript 代码检查工具" license="MIT" />
                 <LibraryItem name="PostCSS" description="CSS 转换工具" license="MIT" />
@@ -1625,28 +2043,30 @@ function AboutTab() {
       </div>
 
       {/* 许可证 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">开源许可</h3>
+      <div className="ios-group p-4 sm:p-6">
+        <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:mb-4 sm:px-0 sm:text-lg sm:font-semibold sm:text-foreground">
+          开源许可
+        </h3>
         <div className="space-y-3">
-          <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 sm:p-4">
+          <div className="rounded-[14px] bg-primary/5 p-3 sm:p-4">
             <div className="flex items-start gap-2 sm:gap-3">
-              <div className="flex-shrink-0 mt-0.5">
-                <div className="rounded-md bg-primary/10 px-2 py-1">
-                  <span className="text-xs sm:text-sm font-bold text-primary">GPLv3</span>
+              <div className="mt-0.5 flex-shrink-0">
+                <div className="rounded-[9px] bg-primary/10 px-2 py-1">
+                  <span className="text-xs font-bold text-primary sm:text-sm">GPLv3</span>
                 </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm sm:text-base font-semibold text-foreground mb-1">
-                  RiyaBot Console
+              <div className="min-w-0 flex-1">
+                <p className="mb-1 text-sm font-semibold text-foreground sm:text-base">
+                  {APP_NAME}
                 </p>
-                <p className="text-xs sm:text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground sm:text-sm">
                   本项目采用 GNU General Public License v3.0 开源许可证。
                   您可以自由地使用、修改和分发本软件，但必须保持相同的开源许可。
                 </p>
               </div>
             </div>
           </div>
-          <p className="text-xs sm:text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground sm:text-sm">
             本项目依赖的所有开源库均遵循各自的开源许可证（MIT、Apache-2.0、BSD 等）。
             感谢所有开源贡献者的无私奉献。
           </p>
@@ -1665,12 +2085,12 @@ type LibraryItemProps = {
 
 function LibraryItem({ name, description, license }: LibraryItemProps) {
   return (
-    <div className="flex items-start justify-between gap-2 rounded-lg border bg-muted/30 p-2.5 sm:p-3">
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-foreground truncate">{name}</p>
-        <p className="text-muted-foreground text-xs mt-0.5">{description}</p>
+    <div className="flex items-start justify-between gap-2 rounded-[14px] bg-muted/45 p-2.5 sm:p-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium text-foreground">{name}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary flex-shrink-0">
+      <span className="inline-flex flex-shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
         {license}
       </span>
     </div>
@@ -1685,50 +2105,58 @@ type ThemeOptionProps = {
   description: string
 }
 
-function ThemeOption({ value, current, onChange, label, description }: ThemeOptionProps) {
+function ThemePreviewDots({ value }: { value: 'light' | 'dark' | 'system' }) {
+  return (
+    <div className="flex gap-1">
+      {value === 'light' && (
+        <>
+          <div className="h-2 w-2 rounded-full bg-slate-200" />
+          <div className="h-2 w-2 rounded-full bg-slate-300" />
+          <div className="h-2 w-2 rounded-full bg-slate-400" />
+        </>
+      )}
+      {value === 'dark' && (
+        <>
+          <div className="h-2 w-2 rounded-full bg-slate-700" />
+          <div className="h-2 w-2 rounded-full bg-slate-800" />
+          <div className="h-2 w-2 rounded-full bg-slate-900" />
+        </>
+      )}
+      {value === 'system' && (
+        <>
+          <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-200 to-slate-700" />
+          <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-300 to-slate-800" />
+          <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-400 to-slate-900" />
+        </>
+      )}
+    </div>
+  )
+}
+
+function ThemeListOption({ value, current, onChange, label, description }: ThemeOptionProps) {
   const isSelected = current === value
 
   return (
     <button
+      type="button"
       onClick={() => onChange(value)}
       className={cn(
-        'relative rounded-lg border-2 p-3 sm:p-4 text-left transition-all',
-        'hover:border-primary/50 hover:bg-accent/50',
-        isSelected ? 'border-primary bg-accent' : 'border-border'
+        'ios-touch flex min-h-[52px] w-full items-center gap-3 border-b border-border/70 px-4 py-2.5 text-left last:border-b-0 sm:min-h-[58px] sm:py-3',
+        'bg-card hover:bg-accent/60'
       )}
     >
-      {/* 选中指示器 */}
-      {isSelected && (
-        <div className="absolute top-2 right-2 sm:top-3 sm:right-3 h-2 w-2 rounded-full bg-primary" />
-      )}
-
-      <div className="space-y-1">
-        <div className="text-sm sm:text-base font-medium">{label}</div>
-        <div className="text-[10px] sm:text-xs text-muted-foreground">{description}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[16px] font-medium leading-6">{label}</div>
+        <div className="hidden truncate text-[13px] leading-5 text-muted-foreground sm:block">
+          {description}
+        </div>
       </div>
-
-      {/* 主题预览 */}
-      <div className="mt-2 sm:mt-3 flex gap-1">
-        {value === 'light' && (
-          <>
-            <div className="h-2 w-2 rounded-full bg-slate-200" />
-            <div className="h-2 w-2 rounded-full bg-slate-300" />
-            <div className="h-2 w-2 rounded-full bg-slate-400" />
-          </>
-        )}
-        {value === 'dark' && (
-          <>
-            <div className="h-2 w-2 rounded-full bg-slate-700" />
-            <div className="h-2 w-2 rounded-full bg-slate-800" />
-            <div className="h-2 w-2 rounded-full bg-slate-900" />
-          </>
-        )}
-        {value === 'system' && (
-          <>
-            <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-200 to-slate-700" />
-            <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-300 to-slate-800" />
-            <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-400 to-slate-900" />
-          </>
+      <div className="flex shrink-0 items-center gap-3">
+        <ThemePreviewDots value={value} />
+        {isSelected ? (
+          <Check className="h-4 w-4 text-primary" strokeWidth={2.6} />
+        ) : (
+          <span className="h-4 w-4" aria-hidden="true" />
         )}
       </div>
     </button>
@@ -1741,29 +2169,67 @@ type ColorPresetOptionProps = {
   onChange: (color: string) => void
   label: string
   colorClass: string
+  swatchStyle?: CSSProperties
 }
 
-function ColorPresetOption({ value, current, onChange, label, colorClass }: ColorPresetOptionProps) {
+function AccentSwatch({
+  option,
+  value,
+  className,
+}: {
+  option?: Pick<ColorPresetOptionProps, 'colorClass' | 'swatchStyle'>
+  value: string
+  className?: string
+}) {
+  const isCustom = value.startsWith('#')
+  const fallbackStyle: CSSProperties = { background: 'hsl(211.29 100% 50%)' }
+  const resolvedStyle = isCustom
+    ? { background: value }
+    : (option?.swatchStyle ?? (!option?.colorClass ? fallbackStyle : undefined))
+
+  return (
+    <span
+      className={cn('block shrink-0', !isCustom && option?.colorClass, className)}
+      style={resolvedStyle}
+      aria-hidden="true"
+    />
+  )
+}
+
+function ColorSheetOption({
+  value,
+  current,
+  onChange,
+  label,
+  colorClass,
+  swatchStyle,
+  onSelected,
+}: ColorPresetOptionProps & { onSelected?: () => void }) {
   const isSelected = current === value
 
   return (
     <button
-      onClick={() => onChange(value)}
-      className={cn(
-        'relative rounded-lg border-2 p-2 sm:p-3 text-left transition-all',
-        'hover:border-primary/50 hover:bg-accent/50',
-        isSelected ? 'border-primary bg-accent' : 'border-border'
-      )}
+      type="button"
+      onClick={() => {
+        onChange(value)
+        onSelected?.()
+      }}
+      className="ios-row min-h-[58px] w-full text-left transition-colors duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent/50 focus-visible:outline-none active:bg-accent/70"
+      aria-current={isSelected ? 'true' : undefined}
     >
-      {/* 选中指示器 */}
-      {isSelected && (
-        <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-primary" />
+      <span className="flex min-w-0 items-center gap-3">
+        <AccentSwatch
+          option={{ colorClass, swatchStyle }}
+          value={value}
+          className="h-8 w-8 rounded-[9px] shadow-[0_4px_10px_rgba(0,0,0,0.12)]"
+        />
+        <span className="truncate text-[16px] font-medium leading-6">{label}</span>
+      </span>
+      {isSelected ? (
+        <Check className="h-4 w-4 shrink-0 text-primary" strokeWidth={2.6} />
+      ) : (
+        <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       )}
-
-      <div className="flex flex-col items-center gap-1.5 sm:gap-2">
-        <div className={cn('h-8 w-8 sm:h-10 sm:w-10 rounded-full', colorClass)} />
-        <div className="text-[10px] sm:text-xs font-medium text-center">{label}</div>
-      </div>
     </button>
   )
 }

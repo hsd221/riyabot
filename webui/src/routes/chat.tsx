@@ -5,7 +5,23 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 // Card 组件已移除，改用更简洁的全屏布局
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Send, Bot, User, Loader2, WifiOff, Wifi, RefreshCw, Edit2, Users, Search, X, UserCircle2, Globe, Plus, MessageSquare } from 'lucide-react'
+import {
+  Send,
+  Bot,
+  User,
+  Loader2,
+  WifiOff,
+  Wifi,
+  RefreshCw,
+  Edit2,
+  Users,
+  Search,
+  X,
+  UserCircle2,
+  Globe,
+  Plus,
+  MessageSquare,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import {
@@ -14,7 +30,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -22,8 +38,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 
 // 生成唯一用户 ID
 function generateUserId(): string {
@@ -107,7 +123,7 @@ interface VirtualIdentityConfig {
   userId: string
   userName: string
   groupName: string
-  groupId: string  // 虚拟群 ID，用于持久化历史记录
+  groupId: string // 虚拟群 ID，用于持久化历史记录
 }
 
 // 聊天标签页
@@ -199,7 +215,7 @@ export function ChatPage() {
   // 从存储中恢复虚拟标签页
   const initializeTabs = (): ChatTab[] => {
     const savedVirtualTabs = getSavedVirtualTabs()
-    const restoredTabs: ChatTab[] = savedVirtualTabs.map(saved => {
+    const restoredTabs: ChatTab[] = savedVirtualTabs.map((saved) => {
       // 确保 virtualConfig 有 groupId（兼容旧数据）
       const config = saved.virtualConfig
       if (!config.groupId && config.platform && config.userId) {
@@ -222,10 +238,10 @@ export function ChatPage() {
   // 多标签页状态
   const [tabs, setTabs] = useState<ChatTab[]>(initializeTabs)
   const [activeTabId, setActiveTabId] = useState('webui-default')
-  
+
   // 当前活动标签页
-  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0]
-  
+  const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0]
+
   // 通用状态
   const [inputValue, setInputValue] = useState('')
   const [isConnecting, setIsConnecting] = useState(false)
@@ -233,8 +249,8 @@ export function ChatPage() {
   const [userName, setUserName] = useState(getStoredUserName())
   const [isEditingName, setIsEditingName] = useState(false)
   const [tempUserName, setTempUserName] = useState('')
-  const [isWaitingResponse, setIsWaitingResponse] = useState(false)  // 等待后端响应，禁止连续发送
-  
+  const [isWaitingResponse, setIsWaitingResponse] = useState(false) // 等待后端响应，禁止连续发送
+
   // 虚拟身份配置对话框状态
   const [showVirtualConfig, setShowVirtualConfig] = useState(false)
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([])
@@ -250,10 +266,10 @@ export function ChatPage() {
     groupName: '',
     groupId: '',
   })
-  
+
   // 持久化用户 ID
   const userIdRef = useRef(getOrCreateUserId())
-  
+
   // 每个标签页的 WebSocket 连接
   const wsMapRef = useRef<Map<string, WebSocket>>(new Map())
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -270,16 +286,14 @@ export function ChatPage() {
 
   // 更新指定标签页
   const updateTab = useCallback((tabId: string, updates: Partial<ChatTab>) => {
-    setTabs(prev => prev.map(tab => 
-      tab.id === tabId ? { ...tab, ...updates } : tab
-    ))
+    setTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, ...updates } : tab)))
   }, [])
 
   // 向指定标签页添加消息
   const addMessageToTab = useCallback((tabId: string, message: ChatMessage) => {
-    setTabs(prev => prev.map(tab => 
-      tab.id === tabId ? { ...tab, messages: [...tab.messages, message] } : tab
-    ))
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === tabId ? { ...tab, messages: [...tab.messages, message] } : tab))
+    )
   }, [])
 
   // 滚动到底部
@@ -309,7 +323,7 @@ export function ChatPage() {
           console.error('[Chat] 获取平台列表失败: 非 JSON 响应:', text.substring(0, 200))
           toast({
             title: '连接失败',
-            description: '无法连接到后端服务，请确保 RiyaBot 已启动',
+            description: '无法连接到后端服务，请确保主程序已启动',
             variant: 'destructive',
           })
         }
@@ -341,7 +355,7 @@ export function ChatPage() {
       if (platform) params.append('platform', platform)
       if (search) params.append('search', search)
       params.append('limit', '50')
-      
+
       const response = await fetchWithAuth(`/api/chat/persons?${params.toString()}`)
       if (response.ok) {
         const contentType = response.headers.get('content-type')
@@ -367,316 +381,337 @@ export function ChatPage() {
   }, [tempVirtualConfig.platform, personSearchQuery, fetchPersons])
 
   // 加载聊天历史到指定标签页
-  const loadChatHistoryForTab = useCallback(async (tabId: string, groupId?: string) => {
-    setIsLoadingHistory(true)
-    try {
-      const params = new URLSearchParams()
-      params.append('user_id', userIdRef.current)
-      params.append('limit', '50')
-      if (groupId) {
-        params.append('group_id', groupId)
-      }
-      const url = `/api/chat/history?${params.toString()}`
-      console.log('[Chat] 正在加载历史消息:', url)
-      
-      const response = await fetchWithAuth(url)
-      
-      if (response.ok) {
-        const text = await response.text()
-        try {
-          const data = JSON.parse(text)
-          
-          if (data.messages && data.messages.length > 0) {
-            const historyMessages: ChatMessage[] = data.messages.map((msg: {
-              id: string
-              type: string
-              content: string
-              message_type?: 'text' | 'rich'
-              segments?: RichMessageSegment[] | null
-              timestamp: number
-              sender_name?: string
-              user_id?: string
-              is_bot?: boolean
-            }) => ({
-              id: msg.id,
-              type: msg.type as 'user' | 'bot' | 'system' | 'error',
-              content: msg.content,
-              messageType: msg.message_type,
-              segments: msg.segments,
-              timestamp: msg.timestamp,
-              sender: {
-                name: msg.sender_name || (msg.is_bot ? '璃夜' : 'WebUI用户'),
-                user_id: msg.user_id,
-                is_bot: msg.is_bot
-              }
-            }))
-            
-            // 更新标签页的消息
-            updateTab(tabId, { messages: historyMessages })
-            
-            // 将历史消息添加到去重缓存
-            const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
-            historyMessages.forEach(msg => {
-              if (msg.type === 'bot') {
-                const contentHash = `bot-${msg.content}-${Math.floor(msg.timestamp * 1000)}`
-                processedSet.add(contentHash)
-              }
-            })
-            processedMessagesMapRef.current.set(tabId, processedSet)
-          }
-        } catch (parseError) {
-          console.error('[Chat] JSON 解析失败:', parseError)
+  const loadChatHistoryForTab = useCallback(
+    async (tabId: string, groupId?: string) => {
+      setIsLoadingHistory(true)
+      try {
+        const params = new URLSearchParams()
+        params.append('user_id', userIdRef.current)
+        params.append('limit', '50')
+        if (groupId) {
+          params.append('group_id', groupId)
         }
-      }
-    } catch (e) {
-      console.error('[Chat] 加载历史消息失败:', e)
-    } finally {
-      setIsLoadingHistory(false)
-    }
-  }, [updateTab])
+        const url = `/api/chat/history?${params.toString()}`
+        console.log('[Chat] 正在加载历史消息:', url)
 
-  // 为指定标签页连接 WebSocket
-  const connectWebSocketForTab = useCallback((tabId: string, tabType: 'webui' | 'virtual', config?: VirtualIdentityConfig) => {
-    // 如果已经有连接，不要重复创建
-    const existingWs = wsMapRef.current.get(tabId)
-    if (existingWs?.readyState === WebSocket.OPEN || 
-        existingWs?.readyState === WebSocket.CONNECTING) {
-      console.log(`[Tab ${tabId}] WebSocket 已存在，跳过连接`)
-      return
-    }
+        const response = await fetchWithAuth(url)
 
-    setIsConnecting(true)
+        if (response.ok) {
+          const text = await response.text()
+          try {
+            const data = JSON.parse(text)
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams()
-    
-    if (tabType === 'virtual' && config) {
-      params.append('user_id', config.userId)
-      params.append('user_name', config.userName)
-      params.append('platform', config.platform)
-      params.append('person_id', config.personId)
-      params.append('group_name', config.groupName || 'WebUI虚拟群聊')
-      // 传递稳定的 group_id，确保历史记录能正确加载
-      if (config.groupId) {
-        params.append('group_id', config.groupId)
-      }
-    } else {
-      params.append('user_id', userIdRef.current)
-      params.append('user_name', userName)
-    }
-    
-    const wsUrl = `${protocol}//${window.location.host}/api/chat/ws?${params.toString()}`
-    console.log(`[Tab ${tabId}] 正在连接 WebSocket:`, wsUrl)
-
-    try {
-      const ws = new WebSocket(wsUrl)
-      wsMapRef.current.set(tabId, ws)
-
-      ws.onopen = () => {
-        updateTab(tabId, { isConnected: true })
-        setIsConnecting(false)
-        console.log(`[Tab ${tabId}] WebSocket 已连接`)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data: WsMessage = JSON.parse(event.data)
-          
-          switch (data.type) {
-            case 'session_info':
-              updateTab(tabId, {
-                sessionInfo: {
-                  session_id: data.session_id,
-                  user_id: data.user_id,
-                  user_name: data.user_name,
-                  bot_name: data.bot_name,
-                }
-              })
-              break
-
-            case 'system':
-              addMessageToTab(tabId, {
-                id: generateMessageId('sys'),
-                type: 'system',
-                content: data.content || '',
-                timestamp: data.timestamp || Date.now() / 1000,
-              })
-              break
-
-            case 'user_message': {
-              // 检查是否是自己发的消息（已在发送时显示，跳过广播回来的）
-              const senderUserId = data.sender?.user_id
-              const currentUserId = tabType === 'virtual' && config 
-                ? config.userId 
-                : userIdRef.current
-              
-              // 如果是自己发的消息，跳过（避免重复显示）
-              if (senderUserId === currentUserId) {
-                break
-              }
-              
-              addMessageToTab(tabId, {
-                id: data.message_id || generateMessageId('user'),
-                type: 'user',
-                content: data.content || '',
-                timestamp: data.timestamp || Date.now() / 1000,
-                sender: data.sender,
-              })
-              break
-            }
-
-            case 'bot_message': {
-              updateTab(tabId, { isTyping: false })
-              // 收到机器人响应，允许继续发送消息
-              setIsWaitingResponse(false)
-              const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
-              const contentHash = `bot-${data.content}-${Math.floor((data.timestamp || 0) * 1000)}`
-              if (processedSet.has(contentHash)) {
-                break
-              }
-              processedSet.add(contentHash)
-              processedMessagesMapRef.current.set(tabId, processedSet)
-              
-              if (processedSet.size > 100) {
-                const firstKey = processedSet.values().next().value
-                if (firstKey) processedSet.delete(firstKey)
-              }
-              
-              // 移除"思考中"占位消息，添加真实的机器人回复
-              setTabs(prev => prev.map(tab => {
-                if (tab.id !== tabId) return tab
-                // 过滤掉 thinking 类型的消息
-                const filteredMessages = tab.messages.filter(msg => msg.type !== 'thinking')
-                return {
-                  ...tab,
-                  messages: [...filteredMessages, {
-                    id: generateMessageId('bot'),
-                    type: 'bot' as const,
-                    content: data.content || '',
-                    messageType: data.message_type,
-                    segments: data.segments,
-                    timestamp: data.timestamp || Date.now() / 1000,
-                    sender: data.sender,
-                  }]
-                }
-              }))
-              break
-            }
-
-            case 'typing':
-              updateTab(tabId, { isTyping: data.is_typing || false })
-              break
-
-            case 'error':
-              // 收到错误响应，允许继续发送消息
-              setIsWaitingResponse(false)
-              // 移除"思考中"占位消息，显示错误
-              setTabs(prev => prev.map(tab => {
-                if (tab.id !== tabId) return tab
-                const filteredMessages = tab.messages.filter(msg => msg.type !== 'thinking')
-                return {
-                  ...tab,
-                  messages: [...filteredMessages, {
-                    id: generateMessageId('error'),
-                    type: 'error' as const,
-                    content: data.content || '发生错误',
-                    timestamp: data.timestamp || Date.now() / 1000,
-                  }]
-                }
-              }))
-              toast({
-                title: '错误',
-                description: data.content,
-                variant: 'destructive',
-              })
-              break
-
-            case 'pong':
-              break
-
-            case 'history': {
-              // 处理服务端发送的历史消息
-              const historyMessages = data.messages || []
-              if (historyMessages.length > 0) {
-                const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
-                const formattedMessages: ChatMessage[] = historyMessages.map((msg: {
-                  id?: string
+            if (data.messages && data.messages.length > 0) {
+              const historyMessages: ChatMessage[] = data.messages.map(
+                (msg: {
+                  id: string
+                  type: string
                   content: string
                   message_type?: 'text' | 'rich'
                   segments?: RichMessageSegment[] | null
                   timestamp: number
                   sender_name?: string
-                  sender_id?: string
+                  user_id?: string
                   is_bot?: boolean
-                }) => {
-                  const isBot = msg.is_bot || false
-                  const msgId = msg.id || generateMessageId(isBot ? 'bot' : 'user')
-                  // 添加到去重集合
-                  const contentHash = `${isBot ? 'bot' : 'user'}-${msg.content}-${Math.floor(msg.timestamp * 1000)}`
-                  processedSet.add(contentHash)
-                  return {
-                    id: msgId,
-                    type: isBot ? 'bot' as const : 'user' as const,
-                    content: msg.content,
-                    messageType: msg.message_type,
-                    segments: msg.segments,
-                    timestamp: msg.timestamp,
-                    sender: {
-                      name: msg.sender_name || (isBot ? '璃夜' : '用户'),
-                      user_id: msg.sender_id,
-                      is_bot: isBot,
-                    },
-                  }
+                }) => ({
+                  id: msg.id,
+                  type: msg.type as 'user' | 'bot' | 'system' | 'error',
+                  content: msg.content,
+                  messageType: msg.message_type,
+                  segments: msg.segments,
+                  timestamp: msg.timestamp,
+                  sender: {
+                    name: msg.sender_name || (msg.is_bot ? '当前 Bot' : 'WebUI用户'),
+                    user_id: msg.user_id,
+                    is_bot: msg.is_bot,
+                  },
                 })
-                processedMessagesMapRef.current.set(tabId, processedSet)
-                // 替换当前标签页的所有消息
-                updateTab(tabId, { messages: formattedMessages })
-                console.log(`[Tab ${tabId}] 已加载 ${formattedMessages.length} 条历史消息`)
+              )
+
+              // 更新标签页的消息
+              updateTab(tabId, { messages: historyMessages })
+
+              // 将历史消息添加到去重缓存
+              const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
+              historyMessages.forEach((msg) => {
+                if (msg.type === 'bot') {
+                  const contentHash = `bot-${msg.content}-${Math.floor(msg.timestamp * 1000)}`
+                  processedSet.add(contentHash)
+                }
+              })
+              processedMessagesMapRef.current.set(tabId, processedSet)
+            }
+          } catch (parseError) {
+            console.error('[Chat] JSON 解析失败:', parseError)
+          }
+        }
+      } catch (e) {
+        console.error('[Chat] 加载历史消息失败:', e)
+      } finally {
+        setIsLoadingHistory(false)
+      }
+    },
+    [updateTab]
+  )
+
+  // 为指定标签页连接 WebSocket
+  const connectWebSocketForTab = useCallback(
+    (tabId: string, tabType: 'webui' | 'virtual', config?: VirtualIdentityConfig) => {
+      // 如果已经有连接，不要重复创建
+      const existingWs = wsMapRef.current.get(tabId)
+      if (
+        existingWs?.readyState === WebSocket.OPEN ||
+        existingWs?.readyState === WebSocket.CONNECTING
+      ) {
+        console.log(`[Tab ${tabId}] WebSocket 已存在，跳过连接`)
+        return
+      }
+
+      setIsConnecting(true)
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const params = new URLSearchParams()
+
+      if (tabType === 'virtual' && config) {
+        params.append('user_id', config.userId)
+        params.append('user_name', config.userName)
+        params.append('platform', config.platform)
+        params.append('person_id', config.personId)
+        params.append('group_name', config.groupName || 'WebUI虚拟群聊')
+        // 传递稳定的 group_id，确保历史记录能正确加载
+        if (config.groupId) {
+          params.append('group_id', config.groupId)
+        }
+      } else {
+        params.append('user_id', userIdRef.current)
+        params.append('user_name', userName)
+      }
+
+      const wsUrl = `${protocol}//${window.location.host}/api/chat/ws?${params.toString()}`
+      console.log(`[Tab ${tabId}] 正在连接 WebSocket:`, wsUrl)
+
+      try {
+        const ws = new WebSocket(wsUrl)
+        wsMapRef.current.set(tabId, ws)
+
+        ws.onopen = () => {
+          updateTab(tabId, { isConnected: true })
+          setIsConnecting(false)
+          console.log(`[Tab ${tabId}] WebSocket 已连接`)
+        }
+
+        ws.onmessage = (event) => {
+          try {
+            const data: WsMessage = JSON.parse(event.data)
+
+            switch (data.type) {
+              case 'session_info':
+                updateTab(tabId, {
+                  sessionInfo: {
+                    session_id: data.session_id,
+                    user_id: data.user_id,
+                    user_name: data.user_name,
+                    bot_name: data.bot_name,
+                  },
+                })
+                break
+
+              case 'system':
+                addMessageToTab(tabId, {
+                  id: generateMessageId('sys'),
+                  type: 'system',
+                  content: data.content || '',
+                  timestamp: data.timestamp || Date.now() / 1000,
+                })
+                break
+
+              case 'user_message': {
+                // 检查是否是自己发的消息（已在发送时显示，跳过广播回来的）
+                const senderUserId = data.sender?.user_id
+                const currentUserId =
+                  tabType === 'virtual' && config ? config.userId : userIdRef.current
+
+                // 如果是自己发的消息，跳过（避免重复显示）
+                if (senderUserId === currentUserId) {
+                  break
+                }
+
+                addMessageToTab(tabId, {
+                  id: data.message_id || generateMessageId('user'),
+                  type: 'user',
+                  content: data.content || '',
+                  timestamp: data.timestamp || Date.now() / 1000,
+                  sender: data.sender,
+                })
+                break
               }
-              break
+
+              case 'bot_message': {
+                updateTab(tabId, { isTyping: false })
+                // 收到机器人响应，允许继续发送消息
+                setIsWaitingResponse(false)
+                const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
+                const contentHash = `bot-${data.content}-${Math.floor((data.timestamp || 0) * 1000)}`
+                if (processedSet.has(contentHash)) {
+                  break
+                }
+                processedSet.add(contentHash)
+                processedMessagesMapRef.current.set(tabId, processedSet)
+
+                if (processedSet.size > 100) {
+                  const firstKey = processedSet.values().next().value
+                  if (firstKey) processedSet.delete(firstKey)
+                }
+
+                // 移除"思考中"占位消息，添加真实的机器人回复
+                setTabs((prev) =>
+                  prev.map((tab) => {
+                    if (tab.id !== tabId) return tab
+                    // 过滤掉 thinking 类型的消息
+                    const filteredMessages = tab.messages.filter((msg) => msg.type !== 'thinking')
+                    return {
+                      ...tab,
+                      messages: [
+                        ...filteredMessages,
+                        {
+                          id: generateMessageId('bot'),
+                          type: 'bot' as const,
+                          content: data.content || '',
+                          messageType: data.message_type,
+                          segments: data.segments,
+                          timestamp: data.timestamp || Date.now() / 1000,
+                          sender: data.sender,
+                        },
+                      ],
+                    }
+                  })
+                )
+                break
+              }
+
+              case 'typing':
+                updateTab(tabId, { isTyping: data.is_typing || false })
+                break
+
+              case 'error':
+                // 收到错误响应，允许继续发送消息
+                setIsWaitingResponse(false)
+                // 移除"思考中"占位消息，显示错误
+                setTabs((prev) =>
+                  prev.map((tab) => {
+                    if (tab.id !== tabId) return tab
+                    const filteredMessages = tab.messages.filter((msg) => msg.type !== 'thinking')
+                    return {
+                      ...tab,
+                      messages: [
+                        ...filteredMessages,
+                        {
+                          id: generateMessageId('error'),
+                          type: 'error' as const,
+                          content: data.content || '发生错误',
+                          timestamp: data.timestamp || Date.now() / 1000,
+                        },
+                      ],
+                    }
+                  })
+                )
+                toast({
+                  title: '错误',
+                  description: data.content,
+                  variant: 'destructive',
+                })
+                break
+
+              case 'pong':
+                break
+
+              case 'history': {
+                // 处理服务端发送的历史消息
+                const historyMessages = data.messages || []
+                if (historyMessages.length > 0) {
+                  const processedSet = processedMessagesMapRef.current.get(tabId) || new Set()
+                  const formattedMessages: ChatMessage[] = historyMessages.map(
+                    (msg: {
+                      id?: string
+                      content: string
+                      message_type?: 'text' | 'rich'
+                      segments?: RichMessageSegment[] | null
+                      timestamp: number
+                      sender_name?: string
+                      sender_id?: string
+                      is_bot?: boolean
+                    }) => {
+                      const isBot = msg.is_bot || false
+                      const msgId = msg.id || generateMessageId(isBot ? 'bot' : 'user')
+                      // 添加到去重集合
+                      const contentHash = `${isBot ? 'bot' : 'user'}-${msg.content}-${Math.floor(msg.timestamp * 1000)}`
+                      processedSet.add(contentHash)
+                      return {
+                        id: msgId,
+                        type: isBot ? ('bot' as const) : ('user' as const),
+                        content: msg.content,
+                        messageType: msg.message_type,
+                        segments: msg.segments,
+                        timestamp: msg.timestamp,
+                        sender: {
+                          name: msg.sender_name || (isBot ? '当前 Bot' : '用户'),
+                          user_id: msg.sender_id,
+                          is_bot: isBot,
+                        },
+                      }
+                    }
+                  )
+                  processedMessagesMapRef.current.set(tabId, processedSet)
+                  // 替换当前标签页的所有消息
+                  updateTab(tabId, { messages: formattedMessages })
+                  console.log(`[Tab ${tabId}] 已加载 ${formattedMessages.length} 条历史消息`)
+                }
+                break
+              }
+
+              default:
+                console.log('未知消息类型:', data.type)
             }
-
-            default:
-              console.log('未知消息类型:', data.type)
+          } catch (e) {
+            console.error('解析消息失败:', e)
           }
-        } catch (e) {
-          console.error('解析消息失败:', e)
         }
-      }
 
-      ws.onclose = () => {
-        updateTab(tabId, { isConnected: false })
-        setIsConnecting(false)
-        wsMapRef.current.delete(tabId)
-        console.log(`[Tab ${tabId}] WebSocket 已断开`)
+        ws.onclose = () => {
+          updateTab(tabId, { isConnected: false })
+          setIsConnecting(false)
+          wsMapRef.current.delete(tabId)
+          console.log(`[Tab ${tabId}] WebSocket 已断开`)
 
-        // 清除旧的重连定时器
-        const oldTimeout = reconnectTimeoutMapRef.current.get(tabId)
-        if (oldTimeout) {
-          clearTimeout(oldTimeout)
-        }
-        
-        // 5秒后尝试重连
-        const timeout = window.setTimeout(() => {
-          if (!isUnmountedRef.current) {
-            const tab = tabs.find(t => t.id === tabId)
-            if (tab) {
-              connectWebSocketForTab(tabId, tab.type, tab.virtualConfig)
+          // 清除旧的重连定时器
+          const oldTimeout = reconnectTimeoutMapRef.current.get(tabId)
+          if (oldTimeout) {
+            clearTimeout(oldTimeout)
+          }
+
+          // 5秒后尝试重连
+          const timeout = window.setTimeout(() => {
+            if (!isUnmountedRef.current) {
+              const tab = tabs.find((t) => t.id === tabId)
+              if (tab) {
+                connectWebSocketForTab(tabId, tab.type, tab.virtualConfig)
+              }
             }
-          }
-        }, 5000)
-        reconnectTimeoutMapRef.current.set(tabId, timeout)
-      }
+          }, 5000)
+          reconnectTimeoutMapRef.current.set(tabId, timeout)
+        }
 
-      ws.onerror = (error) => {
-        console.error(`[Tab ${tabId}] WebSocket 错误:`, error)
+        ws.onerror = (error) => {
+          console.error(`[Tab ${tabId}] WebSocket 错误:`, error)
+          setIsConnecting(false)
+        }
+      } catch (e) {
+        console.error(`[Tab ${tabId}] 创建 WebSocket 失败:`, e)
         setIsConnecting(false)
       }
-    } catch (e) {
-      console.error(`[Tab ${tabId}] 创建 WebSocket 失败:`, e)
-      setIsConnecting(false)
-    }
-  }, [userName, updateTab, addMessageToTab, toast, tabs])
+    },
+    [userName, updateTab, addMessageToTab, toast, tabs]
+  )
 
   // 用于追踪组件是否已卸载
   const isUnmountedRef = useRef(false)
@@ -684,22 +719,22 @@ export function ChatPage() {
   // 初始化连接（默认 WebUI 标签页）
   useEffect(() => {
     isUnmountedRef.current = false
-    
+
     // 保存 ref 的当前值，用于清理
     const wsMap = wsMapRef.current
     const reconnectTimeoutMap = reconnectTimeoutMapRef.current
     const processedMessagesMap = processedMessagesMapRef.current
-    
+
     // 加载默认标签页历史消息
     loadChatHistoryForTab('webui-default')
-    
+
     // 延迟连接
     const connectTimer = setTimeout(() => {
       if (!isUnmountedRef.current) {
         connectWebSocketForTab('webui-default', 'webui')
-        
+
         // 恢复的虚拟标签页也需要建立连接
-        tabs.forEach(tab => {
+        tabs.forEach((tab) => {
           if (tab.type === 'virtual' && tab.virtualConfig) {
             // 初始化去重缓存
             processedMessagesMap.set(tab.id, new Set())
@@ -727,20 +762,20 @@ export function ChatPage() {
       isUnmountedRef.current = true
       clearTimeout(connectTimer)
       clearInterval(heartbeat)
-      
+
       // 清理所有重连定时器
       reconnectTimeoutMap.forEach((timeout) => {
         clearTimeout(timeout)
       })
       reconnectTimeoutMap.clear()
-      
+
       // 关闭所有 WebSocket 连接
       wsMap.forEach((ws) => {
         ws.close()
       })
       wsMap.clear()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 发送消息到当前活动标签页
@@ -754,18 +789,19 @@ export function ChatPage() {
     // 设置等待状态，禁止连续发送
     setIsWaitingResponse(true)
 
-    const displayName = activeTab?.type === 'virtual' 
-      ? activeTab.virtualConfig?.userName || userName
-      : userName
+    const displayName =
+      activeTab?.type === 'virtual' ? activeTab.virtualConfig?.userName || userName : userName
 
     const messageContent = inputValue.trim()
     const currentTimestamp = Date.now() / 1000
 
-    ws.send(JSON.stringify({
-      type: 'message',
-      content: messageContent,
-      user_name: displayName,
-    }))
+    ws.send(
+      JSON.stringify({
+        type: 'message',
+        content: messageContent,
+        user_name: displayName,
+      })
+    )
 
     // 先添加用户消息（立即显示）
     const userMessage: ChatMessage = {
@@ -776,7 +812,7 @@ export function ChatPage() {
       sender: {
         name: displayName,
         is_bot: false,
-      }
+      },
     }
     addMessageToTab(activeTabId, userMessage)
 
@@ -787,9 +823,9 @@ export function ChatPage() {
       content: '',
       timestamp: currentTimestamp + 0.001, // 稍微晚一点确保顺序
       sender: {
-        name: activeTab?.sessionInfo.bot_name || '璃夜',
+        name: activeTab?.sessionInfo.bot_name || '当前 Bot',
         is_bot: true,
-      }
+      },
     }
     addMessageToTab(activeTabId, thinkingMessage)
 
@@ -818,10 +854,12 @@ export function ChatPage() {
     // 通知当前标签页的后端昵称变更
     const ws = wsMapRef.current.get(activeTabId)
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'update_nickname',
-        user_name: newName
-      }))
+      ws.send(
+        JSON.stringify({
+          type: 'update_nickname',
+          user_name: newName,
+        })
+      )
     }
   }
 
@@ -861,7 +899,11 @@ export function ChatPage() {
 
     switch (segment.type) {
       case 'text':
-        return <span key={index} className="whitespace-pre-wrap break-words">{dataText}</span>
+        return (
+          <span key={index} className="whitespace-pre-wrap break-words">
+            {dataText}
+          </span>
+        )
       case 'image':
         return dataText ? (
           <img
@@ -883,7 +925,9 @@ export function ChatPage() {
           />
         ) : null
       case 'voice':
-        return dataText ? <audio key={index} src={dataText} controls className="max-w-full" /> : null
+        return dataText ? (
+          <audio key={index} src={dataText} controls className="max-w-full" />
+        ) : null
       case 'video':
         return dataText ? (
           <video key={index} src={dataText} controls className="max-h-64 max-w-full rounded-md" />
@@ -894,7 +938,10 @@ export function ChatPage() {
         const record = getRecordData(segment.data)
         const replyText = String(record?.text || record?.message_id || dataText)
         return (
-          <div key={index} className="border-l-2 border-muted-foreground/30 pl-2 text-xs opacity-80">
+          <div
+            key={index}
+            className="border-l-2 border-muted-foreground/30 pl-2 text-xs opacity-80"
+          >
             {replyText}
           </div>
         )
@@ -906,7 +953,13 @@ export function ChatPage() {
         const fileUrl = typeof record?.url === 'string' ? record.url : ''
         const label = fileSize ? `${fileName} (${String(fileSize)})` : fileName
         return fileUrl ? (
-          <a key={index} href={fileUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+          <a
+            key={index}
+            href={fileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2"
+          >
             {label}
           </a>
         ) : (
@@ -981,20 +1034,20 @@ export function ChatPage() {
       })
       return
     }
-    
+
     // 生成稳定的虚拟群 ID（基于平台和用户 ID，不包含时间戳）
     const stableGroupId = `webui_virtual_group_${tempVirtualConfig.platform}_${tempVirtualConfig.userId}`
-    
+
     // 生成新标签页ID
     const newTabId = `virtual-${tempVirtualConfig.platform}-${tempVirtualConfig.userId}-${Date.now()}`
     const tabLabel = tempVirtualConfig.userName || tempVirtualConfig.userId
-    
+
     // 创建新标签页，包含稳定的 groupId
     const newTab: ChatTab = {
       id: newTabId,
       type: 'virtual',
       label: tabLabel,
-      virtualConfig: { 
+      virtualConfig: {
         ...tempVirtualConfig,
         groupId: stableGroupId,
       },
@@ -1003,13 +1056,13 @@ export function ChatPage() {
       isTyping: false,
       sessionInfo: {},
     }
-    
-    setTabs(prev => {
+
+    setTabs((prev) => {
       const newTabs = [...prev, newTab]
       // 保存虚拟标签页到 localStorage
       const virtualTabsToSave: SavedVirtualTab[] = newTabs
-        .filter(t => t.type === 'virtual' && t.virtualConfig)
-        .map(t => ({
+        .filter((t) => t.type === 'virtual' && t.virtualConfig)
+        .map((t) => ({
           id: t.id,
           label: t.label,
           virtualConfig: t.virtualConfig!,
@@ -1020,15 +1073,15 @@ export function ChatPage() {
     })
     setActiveTabId(newTabId)
     setShowVirtualConfig(false)
-    
+
     // 初始化去重缓存
     processedMessagesMapRef.current.set(newTabId, new Set())
-    
+
     // 连接 WebSocket
     setTimeout(() => {
       connectWebSocketForTab(newTabId, 'virtual', tempVirtualConfig)
     }, 100)
-    
+
     toast({
       title: '虚拟身份标签页',
       description: `已创建 ${tabLabel} 的对话`,
@@ -1036,38 +1089,38 @@ export function ChatPage() {
   }
 
   // 关闭标签页
-  const closeTab = (tabId: string, e?: React.MouseEvent) => {
+  const closeTab = (tabId: string, e?: React.SyntheticEvent) => {
     e?.stopPropagation()
-    
+
     // 不能关闭默认 WebUI 标签页
     if (tabId === 'webui-default') {
       return
     }
-    
+
     // 关闭 WebSocket 连接
     const ws = wsMapRef.current.get(tabId)
     if (ws) {
       ws.close()
       wsMapRef.current.delete(tabId)
     }
-    
+
     // 清理重连定时器
     const timeout = reconnectTimeoutMapRef.current.get(tabId)
     if (timeout) {
       clearTimeout(timeout)
       reconnectTimeoutMapRef.current.delete(tabId)
     }
-    
+
     // 清理去重缓存
     processedMessagesMapRef.current.delete(tabId)
-    
+
     // 移除标签页并更新存储
-    setTabs(prev => {
-      const newTabs = prev.filter(t => t.id !== tabId)
+    setTabs((prev) => {
+      const newTabs = prev.filter((t) => t.id !== tabId)
       // 更新 localStorage 中的虚拟标签页
       const virtualTabsToSave: SavedVirtualTab[] = newTabs
-        .filter(t => t.type === 'virtual' && t.virtualConfig)
-        .map(t => ({
+        .filter((t) => t.type === 'virtual' && t.virtualConfig)
+        .map((t) => ({
           id: t.id,
           label: t.label,
           virtualConfig: t.virtualConfig!,
@@ -1076,7 +1129,7 @@ export function ChatPage() {
       saveVirtualTabs(virtualTabsToSave)
       return newTabs
     })
-    
+
     // 如果关闭的是当前标签页，切换到默认标签页
     if (activeTabId === tabId) {
       setActiveTabId('webui-default')
@@ -1090,7 +1143,7 @@ export function ChatPage() {
 
   // 选择用户
   const selectPerson = (person: PersonInfo) => {
-    setTempVirtualConfig(prev => ({
+    setTempVirtualConfig((prev) => ({
       ...prev,
       personId: person.person_id,
       userId: person.user_id,
@@ -1099,21 +1152,22 @@ export function ChatPage() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col overflow-hidden bg-background">
       {/* 虚拟身份配置对话框 */}
       <Dialog open={showVirtualConfig} onOpenChange={setShowVirtualConfig}>
-        <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="bottom-0 top-auto flex max-h-[86vh] translate-y-0 flex-col overflow-hidden rounded-b-none rounded-t-[28px] sm:bottom-auto sm:top-[50%] sm:max-w-[500px] sm:translate-y-[-50%] sm:rounded-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCircle2 className="h-5 w-5" />
               新建虚拟身份对话
             </DialogTitle>
             <DialogDescription>
-              选择一个璃夜已认识的用户，以该用户的身份与璃夜对话。璃夜将使用她对该用户的记忆和认知来回应。
+              选择一个当前 Bot 已认识的用户，以该用户的身份与当前 Bot 对话。当前 Bot
+              将使用已有的记忆和认知来回应。
             </DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+
+          <div className="flex flex-1 flex-col space-y-4 overflow-hidden">
             {/* 平台选择 */}
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
@@ -1123,7 +1177,7 @@ export function ChatPage() {
               <Select
                 value={tempVirtualConfig.platform}
                 onValueChange={(value) => {
-                  setTempVirtualConfig(prev => ({
+                  setTempVirtualConfig((prev) => ({
                     ...prev,
                     platform: value,
                     personId: '',
@@ -1134,7 +1188,7 @@ export function ChatPage() {
                 }}
               >
                 <SelectTrigger disabled={isLoadingPlatforms}>
-                  <SelectValue placeholder={isLoadingPlatforms ? "加载中..." : "选择平台"} />
+                  <SelectValue placeholder={isLoadingPlatforms ? '加载中...' : '选择平台'} />
                 </SelectTrigger>
                 <SelectContent>
                   {platforms.map((p) => (
@@ -1148,13 +1202,13 @@ export function ChatPage() {
 
             {/* 用户搜索和选择 */}
             {tempVirtualConfig.platform && (
-              <div className="space-y-2 flex-1 overflow-hidden flex flex-col">
+              <div className="flex flex-1 flex-col space-y-2 overflow-hidden">
                 <Label className="flex items-center gap-2">
                   <Users className="h-4 w-4" />
                   选择用户
                 </Label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     placeholder="搜索用户名..."
                     value={personSearchQuery}
@@ -1162,7 +1216,7 @@ export function ChatPage() {
                     className="pl-9"
                   />
                 </div>
-                <ScrollArea className="h-[250px] border rounded-md">
+                <ScrollArea className="h-[250px] rounded-md border">
                   <div className="p-2">
                     {isLoadingPersons ? (
                       <div className="flex items-center justify-center py-8">
@@ -1170,7 +1224,7 @@ export function ChatPage() {
                       </div>
                     ) : persons.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                        <Users className="h-8 w-8 mb-2 opacity-50" />
+                        <Users className="mb-2 h-8 w-8 opacity-50" />
                         <p className="text-sm">没有找到用户</p>
                       </div>
                     ) : (
@@ -1180,34 +1234,38 @@ export function ChatPage() {
                             key={person.person_id}
                             onClick={() => selectPerson(person)}
                             className={cn(
-                              "w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors",
+                              'flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors',
                               tempVirtualConfig.personId === person.person_id
-                                ? "bg-primary text-primary-foreground"
-                                : "hover:bg-muted"
+                                ? 'bg-primary text-primary-foreground'
+                                : 'hover:bg-muted'
                             )}
                           >
                             <Avatar className="h-8 w-8 shrink-0">
-                              <AvatarFallback className={cn(
-                                "text-xs",
-                                tempVirtualConfig.personId === person.person_id
-                                  ? "bg-primary-foreground/20"
-                                  : "bg-muted"
-                              )}>
+                              <AvatarFallback
+                                className={cn(
+                                  'text-xs',
+                                  tempVirtualConfig.personId === person.person_id
+                                    ? 'bg-primary-foreground/20'
+                                    : 'bg-muted'
+                                )}
+                              >
                                 {(person.nickname || person.person_name || '?').charAt(0)}
                               </AvatarFallback>
                             </Avatar>
                             <div className="min-w-0 flex-1">
-                              <div className="font-medium truncate">
+                              <div className="truncate font-medium">
                                 {person.nickname || person.person_name}
                               </div>
-                              <div className={cn(
-                                "text-xs truncate",
-                                tempVirtualConfig.personId === person.person_id
-                                  ? "text-primary-foreground/70"
-                                  : "text-muted-foreground"
-                              )}>
+                              <div
+                                className={cn(
+                                  'truncate text-xs',
+                                  tempVirtualConfig.personId === person.person_id
+                                    ? 'text-primary-foreground/70'
+                                    : 'text-muted-foreground'
+                                )}
+                              >
                                 ID: {person.user_id}
-                                {person.is_known && " · 已认识"}
+                                {person.is_known && ' · 已认识'}
                               </div>
                             </div>
                           </button>
@@ -1226,13 +1284,15 @@ export function ChatPage() {
                 <Input
                   placeholder="WebUI虚拟群聊"
                   value={tempVirtualConfig.groupName}
-                  onChange={(e) => setTempVirtualConfig(prev => ({
-                    ...prev,
-                    groupName: e.target.value
-                  }))}
+                  onChange={(e) =>
+                    setTempVirtualConfig((prev) => ({
+                      ...prev,
+                      groupName: e.target.value,
+                    }))
+                  }
                 />
                 <p className="text-xs text-muted-foreground">
-                  璃夜会认为这是一个名为此名称的群聊
+                  当前 Bot 会认为这是一个名为此名称的群聊
                 </p>
               </div>
             )}
@@ -1242,7 +1302,7 @@ export function ChatPage() {
             <Button variant="outline" onClick={() => setShowVirtualConfig(false)}>
               取消
             </Button>
-            <Button 
+            <Button
               onClick={createVirtualTab}
               disabled={!tempVirtualConfig.platform || !tempVirtualConfig.personId}
             >
@@ -1252,76 +1312,27 @@ export function ChatPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 标签页栏 */}
-      <div className="shrink-0 border-b bg-muted/30">
-        <div className="max-w-4xl mx-auto px-2 sm:px-4">
-          <div className="flex items-center gap-1 overflow-x-auto py-1.5 scrollbar-thin">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => switchTab(tab.id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors",
-                  "hover:bg-muted",
-                  activeTabId === tab.id
-                    ? "bg-background shadow-sm border"
-                    : "text-muted-foreground"
-                )}
-              >
-                {tab.type === 'webui' ? (
-                  <MessageSquare className="h-3.5 w-3.5" />
-                ) : (
-                  <UserCircle2 className="h-3.5 w-3.5" />
-                )}
-                <span className="max-w-[100px] truncate">{tab.label}</span>
-                {/* 连接状态指示器 */}
-                <span className={cn(
-                  "w-1.5 h-1.5 rounded-full",
-                  tab.isConnected ? "bg-green-500" : "bg-muted-foreground/50"
-                )} />
-                {/* 关闭按钮（非默认标签页） */}
-                {tab.id !== 'webui-default' && (
-                  <button
-                    onClick={(e) => closeTab(tab.id, e)}
-                    className="ml-0.5 p-0.5 rounded hover:bg-muted-foreground/20"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </button>
-            ))}
-            {/* 新建虚拟身份标签页按钮 */}
-            <button
-              onClick={openVirtualConfig}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              title="新建虚拟身份对话"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 头部信息栏 */}
-      <div className="shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="p-3 sm:p-4 max-w-4xl mx-auto">
-          {/* 标题行 */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <Avatar className="h-8 w-8 sm:h-10 sm:w-10 shrink-0">
-                <AvatarFallback className="bg-primary/10 text-primary">
+      {/* 会话摘要 */}
+      <div className="bg-background/72 shrink-0 border-b border-border/35 px-5 py-3 backdrop-blur-2xl sm:px-4">
+        <div className="ios-group mx-auto max-w-4xl overflow-hidden">
+          <div className="ios-row min-h-[68px] py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Avatar className="h-9 w-9 shrink-0 rounded-[12px] sm:h-10 sm:w-10">
+                <AvatarFallback className="rounded-[12px] bg-[#007AFF] text-white shadow-[0_4px_12px_rgba(0,122,255,0.24)]">
                   <Bot className="h-4 w-4 sm:h-5 sm:w-5" />
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
-                <h1 className="text-base sm:text-lg font-semibold truncate">
-                  {activeTab?.sessionInfo.bot_name || '璃夜'}
+                <h1 className="truncate text-base font-semibold sm:text-lg">
+                  {activeTab?.sessionInfo.bot_name || '当前 Bot'}
                 </h1>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   {activeTab?.isConnected ? (
                     <>
-                      <Wifi className="h-3 w-3 text-green-500" />
-                      <span className="text-green-600 dark:text-green-400">已连接</span>
+                      <Wifi className="h-3 w-3 text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]" />
+                      <span className="text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]">
+                        已连接
+                      </span>
                     </>
                   ) : isConnecting ? (
                     <>
@@ -1330,23 +1341,24 @@ export function ChatPage() {
                     </>
                   ) : (
                     <>
-                      <WifiOff className="h-3 w-3 text-red-500" />
-                      <span className="text-red-600 dark:text-red-400">未连接</span>
+                      <WifiOff className="h-3 w-3 text-[rgb(215_0_21)] dark:text-[rgb(255_105_97)]" />
+                      <span className="text-[rgb(215_0_21)] dark:text-[rgb(255_105_97)]">
+                        未连接
+                      </span>
                     </>
                   )}
                 </div>
               </div>
             </div>
-            
-            {/* 右侧操作按钮 */}
-            <div className="flex items-center gap-1 shrink-0">
+
+            <div className="flex shrink-0 items-center gap-1">
               {isLoadingHistory && (
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               )}
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9"
                 onClick={handleReconnect}
                 disabled={isConnecting}
                 title="重新连接"
@@ -1355,9 +1367,60 @@ export function ChatPage() {
               </Button>
             </div>
           </div>
-          
-          {/* 用户身份（桌面端显示更多信息） */}
-          <div className="hidden sm:flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+
+          <div className="border-t border-border/35 px-3 py-2">
+            <div className="ios-scrollbar-none flex items-center gap-2 overflow-x-auto">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => switchTab(tab.id)}
+                  className={cn(
+                    'ios-touch flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition-colors',
+                    activeTabId === tab.id
+                      ? 'bg-muted/80 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]'
+                      : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground'
+                  )}
+                >
+                  {tab.type === 'webui' ? (
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  ) : (
+                    <UserCircle2 className="h-3.5 w-3.5" />
+                  )}
+                  <span className="max-w-[100px] truncate">{tab.label}</span>
+                  <span
+                    className={cn(
+                      'h-1.5 w-1.5 rounded-full',
+                      tab.isConnected ? 'bg-[rgb(52_199_89)]' : 'bg-muted-foreground/40'
+                    )}
+                  />
+                  {tab.id !== 'webui-default' && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => closeTab(tab.id, e)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          closeTab(tab.id, e)
+                        }
+                      }}
+                      className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  )}
+                </button>
+              ))}
+              <button
+                onClick={openVirtualConfig}
+                className="ios-touch flex min-h-9 items-center gap-1 rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                title="新建虚拟身份对话"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="hidden min-h-[46px] items-center gap-2 border-t border-border/70 px-4 text-sm text-muted-foreground sm:flex">
             {activeTab?.type === 'virtual' && activeTab.virtualConfig ? (
               <>
                 <UserCircle2 className="h-3 w-3 text-primary" />
@@ -1391,7 +1454,12 @@ export function ChatPage() {
                     <Button size="sm" variant="ghost" className="h-7 px-2" onClick={saveEditedName}>
                       保存
                     </Button>
-                    <Button size="sm" variant="ghost" className="h-7 px-2" onClick={cancelEditingName}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={cancelEditingName}
+                    >
                       取消
                     </Button>
                   </div>
@@ -1416,16 +1484,18 @@ export function ChatPage() {
       </div>
 
       {/* 消息列表区域 */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden bg-background">
         <ScrollArea className="h-full">
-          <div className="p-3 sm:p-4 max-w-4xl mx-auto space-y-3 sm:space-y-4">
+          <div className="mx-auto max-w-4xl space-y-3 px-5 py-4 sm:space-y-4 sm:p-5">
             {activeTab?.messages.length === 0 && !isLoadingHistory && (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <Bot className="h-12 w-12 mb-4 opacity-50" />
-                <p className="text-sm">开始与 {activeTab?.sessionInfo.bot_name || '璃夜'} 对话吧！</p>
+                <Bot className="mb-4 h-12 w-12 opacity-50" />
+                <p className="text-sm">
+                  开始与 {activeTab?.sessionInfo.bot_name || '当前 Bot'} 对话吧！
+                </p>
               </div>
             )}
-            
+
             {activeTab?.messages.map((message) => (
               <div
                 key={message.id}
@@ -1438,14 +1508,14 @@ export function ChatPage() {
               >
                 {/* 系统消息 */}
                 {message.type === 'system' && (
-                  <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1 rounded-full max-w-[90%]">
+                  <div className="max-w-[90%] rounded-full bg-secondary/80 px-4 py-1.5 text-[13px] leading-5 text-muted-foreground shadow-[inset_0_1px_1px_rgba(255,255,255,0.56)]">
                     {message.content}
                   </div>
                 )}
 
                 {/* 错误消息 */}
                 {message.type === 'error' && (
-                  <div className="text-xs text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 px-3 py-1 rounded-full max-w-[90%]">
+                  <div className="max-w-[90%] rounded-full bg-[rgb(255_59_48_/_0.1)] px-4 py-1.5 text-[13px] leading-5 text-[rgb(174_37_31)] shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:text-[rgb(255_105_97)]">
                     {message.content}
                   </div>
                 )}
@@ -1453,23 +1523,34 @@ export function ChatPage() {
                 {/* 思考中占位消息 */}
                 {message.type === 'thinking' && (
                   <>
-                    <Avatar className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
+                    <Avatar className="h-7 w-7 shrink-0 sm:h-8 sm:w-8">
                       <AvatarFallback className="bg-primary/10 text-primary">
                         <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       </AvatarFallback>
                     </Avatar>
-                    <div className="flex flex-col gap-1 max-w-[75%] sm:max-w-[70%]">
-                      <div className="flex items-center gap-2 text-[10px] sm:text-xs text-muted-foreground">
-                        <span className="hidden sm:inline">{message.sender?.name || activeTab?.sessionInfo.bot_name}</span>
+                    <div className="flex max-w-[75%] flex-col gap-1 sm:max-w-[70%]">
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground sm:text-xs">
+                        <span className="hidden sm:inline">
+                          {message.sender?.name || activeTab?.sessionInfo.bot_name}
+                        </span>
                       </div>
-                      <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-3">
+                      <div className="rounded-[18px] rounded-tl-md bg-card px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
                         <div className="flex items-center gap-2">
                           <div className="flex gap-1">
-                            <span className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            <span
+                              className="h-2 w-2 animate-bounce rounded-full bg-primary/60"
+                              style={{ animationDelay: '0ms' }}
+                            />
+                            <span
+                              className="h-2 w-2 animate-bounce rounded-full bg-primary/60"
+                              style={{ animationDelay: '150ms' }}
+                            />
+                            <span
+                              className="h-2 w-2 animate-bounce rounded-full bg-primary/60"
+                              style={{ animationDelay: '300ms' }}
+                            />
                           </div>
-                          <span className="text-xs text-muted-foreground ml-1">思考中...</span>
+                          <span className="ml-1 text-xs text-muted-foreground">思考中...</span>
                         </div>
                       </div>
                     </div>
@@ -1479,7 +1560,7 @@ export function ChatPage() {
                 {/* 用户/机器人消息 */}
                 {(message.type === 'user' || message.type === 'bot') && (
                   <>
-                    <Avatar className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
+                    <Avatar className="h-7 w-7 shrink-0 sm:h-8 sm:w-8">
                       <AvatarFallback
                         className={cn(
                           'text-xs',
@@ -1497,20 +1578,23 @@ export function ChatPage() {
                     </Avatar>
                     <div
                       className={cn(
-                        'flex flex-col gap-1 max-w-[75%] sm:max-w-[70%]',
+                        'flex max-w-[75%] flex-col gap-1 sm:max-w-[70%]',
                         message.type === 'user' && 'items-end'
                       )}
                     >
-                      <div className="flex items-center gap-2 text-[10px] sm:text-xs text-muted-foreground">
-                        <span className="hidden sm:inline">{message.sender?.name || (message.type === 'bot' ? activeTab?.sessionInfo.bot_name : userName)}</span>
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground sm:text-xs">
+                        <span className="hidden sm:inline">
+                          {message.sender?.name ||
+                            (message.type === 'bot' ? activeTab?.sessionInfo.bot_name : userName)}
+                        </span>
                         <span>{formatTime(message.timestamp)}</span>
                       </div>
                       <div
                         className={cn(
-                          'rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words',
+                          'whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
                           message.type === 'bot'
-                            ? 'bg-muted rounded-tl-sm'
-                            : 'bg-primary text-primary-foreground rounded-tr-sm'
+                            ? 'rounded-tl-md bg-card'
+                            : 'rounded-tr-md bg-primary text-primary-foreground'
                         )}
                       >
                         {renderMessageContent(message)}
@@ -1527,24 +1611,34 @@ export function ChatPage() {
       </div>
 
       {/* 输入区域 - 固定在底部 */}
-      <div className="shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="p-3 sm:p-4 max-w-4xl mx-auto">
+      <div className="ios-bottom-bar shrink-0">
+        <div className="mx-auto max-w-4xl px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-4 sm:pt-3">
           <div className="flex gap-2">
             <Input
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isWaitingResponse ? '等待响应中...' : (activeTab?.isConnected ? '输入消息...' : '等待连接...')}
+              placeholder={
+                isWaitingResponse
+                  ? '等待响应中...'
+                  : activeTab?.isConnected
+                    ? '输入消息...'
+                    : '等待连接...'
+              }
               disabled={!activeTab?.isConnected || isWaitingResponse}
-              className="flex-1 h-10 sm:h-10"
+              className="h-10 flex-1 rounded-full border-black/5 bg-secondary/90 px-4 shadow-[inset_0_1px_1px_rgba(0,0,0,0.035)]"
             />
             <Button
               onClick={sendMessage}
               disabled={!activeTab?.isConnected || !inputValue.trim() || isWaitingResponse}
               size="icon"
-              className="h-10 w-10 shrink-0"
+              className="h-10 w-10 shrink-0 shadow-[0_8px_18px_hsl(var(--primary)_/_0.18),0_1px_2px_rgba(0,0,0,0.08)]"
             >
-              {isWaitingResponse ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {isWaitingResponse ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
             </Button>
           </div>
         </div>

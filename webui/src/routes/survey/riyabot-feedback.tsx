@@ -1,11 +1,11 @@
 /**
- * 璃夜使用体验反馈问卷页面
+ * 当前 Bot 使用体验反馈问卷页面
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Loader2, AlertCircle, FileQuestion } from 'lucide-react'
+import { Loader2, AlertCircle } from 'lucide-react'
 import { SurveyRenderer } from '@/components/survey'
 import { riyabotFeedbackSurvey } from '@/config/surveys'
 import { getRiyaBotStatus } from '@/lib/system-api'
@@ -16,11 +16,11 @@ export function RiyaBotFeedbackSurveyPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [riyabotVersion, setRiyabotVersion] = useState<string>('未知版本')
 
-  // 初始化问卷配置，获取璃夜版本
+  // 初始化问卷配置，获取主程序版本
   useEffect(() => {
     const init = async () => {
       try {
-        // 获取璃夜版本
+        // 获取主程序版本
         const status = await getRiyaBotStatus()
         setRiyabotVersion(status.version || '未知版本')
       } catch (error) {
@@ -57,15 +57,17 @@ export function RiyaBotFeedbackSurveyPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="ios-page">
+        <div className="ios-card flex min-h-32 items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
       </div>
     )
   }
 
   if (!surveyConfig) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
+      <div className="ios-page flex min-h-full flex-col items-center justify-center gap-4">
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -80,20 +82,12 @@ export function RiyaBotFeedbackSurveyPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
-      {/* 页面标题 */}
-      <div className="mb-4 sm:mb-6 shrink-0">
-        <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-          <FileQuestion className="h-8 w-8" strokeWidth={2} />
-          璃夜使用体验反馈问卷
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-          感谢您的反馈，帮助我们打造更好的 AI 伙伴
-        </p>
-      </div>
-
-      {/* 问卷内容 */}
-      <div className="flex-1 min-h-0">
+    <div className="ios-page">
+      <div className="ios-content max-w-3xl">
+        <div>
+          <h1 className="ios-title">RiyaBot 反馈</h1>
+          <p className="ios-subtitle">分享真实使用感受，帮助我们调整体验和能力优先级。</p>
+        </div>
         <SurveyRenderer
           config={surveyConfig}
           initialAnswers={initialAnswers}

@@ -1,10 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Key, Lock, AlertCircle, Moon, Sun, HelpCircle, FileText, Terminal, Zap } from 'lucide-react'
+import {
+  AlertCircle,
+  ChevronRight,
+  FileText,
+  HelpCircle,
+  Key,
+  Lock,
+  Moon,
+  Sun,
+  Terminal,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -13,24 +21,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
-import { WavesBackground } from '@/components/waves-background'
-import { useAnimation } from '@/hooks/use-animation'
 import { useTheme } from '@/components/use-theme'
 import { checkAuthStatus } from '@/lib/fetch-with-auth'
 import { checkFirstSetup } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
-import { APP_FULL_NAME } from '@/lib/version'
+import { APP_FULL_NAME, APP_NAME } from '@/lib/version'
 
 export function AuthPage() {
   const [token, setToken] = useState('')
@@ -38,7 +33,6 @@ export function AuthPage() {
   const [error, setError] = useState('')
   const [checkingAuth, setCheckingAuth] = useState(true)
   const navigate = useNavigate()
-  const { enableWavesBackground, setEnableWavesBackground } = useAnimation()
   const { theme, setTheme } = useTheme()
 
   // 如果已经认证，直接跳转到首页
@@ -123,204 +117,186 @@ export function AuthPage() {
   // 正在检查认证状态时显示加载
   if (checkingAuth) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-        {enableWavesBackground && <WavesBackground />}
-        <div className="text-muted-foreground">正在检查登录状态...</div>
+      <div className="ios-page flex min-h-screen items-center justify-center overflow-hidden">
+        <div className="ios-group px-5 py-3 text-sm leading-relaxed text-muted-foreground">
+          正在检查登录状态...
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-      {/* 波浪背景 - 独立控制 */}
-      {enableWavesBackground && <WavesBackground />}
+    <div className="ios-page flex min-h-screen flex-col overflow-x-hidden">
+      <button
+        onClick={toggleTheme}
+        className="ios-touch absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center rounded-full text-foreground hover:bg-muted/70"
+        title={actualTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+      >
+        {actualTheme === 'dark' ? (
+          <Sun className="h-5 w-5" strokeWidth={2.5} fill="none" />
+        ) : (
+          <Moon className="h-5 w-5" strokeWidth={2.5} fill="none" />
+        )}
+      </button>
 
-      {/* 认证卡片 - 磨砂玻璃效果 */}
-      <Card className="relative z-10 w-full max-w-md shadow-2xl backdrop-blur-xl bg-card/80 border-border/50">
-        {/* 主题切换按钮 */}
-        <button
-          onClick={toggleTheme}
-          className="absolute right-4 top-4 rounded-lg p-2 hover:bg-accent transition-colors z-10 text-foreground"
-          title={actualTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
-        >
-          {actualTheme === 'dark' ? (
-            <Sun className="h-5 w-5" strokeWidth={2.5} fill="none" />
-          ) : (
-            <Moon className="h-5 w-5" strokeWidth={2.5} fill="none" />
-          )}
-        </button>
-
-        <CardHeader className="space-y-4 text-center">
-          {/* Logo/Icon */}
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-            <Lock className="h-8 w-8 text-primary" strokeWidth={2} fill="none" />
+      <main className="mx-auto flex w-full max-w-[27.5rem] flex-1 flex-col justify-center gap-7 py-10">
+        <header className="space-y-4 text-left sm:text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-primary text-primary-foreground shadow-[0_10px_24px_hsl(var(--primary)_/_0.22)] sm:mx-auto">
+            <Lock className="h-7 w-7" strokeWidth={2.2} fill="none" />
           </div>
 
-          <div className="space-y-2">
-            <CardTitle className="text-2xl font-bold">欢迎使用 RiyaBot</CardTitle>
-            <CardDescription className="text-base">
-              请输入您的 Access Token 以继续访问系统
-            </CardDescription>
+          <div className="space-y-3">
+            <h1 className="text-[32px] font-semibold leading-[1.14] tracking-normal text-foreground">
+              {APP_NAME}
+            </h1>
+            <p className="max-w-sm text-[17px] leading-[1.45] text-muted-foreground sm:mx-auto">
+              输入 Access Token 继续访问控制台。
+            </p>
           </div>
-        </CardHeader>
+        </header>
 
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Token 输入框 */}
-            <div className="space-y-2">
-              <Label htmlFor="token" className="text-sm font-medium">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="ios-group overflow-hidden">
+            <label htmlFor="token" className="ios-row min-h-[64px] gap-3 px-4 py-2">
+              <Key
+                className="h-5 w-5 flex-shrink-0 text-muted-foreground"
+                strokeWidth={2}
+                fill="none"
+              />
+              <span className="shrink-0 text-[17px] font-medium leading-snug text-foreground">
                 Access Token
-              </Label>
-              <div className="relative">
-                <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" strokeWidth={2} fill="none" />
-                <Input
-                  id="token"
-                  type="password"
-                  placeholder="请输入您的 Access Token"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  className={cn('pl-10', error && 'border-red-500 focus-visible:ring-red-500')}
-                  disabled={isValidating}
-                  autoFocus
-                  autoComplete="off"
-                />
-              </div>
-            </div>
+              </span>
+              <Input
+                id="token"
+                type="password"
+                placeholder="请输入 Token"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                className={cn(
+                  'h-10 min-w-0 flex-1 border-0 bg-transparent px-0 text-right text-[17px] shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:ring-offset-0',
+                  error &&
+                    'text-[rgb(174_37_31)] placeholder:text-[rgb(215_0_21_/_0.62)] dark:text-[rgb(255_105_97)]'
+                )}
+                disabled={isValidating}
+                autoComplete="off"
+              />
+            </label>
 
-            {/* 错误提示 */}
             {error && (
-              <div className="flex items-center gap-2 rounded-md bg-red-50 p-3 text-sm text-red-600 dark:bg-red-950/50 dark:text-red-400">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" strokeWidth={2} fill="none" />
-                <span>{error}</span>
+              <div className="ios-row flex items-start gap-3 bg-[rgb(255_59_48_/_0.06)] px-4 py-3 text-sm leading-relaxed text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)]">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={2} fill="none" />
+                <span className="min-w-0">{error}</span>
               </div>
             )}
+          </div>
 
-            {/* 提交按钮 */}
-            <Button type="submit" className="w-full" disabled={isValidating}>
-              {isValidating ? (
-                <>
-                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  验证中...
-                </>
-              ) : (
-                '验证并进入'
-              )}
-            </Button>
+          <Button
+            type="submit"
+            className="h-12 w-full rounded-full text-[17px] font-semibold shadow-[0_10px_24px_hsl(var(--primary)_/_0.2)] active:scale-[0.98]"
+            disabled={isValidating}
+          >
+            {isValidating ? (
+              <>
+                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                验证中...
+              </>
+            ) : (
+              '验证并进入'
+            )}
+          </Button>
 
-            {/* 帮助文本 */}
-            <Dialog>
-              <DialogTrigger asChild>
-                <button className="w-full text-center text-sm text-primary hover:text-primary/80 transition-colors underline-offset-4 hover:underline flex items-center justify-center gap-1">
-                  <HelpCircle className="h-4 w-4" strokeWidth={2} fill="none" />
-                  我没有 Token，我该去哪里获得 Token？
-                </button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <Lock className="h-5 w-5 text-primary" strokeWidth={2} fill="none" />
-                    如何获取 Access Token
-                  </DialogTitle>
-                  <DialogDescription>
-                    Access Token 是访问 RiyaBot Console 的唯一凭证，请按以下方式获取
-                  </DialogDescription>
-                </DialogHeader>
+          <Dialog>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="ios-group ios-touch flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left text-[15px] font-medium text-primary"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <HelpCircle className="h-5 w-5 flex-shrink-0" strokeWidth={2.2} fill="none" />
+                  <span className="min-w-0 leading-snug">如何获取 Access Token</span>
+                </span>
+                <ChevronRight
+                  className="h-5 w-5 flex-shrink-0 text-primary/70"
+                  strokeWidth={2.2}
+                  fill="none"
+                />
+              </button>
+            </DialogTrigger>
+            <DialogContent className="bottom-0 left-0 top-auto flex max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1rem,env(safe-area-inset-bottom))] sm:bottom-auto sm:left-[50%] sm:top-[50%] sm:max-h-[80vh] sm:max-w-md sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-[22px] sm:border sm:p-5 [&>button:last-child]:right-4 [&>button:last-child]:top-4">
+              <DialogHeader className="px-5 pb-1 pt-5 sm:px-0 sm:pt-0">
+                <DialogTitle className="flex items-center gap-2">
+                  <Lock className="h-5 w-5 text-primary" strokeWidth={2} fill="none" />
+                  如何获取 Access Token
+                </DialogTitle>
+                <DialogDescription>
+                  Access Token 是访问 {APP_NAME} 的唯一凭证，请按以下方式获取
+                </DialogDescription>
+              </DialogHeader>
 
-                <div className="space-y-4">
-                  {/* 方式一：查看控制台 */}
-                  <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
-                    <div className="flex items-start gap-3">
-                      <Terminal className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" strokeWidth={2} fill="none" />
-                      <div className="flex-1 space-y-2">
-                        <h4 className="font-semibold text-sm">方式一：查看启动日志</h4>
-                        <p className="text-sm text-muted-foreground">
-                          在 RiyaBot 启动时，控制台会显示 WebUI Access Token。
-                        </p>
-                        <div className="rounded bg-background p-2 font-mono text-xs">
-                          <p className="text-muted-foreground">🔑 WebUI Access Token: abc123...</p>
-                          <p className="text-muted-foreground">💡 请使用此 Token 登录 WebUI</p>
-                        </div>
+              <div className="ios-scrollbar-none max-h-[calc(86vh-8rem)] space-y-4 overflow-y-auto px-5 pb-5 sm:max-h-[60vh] sm:px-0 sm:pb-0">
+                <div className="overflow-hidden rounded-[18px] border border-border/60 bg-card/80">
+                  <div className="flex items-start gap-3 border-b border-border/60 px-4 py-4">
+                    <Terminal
+                      className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary"
+                      strokeWidth={2}
+                      fill="none"
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <h4 className="text-sm font-semibold leading-snug">查看启动日志</h4>
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        主程序启动时，控制台会显示 WebUI Access Token。
+                      </p>
+                      <div className="rounded-[12px] bg-muted/70 p-2.5 font-mono text-xs leading-relaxed">
+                        <p className="text-muted-foreground">WebUI Access Token: abc123...</p>
+                        <p className="text-muted-foreground">请使用此 Token 登录 WebUI</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* 方式二：查看配置文件 */}
-                  <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
-                    <div className="flex items-start gap-3">
-                      <FileText className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" strokeWidth={2} fill="none" />
-                      <div className="flex-1 space-y-2">
-                        <h4 className="font-semibold text-sm">方式二：查看配置文件</h4>
-                        <p className="text-sm text-muted-foreground">
-                          Token 保存在项目根目录的配置文件中：
-                        </p>
-                        <div className="rounded bg-background p-2 font-mono text-xs break-all">
-                          <code className="text-primary">data/webui.json</code>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          打开此文件，复制 <code className="px-1 py-0.5 bg-background rounded">access_token</code> 字段的值
-                        </p>
+                  <div className="flex items-start gap-3 px-4 py-4">
+                    <FileText
+                      className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary"
+                      strokeWidth={2}
+                      fill="none"
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <h4 className="text-sm font-semibold leading-snug">查看配置文件</h4>
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        Token 保存在项目根目录的配置文件中：
+                      </p>
+                      <div className="break-all rounded-[12px] bg-muted/70 p-2.5 font-mono text-xs leading-relaxed">
+                        <code className="text-primary">data/webui.json</code>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* 安全提示 */}
-                  <div className="rounded-lg border border-yellow-200 dark:border-yellow-900 bg-yellow-50 dark:bg-yellow-950/30 p-3">
-                    <div className="flex gap-2">
-                      <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" strokeWidth={2} fill="none" />
-                      <div className="text-sm text-yellow-800 dark:text-yellow-300 space-y-1">
-                        <p className="font-semibold">安全提示</p>
-                        <ul className="list-disc list-inside space-y-0.5 text-xs">
-                          <li>请妥善保管您的 Token，不要泄露给他人</li>
-                          <li>如需重置 Token，请在登录后前往系统设置</li>
-                        </ul>
-                      </div>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        打开此文件，复制{' '}
+                        <code className="rounded bg-muted px-1 py-0.5">access_token</code> 字段的值
+                      </p>
                     </div>
                   </div>
                 </div>
-              </DialogContent>
-            </Dialog>
 
-            {/* 性能优化选项 */}
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <button className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline flex items-center justify-center gap-1">
-                  <Zap className="h-4 w-4" strokeWidth={2} fill="none" />
-                  我觉得这个界面很卡怎么办？
-                </button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-primary" strokeWidth={2} fill="none" />
-                    关闭背景动画
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    背景动画可能会在低性能设备上造成卡顿。关闭动画可以显著提升界面流畅度。
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    关闭动画后，背景将变为纯色，但不影响任何功能的使用。您可以随时在系统设置中重新开启动画。
-                  </p>
+                <div className="overflow-hidden rounded-[18px] border border-border/60 bg-card/80">
+                  <div className="flex items-start gap-3 px-4 py-3">
+                    <AlertCircle
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(178_93_0)] dark:text-[rgb(255_159_10)]"
+                      strokeWidth={2}
+                      fill="none"
+                    />
+                    <div className="space-y-1 text-sm leading-relaxed text-muted-foreground">
+                      <p className="font-semibold text-foreground">安全提示</p>
+                      <p>请妥善保管您的 Token。需要重置时，可在登录后前往系统设置。</p>
+                    </div>
+                  </div>
                 </div>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => setEnableWavesBackground(false)}
-                  >
-                    关闭动画
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </form>
-        </CardContent>
-      </Card>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </form>
+      </main>
 
-      {/* 页脚信息 */}
-      <div className="absolute bottom-4 left-0 right-0 text-center text-xs text-muted-foreground">
-        <p>{APP_FULL_NAME}</p>
-      </div>
+      <p className="pb-[max(0.25rem,env(safe-area-inset-bottom))] text-center text-[11px] leading-relaxed text-muted-foreground">
+        {APP_FULL_NAME}
+      </p>
     </div>
   )
 }

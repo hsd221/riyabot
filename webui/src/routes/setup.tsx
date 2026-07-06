@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import {
   Sparkles,
   ArrowRight,
+  ChevronRight,
   CheckCircle2,
   SkipForward,
   Bot,
@@ -28,6 +29,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/version'
 import { useToast } from '@/hooks/use-toast'
@@ -68,6 +77,7 @@ export function SetupPage() {
   const [isCompleting, setIsCompleting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [stepDialogOpen, setStepDialogOpen] = useState(false)
 
   const [agreementStatus, setAgreementStatus] = useState<AgreementStatus | null>(null)
   const [acceptedEula, setAcceptedEula] = useState(false)
@@ -150,6 +160,7 @@ export function SetupPage() {
   ]
 
   const progress = ((currentStep + 1) / steps.length) * 100
+  const currentStepInfo = steps[currentStep]
 
   // 加载现有配置
   useEffect(() => {
@@ -167,8 +178,8 @@ export function SetupPage() {
         ])
 
         setAgreementStatus(agreement)
-        setAcceptedEula(agreement.eula.confirmed)
-        setAcceptedPrivacy(agreement.privacy.confirmed)
+        setAcceptedEula(false)
+        setAcceptedPrivacy(false)
         setBotBasic(bot)
         setPersonality(personality)
         setEmoji(emoji)
@@ -202,10 +213,6 @@ export function SetupPage() {
             throw new Error('协议状态尚未加载')
           }
 
-          if (agreementStatus.eula.confirmed && agreementStatus.privacy.confirmed) {
-            return true
-          }
-
           if (!acceptedEula || !acceptedPrivacy) {
             toast({
               title: '请先确认协议',
@@ -215,9 +222,11 @@ export function SetupPage() {
             return false
           }
 
-          setAgreementStatus(
-            await confirmAgreement(agreementStatus.eula.hash, agreementStatus.privacy.hash)
-          )
+          if (!(agreementStatus.eula.confirmed && agreementStatus.privacy.confirmed)) {
+            setAgreementStatus(
+              await confirmAgreement(agreementStatus.eula.hash, agreementStatus.privacy.hash)
+            )
+          }
           break
         case 'bot-basic':
           await saveBotBasicConfig(botBasic)
@@ -287,17 +296,17 @@ export function SetupPage() {
       setRestartProgress('正在完成初始化...')
       await completeSetup()
 
-      // 3. 触发璃夜重启
-      setRestartProgress('正在重启璃夜...')
+      // 3. 触发主程序重启
+      setRestartProgress('正在重启主程序...')
       await restartRiyaBot()
 
       toast({
         title: '配置完成',
-        description: '璃夜正在重启以应用新配置...',
+        description: '主程序正在重启以应用新配置...',
       })
 
-      // 4. 轮询检查璃夜是否重启成功
-      setRestartProgress('等待璃夜重启完成...')
+      // 4. 轮询检查主程序是否重启成功
+      setRestartProgress('等待主程序重启完成...')
       const maxAttempts = 60 // 最多等待60秒
       let attempt = 0
       let restartSuccess = false
@@ -318,7 +327,7 @@ export function SetupPage() {
       }
 
       if (!restartSuccess) {
-        throw new Error('重启超时,请手动检查璃夜状态')
+        throw new Error('重启超时,请手动检查主程序状态')
       }
 
       // 5. 导航到首页
@@ -385,15 +394,14 @@ export function SetupPage() {
         return <OtherBasicForm config={otherBasic} onChange={setOtherBasic} />
       case 'model-config':
         return (
-          <div className="space-y-6">
-            <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+          <div className="space-y-4">
+            <div className="ios-group p-5 text-sm leading-relaxed text-muted-foreground">
               模型配置不再预设任何厂商。请按自己的服务商和模型名称完成配置后，再返回此向导完成初始化。
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Button
+            <div className="ios-group divide-y divide-border/70 overflow-hidden">
+              <button
                 type="button"
-                variant="outline"
-                className="h-auto justify-start p-4 text-left"
+                className="ios-touch flex min-h-16 w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-accent"
                 onClick={() => navigate({ to: '/config/modelProvider' })}
               >
                 <div>
@@ -402,11 +410,11 @@ export function SetupPage() {
                     添加 API Base URL、Key 和客户端类型
                   </div>
                 </div>
-              </Button>
-              <Button
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+              <button
                 type="button"
-                variant="outline"
-                className="h-auto justify-start p-4 text-left"
+                className="ios-touch flex min-h-16 w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-accent"
                 onClick={() => navigate({ to: '/config/model' })}
               >
                 <div>
@@ -415,7 +423,8 @@ export function SetupPage() {
                     添加模型并分配给回复、规划、工具等任务
                   </div>
                 </div>
-              </Button>
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
             </div>
           </div>
         )
@@ -425,16 +434,16 @@ export function SetupPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4 md:p-6">
+    <div className="ios-page min-h-screen">
       {/* 重启遮罩层 */}
       {isRestarting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-md flex-col items-center space-y-6 rounded-lg border bg-card p-8 text-center shadow-lg">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-xl">
+          <div className="ios-card mx-auto flex w-full max-w-md flex-col items-center space-y-6 p-6 text-center sm:p-8">
+            <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-primary/10">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold">正在重启璃夜</h2>
+              <h2 className="text-2xl font-semibold">正在重启主程序</h2>
               <p className="text-muted-foreground">{restartProgress}</p>
             </div>
             <div className="w-full">
@@ -449,233 +458,326 @@ export function SetupPage() {
         </div>
       )}
 
-      {/* 背景装饰 */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute left-1/4 top-1/4 h-64 w-64 md:h-96 md:w-96 rounded-full bg-primary/5 blur-3xl" />
-        <div className="absolute right-1/4 bottom-1/4 h-64 w-64 md:h-96 md:w-96 rounded-full bg-secondary/5 blur-3xl" />
-      </div>
-
       {/* 加载状态 */}
       {isLoading ? (
-        <div className="relative z-10 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center">
-            <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <div className="flex min-h-[calc(100vh-2rem)] items-center justify-center">
+          <div className="ios-card w-full max-w-sm p-6 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-primary/10">
+              <Loader2 className="h-7 w-7 animate-spin text-primary" />
+            </div>
+            <p className="text-lg font-semibold">加载配置中...</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              正在读取现有配置
+            </p>
           </div>
-          <p className="text-lg font-medium">加载配置中...</p>
-          <p className="text-sm text-muted-foreground mt-2">
-            正在读取现有配置
-          </p>
         </div>
       ) : (
         <>
           {/* 主要内容 */}
-          <div className="relative z-10 w-full max-w-4xl">
-        {/* 头部 */}
-        <div className="mb-6 md:mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 md:h-16 md:w-16 items-center justify-center rounded-2xl bg-primary/10">
-            <Sparkles
-              className="h-6 w-6 md:h-8 md:w-8 text-primary"
-              strokeWidth={2}
-              fill="none"
-            />
-          </div>
-          <h1 className="mb-2 text-2xl md:text-3xl font-bold">
-            首次配置向导
-          </h1>
-          <p className="text-sm md:text-base text-muted-foreground">
-            让我们一起完成 {APP_NAME} 的初始配置
-          </p>
-        </div>
-
-        {/* 进度条 */}
-        <div className="mb-6 md:mb-8">
-          <div className="mb-2 flex items-center justify-between text-xs md:text-sm">
-            <span className="text-muted-foreground">
-              步骤 {currentStep + 1} / {steps.length}
-            </span>
-            <span className="font-medium text-primary">
-              {Math.round(progress)}%
-            </span>
-          </div>
-          <Progress value={progress} className="h-2" />
-        </div>
-
-        {/* 步骤指示器 */}
-        <div className="mb-6 md:mb-8 flex justify-between">
-          {steps.map((step, index) => {
-            const Icon = step.icon
-            return (
-              <div
-                key={step.id}
-                className={cn(
-                  'flex flex-1 flex-col items-center gap-1 md:gap-2',
-                  index < steps.length - 1 && 'relative'
-                )}
-              >
-                {/* 连接线 */}
-                {index < steps.length - 1 && (
-                  <div
-                    className={cn(
-                      'absolute left-1/2 top-3 md:top-4 h-0.5 w-full',
-                      index < currentStep ? 'bg-primary' : 'bg-border'
-                    )}
+          <div className="mx-auto grid h-[calc(100svh-2.5rem)] w-full min-w-0 max-w-[120rem] grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden sm:gap-5">
+            {/* 头部 */}
+            <div className="flex min-w-0 items-center justify-between gap-3 sm:gap-4">
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-card/80 shadow-[0_1px_1px_rgba(255,255,255,0.7)_inset,0_8px_22px_rgba(31,41,55,0.04)] backdrop-blur-xl sm:h-14 sm:w-14">
+                  <Sparkles
+                    className="h-5 w-5 text-primary sm:h-6 sm:w-6"
+                    strokeWidth={2}
+                    fill="none"
                   />
-                )}
-
-                {/* 步骤圆圈 */}
-                <div
-                  className={cn(
-                    'relative z-10 flex h-6 w-6 md:h-8 md:w-8 items-center justify-center rounded-full border-2 transition-all',
-                    index === currentStep
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : index < currentStep
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border bg-background text-muted-foreground'
-                  )}
-                >
-                  {index < currentStep ? (
-                    <CheckCircle2
-                      className="h-3 w-3 md:h-4 md:w-4"
-                      strokeWidth={2.5}
-                      fill="none"
-                    />
-                  ) : (
-                    <Icon className="h-3 w-3 md:h-4 md:w-4" />
-                  )}
                 </div>
-
-                {/* 步骤标题 */}
-                <span
-                  className={cn(
-                    'text-[10px] md:text-xs text-center max-w-[60px] md:max-w-none truncate md:whitespace-normal',
-                    index === currentStep
-                      ? 'font-medium text-foreground'
-                      : 'text-muted-foreground'
-                  )}
-                  title={step.title}
-                >
-                  {step.title}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* 步骤内容卡片 */}
-        <Card className="mb-6 md:mb-8 shadow-lg">
-          <CardContent className="p-4 md:p-8">
-            <div className="min-h-[300px] md:min-h-[400px]">
-              <div className="mb-4 md:mb-6">
-                <h2 className="mb-2 text-xl md:text-2xl font-semibold">
-                  {steps[currentStep].title}
-                </h2>
-                <p className="text-sm md:text-base text-muted-foreground">
-                  {steps[currentStep].description}
-                </p>
-              </div>
-
-              {/* 表单内容 */}
-              <ScrollArea className="h-[400px] md:h-[500px]">
-                <div className="pr-2">
-                  {renderStepForm()}
+                <div className="min-w-0">
+                  <h1 className="truncate text-[22px] font-semibold leading-tight tracking-normal sm:text-3xl">首次配置向导</h1>
+                  <p className="ios-subtitle line-clamp-2">
+                    让我们一起完成 {APP_NAME} 的初始配置
+                  </p>
                 </div>
-              </ScrollArea>
+              </div>
+              <div className="hidden min-w-56 rounded-lg bg-card/80 px-4 py-3 shadow-[0_6px_18px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.035)] backdrop-blur-xl sm:block">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-foreground">
+                    步骤 {currentStep + 1} / {steps.length}
+                  </span>
+                  <span className="font-semibold text-primary">
+                    {Math.round(progress)}%
+                  </span>
+                </div>
+                <Progress value={progress} className="h-1.5" />
+              </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* 操作按钮 */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0">
-          <Button
-            variant="outline"
-            onClick={handlePrevious}
-            disabled={currentStep === 0 || isSaving}
-            className="w-full sm:w-auto order-2 sm:order-1"
-          >
-            上一步
-          </Button>
+            <div className="grid min-h-0 min-w-0 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)] lg:gap-5">
+              {/* iPad / desktop 步骤栏 */}
+              <aside className="ios-card hidden min-h-0 flex-col overflow-hidden bg-card/80 backdrop-blur-xl lg:flex">
+                <div className="border-b border-border/70 px-5 py-4">
+                  <p className="text-sm font-semibold">配置步骤</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    按顺序完成必要配置
+                  </p>
+                </div>
+                <div className="ios-scrollbar-none flex-1 overflow-y-auto p-2">
+                  {steps.map((step, index) => {
+                    const Icon = step.icon
+                    const isActive = index === currentStep
+                    const isDone = index < currentStep
+                    return (
+                      <button
+                        key={step.id}
+                        type="button"
+                        onClick={() => index <= currentStep && setCurrentStep(index)}
+                        disabled={index > currentStep}
+                        className={cn(
+                          'ios-touch relative flex min-h-16 w-full items-center gap-3 rounded-lg px-4 py-3 text-left disabled:cursor-not-allowed',
+                          isActive
+                            ? 'bg-muted/90 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.03)]'
+                            : isDone
+                              ? 'text-foreground hover:bg-muted/70'
+                              : 'text-muted-foreground'
+                        )}
+                      >
+                        {isActive && (
+                          <span className="absolute inset-y-3 left-1 w-1 rounded-full bg-primary" />
+                        )}
+                        <div
+                          className={cn(
+                            'grid h-9 w-9 shrink-0 place-items-center rounded-full',
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : isDone
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {isDone ? (
+                            <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} fill="none" />
+                          ) : (
+                            <Icon className="h-4 w-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold">{step.title}</div>
+                          <div className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
+                            {step.description}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </aside>
 
-          <div className="flex gap-2 w-full sm:w-auto order-1 sm:order-2">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="flex-1 sm:flex-none gap-2"
-                  disabled={isSaving || isCompleting}
-                >
-                  <SkipForward className="h-4 w-4" strokeWidth={2} fill="none" />
-                  跳过向导
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>确认跳过配置向导</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    您可以随时在系统设置中重新进入配置向导。确定要跳过吗？
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleSkip}>
-                    确认跳过
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+              <div className="flex min-h-0 min-w-0 flex-col gap-4">
+                {/* 手机 / 窄屏步骤条 */}
+                <div className="lg:hidden">
+                  <div className="ios-group overflow-hidden">
+                    <div className="px-4 py-3">
+                      <div className="mb-2 flex items-center justify-between text-sm">
+                        <span className="font-medium">步骤 {currentStep + 1} / {steps.length}</span>
+                        <span className="font-semibold text-primary">{Math.round(progress)}%</span>
+                      </div>
+                      <Progress value={progress} className="h-1.5" />
+                    </div>
 
-            {currentStep === steps.length - 1 ? (
-              <Button
-                onClick={handleComplete}
-                disabled={isCompleting || isSaving}
-                className="flex-1 sm:flex-none"
-              >
-                {isCompleting || isSaving ? (
-                  <>
-                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    {isSaving ? '保存中...' : '完成中...'}
-                  </>
-                ) : (
-                  <>
-                    完成配置
-                    <CheckCircle2
-                      className="ml-2 h-4 w-4"
-                      strokeWidth={2}
-                      fill="none"
-                    />
-                  </>
-                )}
-              </Button>
-            ) : (
-              <Button
-                onClick={handleNext}
-                disabled={isSaving}
-                className="flex-1 sm:flex-none"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    保存中...
-                  </>
-                ) : (
-                  <>
-                    下一步
-                    <ArrowRight
-                      className="ml-2 h-4 w-4"
-                      strokeWidth={2}
-                      fill="none"
-                    />
-                  </>
-                )}
-              </Button>
-            )}
+                    <Dialog open={stepDialogOpen} onOpenChange={setStepDialogOpen}>
+                      <DialogTrigger asChild>
+                        <button
+                          type="button"
+                          className="ios-row ios-touch min-h-[66px] w-full text-left"
+                        >
+                          <span className="flex min-w-0 items-center gap-3">
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-primary text-primary-foreground shadow-[0_4px_10px_hsl(var(--primary)_/_0.22)]">
+                              <currentStepInfo.icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[16px] font-medium leading-6">
+                                {currentStepInfo.title}
+                              </span>
+                              <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                                {currentStepInfo.description}
+                              </span>
+                            </span>
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                        <DialogHeader className="px-5 pb-1 pt-5">
+                          <DialogTitle>配置步骤</DialogTitle>
+                          <DialogDescription>查看当前向导进度</DialogDescription>
+                        </DialogHeader>
+                        <div className="px-5 pb-5">
+                          <div className="ios-group overflow-hidden">
+                            {steps.map((step, index) => {
+                              const Icon = step.icon
+                              const isActive = index === currentStep
+                              const isDone = index < currentStep
+                              return (
+                                <button
+                                  key={step.id}
+                                  type="button"
+                                  disabled={index > currentStep}
+                                  onClick={() => {
+                                    if (index <= currentStep) {
+                                      setCurrentStep(index)
+                                      setStepDialogOpen(false)
+                                    }
+                                  }}
+                                  className="ios-row min-h-[62px] w-full text-left transition-colors duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent/50 active:bg-accent/70 disabled:opacity-55 focus-visible:outline-none"
+                                >
+                                  <span className="flex min-w-0 items-center gap-3">
+                                    <span
+                                      className={cn(
+                                        'grid h-8 w-8 shrink-0 place-items-center rounded-[9px]',
+                                        isActive
+                                          ? 'bg-primary text-primary-foreground'
+                                          : isDone
+                                            ? 'bg-primary/10 text-primary'
+                                            : 'bg-muted text-muted-foreground'
+                                      )}
+                                    >
+                                      {isDone ? (
+                                        <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} fill="none" />
+                                      ) : (
+                                        <Icon className="h-4 w-4" />
+                                      )}
+                                    </span>
+                                    <span className="min-w-0">
+                                      <span className="block truncate text-[15px] font-medium leading-5">
+                                        {step.title}
+                                      </span>
+                                      <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                                        {step.description}
+                                      </span>
+                                    </span>
+                                  </span>
+                                  {isActive ? (
+                                    <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" strokeWidth={2.5} fill="none" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </div>
+
+                {/* 步骤内容面板 */}
+                <Card className="flex min-h-0 min-w-0 flex-1 overflow-hidden !border-0 !bg-transparent !shadow-none !backdrop-blur-none sm:!border sm:!border-black/[0.035] sm:!bg-white/[0.78] sm:!shadow-[0_1px_1px_rgba(255,255,255,0.74)_inset,0_10px_30px_rgba(31,41,55,0.032),0_1px_2px_rgba(0,0,0,0.024)] sm:!backdrop-blur-2xl dark:sm:!border-white/10 dark:sm:!bg-white/[0.09]">
+                  <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <div className="hidden border-b border-border/60 bg-card/55 px-5 py-5 sm:block sm:px-6">
+                        <h2 className="text-xl font-semibold sm:text-2xl">
+                          {steps[currentStep].title}
+                        </h2>
+                        <p className="mt-1 text-sm leading-relaxed text-muted-foreground sm:text-base">
+                          {steps[currentStep].description}
+                        </p>
+                      </div>
+
+                      {/* 表单内容 */}
+                      <ScrollArea className="min-h-0 min-w-0 flex-1">
+                        <div className="min-w-0 p-4 pb-28 sm:p-6">
+                          {renderStepForm()}
+                        </div>
+                      </ScrollArea>
+                    </div>
+
+                    {/* 操作按钮 */}
+                    <div className="ios-bottom-bar flex shrink-0 items-center justify-between gap-2 p-3">
+                      <Button
+                        variant="outline"
+                        onClick={handlePrevious}
+                        disabled={currentStep === 0 || isSaving}
+                        className="h-12 w-20 shrink-0 px-3 text-sm sm:w-auto sm:px-5 sm:text-base"
+                      >
+                        上一步
+                      </Button>
+
+                      <div className="flex min-w-0 flex-1 justify-end gap-2">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              className="h-12 w-12 shrink-0 gap-2 px-0 sm:w-auto sm:px-5"
+                              disabled={isSaving || isCompleting}
+                              aria-label="跳过向导"
+                              title="跳过向导"
+                            >
+                              <SkipForward className="h-4 w-4" strokeWidth={2} fill="none" />
+                              <span className="hidden sm:inline">跳过向导</span>
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>确认跳过配置向导</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                您可以随时在系统设置中重新进入配置向导。确定要跳过吗？
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>取消</AlertDialogCancel>
+                              <AlertDialogAction onClick={handleSkip}>
+                                确认跳过
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+
+                        {currentStep === steps.length - 1 ? (
+                          <Button
+                            onClick={handleComplete}
+                            disabled={isCompleting || isSaving}
+                            className="h-12 min-w-0 flex-1 px-3 text-sm sm:flex-none sm:px-8 sm:text-base"
+                          >
+                            {isCompleting || isSaving ? (
+                              <>
+                                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                {isSaving ? '保存中...' : '完成中...'}
+                              </>
+                            ) : (
+                              <>
+                                完成配置
+                                <CheckCircle2
+                                  className="ml-2 h-4 w-4"
+                                  strokeWidth={2}
+                                  fill="none"
+                                />
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            onClick={handleNext}
+                            disabled={isSaving}
+                            className="h-12 min-w-0 flex-1 px-3 text-sm sm:flex-none sm:px-8 sm:text-base"
+                          >
+                            {isSaving ? (
+                              <>
+                                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                保存中...
+                              </>
+                            ) : (
+                              <>
+                                下一步
+                                <ArrowRight
+                                  className="ml-2 h-4 w-4"
+                                  strokeWidth={2}
+                                  fill="none"
+                                />
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* 页脚提示 */}
-      <div className="relative z-10 mt-6 md:mt-8 text-center text-xs text-muted-foreground">
-        <p>您可以随时在设置中修改这些配置</p>
-      </div>
         </>
       )}
     </div>

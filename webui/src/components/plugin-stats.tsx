@@ -30,6 +30,9 @@ interface PluginStatsProps {
   compact?: boolean // 紧凑模式（只显示数字）
 }
 
+const starActiveClass = 'fill-[rgb(255_204_0)] text-[rgb(255_204_0)]'
+const starInactiveClass = 'text-muted-foreground/35 hover:text-[rgb(255_204_0)]'
+
 export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
   const [stats, setStats] = useState<PluginStatsData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -136,12 +139,18 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
   if (compact) {
     return (
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
-        <div className="flex items-center gap-1" title={`下载量: ${stats.downloads.toLocaleString()}`}>
+        <div
+          className="flex items-center gap-1"
+          title={`下载量: ${stats.downloads.toLocaleString()}`}
+        >
           <Download className="h-4 w-4" />
           <span>{stats.downloads.toLocaleString()}</span>
         </div>
-        <div className="flex items-center gap-1" title={`评分: ${stats.rating.toFixed(1)} (${stats.rating_count} 条评价)`}>
-          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+        <div
+          className="flex items-center gap-1"
+          title={`评分: ${stats.rating.toFixed(1)} (${stats.rating_count} 条评价)`}
+        >
+          <Star className={`h-4 w-4 ${starActiveClass}`} />
           <span>{stats.rating.toFixed(1)}</span>
         </div>
         <div className="flex items-center gap-1" title={`点赞数: ${stats.likes}`}>
@@ -156,52 +165,91 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
   return (
     <div className="space-y-4">
       {/* 统计数字 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <Download className="h-5 w-5 text-muted-foreground mb-1" />
-          <span className="text-2xl font-bold">{stats.downloads.toLocaleString()}</span>
-          <span className="text-xs text-muted-foreground">下载量</span>
+      <div className="ios-group overflow-hidden">
+        <div className="ios-row min-h-[58px]">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+              <Download className="h-4 w-4" />
+            </span>
+            <span className="text-[15px] font-medium leading-5">下载量</span>
+          </span>
+          <span className="text-[16px] font-semibold tabular-nums leading-5">
+            {stats.downloads.toLocaleString()}
+          </span>
         </div>
-
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <Star className="h-5 w-5 text-yellow-400 mb-1 fill-yellow-400" />
-          <span className="text-2xl font-bold">{stats.rating.toFixed(1)}</span>
-          <span className="text-xs text-muted-foreground">{stats.rating_count} 条评价</span>
+        <div className="ios-row min-h-[58px]">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-yellow">
+              <Star className="h-4 w-4 fill-white" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium leading-5">评分</span>
+              <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                {stats.rating_count} 条评价
+              </span>
+            </span>
+          </span>
+          <span className="text-[16px] font-semibold tabular-nums leading-5">
+            {stats.rating.toFixed(1)}
+          </span>
         </div>
-
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <ThumbsUp className="h-5 w-5 text-green-500 mb-1" />
-          <span className="text-2xl font-bold">{stats.likes}</span>
-          <span className="text-xs text-muted-foreground">点赞</span>
+        <div className="ios-row min-h-[58px]">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+              <ThumbsUp className="h-4 w-4" />
+            </span>
+            <span className="text-[15px] font-medium leading-5">点赞</span>
+          </span>
+          <span className="text-[16px] font-semibold tabular-nums leading-5">{stats.likes}</span>
         </div>
-
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <ThumbsDown className="h-5 w-5 text-red-500 mb-1" />
-          <span className="text-2xl font-bold">{stats.dislikes}</span>
-          <span className="text-xs text-muted-foreground">点踩</span>
+        <div className="ios-row min-h-[58px]">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-red">
+              <ThumbsDown className="h-4 w-4" />
+            </span>
+            <span className="text-[15px] font-medium leading-5">点踩</span>
+          </span>
+          <span className="text-[16px] font-semibold tabular-nums leading-5">{stats.dislikes}</span>
         </div>
       </div>
 
       {/* 操作按钮 */}
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={handleLike}>
-          <ThumbsUp className="h-4 w-4 mr-1" />
-          点赞
-        </Button>
-
-        <Button variant="outline" size="sm" onClick={handleDislike}>
-          <ThumbsDown className="h-4 w-4 mr-1" />
-          点踩
-        </Button>
-
+      <div className="ios-group overflow-hidden">
+        <button type="button" className="ios-row ios-touch w-full text-left" onClick={handleLike}>
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+              <ThumbsUp className="h-4 w-4" />
+            </span>
+            <span className="text-[15px] font-medium leading-5">点赞</span>
+          </span>
+          <span className="text-[15px] leading-5 text-muted-foreground">发送</span>
+        </button>
+        <button
+          type="button"
+          className="ios-row ios-touch w-full text-left"
+          onClick={handleDislike}
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="ios-symbol ios-symbol-sm ios-symbol-red">
+              <ThumbsDown className="h-4 w-4" />
+            </span>
+            <span className="text-[15px] font-medium leading-5">反馈</span>
+          </span>
+          <span className="text-[15px] leading-5 text-muted-foreground">发送</span>
+        </button>
         <Dialog open={isRatingDialogOpen} onOpenChange={setIsRatingDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="default" size="sm">
-              <Star className="h-4 w-4 mr-1" />
-              评分
-            </Button>
+            <button type="button" className="ios-row ios-touch w-full text-left">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-yellow">
+                  <Star className="h-4 w-4 fill-white" />
+                </span>
+                <span className="text-[15px] font-medium leading-5">评分</span>
+              </span>
+              <span className="text-[15px] leading-5 text-primary">评价</span>
+            </button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="ios-sheet">
             <DialogHeader>
               <DialogTitle>为插件评分</DialogTitle>
               <DialogDescription>分享你的使用体验，帮助其他用户</DialogDescription>
@@ -219,9 +267,7 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
                     >
                       <Star
                         className={`h-8 w-8 transition-colors ${
-                          star <= userRating
-                            ? 'fill-yellow-400 text-yellow-400'
-                            : 'text-muted-foreground hover:text-yellow-300'
+                          star <= userRating ? starActiveClass : starInactiveClass
                         }`}
                       />
                     </button>
@@ -239,7 +285,7 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
 
               {/* 评论 */}
               <div>
-                <label className="text-sm font-medium mb-2 block">评论（可选）</label>
+                <label className="mb-2 block text-sm font-medium">评论（可选）</label>
                 <Textarea
                   value={userComment}
                   onChange={(e) => setUserComment(e.target.value)}
@@ -247,7 +293,7 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
                   rows={4}
                   maxLength={500}
                 />
-                <div className="text-xs text-muted-foreground mt-1 text-right">
+                <div className="mt-1 text-right text-xs text-muted-foreground">
                   {userComment.length} / 500
                 </div>
               </div>
@@ -268,30 +314,30 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
       {/* 最近评价 */}
       {stats.recent_ratings && stats.recent_ratings.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold">最近评价</h4>
-          <div className="space-y-3">
+          <h4 className="px-1 text-[13px] font-medium leading-5 text-muted-foreground">最近评价</h4>
+          <div className="ios-group overflow-hidden">
             {stats.recent_ratings.map((rating, index) => (
-              <div key={index} className="p-3 rounded-lg border bg-muted/50">
-                <div className="flex items-center justify-between mb-2">
+              <div key={index} className="ios-row min-h-[74px] items-start">
+                <div className="min-w-0 flex-1">
                   <div className="flex gap-1">
                     {[1, 2, 3, 4, 5].map((star) => (
                       <Star
                         key={star}
                         className={`h-3 w-3 ${
-                          star <= rating.rating
-                            ? 'fill-yellow-400 text-yellow-400'
-                            : 'text-muted-foreground'
+                          star <= rating.rating ? starActiveClass : 'text-muted-foreground/35'
                         }`}
                       />
                     ))}
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(rating.created_at).toLocaleDateString()}
-                  </span>
+                  {rating.comment && (
+                    <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">
+                      {rating.comment}
+                    </p>
+                  )}
                 </div>
-                {rating.comment && (
-                  <p className="text-sm text-muted-foreground">{rating.comment}</p>
-                )}
+                <span className="shrink-0 text-[12px] leading-5 text-muted-foreground">
+                  {new Date(rating.created_at).toLocaleDateString()}
+                </span>
               </div>
             ))}
           </div>

@@ -24,11 +24,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Eye, FileSearch } from 'lucide-react'
 import type {
@@ -51,12 +47,12 @@ interface ProcessingSectionProps {
 }
 
 // 正则表达式编辑器（构建器+测试器合并）
-function RegexEditor({ 
-  regex, 
+function RegexEditor({
+  regex,
   reaction,
   onRegexChange,
   onReactionChange,
-}: { 
+}: {
   regex: string
   reaction: string
   onRegexChange: (value: string) => void
@@ -84,9 +80,9 @@ function RegexEditor({
     const start = input.selectionStart || 0
     const end = input.selectionEnd || 0
     const newValue = regex.substring(0, start) + text + regex.substring(end)
-    
+
     onRegexChange(newValue)
-    
+
     setTimeout(() => {
       const newPosition = start + text.length + moveCursor
       input.setSelectionRange(newPosition, newPosition)
@@ -113,10 +109,10 @@ function RegexEditor({
 
       const execRegex = new RegExp(jsRegex)
       const execResult = execRegex.exec(testText)
-      
+
       if (execResult && execResult.groups) {
         setCaptureGroups(execResult.groups)
-        
+
         let replaced = reaction
         Object.entries(execResult.groups).forEach(([key, value]) => {
           replaced = replaced.replace(new RegExp(`\\[${key}\\]`, 'g'), value || '')
@@ -150,14 +146,15 @@ function RegexEditor({
       while ((match = regexObj.exec(testText)) !== null) {
         if (match.index > lastIndex) {
           parts.push(
-            <span key={`text-${lastIndex}`}>
-              {testText.substring(lastIndex, match.index)}
-            </span>
+            <span key={`text-${lastIndex}`}>{testText.substring(lastIndex, match.index)}</span>
           )
         }
 
         parts.push(
-          <span key={`match-${match.index}`} className="bg-yellow-200 dark:bg-yellow-900 font-semibold">
+          <span
+            key={`match-${match.index}`}
+            className="rounded-[5px] bg-[rgb(255_204_0_/_0.2)] px-0.5 font-semibold text-[rgb(143_96_0)] dark:text-[rgb(255_214_10)]"
+          >
             {match[0]}
           </span>
         )
@@ -166,11 +163,7 @@ function RegexEditor({
       }
 
       if (lastIndex < testText.length) {
-        parts.push(
-          <span key={`text-${lastIndex}`}>
-            {testText.substring(lastIndex)}
-          </span>
-        )
+        parts.push(<span key={`text-${lastIndex}`}>{testText.substring(lastIndex)}</span>)
       }
 
       return <>{parts}</>
@@ -243,11 +236,11 @@ function RegexEditor({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          <FileSearch className="h-4 w-4 mr-1" />
+          <FileSearch className="mr-1 h-4 w-4" />
           正则编辑器
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-[95vw] sm:max-w-[900px] max-h-[90vh]">
+      <DialogContent className="max-h-[90vh] max-w-[95vw] sm:max-w-[900px]">
         <DialogHeader>
           <DialogTitle>正则表达式编辑器</DialogTitle>
           <DialogDescription className="text-sm">
@@ -256,245 +249,262 @@ function RegexEditor({
         </DialogHeader>
 
         <ScrollArea className="max-h-[calc(90vh-120px)]">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'build' | 'test')} className="w-full">
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as 'build' | 'test')}
+            className="w-full"
+          >
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="build">🔧 构建器</TabsTrigger>
               <TabsTrigger value="test">🧪 测试器</TabsTrigger>
             </TabsList>
 
-          {/* 构建器标签页 */}
-          <TabsContent value="build" className="space-y-4 mt-4">
-            {/* 正则表达式编辑 */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">正则表达式</Label>
-              <Input
-                ref={inputRef}
-                value={regex}
-                onChange={(e) => onRegexChange(e.target.value)}
-                className="font-mono text-sm"
-                placeholder="点击下方按钮构建正则表达式..."
-              />
-            </div>
+            {/* 构建器标签页 */}
+            <TabsContent value="build" className="mt-4 space-y-4">
+              {/* 正则表达式编辑 */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">正则表达式</Label>
+                <Input
+                  ref={inputRef}
+                  value={regex}
+                  onChange={(e) => onRegexChange(e.target.value)}
+                  className="font-mono text-sm"
+                  placeholder="点击下方按钮构建正则表达式..."
+                />
+              </div>
 
-            {/* Reaction 编辑 */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Reaction 内容</Label>
-              <Textarea
-                value={reaction}
-                onChange={(e) => onReactionChange(e.target.value)}
-                placeholder="使用 [捕获组名] 引用捕获的内容..."
-                rows={3}
-                className="text-sm"
-              />
-            </div>
+              {/* Reaction 编辑 */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Reaction 内容</Label>
+                <Textarea
+                  value={reaction}
+                  onChange={(e) => onReactionChange(e.target.value)}
+                  placeholder="使用 [捕获组名] 引用捕获的内容..."
+                  rows={3}
+                  className="text-sm"
+                />
+              </div>
 
-            {/* 快捷按钮 */}
-            <div className="space-y-4 border-t pt-4">
-              {patterns.map((category) => (
-                <div key={category.category} className="space-y-2">
-                  <h5 className="text-xs font-semibold text-primary">{category.category}</h5>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {category.items.map((item) => (
-                      <Button
-                        key={item.label}
-                        variant="outline"
-                        size="sm"
-                        className="justify-start h-auto py-2 px-3"
-                        onClick={() => insertAtCursor(item.pattern, item.moveCursor || 0)}
-                      >
-                        <div className="flex flex-col items-start w-full">
-                          <div className="flex items-center gap-2 w-full">
-                            <span className="text-xs font-medium">{item.label}</span>
-                            <code className="ml-auto text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                              {item.pattern}
-                            </code>
+              {/* 快捷按钮 */}
+              <div className="space-y-4 border-t pt-4">
+                {patterns.map((category) => (
+                  <div key={category.category} className="space-y-2">
+                    <h5 className="text-xs font-semibold text-primary">{category.category}</h5>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {category.items.map((item) => (
+                        <Button
+                          key={item.label}
+                          variant="outline"
+                          size="sm"
+                          className="h-auto justify-start px-3 py-2"
+                          onClick={() => insertAtCursor(item.pattern, item.moveCursor || 0)}
+                        >
+                          <div className="flex w-full flex-col items-start">
+                            <div className="flex w-full items-center gap-2">
+                              <span className="text-xs font-medium">{item.label}</span>
+                              <code className="ml-auto rounded-[6px] bg-muted/60 px-1.5 py-0.5 font-mono text-xs">
+                                {item.pattern}
+                              </code>
+                            </div>
+                            <span className="mt-0.5 text-xs text-muted-foreground">
+                              {item.desc}
+                            </span>
                           </div>
-                          <span className="text-xs text-muted-foreground mt-0.5">
-                            {item.desc}
-                          </span>
-                        </div>
-                      </Button>
-                    ))}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {/* 完整示例 */}
+                <div className="space-y-2 border-t pt-4">
+                  <h5 className="text-xs font-semibold text-primary">完整示例模板</h5>
+                  <div className="space-y-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-auto w-full justify-start px-3 py-2"
+                      onClick={() => onRegexChange('^(?P<n>\\S{1,20})是这样的$')}
+                    >
+                      <div className="flex w-full flex-col items-start">
+                        <code className="w-full overflow-x-auto rounded-[8px] bg-muted/60 px-2 py-1 font-mono text-xs">
+                          ^(?P&lt;n&gt;\S{'{1,20}'})是这样的$
+                        </code>
+                        <span className="mt-1 text-xs text-muted-foreground">
+                          匹配「某事物是这样的」并捕获事物名称
+                        </span>
+                      </div>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-auto w-full justify-start px-3 py-2"
+                      onClick={() =>
+                        onRegexChange(
+                          '(?:[^，。.\\s]+，\\s*)?我(?:也)?[没沒]要求你\\s*(?P<action>.+?)[.。,，]?$'
+                        )
+                      }
+                    >
+                      <div className="flex w-full flex-col items-start">
+                        <code className="w-full overflow-x-auto rounded-[8px] bg-muted/60 px-2 py-1 font-mono text-xs">
+                          (?:[^，。.\s]+，\s*)?我(?:也)?[没沒]要求你\s*(?P&lt;action&gt;.+?)[.。,，]?$
+                        </code>
+                        <span className="mt-1 text-xs text-muted-foreground">
+                          匹配「我没要求你做某事」并捕获具体行为
+                        </span>
+                      </div>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-auto w-full justify-start px-3 py-2"
+                      onClick={() => onRegexChange('(?P<subject>.+?)(?:是|为什么|怎么)')}
+                    >
+                      <div className="flex w-full flex-col items-start">
+                        <code className="w-full overflow-x-auto rounded-[8px] bg-muted/60 px-2 py-1 font-mono text-xs">
+                          (?P&lt;subject&gt;.+?)(?:是|为什么|怎么)
+                        </code>
+                        <span className="mt-1 text-xs text-muted-foreground">捕获问题主题词</span>
+                      </div>
+                    </Button>
                   </div>
                 </div>
-              ))}
+              </div>
 
-              {/* 完整示例 */}
-              <div className="space-y-2 border-t pt-4">
-                <h5 className="text-xs font-semibold text-primary">完整示例模板</h5>
-                <div className="space-y-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start h-auto py-2 px-3"
-                    onClick={() => onRegexChange('^(?P<n>\\S{1,20})是这样的$')}
-                  >
-                    <div className="flex flex-col items-start w-full">
-                      <code className="text-xs font-mono bg-muted px-2 py-1 rounded w-full overflow-x-auto">
-                        ^(?P&lt;n&gt;\S{'{1,20}'})是这样的$
-                      </code>
-                      <span className="text-xs text-muted-foreground mt-1">
-                        匹配「某事物是这样的」并捕获事物名称
-                      </span>
-                    </div>
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start h-auto py-2 px-3"
-                    onClick={() => onRegexChange('(?:[^，。.\\s]+，\\s*)?我(?:也)?[没沒]要求你\\s*(?P<action>.+?)[.。,，]?$')}
-                  >
-                    <div className="flex flex-col items-start w-full">
-                      <code className="text-xs font-mono bg-muted px-2 py-1 rounded w-full overflow-x-auto">
-                        (?:[^，。.\s]+，\s*)?我(?:也)?[没沒]要求你\s*(?P&lt;action&gt;.+?)[.。,，]?$
-                      </code>
-                      <span className="text-xs text-muted-foreground mt-1">
-                        匹配「我没要求你做某事」并捕获具体行为
-                      </span>
-                    </div>
-                  </Button>
+              {/* 帮助信息 */}
+              <div className="ios-group p-4">
+                <p className="text-xs font-semibold text-foreground">使用提示</p>
+                <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-muted-foreground">
+                  <li>点击输入框设置光标位置，然后点击按钮插入模式</li>
+                  <li>
+                    命名捕获组格式：
+                    <code className="rounded-[6px] bg-muted px-1.5 py-0.5 text-foreground">
+                      (?P&lt;名称&gt;模式)
+                    </code>
+                  </li>
+                  <li>
+                    在 reaction 中使用
+                    <code className="rounded-[6px] bg-muted px-1.5 py-0.5 text-foreground">
+                      [名称]
+                    </code>
+                    引用捕获的内容
+                  </li>
+                  <li>切换到测试器标签页验证正则表达式效果</li>
+                </ul>
+              </div>
+            </TabsContent>
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start h-auto py-2 px-3"
-                    onClick={() => onRegexChange('(?P<subject>.+?)(?:是|为什么|怎么)')}
-                  >
-                    <div className="flex flex-col items-start w-full">
-                      <code className="text-xs font-mono bg-muted px-2 py-1 rounded w-full overflow-x-auto">
-                        (?P&lt;subject&gt;.+?)(?:是|为什么|怎么)
-                      </code>
-                      <span className="text-xs text-muted-foreground mt-1">
-                        捕获问题主题词
-                      </span>
-                    </div>
-                  </Button>
+            {/* 测试器标签页 */}
+            <TabsContent value="test" className="mt-4 space-y-4">
+              {/* 当前正则显示 */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">当前正则表达式</Label>
+                <div className="break-all rounded-[14px] bg-muted/35 p-3 font-mono text-xs">
+                  {regex || '(未设置)'}
                 </div>
               </div>
-            </div>
 
-            {/* 帮助信息 */}
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 space-y-1">
-              <p className="text-xs font-medium text-blue-900 dark:text-blue-100">💡 使用提示</p>
-              <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                <li>点击输入框设置光标位置，然后点击按钮插入模式</li>
-                <li>命名捕获组格式：<code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">(?P&lt;名称&gt;模式)</code></li>
-                <li>在 reaction 中使用 <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">[名称]</code> 引用捕获的内容</li>
-                <li>切换到测试器标签页验证正则表达式效果</li>
-              </ul>
-            </div>
-          </TabsContent>
-
-          {/* 测试器标签页 */}
-          <TabsContent value="test" className="space-y-4 mt-4">
-            {/* 当前正则显示 */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">当前正则表达式</Label>
-              <div className="rounded-md bg-muted p-3 font-mono text-xs break-all">
-                {regex || '(未设置)'}
+              {/* 测试文本输入 */}
+              <div className="space-y-2">
+                <Label htmlFor="test-text" className="text-sm font-medium">
+                  测试文本
+                </Label>
+                <Textarea
+                  id="test-text"
+                  value={testText}
+                  onChange={(e) => setTestText(e.target.value)}
+                  placeholder="在此输入要测试的文本...&#10;例如：打游戏是这样的"
+                  className="min-h-[100px] text-sm"
+                />
               </div>
-            </div>
 
-            {/* 测试文本输入 */}
-            <div className="space-y-2">
-              <Label htmlFor="test-text" className="text-sm font-medium">测试文本</Label>
-              <Textarea
-                id="test-text"
-                value={testText}
-                onChange={(e) => setTestText(e.target.value)}
-                placeholder="在此输入要测试的文本...&#10;例如：打游戏是这样的"
-                className="min-h-[100px] text-sm"
-              />
-            </div>
+              {/* 错误提示 */}
+              {error && (
+                <div className="border-destructive/20 bg-destructive/10 rounded-[14px] border p-3">
+                  <p className="text-destructive text-sm font-medium">正则表达式错误</p>
+                  <p className="text-destructive/80 mt-1 text-xs">{error}</p>
+                </div>
+              )}
 
-            {/* 错误提示 */}
-            {error && (
-              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
-                <p className="text-sm text-destructive font-medium">正则表达式错误</p>
-                <p className="text-xs text-destructive/80 mt-1">{error}</p>
-              </div>
-            )}
+              {/* 匹配结果 */}
+              {!error && testText && (
+                <div className="space-y-3">
+                  {/* 匹配状态 */}
+                  <div className="flex items-center gap-2">
+                    {matches && matches.length > 0 ? (
+                      <>
+                        <div className="h-2 w-2 rounded-full bg-[rgb(52_199_89_/_0.8)]"></div>
+                        <span className="text-sm font-medium text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]">
+                          匹配成功 ({matches.length} 处)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="h-2 w-2 rounded-full bg-muted-foreground/35"></div>
+                        <span className="text-sm font-medium text-muted-foreground">无匹配</span>
+                      </>
+                    )}
+                  </div>
 
-            {/* 匹配结果 */}
-            {!error && testText && (
-              <div className="space-y-3">
-                {/* 匹配状态 */}
-                <div className="flex items-center gap-2">
-                  {matches && matches.length > 0 ? (
-                    <>
-                      <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                      <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                        匹配成功 ({matches.length} 处)
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="h-2 w-2 rounded-full bg-gray-400"></div>
-                      <span className="text-sm font-medium text-muted-foreground">
-                        无匹配
-                      </span>
-                    </>
+                  {/* 高亮显示 */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">匹配高亮</Label>
+                    <ScrollArea className="h-40 rounded-[14px] bg-muted/35 p-3">
+                      <div className="break-words text-sm">{renderHighlightedText()}</div>
+                    </ScrollArea>
+                  </div>
+
+                  {/* 捕获组 */}
+                  {Object.keys(captureGroups).length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">命名捕获组</Label>
+                      <ScrollArea className="h-32 rounded-[14px] border border-black/[0.035] bg-muted/35 p-3 dark:border-white/10">
+                        <div className="space-y-2">
+                          {Object.entries(captureGroups).map(([name, value]) => (
+                            <div key={name} className="flex items-start gap-2 text-sm">
+                              <span className="min-w-[80px] font-mono font-semibold text-primary">
+                                [{name}]
+                              </span>
+                              <span className="text-muted-foreground">=</span>
+                              <span className="rounded-[8px] bg-muted/60 px-2 py-0.5 font-mono">
+                                {value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+
+                  {/* 替换预览 */}
+                  {Object.keys(captureGroups).length > 0 && reaction && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Reaction 替换预览</Label>
+                      <ScrollArea className="h-48 rounded-[14px] border border-black/[0.035] bg-muted/35 p-3 dark:border-white/10">
+                        <div className="break-words text-sm">{replacedReaction}</div>
+                      </ScrollArea>
+                      <p className="text-xs text-muted-foreground">
+                        reaction 中的 [name] 已被替换为对应的捕获组值
+                      </p>
+                    </div>
                   )}
                 </div>
+              )}
 
-                {/* 高亮显示 */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">匹配高亮</Label>
-                  <ScrollArea className="h-40 rounded-md bg-muted p-3">
-                    <div className="text-sm break-words">
-                      {renderHighlightedText()}
-                    </div>
-                  </ScrollArea>
-                </div>
-
-                {/* 捕获组 */}
-                {Object.keys(captureGroups).length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">命名捕获组</Label>
-                    <ScrollArea className="h-32 rounded-md border p-3">
-                      <div className="space-y-2">
-                        {Object.entries(captureGroups).map(([name, value]) => (
-                          <div key={name} className="flex items-start gap-2 text-sm">
-                            <span className="font-mono font-semibold text-primary min-w-[80px]">[{name}]</span>
-                            <span className="text-muted-foreground">=</span>
-                            <span className="font-mono bg-muted px-2 py-0.5 rounded">{value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  </div>
-                )}
-
-                {/* 替换预览 */}
-                {Object.keys(captureGroups).length > 0 && reaction && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">Reaction 替换预览</Label>
-                    <ScrollArea className="h-48 rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
-                      <div className="text-sm break-words">
-                        {replacedReaction}
-                      </div>
-                    </ScrollArea>
-                    <p className="text-xs text-muted-foreground">
-                      reaction 中的 [name] 已被替换为对应的捕获组值
-                    </p>
-                  </div>
-                )}
+              {/* 帮助信息 */}
+              <div className="ios-group p-4">
+                <p className="text-xs font-semibold text-foreground">测试说明</p>
+                <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-muted-foreground">
+                  <li>匹配的文本会以黄色背景高亮显示</li>
+                  <li>命名捕获组的值会显示在下方列表中</li>
+                  <li>Reaction 替换预览显示最终生成的反应内容</li>
+                  <li>如需修改正则，切换回构建器标签页</li>
+                </ul>
               </div>
-            )}
-
-            {/* 帮助信息 */}
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 space-y-1">
-              <p className="text-xs font-medium text-blue-900 dark:text-blue-100">💡 测试说明</p>
-              <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                <li>匹配的文本会以黄色背景高亮显示</li>
-                <li>命名捕获组的值会显示在下方列表中</li>
-                <li>Reaction 替换预览显示最终生成的反应内容</li>
-                <li>如需修改正则，切换回构建器标签页</li>
-              </ul>
-            </div>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+          </Tabs>
         </ScrollArea>
       </DialogContent>
     </Dialog>
@@ -516,10 +526,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
   const addRegexRule = () => {
     onKeywordReactionChange({
       ...keywordReactionConfig,
-      regex_rules: [
-        ...keywordReactionConfig.regex_rules,
-        { regex: [''], reaction: '' },
-      ],
+      regex_rules: [...keywordReactionConfig.regex_rules, { regex: [''], reaction: '' }],
     })
   }
 
@@ -532,7 +539,11 @@ export const ProcessingSection = React.memo(function ProcessingSection({
   }
 
   // 更新正则规则
-  const updateRegexRule = (index: number, field: 'regex' | 'reaction', value: string | string[]) => {
+  const updateRegexRule = (
+    index: number,
+    field: 'regex' | 'reaction',
+    value: string | string[]
+  ) => {
     const newRules = [...keywordReactionConfig.regex_rules]
     if (field === 'regex' && typeof value === 'string') {
       newRules[index] = { ...newRules[index], regex: [value] }
@@ -549,10 +560,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
   const addKeywordRule = () => {
     onKeywordReactionChange({
       ...keywordReactionConfig,
-      keyword_rules: [
-        ...keywordReactionConfig.keyword_rules,
-        { keywords: [], reaction: '' },
-      ],
+      keyword_rules: [...keywordReactionConfig.keyword_rules, { keywords: [], reaction: '' }],
     })
   }
 
@@ -565,7 +573,11 @@ export const ProcessingSection = React.memo(function ProcessingSection({
   }
 
   // 更新关键词规则
-  const updateKeywordRule = (index: number, field: 'keywords' | 'reaction', value: string | string[]) => {
+  const updateKeywordRule = (
+    index: number,
+    field: 'keywords' | 'reaction',
+    value: string | string[]
+  ) => {
     const newRules = [...keywordReactionConfig.keyword_rules]
     if (field === 'keywords' && Array.isArray(value)) {
       newRules[index] = { ...newRules[index], keywords: value }
@@ -616,27 +628,23 @@ export const ProcessingSection = React.memo(function ProcessingSection({
 
   // 预览组件
   const RegexRulePreview = ({ rule }: { rule: KeywordRule }) => {
-    const previewText = `{ regex = [${(rule.regex || []).map(r => `"${r}"`).join(', ')}], reaction = "${rule.reaction}" }`
-    
+    const previewText = `{ regex = [${(rule.regex || []).map((r) => `"${r}"`).join(', ')}], reaction = "${rule.reaction}" }`
+
     return (
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm">
-            <Eye className="h-4 w-4 mr-1" />
+            <Eye className="mr-1 h-4 w-4" />
             预览
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[95vw] sm:w-[500px]">
           <div className="space-y-2">
-            <h4 className="font-medium text-sm">配置预览</h4>
-            <ScrollArea className="h-60 rounded-md bg-muted p-3">
-              <pre className="font-mono text-xs break-all">
-                {previewText}
-              </pre>
+            <h4 className="text-sm font-medium">配置预览</h4>
+            <ScrollArea className="h-60 rounded-[14px] bg-muted/35 p-3">
+              <pre className="break-all font-mono text-xs">{previewText}</pre>
             </ScrollArea>
-            <p className="text-xs text-muted-foreground">
-              这是保存到 bot_config.toml 文件中的格式
-            </p>
+            <p className="text-xs text-muted-foreground">这是保存到 bot_config.toml 文件中的格式</p>
           </div>
         </PopoverContent>
       </Popover>
@@ -644,27 +652,23 @@ export const ProcessingSection = React.memo(function ProcessingSection({
   }
 
   const KeywordRulePreview = ({ rule }: { rule: KeywordRule }) => {
-    const previewText = `[[keyword_reaction.keyword_rules]]\nkeywords = [${(rule.keywords || []).map(k => `"${k}"`).join(', ')}]\nreaction = "${rule.reaction}"`
-    
+    const previewText = `[[keyword_reaction.keyword_rules]]\nkeywords = [${(rule.keywords || []).map((k) => `"${k}"`).join(', ')}]\nreaction = "${rule.reaction}"`
+
     return (
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm">
-            <Eye className="h-4 w-4 mr-1" />
+            <Eye className="mr-1 h-4 w-4" />
             预览
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[95vw] sm:w-[500px]">
           <div className="space-y-2">
-            <h4 className="font-medium text-sm">配置预览</h4>
-            <ScrollArea className="h-60 rounded-md bg-muted p-3">
-              <pre className="font-mono text-xs whitespace-pre-wrap break-all">
-                {previewText}
-              </pre>
+            <h4 className="text-sm font-medium">配置预览</h4>
+            <ScrollArea className="h-60 rounded-[14px] bg-muted/35 p-3">
+              <pre className="whitespace-pre-wrap break-all font-mono text-xs">{previewText}</pre>
             </ScrollArea>
-            <p className="text-xs text-muted-foreground">
-              这是保存到 bot_config.toml 文件中的格式
-            </p>
+            <p className="text-xs text-muted-foreground">这是保存到 bot_config.toml 文件中的格式</p>
           </div>
         </PopoverContent>
       </Popover>
@@ -674,12 +678,10 @@ export const ProcessingSection = React.memo(function ProcessingSection({
   return (
     <div className="space-y-6">
       {/* 关键词反应配置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+      <div className="ios-group space-y-6 p-4 sm:p-6">
         <div>
-          <h3 className="text-lg font-semibold mb-2">关键词反应配置</h3>
-          <p className="text-sm text-muted-foreground">
-            配置触发特定反应的关键词和正则表达式规则
-          </p>
+          <h3 className="mb-2 text-lg font-semibold">关键词反应配置</h3>
+          <p className="text-sm text-muted-foreground">配置触发特定反应的关键词和正则表达式规则</p>
         </div>
 
         {/* 正则规则 */}
@@ -687,19 +689,20 @@ export const ProcessingSection = React.memo(function ProcessingSection({
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-base font-semibold">正则表达式规则</h4>
-              <p className="text-xs text-muted-foreground mt-1">
-                使用正则表达式匹配消息内容
-              </p>
+              <p className="mt-1 text-xs text-muted-foreground">使用正则表达式匹配消息内容</p>
             </div>
             <Button onClick={addRegexRule} size="sm" variant="outline">
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               添加正则规则
             </Button>
           </div>
 
           <div className="space-y-3">
             {keywordReactionConfig.regex_rules.map((rule, index) => (
-              <div key={index} className="rounded-lg border p-4 space-y-3">
+              <div
+                key={index}
+                className="space-y-3 rounded-[16px] border border-border/45 bg-muted/35 p-4"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">正则规则 {index + 1}</span>
                   <div className="flex items-center gap-2">
@@ -744,7 +747,8 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                       className="font-mono text-sm"
                     />
                     <p className="text-xs text-muted-foreground">
-                      支持命名捕获组 (?P&lt;name&gt;pattern)，可在 reaction 中使用 [name] 引用。点击"正则编辑器"可视化构建和测试！
+                      支持命名捕获组 (?P&lt;name&gt;pattern)，可在 reaction 中使用 [name]
+                      引用。点击"正则编辑器"可视化构建和测试！
                     </p>
                   </div>
 
@@ -753,7 +757,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                     <Textarea
                       value={rule.reaction}
                       onChange={(e) => updateRegexRule(index, 'reaction', e.target.value)}
-                      placeholder="触发后璃夜的反应...&#10;可以使用 [捕获组名] 来引用正则表达式中的内容"
+                      placeholder="触发后当前实例的反应...&#10;可以使用 [捕获组名] 来引用正则表达式中的内容"
                       rows={3}
                       className="text-sm"
                     />
@@ -766,8 +770,20 @@ export const ProcessingSection = React.memo(function ProcessingSection({
             ))}
 
             {keywordReactionConfig.regex_rules.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                暂无正则规则，点击"添加正则规则"开始配置
+              <div className="ios-empty-state min-h-[180px] rounded-[18px] border border-dashed border-border/55 bg-muted/25 py-8">
+                <span className="ios-empty-illustration text-primary">
+                  <FileSearch className="h-8 w-8" />
+                </span>
+                <div className="space-y-1">
+                  <p className="text-[15px] font-semibold text-foreground">暂无正则规则</p>
+                  <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+                    添加一条正则规则，用于匹配更复杂的消息模式。
+                  </p>
+                </div>
+                <Button onClick={addRegexRule} size="sm" variant="outline">
+                  <Plus className="mr-1 h-4 w-4" />
+                  添加正则规则
+                </Button>
               </div>
             )}
           </div>
@@ -778,19 +794,20 @@ export const ProcessingSection = React.memo(function ProcessingSection({
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-base font-semibold">关键词规则</h4>
-              <p className="text-xs text-muted-foreground mt-1">
-                使用关键词列表匹配消息内容
-              </p>
+              <p className="mt-1 text-xs text-muted-foreground">使用关键词列表匹配消息内容</p>
             </div>
             <Button onClick={addKeywordRule} size="sm" variant="outline">
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               添加关键词规则
             </Button>
           </div>
 
           <div className="space-y-3">
             {keywordReactionConfig.keyword_rules.map((rule, ruleIndex) => (
-              <div key={ruleIndex} className="rounded-lg border p-4 space-y-3">
+              <div
+                key={ruleIndex}
+                className="space-y-3 rounded-[16px] border border-border/45 bg-muted/35 p-4"
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">关键词规则 {ruleIndex + 1}</span>
                   <div className="flex items-center gap-2">
@@ -823,12 +840,8 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                   <div className="grid gap-2">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs font-medium">关键词列表</Label>
-                      <Button
-                        onClick={() => addKeyword(ruleIndex)}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        <Plus className="h-3 w-3 mr-1" />
+                      <Button onClick={() => addKeyword(ruleIndex)} size="sm" variant="ghost">
+                        <Plus className="mr-1 h-3 w-3" />
                         添加关键词
                       </Button>
                     </div>
@@ -838,9 +851,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                         <div key={keywordIndex} className="flex items-center gap-2">
                           <Input
                             value={keyword}
-                            onChange={(e) =>
-                              updateKeyword(ruleIndex, keywordIndex, e.target.value)
-                            }
+                            onChange={(e) => updateKeyword(ruleIndex, keywordIndex, e.target.value)}
                             placeholder="关键词"
                             className="flex-1"
                           />
@@ -855,7 +866,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                       ))}
 
                       {(!rule.keywords || rule.keywords.length === 0) && (
-                        <p className="text-xs text-muted-foreground text-center py-2">
+                        <p className="py-2 text-center text-xs text-muted-foreground">
                           暂无关键词，点击"添加关键词"开始配置
                         </p>
                       )}
@@ -867,7 +878,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                     <Textarea
                       value={rule.reaction}
                       onChange={(e) => updateKeywordRule(ruleIndex, 'reaction', e.target.value)}
-                      placeholder="触发后璃夜的反应..."
+                      placeholder="触发后当前实例的反应..."
                       rows={3}
                       className="text-sm"
                     />
@@ -877,8 +888,20 @@ export const ProcessingSection = React.memo(function ProcessingSection({
             ))}
 
             {keywordReactionConfig.keyword_rules.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                暂无关键词规则，点击"添加关键词规则"开始配置
+              <div className="ios-empty-state min-h-[180px] rounded-[18px] border border-dashed border-border/55 bg-muted/25 py-8">
+                <span className="ios-empty-illustration text-primary">
+                  <FileSearch className="h-8 w-8" />
+                </span>
+                <div className="space-y-1">
+                  <p className="text-[15px] font-semibold text-foreground">暂无关键词规则</p>
+                  <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+                    添加关键词列表，用更直接的条件触发固定反应。
+                  </p>
+                </div>
+                <Button onClick={addKeywordRule} size="sm" variant="outline">
+                  <Plus className="mr-1 h-4 w-4" />
+                  添加关键词规则
+                </Button>
               </div>
             )}
           </div>
@@ -886,9 +909,9 @@ export const ProcessingSection = React.memo(function ProcessingSection({
       </div>
 
       {/* 回复后处理配置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+      <div className="ios-group space-y-6 p-4 sm:p-6">
         <div>
-          <h3 className="text-lg font-semibold mb-4">回复后处理配置</h3>
+          <h3 className="mb-4 text-lg font-semibold">回复后处理配置</h3>
           <div className="flex items-center space-x-2">
             <Switch
               id="enable_response_post_process"
@@ -904,17 +927,15 @@ export const ProcessingSection = React.memo(function ProcessingSection({
               启用回复后处理
             </Label>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            包括错别字生成器和回复分割器
-          </p>
+          <p className="mt-2 text-xs text-muted-foreground">包括错别字生成器和回复分割器</p>
         </div>
 
         {/* 错别字生成器 */}
         {responsePostProcessConfig.enable_response_post_process && (
           <>
-            <div className="border-t pt-6 space-y-4">
+            <div className="space-y-4 border-t pt-6">
               <div>
-                <div className="flex items-center space-x-2 mb-4">
+                <div className="mb-4 flex items-center space-x-2">
                   <Switch
                     id="enable_chinese_typo"
                     checked={chineseTypoConfig.enable}
@@ -926,12 +947,12 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                     中文错别字生成器
                   </Label>
                 </div>
-                <p className="text-xs text-muted-foreground mb-4">
-                  为回复添加随机错别字，让璃夜的回复更自然
+                <p className="mb-4 text-xs text-muted-foreground">
+                  为回复添加随机错别字，让当前实例的回复更自然
                 </p>
 
                 {chineseTypoConfig.enable && (
-                  <div className="grid gap-4 pl-6 border-l-2 border-primary/20">
+                  <div className="grid gap-4 border-l-2 border-primary/20 pl-6">
                     <div className="grid gap-2">
                       <Label htmlFor="error_rate" className="text-xs font-medium">
                         单字替换概率
@@ -1015,9 +1036,9 @@ export const ProcessingSection = React.memo(function ProcessingSection({
             </div>
 
             {/* 回复分割器 */}
-            <div className="border-t pt-6 space-y-4">
+            <div className="space-y-4 border-t pt-6">
               <div>
-                <div className="flex items-center space-x-2 mb-4">
+                <div className="mb-4 flex items-center space-x-2">
                   <Switch
                     id="enable_response_splitter"
                     checked={responseSplitterConfig.enable}
@@ -1025,16 +1046,17 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                       onResponseSplitterChange({ ...responseSplitterConfig, enable: checked })
                     }
                   />
-                  <Label htmlFor="enable_response_splitter" className="cursor-pointer font-semibold">
+                  <Label
+                    htmlFor="enable_response_splitter"
+                    className="cursor-pointer font-semibold"
+                  >
                     回复分割器
                   </Label>
                 </div>
-                <p className="text-xs text-muted-foreground mb-4">
-                  控制回复的长度和句子数量
-                </p>
+                <p className="mb-4 text-xs text-muted-foreground">控制回复的长度和句子数量</p>
 
                 {responseSplitterConfig.enable && (
-                  <div className="grid gap-4 pl-6 border-l-2 border-primary/20">
+                  <div className="grid gap-4 border-l-2 border-primary/20 pl-6">
                     <div className="grid gap-2">
                       <Label htmlFor="max_length" className="text-xs font-medium">
                         最大长度
@@ -1104,7 +1126,7 @@ export const ProcessingSection = React.memo(function ProcessingSection({
                         超出时一次性返回全部
                       </Label>
                     </div>
-                    <p className="text-xs text-muted-foreground -mt-2">
+                    <p className="-mt-2 text-xs text-muted-foreground">
                       当句子数量超出限制时，合并后一次性返回所有内容
                     </p>
                   </div>

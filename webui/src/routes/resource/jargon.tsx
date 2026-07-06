@@ -1,4 +1,21 @@
-import { Hash, Search, Edit, Trash2, Eye, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Check, X, HelpCircle, Globe, MessageCircle } from 'lucide-react'
+import {
+  Hash,
+  Search,
+  Edit,
+  Trash2,
+  Eye,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Check,
+  X,
+  HelpCircle,
+  Globe,
+  MessageCircle,
+  SlidersHorizontal,
+} from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
@@ -9,14 +26,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   Dialog,
   DialogContent,
@@ -44,8 +53,35 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
-import type { Jargon, JargonCreateRequest, JargonUpdateRequest, JargonChatInfo, JargonStats } from '@/types/jargon'
-import { getJargonList, getJargonDetail, createJargon, updateJargon, deleteJargon, batchDeleteJargons, getJargonStats, getJargonChatList, batchSetJargonStatus } from '@/lib/jargon-api'
+import { IosListSkeleton } from '@/components/ui/skeleton'
+import type {
+  Jargon,
+  JargonCreateRequest,
+  JargonUpdateRequest,
+  JargonChatInfo,
+  JargonStats,
+} from '@/types/jargon'
+import {
+  getJargonList,
+  getJargonDetail,
+  createJargon,
+  updateJargon,
+  deleteJargon,
+  batchDeleteJargons,
+  getJargonStats,
+  getJargonChatList,
+  batchSetJargonStatus,
+} from '@/lib/jargon-api'
+
+const JARGON_STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态', description: '不限判定状态' },
+  { value: 'true', label: '是黑话', description: '只看已确认黑话' },
+  { value: 'false', label: '非黑话', description: '只看确认非黑话' },
+  { value: 'null', label: '未判定', description: '只看待判定词条' },
+] as const
+
+const softGreenBadgeClass =
+  'border-0 bg-[rgb(52_199_89_/_0.13)] text-[rgb(36_138_61)] shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:text-[rgb(48_209_88)]'
 
 export function JargonManagementPage() {
   const [jargons, setJargons] = useState<Jargon[]>([])
@@ -86,7 +122,14 @@ export function JargonManagementPage() {
         page_size: pageSize,
         search: search || undefined,
         chat_id: filterChatId === 'all' ? undefined : filterChatId,
-        is_jargon: filterIsJargon === 'all' ? undefined : filterIsJargon === 'true' ? true : filterIsJargon === 'false' ? false : undefined,
+        is_jargon:
+          filterIsJargon === 'all'
+            ? undefined
+            : filterIsJargon === 'true'
+              ? true
+              : filterIsJargon === 'false'
+                ? false
+                : undefined,
       })
       setJargons(response.data)
       setTotal(response.total)
@@ -190,7 +233,7 @@ export function JargonManagementPage() {
     if (selectedIds.size === jargons.length && jargons.length > 0) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(jargons.map(j => j.id)))
+      setSelectedIds(new Set(jargons.map((j) => j.id)))
     }
   }
 
@@ -250,33 +293,97 @@ export function JargonManagementPage() {
       })
     }
   }
+  const jargonStatItems = [
+    {
+      label: '总数量',
+      value: stats.total,
+      detail: '全部词条',
+      Icon: Hash,
+      symbolClassName: 'ios-symbol-pink',
+    },
+    {
+      label: '已确认黑话',
+      value: stats.confirmed_jargon,
+      detail: '可用词条',
+      Icon: Check,
+      symbolClassName: 'ios-symbol-green',
+    },
+    {
+      label: '确认非黑话',
+      value: stats.confirmed_not_jargon,
+      detail: '已排除',
+      Icon: X,
+      symbolClassName: 'ios-symbol-gray',
+    },
+    {
+      label: '待判定',
+      value: stats.pending,
+      detail: '需要确认',
+      Icon: HelpCircle,
+      symbolClassName: 'ios-symbol-orange',
+    },
+    {
+      label: '全局黑话',
+      value: stats.global_count,
+      detail: '全局生效',
+      Icon: Globe,
+      symbolClassName: 'ios-symbol-purple',
+    },
+    {
+      label: '推断完成',
+      value: stats.complete_count,
+      detail: '已处理',
+      Icon: Check,
+      symbolClassName: 'ios-symbol-blue',
+    },
+    {
+      label: '关联聊天数',
+      value: stats.chat_count,
+      detail: '覆盖范围',
+      Icon: MessageCircle,
+      symbolClassName: 'ios-symbol-teal',
+    },
+  ]
 
   // 渲染黑话状态徽章
   const renderJargonStatus = (isJargon: boolean | null) => {
     if (isJargon === true) {
-      return <Badge variant="default" className="bg-green-600 hover:bg-green-700"><Check className="h-3 w-3 mr-1" />是黑话</Badge>
+      return (
+        <Badge variant="secondary" className={softGreenBadgeClass}>
+          <Check className="mr-1 h-3 w-3" />
+          是黑话
+        </Badge>
+      )
     } else if (isJargon === false) {
-      return <Badge variant="secondary"><X className="h-3 w-3 mr-1" />非黑话</Badge>
+      return (
+        <Badge variant="secondary">
+          <X className="mr-1 h-3 w-3" />
+          非黑话
+        </Badge>
+      )
     } else {
-      return <Badge variant="outline"><HelpCircle className="h-3 w-3 mr-1" />未判定</Badge>
+      return (
+        <Badge variant="outline">
+          <HelpCircle className="mr-1 h-3 w-3" />
+          未判定
+        </Badge>
+      )
     }
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
-              <MessageCircle className="h-8 w-8" strokeWidth={2} />
-              黑话管理
-            </h1>
-            <p className="text-muted-foreground mt-1 text-sm sm:text-base">
-              管理璃夜学习到的黑话和俚语
-            </p>
+            <h1 className="ios-title">黑话管理</h1>
+            <p className="ios-subtitle">管理当前实例学习到的黑话和俚语</p>
           </div>
-          <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+          <Button
+            onClick={() => setIsCreateDialogOpen(true)}
+            className="hidden gap-2 sm:inline-flex"
+          >
             <Plus className="h-4 w-4" />
             新增黑话
           </Button>
@@ -284,88 +391,141 @@ export function JargonManagementPage() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 pr-4">
+        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+          <button
+            type="button"
+            onClick={() => setIsCreateDialogOpen(true)}
+            className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                <Plus className="h-4 w-4" />
+              </span>
+              <span className="block min-w-0 truncate text-[16px] font-normal leading-6">
+                新增黑话
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
 
-          {/* 统计卡片 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">总数量</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1">{stats.total}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">已确认黑话</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-green-600">{stats.confirmed_jargon}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">确认非黑话</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-gray-500">{stats.confirmed_not_jargon}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">待判定</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-yellow-600">{stats.pending}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">全局黑话</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-blue-600">{stats.global_count}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">推断完成</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1 text-purple-600">{stats.complete_count}</div>
-            </div>
-            <div className="rounded-lg border bg-card p-3 sm:p-4">
-              <div className="text-xs sm:text-sm text-muted-foreground">关联聊天数</div>
-              <div className="text-xl sm:text-2xl font-bold mt-1">{stats.chat_count}</div>
-            </div>
+          {/* 统计 */}
+          <div className="ios-stat-grid">
+            {jargonStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
+              <div key={label} className="ios-stat-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                      {label}
+                    </p>
+                    <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                      {detail}
+                    </p>
+                  </div>
+                  <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
+                  {value}
+                </p>
+              </div>
+            ))}
           </div>
 
-          {/* 搜索和筛选 */}
-          <div className="rounded-lg border bg-card p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="search">搜索</Label>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="search"
-                    placeholder="搜索内容、含义..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>聊天筛选</Label>
-                <Select value={filterChatId} onValueChange={setFilterChatId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="全部聊天" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部聊天</SelectItem>
-                    {chatList.map((chat) => (
-                      <SelectItem key={chat.chat_id} value={chat.chat_id}>
-                        {chat.chat_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>状态筛选</Label>
-                <Select value={filterIsJargon} onValueChange={setFilterIsJargon}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="全部状态" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部状态</SelectItem>
-                    <SelectItem value="true">是黑话</SelectItem>
-                    <SelectItem value="false">非黑话</SelectItem>
-                    <SelectItem value="null">未判定</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="page-size">每页显示</Label>
+          <div className="ios-search-field">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="search"
+              placeholder="搜索内容或含义"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value)
+                setPage(1)
+              }}
+              className="ios-search-input"
+            />
+          </div>
+
+          {/* 筛选 */}
+          <div className="ios-group overflow-hidden">
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                  <MessageCircle className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">聊天筛选</span>
+                </span>
+              </span>
+              <Select
+                value={filterChatId}
+                onValueChange={(value) => {
+                  setFilterChatId(value)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="h-auto min-h-0 w-auto max-w-[11rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                  <SelectValue placeholder="全部聊天" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部聊天</SelectItem>
+                  {chatList.map((chat) => (
+                    <SelectItem key={chat.chat_id} value={chat.chat_id}>
+                      {chat.chat_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-pink">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">状态筛选</span>
+                </span>
+              </span>
+              <Select
+                value={filterIsJargon}
+                onValueChange={(value) => {
+                  setFilterIsJargon(value)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="h-auto min-h-0 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                  <SelectValue placeholder="全部状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  {JARGON_STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div
+              className={cn(
+                'ios-row min-h-[64px]',
+                selectedIds.size > 0 &&
+                  'flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between'
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">显示设置</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    已选 {selectedIds.size}
+                  </span>
+                </span>
+              </span>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                 <Select
                   value={pageSize.toString()}
                   onValueChange={(value) => {
@@ -374,222 +534,248 @@ export function JargonManagementPage() {
                     setSelectedIds(new Set())
                   }}
                 >
-                  <SelectTrigger id="page-size">
+                  <SelectTrigger
+                    id="page-size"
+                    className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="20">20</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                    <SelectItem value="100">100</SelectItem>
+                    <SelectItem value="10">10 条</SelectItem>
+                    <SelectItem value="20">20 条</SelectItem>
+                    <SelectItem value="50">50 条</SelectItem>
+                    <SelectItem value="100">100 条</SelectItem>
                   </SelectContent>
                 </Select>
+                {selectedIds.size > 0 && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleBatchSetJargon(true)}
+                      className="h-10 rounded-full px-4"
+                    >
+                      <Check className="mr-1 h-4 w-4" />
+                      黑话
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleBatchSetJargon(false)}
+                      className="h-10 rounded-full px-4"
+                    >
+                      <X className="mr-1 h-4 w-4" />
+                      非黑话
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedIds(new Set())}
+                      className="h-10 rounded-full px-4"
+                    >
+                      取消选择
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setIsBatchDeleteDialogOpen(true)}
+                      className="h-10 rounded-full px-4"
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" />
+                      批量删除
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
-
-            {/* 批量操作工具栏 */}
-            {selectedIds.size > 0 && (
-              <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t">
-                <span className="text-sm text-muted-foreground">已选择 {selectedIds.size} 个</span>
-                <Button variant="outline" size="sm" onClick={() => handleBatchSetJargon(true)}>
-                  <Check className="h-4 w-4 mr-1" />
-                  标记为黑话
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleBatchSetJargon(false)}>
-                  <X className="h-4 w-4 mr-1" />
-                  标记为非黑话
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>
-                  取消选择
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => setIsBatchDeleteDialogOpen(true)}>
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  批量删除
-                </Button>
-              </div>
-            )}
           </div>
 
           {/* 黑话列表 */}
-          <div className="rounded-lg border bg-card">
-            {/* 桌面端表格视图 */}
-            <div className="hidden md:block">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <Checkbox
-                        checked={selectedIds.size === jargons.length && jargons.length > 0}
-                        onCheckedChange={toggleSelectAll}
-                      />
-                    </TableHead>
-                    <TableHead>内容</TableHead>
-                    <TableHead>含义</TableHead>
-                    <TableHead>聊天</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead className="text-center">次数</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        加载中...
-                      </TableCell>
-                    </TableRow>
-                  ) : jargons.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        暂无数据
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    jargons.map((jargon) => (
-                      <TableRow key={jargon.id}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedIds.has(jargon.id)}
-                            onCheckedChange={() => toggleSelect(jargon.id)}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium max-w-[200px]">
-                          <div className="flex items-center gap-2">
-                            {jargon.is_global && <span title="全局黑话"><Globe className="h-4 w-4 text-blue-500 flex-shrink-0" /></span>}
-                            <span className="truncate" title={jargon.content}>{jargon.content}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-[200px] truncate" title={jargon.meaning || ''}>
-                          {jargon.meaning || <span className="text-muted-foreground">-</span>}
-                        </TableCell>
-                        <TableCell className="max-w-[150px] truncate" title={jargon.chat_name || jargon.chat_id}>
-                          {jargon.chat_name || jargon.chat_id}
-                        </TableCell>
-                        <TableCell>{renderJargonStatus(jargon.is_jargon)}</TableCell>
-                        <TableCell className="text-center">{jargon.count}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleEdit(jargon)}
-                            >
-                              <Edit className="h-4 w-4 mr-1" />
-                              编辑
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleViewDetail(jargon)}
-                              title="查看详情"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => setDeleteConfirmJargon(jargon)}
-                              className="bg-red-600 hover:bg-red-700 text-white"
-                            >
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              删除
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[13px] font-medium leading-5 text-muted-foreground">黑话列表</p>
+              {jargons.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                >
+                  {selectedIds.size === jargons.length ? '取消全选' : '全选'}
+                </button>
+              )}
             </div>
-
-            {/* 移动端卡片视图 */}
-            <div className="md:hidden space-y-3 p-4">
+            <div className="ios-group overflow-hidden">
               {loading ? (
-                <div className="text-center py-8 text-muted-foreground">加载中...</div>
+                <IosListSkeleton rows={4} />
               ) : jargons.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">暂无数据</div>
+                <div className="ios-empty-state">
+                  <span className="ios-empty-illustration">
+                    <Hash className="relative z-10 h-7 w-7 text-primary" />
+                  </span>
+                  <div>
+                    <p className="text-[16px] font-semibold leading-6 text-foreground">暂无黑话</p>
+                    <p className="mt-1 max-w-sm text-[13px] leading-5">
+                      新增词条后，可以在这里判定状态、管理含义和关联聊天。
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => setIsCreateDialogOpen(true)}
+                    size="sm"
+                    className="h-9 px-4"
+                  >
+                    <Plus className="mr-1 h-4 w-4" />
+                    新增黑话
+                  </Button>
+                </div>
               ) : (
                 jargons.map((jargon) => (
-                  <div key={jargon.id} className="rounded-lg border bg-card p-4 space-y-3">
-                    <div className="flex items-start gap-3">
+                  <div
+                    key={jargon.id}
+                    className="ios-row min-h-[96px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
                       <Checkbox
                         checked={selectedIds.has(jargon.id)}
                         onCheckedChange={() => toggleSelect(jargon.id)}
-                        className="mt-1"
+                        className="mt-2"
                       />
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <div className="flex items-center gap-2">
-                          {jargon.is_global && <Globe className="h-4 w-4 text-blue-500 flex-shrink-0" />}
-                          <h3 className="font-semibold text-sm break-all">{jargon.content}</h3>
-                        </div>
-                        {jargon.meaning && (
-                          <p className="text-sm text-muted-foreground break-all">{jargon.meaning}</p>
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-pink mt-0.5">
+                        {jargon.is_global ? (
+                          <Globe className="h-4 w-4" />
+                        ) : (
+                          <Hash className="h-4 w-4" />
                         )}
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3
+                          className="line-clamp-1 text-[15px] font-semibold leading-5 text-foreground"
+                          title={jargon.content}
+                        >
+                          {jargon.content}
+                        </h3>
+                        <p
+                          className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground"
+                          title={jargon.meaning || ''}
+                        >
+                          {jargon.meaning || '暂无含义'}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
                           {renderJargonStatus(jargon.is_jargon)}
-                          <span className="text-muted-foreground">次数: {jargon.count}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          聊天: {jargon.chat_name || jargon.chat_id}
+                          <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium leading-4 text-muted-foreground">
+                            {jargon.count} 次
+                          </span>
+                          <span
+                            className="max-w-[12rem] truncate rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium leading-4 text-muted-foreground"
+                            title={jargon.chat_name || jargon.chat_id}
+                          >
+                            {jargon.chat_name || jargon.chat_id}
+                          </span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-1 pt-2 border-t">
-                      <Button variant="outline" size="sm" onClick={() => handleEdit(jargon)} className="text-xs px-2 py-1 h-auto">
-                        <Edit className="h-3 w-3 mr-1" />编辑
+
+                    <div className="flex shrink-0 flex-wrap gap-2 pl-14 sm:pl-0">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => handleEdit(jargon)}
+                        className="h-9 rounded-full px-4"
+                      >
+                        <Edit className="mr-1 h-4 w-4" />
+                        编辑
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleViewDetail(jargon)} className="text-xs px-2 py-1 h-auto">
-                        <Eye className="h-3 w-3" />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-full"
+                        onClick={() => handleViewDetail(jargon)}
+                        title="查看详情"
+                      >
+                        <Eye className="h-4 w-4" />
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => setDeleteConfirmJargon(jargon)} className="text-xs px-2 py-1 h-auto text-destructive hover:text-destructive">
-                        <Trash2 className="h-3 w-3 mr-1" />删除
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeleteConfirmJargon(jargon)}
+                        className="text-destructive hover:text-destructive h-9 rounded-full px-4"
+                      >
+                        <Trash2 className="mr-1 h-4 w-4" />
+                        删除
                       </Button>
                     </div>
                   </div>
                 ))
               )}
-            </div>
 
-            {/* 分页 */}
-            {total > 0 && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t">
-                <div className="text-sm text-muted-foreground">
-                  共 {total} 条记录，第 {page} / {Math.ceil(total / pageSize)} 页
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPage(1)} disabled={page === 1} className="hidden sm:flex">
-                    <ChevronsLeft className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage(page - 1)} disabled={page === 1}>
-                    <ChevronLeft className="h-4 w-4 sm:mr-1" />
-                    <span className="hidden sm:inline">上一页</span>
-                  </Button>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      value={jumpToPage}
-                      onChange={(e) => setJumpToPage(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
-                      placeholder={page.toString()}
-                      className="w-16 h-8 text-center"
-                      min={1}
-                      max={Math.ceil(total / pageSize)}
-                    />
-                    <Button variant="outline" size="sm" onClick={handleJumpToPage} disabled={!jumpToPage} className="h-8">
-                      跳转
+              {total > 0 && (
+                <div className="ios-row ios-row-plain min-h-[68px] flex-col !items-stretch !justify-start gap-3 border-t border-border/60 sm:flex-row sm:!items-center sm:!justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    共 {total} 条记录，第 {page} / {Math.ceil(total / pageSize)} 页
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(1)}
+                      disabled={page === 1}
+                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(page - 1)}
+                      disabled={page === 1}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <ChevronLeft className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">上一页</span>
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        value={jumpToPage}
+                        onChange={(e) => setJumpToPage(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
+                        placeholder={page.toString()}
+                        className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                        min={1}
+                        max={Math.ceil(total / pageSize)}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleJumpToPage}
+                        disabled={!jumpToPage}
+                        className="h-9 rounded-full px-3"
+                      >
+                        跳转
+                      </Button>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(page + 1)}
+                      disabled={page >= Math.ceil(total / pageSize)}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <span className="hidden sm:inline">下一页</span>
+                      <ChevronRight className="h-4 w-4 sm:ml-1" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(Math.ceil(total / pageSize))}
+                      disabled={page >= Math.ceil(total / pageSize)}
+                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
                     </Button>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / pageSize)}>
-                    <span className="hidden sm:inline">下一页</span>
-                    <ChevronRight className="h-4 w-4 sm:ml-1" />
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage(Math.ceil(total / pageSize))} disabled={page >= Math.ceil(total / pageSize)} className="hidden sm:flex">
-                    <ChevronsRight className="h-4 w-4" />
-                  </Button>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </ScrollArea>
@@ -658,7 +844,10 @@ export function JargonManagementPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBatchDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleBatchDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               确认删除
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -682,7 +871,7 @@ function JargonDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] grid grid-rows-[auto_1fr_auto] overflow-hidden">
+      <DialogContent className="grid max-h-[80vh] max-w-2xl grid-rows-[auto_1fr_auto] overflow-hidden">
         <DialogHeader>
           <DialogTitle>黑话详情</DialogTitle>
           <DialogDescription>查看黑话的完整信息</DialogDescription>
@@ -694,16 +883,18 @@ function JargonDetailDialog({
               <InfoItem icon={Hash} label="记录ID" value={jargon.id.toString()} mono />
               <InfoItem label="使用次数" value={jargon.count.toString()} />
             </div>
-            
+
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">内容</Label>
-              <div className="text-sm p-2 bg-muted rounded break-all whitespace-pre-wrap">{jargon.content}</div>
+              <div className="whitespace-pre-wrap break-all rounded-[14px] bg-muted/35 p-3 text-sm leading-relaxed">
+                {jargon.content}
+              </div>
             </div>
 
             {jargon.raw_content && (
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">原始内容</Label>
-                <div className="text-sm p-2 bg-muted rounded break-all">
+                <div className="break-all rounded-[14px] bg-muted/35 p-3 text-sm leading-relaxed">
                   {(() => {
                     try {
                       const rawArray = JSON.parse(jargon.raw_content)
@@ -726,12 +917,8 @@ function JargonDetailDialog({
 
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">含义</Label>
-              <div className="text-sm p-2 bg-muted rounded break-all">
-                {jargon.meaning ? (
-                  <MarkdownRenderer content={jargon.meaning} />
-                ) : (
-                  '-'
-                )}
+              <div className="break-all rounded-[14px] bg-muted/35 p-3 text-sm leading-relaxed">
+                {jargon.meaning ? <MarkdownRenderer content={jargon.meaning} /> : '-'}
               </div>
             </div>
 
@@ -740,11 +927,29 @@ function JargonDetailDialog({
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">状态</Label>
                 <div className="flex items-center gap-2">
-                  {jargon.is_jargon === true && <Badge variant="default" className="bg-green-600">是黑话</Badge>}
+                  {jargon.is_jargon === true && (
+                    <Badge variant="secondary" className={softGreenBadgeClass}>
+                      是黑话
+                    </Badge>
+                  )}
                   {jargon.is_jargon === false && <Badge variant="secondary">非黑话</Badge>}
                   {jargon.is_jargon === null && <Badge variant="outline">未判定</Badge>}
-                  {jargon.is_global && <Badge variant="outline" className="border-blue-500 text-blue-500">全局</Badge>}
-                  {jargon.is_complete && <Badge variant="outline" className="border-purple-500 text-purple-500">推断完成</Badge>}
+                  {jargon.is_global && (
+                    <Badge
+                      variant="outline"
+                      className="border-[rgb(0_122_255_/_0.22)] bg-[rgb(0_122_255_/_0.07)] text-[rgb(0_122_255)] dark:border-[rgb(10_132_255_/_0.28)] dark:bg-[rgb(10_132_255_/_0.12)] dark:text-[rgb(10_132_255)]"
+                    >
+                      全局
+                    </Badge>
+                  )}
+                  {jargon.is_complete && (
+                    <Badge
+                      variant="outline"
+                      className="border-[rgb(88_86_214_/_0.22)] bg-[rgb(88_86_214_/_0.07)] text-[rgb(88_86_214)] dark:border-[rgb(94_92_230_/_0.28)] dark:bg-[rgb(94_92_230_/_0.12)] dark:text-[rgb(94_92_230)]"
+                    >
+                      推断完成
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
@@ -752,14 +957,18 @@ function JargonDetailDialog({
             {jargon.inference_with_context && (
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">上下文推断结果</Label>
-                <div className="p-2 bg-muted rounded break-all whitespace-pre-wrap font-mono text-xs max-h-[200px] overflow-y-auto">{jargon.inference_with_context}</div>
+                <div className="max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all rounded-[14px] bg-muted/35 p-3 font-mono text-xs leading-relaxed">
+                  {jargon.inference_with_context}
+                </div>
               </div>
             )}
 
             {jargon.inference_content_only && (
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">纯词条推断结果</Label>
-                <div className="p-2 bg-muted rounded break-all whitespace-pre-wrap font-mono text-xs max-h-[200px] overflow-y-auto">{jargon.inference_content_only}</div>
+                <div className="max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all rounded-[14px] bg-muted/35 p-3 font-mono text-xs leading-relaxed">
+                  {jargon.inference_content_only}
+                </div>
               </div>
             )}
           </div>
@@ -787,7 +996,7 @@ function InfoItem({
 }) {
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+      <Label className="flex items-center gap-1 text-xs text-muted-foreground">
         {Icon && <Icon className="h-3 w-3" />}
         {label}
       </Label>
@@ -851,7 +1060,7 @@ function JargonCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>新增黑话</DialogTitle>
           <DialogDescription>创建新的黑话记录</DialogDescription>
@@ -913,7 +1122,9 @@ function JargonCreateDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
           <Button onClick={handleCreate} disabled={saving}>
             {saving ? '创建中...' : '创建'}
           </Button>
@@ -946,7 +1157,7 @@ function JargonEditDialog({
       setFormData({
         content: jargon.content,
         meaning: jargon.meaning || '',
-        chat_id: jargon.stream_id || jargon.chat_id,  // 使用 stream_id 来匹配 chatList
+        chat_id: jargon.stream_id || jargon.chat_id, // 使用 stream_id 来匹配 chatList
         is_global: jargon.is_global,
         is_jargon: jargon.is_jargon,
       })
@@ -979,7 +1190,7 @@ function JargonEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>编辑黑话</DialogTitle>
           <DialogDescription>修改黑话的信息</DialogDescription>
@@ -1029,8 +1240,12 @@ function JargonEditDialog({
           <div className="space-y-2">
             <Label>黑话状态</Label>
             <Select
-              value={formData.is_jargon === null ? 'null' : formData.is_jargon?.toString() || 'null'}
-              onValueChange={(value) => setFormData({ ...formData, is_jargon: value === 'null' ? null : value === 'true' })}
+              value={
+                formData.is_jargon === null ? 'null' : formData.is_jargon?.toString() || 'null'
+              }
+              onValueChange={(value) =>
+                setFormData({ ...formData, is_jargon: value === 'null' ? null : value === 'true' })
+              }
             >
               <SelectTrigger>
                 <SelectValue />
@@ -1054,7 +1269,9 @@ function JargonEditDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? '保存中...' : '保存'}
           </Button>

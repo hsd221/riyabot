@@ -73,28 +73,28 @@ const indexRoute = createRoute({
   component: IndexPage,
 })
 
-// 配置路由 - 璃夜主程序配置
+// 配置路由 - 主程序配置
 const botConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/bot',
   component: BotConfigPage,
 })
 
-// 配置路由 - 璃夜模型提供商配置
+// 配置路由 - 模型提供商配置
 const modelProviderConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/modelProvider',
   component: ModelProviderConfigPage,
 })
 
-// 配置路由 - 璃夜模型配置
+// 配置路由 - 模型配置
 const modelConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/model',
   component: ModelConfigPage,
 })
 
-// 配置路由 - 璃夜适配器配置
+// 配置路由 - 适配器配置
 const adapterConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/adapter',
@@ -185,7 +185,7 @@ const webuiFeedbackSurveyRoute = createRoute({
   component: WebUIFeedbackSurveyPage,
 })
 
-// 问卷调查路由 - 璃夜体验反馈
+// 问卷调查路由 - 当前 Bot 体验反馈
 const riyabotFeedbackSurveyRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/survey/riyabot-feedback',

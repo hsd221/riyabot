@@ -60,7 +60,7 @@ export const LogSection = React.memo(function LogSection({ config, onChange }: L
   const colorTextOptions = ['none', 'title', 'full']
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+    <div className="ios-group p-4 sm:p-6 space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">日志配置</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

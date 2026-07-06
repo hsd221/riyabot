@@ -140,13 +140,40 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">
 
+function sanitizeToastNode<T extends React.ReactNode>(node: T): T {
+  if (typeof node !== "string") return node
+
+  const value = node.trim()
+
+  if (
+    /Unexpected token|is not valid JSON|Too Many R|Too Many Requests|请求频率过高/i.test(value)
+  ) {
+    return "请求过于频繁，请稍后重试。" as T
+  }
+
+  if (/Failed to fetch|NetworkError|AbortError|Load failed|network/i.test(value)) {
+    return "网络暂时不可用，请稍后重试。" as T
+  }
+
+  if (value.length > 96) {
+    return `${value.slice(0, 96)}...` as T
+  }
+
+  return value as T
+}
+
 function toast({ ...props }: Toast) {
   const id = genId()
 
   const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",
-      toast: { ...props, id },
+      toast: {
+        ...props,
+        title: sanitizeToastNode(props.title),
+        description: sanitizeToastNode(props.description),
+        id,
+      },
     })
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
@@ -154,6 +181,8 @@ function toast({ ...props }: Toast) {
     type: "ADD_TOAST",
     toast: {
       ...props,
+      title: sanitizeToastNode(props.title),
+      description: sanitizeToastNode(props.description),
       id,
       open: true,
       onOpenChange: (open) => {

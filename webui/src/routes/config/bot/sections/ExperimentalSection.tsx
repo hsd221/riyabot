@@ -32,7 +32,7 @@ export const ExperimentalSection = React.memo(function ExperimentalSection({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+    <div className="ios-group p-4 sm:p-6 space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">实验性功能</h3>
         <div className="grid gap-4">

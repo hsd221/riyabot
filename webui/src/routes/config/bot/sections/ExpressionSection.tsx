@@ -21,11 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Plus, Trash2, Eye } from 'lucide-react'
 import type { ExpressionConfig } from '../types'
 
@@ -49,11 +45,11 @@ const ExpressionGroupMemberInput = React.memo(function ExpressionGroupMemberInpu
   // 判断当前成员是否在可选列表中
   const isFromList = availableChatIds.includes(member) || member === '*'
   const [inputMode, setInputMode] = useState(!isFromList)
-  
+
   return (
     <div className="flex gap-2">
       {/* 输入模式切换 */}
-      <div className="flex-1 flex gap-2">
+      <div className="flex flex-1 gap-2">
         {inputMode ? (
           // 手动输入模式
           <>
@@ -104,7 +100,7 @@ const ExpressionGroupMemberInput = React.memo(function ExpressionGroupMemberInpu
           </>
         )}
       </div>
-      
+
       {/* 删除按钮 */}
       <AlertDialog>
         <AlertDialogTrigger asChild>
@@ -162,11 +158,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   }
 
   // 更新学习规则
-  const updateLearningRule = (
-    index: number,
-    field: 0 | 1 | 2 | 3,
-    value: string
-  ) => {
+  const updateLearningRule = (index: number, field: 0 | 1 | 2 | 3, value: string) => {
     const newList = learningList.map((rule) => [...rule] as [string, string, string, string])
     newList[index][field] = value
     onChange({
@@ -178,24 +170,22 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   // 预览组件
   const LearningRulePreview = ({ rule }: { rule: [string, string, string, string] }) => {
     const previewText = `["${rule[0]}", "${rule[1]}", "${rule[2]}", "${rule[3]}"]`
-    
+
     return (
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm">
-            <Eye className="h-4 w-4 mr-1" />
+            <Eye className="mr-1 h-4 w-4" />
             预览
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-80 sm:w-96">
           <div className="space-y-2">
-            <h4 className="font-medium text-sm">配置预览</h4>
-            <div className="rounded-md bg-muted p-3 font-mono text-xs break-all">
+            <h4 className="text-sm font-medium">配置预览</h4>
+            <div className="break-all rounded-[14px] bg-muted/35 p-3 font-mono text-xs">
               {previewText}
             </div>
-            <p className="text-xs text-muted-foreground">
-              这是保存到 bot_config.toml 文件中的格式
-            </p>
+            <p className="text-xs text-muted-foreground">这是保存到 bot_config.toml 文件中的格式</p>
           </div>
         </PopoverContent>
       </Popover>
@@ -274,17 +264,17 @@ export const ExpressionSection = React.memo(function ExpressionSection({
   return (
     <div className="space-y-6">
       {/* 表达学习配置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+      <div className="ios-group space-y-6 p-4 sm:p-6">
         <div>
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold">表达学习配置</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                配置璃夜如何学习和使用表达方式
+              <p className="mt-1 text-sm text-muted-foreground">
+                配置当前实例如何学习和使用表达方式
               </p>
             </div>
             <Button onClick={addLearningRule} size="sm" variant="outline">
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               添加规则
             </Button>
           </div>
@@ -294,15 +284,18 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               // 检查是否已有全局配置（rule[0] === ''）
               const hasGlobalConfig = learningList.some((r, i) => i !== index && r[0] === '')
               const isGlobal = rule[0] === ''
-              
+
               // 解析聊天流 ID（格式：platform:id:type）
               const parts = rule[0].split(':')
               const platform = parts[0] || 'qq'
               const chatId = parts[1] || ''
               const chatType = parts[2] || 'group'
-              
+
               return (
-                <div key={index} className="rounded-lg border p-4 space-y-4">
+                <div
+                  key={index}
+                  className="space-y-4 rounded-[16px] border border-border/45 bg-muted/35 p-4"
+                >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">
                       规则 {index + 1} {isGlobal && '（全局配置）'}
@@ -368,8 +361,8 @@ export const ExpressionSection = React.memo(function ExpressionSection({
 
                     {/* 详细配置选项 - 只在非全局时显示 */}
                     {!isGlobal && (
-                      <div className="grid gap-4 p-3 sm:p-4 rounded-lg bg-muted/50">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid gap-4 rounded-[14px] bg-muted/45 p-3 sm:p-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                           {/* 平台选择 */}
                           <div className="grid gap-2">
                             <Label className="text-xs font-medium">平台</Label>
@@ -395,7 +388,11 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <Input
                               value={chatId}
                               onChange={(e) => {
-                                updateLearningRule(index, 0, `${platform}:${e.target.value}:${chatType}`)
+                                updateLearningRule(
+                                  index,
+                                  0,
+                                  `${platform}:${e.target.value}:${chatType}`
+                                )
                               }}
                               placeholder="输入群 ID"
                               className="font-mono text-sm"
@@ -427,66 +424,66 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                       </div>
                     )}
 
-                  {/* 使用学到的表达 - 改为开关 */}
-                  <div className="grid gap-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-xs font-medium">使用学到的表达</Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          允许璃夜使用从聊天中学到的表达方式
-                        </p>
+                    {/* 使用学到的表达 - 改为开关 */}
+                    <div className="grid gap-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-xs font-medium">使用学到的表达</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            允许当前实例使用从聊天中学到的表达方式
+                          </p>
+                        </div>
+                        <Switch
+                          checked={rule[1] === 'enable'}
+                          onCheckedChange={(checked) =>
+                            updateLearningRule(index, 1, checked ? 'enable' : 'disable')
+                          }
+                        />
                       </div>
-                      <Switch
-                        checked={rule[1] === 'enable'}
-                        onCheckedChange={(checked) =>
-                          updateLearningRule(index, 1, checked ? 'enable' : 'disable')
-                        }
-                      />
                     </div>
-                  </div>
 
-                  {/* 学习表达 - 改为开关 */}
-                  <div className="grid gap-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-xs font-medium">学习表达</Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          允许璃夜从聊天中学习新的表达方式
-                        </p>
+                    {/* 学习表达 - 改为开关 */}
+                    <div className="grid gap-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-xs font-medium">学习表达</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            允许当前实例从聊天中学习新的表达方式
+                          </p>
+                        </div>
+                        <Switch
+                          checked={rule[2] === 'enable'}
+                          onCheckedChange={(checked) =>
+                            updateLearningRule(index, 2, checked ? 'enable' : 'disable')
+                          }
+                        />
                       </div>
-                      <Switch
-                        checked={rule[2] === 'enable'}
-                        onCheckedChange={(checked) =>
-                          updateLearningRule(index, 2, checked ? 'enable' : 'disable')
-                        }
-                      />
                     </div>
-                  </div>
 
-                  {/* 学习黑话 */}
-                  <div className="grid gap-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-xs font-medium">学习黑话</Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          允许璃夜从该聊天流学习 jargon/黑话
-                        </p>
+                    {/* 学习黑话 */}
+                    <div className="grid gap-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-xs font-medium">学习黑话</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            允许当前实例从该聊天流学习 jargon/黑话
+                          </p>
+                        </div>
+                        <Switch
+                          checked={rule[3] === 'enable'}
+                          onCheckedChange={(checked) =>
+                            updateLearningRule(index, 3, checked ? 'enable' : 'disable')
+                          }
+                        />
                       </div>
-                      <Switch
-                        checked={rule[3] === 'enable'}
-                        onCheckedChange={(checked) =>
-                          updateLearningRule(index, 3, checked ? 'enable' : 'disable')
-                        }
-                      />
                     </div>
                   </div>
                 </div>
-              </div>
               )
             })}
 
             {learningList.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="py-8 text-center text-muted-foreground">
                 暂无学习规则，点击"添加规则"开始配置
               </div>
             )}
@@ -495,23 +492,21 @@ export const ExpressionSection = React.memo(function ExpressionSection({
       </div>
 
       {/* 表达优化配置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+      <div className="ios-group space-y-6 p-4 sm:p-6">
         <div>
           <div className="mb-4">
             <div>
               <h3 className="text-lg font-semibold">表达优化配置</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                配置表达方式的自动检查和手动反思
-              </p>
+              <p className="mt-1 text-sm text-muted-foreground">配置表达方式的自动检查和手动反思</p>
             </div>
           </div>
 
           <div className="space-y-4">
-            <div className="rounded-lg border p-4 space-y-4">
+            <div className="space-y-4 rounded-[16px] border border-border/45 bg-muted/35 p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm font-medium">自动表达优化</span>
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     定时抽取表达方式并按评估标准自动检查
                   </p>
                 </div>
@@ -524,8 +519,8 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               </div>
 
               {config.expression_self_reflect && (
-                <div className="grid gap-4 p-3 sm:p-4 rounded-lg bg-muted/50">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid gap-4 rounded-[14px] bg-muted/45 p-3 sm:p-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="grid gap-2">
                       <Label htmlFor="expression_auto_check_interval">自动检查间隔（秒）</Label>
                       <Input
@@ -534,7 +529,10 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                         min="1"
                         value={config.expression_auto_check_interval}
                         onChange={(e) =>
-                          onChange({ ...config, expression_auto_check_interval: parseInt(e.target.value) })
+                          onChange({
+                            ...config,
+                            expression_auto_check_interval: parseInt(e.target.value),
+                          })
                         }
                       />
                     </div>
@@ -547,7 +545,10 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                         min="1"
                         value={config.expression_auto_check_count}
                         onChange={(e) =>
-                          onChange({ ...config, expression_auto_check_count: parseInt(e.target.value) })
+                          onChange({
+                            ...config,
+                            expression_auto_check_count: parseInt(e.target.value),
+                          })
                         }
                       />
                     </div>
@@ -557,7 +558,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     <div className="flex items-center justify-between">
                       <Label>额外评估标准</Label>
                       <Button onClick={addCustomCriteria} size="sm" variant="outline">
-                        <Plus className="h-4 w-4 mr-1" />
+                        <Plus className="mr-1 h-4 w-4" />
                         添加标准
                       </Button>
                     </div>
@@ -585,10 +586,10 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               )}
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/45 bg-muted/35 p-4">
               <div>
                 <span className="text-sm font-medium">只使用已检查表达</span>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="mt-1 text-xs text-muted-foreground">
                   开启后只选择 checked=true 且未拒绝的表达方式
                 </p>
               </div>
@@ -600,30 +601,30 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/45 bg-muted/35 p-4">
               <div>
                 <span className="text-sm font-medium">手动表达反思</span>
-                <p className="text-xs text-muted-foreground mt-1">
-                  璃夜主动向操作员询问表达方式是否合适
+                <p className="mt-1 text-xs text-muted-foreground">
+                  当前实例主动向操作员询问表达方式是否合适
                 </p>
               </div>
-            <Switch
-              checked={config.expression_manual_reflect}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, expression_manual_reflect: checked })
-              }
-            />
+              <Switch
+                checked={config.expression_manual_reflect}
+                onCheckedChange={(checked) =>
+                  onChange({ ...config, expression_manual_reflect: checked })
+                }
+              />
             </div>
           </div>
 
           {config.expression_manual_reflect && (
             <div className="space-y-4">
               {/* 表达反思操作员 ID */}
-              <div className="rounded-lg border p-4 space-y-4">
+              <div className="space-y-4 rounded-[16px] border border-border/45 bg-muted/35 p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">反思操作员</span>
                 </div>
-                
+
                 <div className="space-y-4">
                   {(() => {
                     const operatorId = config.manual_reflect_operator_id || ''
@@ -631,17 +632,20 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     const platform = parts[0] || 'qq'
                     const chatId = parts[1] || ''
                     const chatType = parts[2] || 'private'
-                    
+
                     return (
-                      <div className="grid gap-4 p-3 sm:p-4 rounded-lg bg-muted/50">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid gap-4 rounded-[14px] bg-muted/45 p-3 sm:p-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                           {/* 平台选择 */}
                           <div className="grid gap-2">
                             <Label className="text-xs font-medium">平台</Label>
                             <Select
                               value={platform}
                               onValueChange={(value) => {
-                                onChange({ ...config, manual_reflect_operator_id: `${value}:${chatId}:${chatType}` })
+                                onChange({
+                                  ...config,
+                                  manual_reflect_operator_id: `${value}:${chatId}:${chatType}`,
+                                })
                               }}
                             >
                               <SelectTrigger>
@@ -660,7 +664,10 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <Input
                               value={chatId}
                               onChange={(e) => {
-                                onChange({ ...config, manual_reflect_operator_id: `${platform}:${e.target.value}:${chatType}` })
+                                onChange({
+                                  ...config,
+                                  manual_reflect_operator_id: `${platform}:${e.target.value}:${chatType}`,
+                                })
                               }}
                               placeholder="输入 ID"
                               className="font-mono text-sm"
@@ -673,7 +680,10 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <Select
                               value={chatType}
                               onValueChange={(value) => {
-                                onChange({ ...config, manual_reflect_operator_id: `${platform}:${chatId}:${value}` })
+                                onChange({
+                                  ...config,
+                                  manual_reflect_operator_id: `${platform}:${chatId}:${value}`,
+                                })
                               }}
                             >
                               <SelectTrigger>
@@ -690,7 +700,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                           当前操作员 ID：{config.manual_reflect_operator_id || '（未设置）'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          璃夜会向此操作员询问表达方式是否合适
+                          当前实例会向此操作员询问表达方式是否合适
                         </p>
                       </div>
                     )
@@ -699,11 +709,11 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               </div>
 
               {/* 允许反思的聊天流列表 */}
-              <div className="rounded-lg border p-4 space-y-4">
+              <div className="space-y-4 rounded-[16px] border border-border/45 bg-muted/35 p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-sm font-medium">允许反思的聊天流</span>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       只有在此列表中的聊天流才会提出问题并跟踪。如果列表为空，则所有聊天流都可以进行表达反思
                     </p>
                   </div>
@@ -717,7 +727,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     size="sm"
                     variant="outline"
                   >
-                    <Plus className="h-4 w-4 mr-1" />
+                    <Plus className="mr-1 h-4 w-4" />
                     添加聊天流
                   </Button>
                 </div>
@@ -728,9 +738,12 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                     const platform = parts[0] || 'qq'
                     const id = parts[1] || ''
                     const chatType = parts[2] || 'group'
-                    
+
                     return (
-                      <div key={index} className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
+                      <div
+                        key={index}
+                        className="flex items-center gap-2 rounded-[14px] bg-muted/45 p-3"
+                      >
                         <Select
                           value={platform}
                           onValueChange={(value) => {
@@ -747,7 +760,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <SelectItem value="wx">微信</SelectItem>
                           </SelectContent>
                         </Select>
-                        
+
                         <Input
                           value={id}
                           onChange={(e) => {
@@ -758,7 +771,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                           placeholder="ID"
                           className="flex-1 font-mono text-sm"
                         />
-                        
+
                         <Select
                           value={chatType}
                           onValueChange={(value) => {
@@ -775,7 +788,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                             <SelectItem value="private">私聊</SelectItem>
                           </SelectContent>
                         </Select>
-                        
+
                         <Button
                           onClick={() => {
                             onChange({
@@ -793,7 +806,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
                   })}
 
                   {allowReflect.length === 0 && (
-                    <div className="text-center py-4 text-muted-foreground text-sm">
+                    <div className="py-4 text-center text-sm text-muted-foreground">
                       列表为空，所有聊天流都可以进行表达反思
                     </div>
                   )}
@@ -805,17 +818,17 @@ export const ExpressionSection = React.memo(function ExpressionSection({
       </div>
 
       {/* 表达共享组配置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+      <div className="ios-group space-y-6 p-4 sm:p-6">
         <div>
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold">表达共享组配置</h3>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="mt-1 text-sm text-muted-foreground">
                 配置不同聊天流之间如何共享学到的表达方式
               </p>
             </div>
             <Button onClick={addExpressionGroup} size="sm" variant="outline">
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               添加共享组
             </Button>
           </div>
@@ -823,12 +836,13 @@ export const ExpressionSection = React.memo(function ExpressionSection({
           <div className="space-y-4">
             {expressionGroups.map((group, groupIndex) => {
               // 获取所有已配置的聊天流 ID（用于下拉框选项）
-              const availableChatIds = learningList
-                .map(rule => rule[0])
-                .filter(id => id !== '') // 过滤掉全局配置
-              
+              const availableChatIds = learningList.map((rule) => rule[0]).filter((id) => id !== '') // 过滤掉全局配置
+
               return (
-                <div key={groupIndex} className="rounded-lg border p-4 space-y-3">
+                <div
+                  key={groupIndex}
+                  className="space-y-3 rounded-[16px] border border-border/45 bg-muted/35 p-4"
+                >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">
                       共享组 {groupIndex + 1}
@@ -888,7 +902,7 @@ export const ExpressionSection = React.memo(function ExpressionSection({
             })}
 
             {expressionGroups.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="py-8 text-center text-muted-foreground">
                 暂无共享组，点击"添加共享组"开始配置
               </div>
             )}
@@ -897,26 +911,24 @@ export const ExpressionSection = React.memo(function ExpressionSection({
       </div>
 
       {/* 黑话设置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+      <div className="ios-group space-y-4 p-4 sm:p-6">
         <div>
-          <h3 className="text-lg font-semibold mb-4">黑话设置</h3>
+          <h3 className="mb-4 text-lg font-semibold">黑话设置</h3>
           <div className="flex items-center space-x-2">
             <Switch
               id="all_global_jargon"
               checked={config.all_global_jargon ?? false}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, all_global_jargon: checked })
-              }
+              onCheckedChange={(checked) => onChange({ ...config, all_global_jargon: checked })}
             />
             <Label htmlFor="all_global_jargon" className="cursor-pointer">
               全局黑话模式
             </Label>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
+          <p className="mt-2 text-xs text-muted-foreground">
             开启后，新增的黑话将默认设为全局（所有聊天流共享）。关闭后，已记录的全局黑话不会改变，需要手动删除。
           </p>
 
-          <div className="flex items-center space-x-2 mt-4">
+          <div className="mt-4 flex items-center space-x-2">
             <Switch
               id="enable_jargon_explanation"
               checked={config.enable_jargon_explanation}
@@ -928,11 +940,11 @@ export const ExpressionSection = React.memo(function ExpressionSection({
               回复前解释上下文黑话
             </Label>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
+          <p className="mt-2 text-xs text-muted-foreground">
             关闭可减少一次 LLM 调用，仅影响回复前的黑话匹配与解释
           </p>
 
-          <div className="grid gap-2 mt-4">
+          <div className="mt-4 grid gap-2">
             <Label htmlFor="jargon_mode">黑话解释来源</Label>
             <Select
               value={config.jargon_mode}

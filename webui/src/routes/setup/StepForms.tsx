@@ -10,7 +10,6 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Markdown } from '@/components/ui/markdown'
 import { X, FileText, ShieldCheck } from 'lucide-react'
 import type {
@@ -30,6 +29,9 @@ interface AgreementFormProps {
   onAcceptedPrivacyChange: (checked: boolean) => void
 }
 
+const agreementMarkdownClass =
+  'max-w-none overflow-hidden break-words text-[14px] leading-[1.55] text-foreground dark:prose-invert sm:text-sm [&_*]:max-w-full [&_h1]:!mb-3 [&_h1]:!mt-0 [&_h1]:!break-words [&_h1]:!text-lg [&_h1]:!font-semibold [&_h1]:!leading-tight sm:[&_h1]:!text-xl [&_h2]:!mb-2 [&_h2]:!mt-5 [&_h2]:!break-words [&_h2]:!text-base [&_h3]:!break-words [&_h3]:!text-sm [&_h3]:!font-semibold [&_p]:!my-2.5 [&_p]:!break-words [&_p]:!leading-[1.55] [&_strong]:font-semibold'
+
 export function AgreementForm({
   status,
   acceptedEula,
@@ -46,45 +48,68 @@ export function AgreementForm({
   }
 
   const allConfirmed = status.eula.confirmed && status.privacy.confirmed
+  const readyToContinue = acceptedEula && acceptedPrivacy
 
   return (
-    <div className="space-y-6">
-      {allConfirmed ? (
-        <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
-          <ShieldCheck className="h-4 w-4" />
-          <AlertTitle>协议已确认</AlertTitle>
-          <AlertDescription>
-            当前版本的最终用户许可协议和隐私条款已经确认。
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <Alert>
-          <FileText className="h-4 w-4" />
-          <AlertTitle>需要确认协议</AlertTitle>
-          <AlertDescription>
-            请阅读并同意当前版本的最终用户许可协议和隐私条款后继续。
-          </AlertDescription>
-        </Alert>
-      )}
+    <div className="min-w-0 space-y-4 sm:space-y-6">
+      <div
+        className={
+          readyToContinue
+            ? 'ios-group flex min-w-0 items-start gap-3 border-emerald-200/70 bg-emerald-50/70 px-4 py-3.5 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-100'
+            : 'ios-group flex min-w-0 items-start gap-3 px-4 py-3.5'
+        }
+      >
+        <span
+          className={
+            readyToContinue
+              ? 'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-emerald-500 text-white shadow-[0_4px_10px_rgba(16,185,129,0.22)]'
+              : 'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-[#007AFF] text-white shadow-[0_4px_10px_rgba(0,122,255,0.2)]'
+          }
+        >
+          {readyToContinue ? (
+            <ShieldCheck className="h-4 w-4" />
+          ) : (
+            <FileText className="h-4 w-4" />
+          )}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[15px] font-medium leading-5">
+            {readyToContinue ? '协议已勾选' : '请阅读并确认协议'}
+          </span>
+          <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
+            {readyToContinue
+              ? '点击下一步后会继续当前配置流程。'
+              : allConfirmed
+                ? '系统检测到本机曾确认过此版本，但本次向导仍需要您显式勾选后继续。'
+                : '请阅读并同意当前版本的最终用户许可协议和隐私条款后继续。'}
+          </span>
+        </span>
+      </div>
 
-      <Tabs defaultValue="eula" className="w-full">
+      <Tabs defaultValue="eula" className="min-w-0 w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="eula">许可协议</TabsTrigger>
           <TabsTrigger value="privacy">隐私条款</TabsTrigger>
         </TabsList>
-        <TabsContent value="eula" className="mt-4">
-          <div className="rounded-md border bg-background">
-            <ScrollArea className="h-[320px] p-4">
-              <Markdown className="prose-sm dark:prose-invert max-w-none">
+        <TabsContent value="eula" className="mt-3 sm:mt-4">
+          <div
+            data-setup-panel="agreement-document"
+            className="ios-group min-w-0 overflow-hidden"
+          >
+            <ScrollArea className="h-[clamp(108px,18svh,420px)] min-w-0 p-4 sm:h-[clamp(172px,31svh,420px)] sm:p-6">
+              <Markdown className={agreementMarkdownClass}>
                 {status.eula.content}
               </Markdown>
             </ScrollArea>
           </div>
         </TabsContent>
-        <TabsContent value="privacy" className="mt-4">
-          <div className="rounded-md border bg-background">
-            <ScrollArea className="h-[320px] p-4">
-              <Markdown className="prose-sm dark:prose-invert max-w-none">
+        <TabsContent value="privacy" className="mt-3 sm:mt-4">
+          <div
+            data-setup-panel="agreement-document"
+            className="ios-group min-w-0 overflow-hidden"
+          >
+            <ScrollArea className="h-[clamp(108px,18svh,420px)] min-w-0 p-4 sm:h-[clamp(172px,31svh,420px)] sm:p-6">
+              <Markdown className={agreementMarkdownClass}>
                 {status.privacy.content}
               </Markdown>
             </ScrollArea>
@@ -92,31 +117,32 @@ export function AgreementForm({
         </TabsContent>
       </Tabs>
 
-      <div className="space-y-3 rounded-md border bg-muted/30 p-4">
-        <label className="flex items-start gap-3 text-sm">
+      <div
+        data-setup-panel="agreement-checkboxes"
+        className="ios-group min-w-0 divide-y divide-border/60 overflow-hidden"
+      >
+        <label className="ios-touch flex min-h-16 items-start gap-3 px-5 py-4 text-sm leading-relaxed hover:bg-accent/70">
           <Checkbox
-            checked={status.eula.confirmed || acceptedEula}
-            disabled={status.eula.confirmed}
+            checked={acceptedEula}
             onCheckedChange={(checked) => onAcceptedEulaChange(checked === true)}
             className="mt-0.5"
           />
           <span>
             我已阅读并同意《{status.eula.title}》
-            <span className="block text-xs text-muted-foreground">
+            <span className="hidden text-xs text-muted-foreground sm:block">
               当前版本哈希：{status.eula.hash}
             </span>
           </span>
         </label>
-        <label className="flex items-start gap-3 text-sm">
+        <label className="ios-touch flex min-h-16 items-start gap-3 px-5 py-4 text-sm leading-relaxed hover:bg-accent/70">
           <Checkbox
-            checked={status.privacy.confirmed || acceptedPrivacy}
-            disabled={status.privacy.confirmed}
+            checked={acceptedPrivacy}
             onCheckedChange={(checked) => onAcceptedPrivacyChange(checked === true)}
             className="mt-0.5"
           />
           <span>
             我已阅读并同意《{status.privacy.title}》
-            <span className="block text-xs text-muted-foreground">
+            <span className="hidden text-xs text-muted-foreground sm:block">
               当前版本哈希：{status.privacy.hash}
             </span>
           </span>
@@ -150,8 +176,8 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
+    <div className="space-y-5">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="qq_account">QQ账号 *</Label>
         <Input
           id="qq_account"
@@ -167,7 +193,7 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="nickname">昵称 *</Label>
         <Input
           id="nickname"
@@ -180,7 +206,7 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="ios-group space-y-3 p-5">
         <Label>别名</Label>
         <div className="flex flex-wrap gap-2 mb-2">
           {config.alias_names.map((alias, index) => (
@@ -239,8 +265,8 @@ interface PersonalityFormProps {
 
 export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
+    <div className="space-y-5">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="personality">人格特征 *</Label>
         <Textarea
           id="personality"
@@ -254,7 +280,7 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="reply_style">表达风格 *</Label>
         <Textarea
           id="reply_style"
@@ -268,7 +294,7 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="plan_style">群聊说话规则 *</Label>
         <Textarea
           id="plan_style"
@@ -293,8 +319,8 @@ interface EmojiFormProps {
 
 export function EmojiForm({ config, onChange }: EmojiFormProps) {
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
+    <div className="space-y-5">
+      <div className="ios-group space-y-3 p-5">
         <div className="flex items-center justify-between">
           <Label htmlFor="emoji_chance">表情包激活概率</Label>
           <span className="text-sm text-muted-foreground">
@@ -308,6 +334,7 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           max="1"
           step="0.1"
           value={config.emoji_chance}
+          className="h-2 cursor-pointer bg-transparent p-0 shadow-none"
           onChange={(e) =>
             onChange({ ...config, emoji_chance: Number(e.target.value) })
           }
@@ -317,7 +344,7 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="max_reg_num">最大表情包数量</Label>
         <Input
           id="max_reg_num"
@@ -334,7 +361,8 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
         </p>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="ios-group">
+        <div className="ios-row">
         <div className="space-y-1">
           <Label htmlFor="do_replace">达到最大数量时替换</Label>
           <p className="text-xs text-muted-foreground">
@@ -349,8 +377,9 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           }
         />
       </div>
+      </div>
 
-      <div className="space-y-3">
+      <div className="ios-group space-y-3 p-5">
         <Label htmlFor="check_interval">检查间隔（分钟）</Label>
         <Input
           id="check_interval"
@@ -367,9 +396,10 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
         </p>
       </div>
 
-      <Separator />
+      <Separator className="hidden" />
 
-      <div className="flex items-center justify-between">
+      <div className="ios-group">
+      <div className="ios-row">
         <div className="space-y-1">
           <Label htmlFor="steal_emoji">偷取表情包</Label>
           <p className="text-xs text-muted-foreground">
@@ -384,8 +414,8 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           }
         />
       </div>
+      <div className="ios-row">
 
-      <div className="flex items-center justify-between">
         <div className="space-y-1">
           <Label htmlFor="content_filtration">启用表情包过滤</Label>
           <p className="text-xs text-muted-foreground">
@@ -400,9 +430,10 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           }
         />
       </div>
+      </div>
 
       {config.content_filtration && (
-        <div className="space-y-3">
+        <div className="ios-group space-y-3 p-5">
           <Label htmlFor="filtration_prompt">过滤要求</Label>
           <Input
             id="filtration_prompt"
@@ -429,8 +460,8 @@ interface OtherBasicFormProps {
 
 export function OtherBasicForm({ config, onChange }: OtherBasicFormProps) {
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="ios-group">
+      <div className="ios-row">
         <div className="space-y-1">
           <Label htmlFor="enable_tool">启用工具系统</Label>
           <p className="text-xs text-muted-foreground">
@@ -446,7 +477,7 @@ export function OtherBasicForm({ config, onChange }: OtherBasicFormProps) {
         />
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="ios-row">
         <div className="space-y-1">
           <Label htmlFor="all_global_jargon">启用全局黑话模式</Label>
           <p className="text-xs text-muted-foreground">

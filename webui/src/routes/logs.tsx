@@ -10,22 +10,56 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
-import { Card } from '@/components/ui/card'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Search, RefreshCw, Download, Filter, Trash2, Pause, Play, Calendar as CalendarIcon, X, Type } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import {
+  Calendar as CalendarIcon,
+  Check,
+  ChevronRight,
+  Download,
+  Filter,
+  Radio,
+  Pause,
+  Play,
+  RefreshCw,
+  Search,
+  Trash2,
+  Type,
+  X,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { logWebSocket, type LogEntry } from '@/lib/log-websocket'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 
 // 字号配置
 type FontSize = 'xs' | 'sm' | 'base'
-const fontSizeConfig: Record<FontSize, { label: string; rowHeight: number; class: string }> = {
-  xs: { label: '小', rowHeight: 28, class: 'text-[10px] sm:text-xs' },
-  sm: { label: '中', rowHeight: 36, class: 'text-xs sm:text-sm' },
-  base: { label: '大', rowHeight: 44, class: 'text-sm sm:text-base' },
+const fontSizeConfig: Record<
+  FontSize,
+  { label: string; desktopRowHeight: number; mobileRowHeight: number; class: string }
+> = {
+  xs: { label: '小', desktopRowHeight: 34, mobileRowHeight: 88, class: 'text-[10px] sm:text-xs' },
+  sm: { label: '中', desktopRowHeight: 42, mobileRowHeight: 96, class: 'text-xs sm:text-sm' },
+  base: { label: '大', desktopRowHeight: 52, mobileRowHeight: 106, class: 'text-sm sm:text-base' },
 }
+
+const LOG_LEVEL_OPTIONS = [
+  { value: 'all', label: '全部级别', description: '显示所有日志级别' },
+  { value: 'DEBUG', label: 'DEBUG', description: '调试信息' },
+  { value: 'INFO', label: 'INFO', description: '常规运行信息' },
+  { value: 'WARNING', label: 'WARNING', description: '需要关注的警告' },
+  { value: 'ERROR', label: 'ERROR', description: '运行错误' },
+  { value: 'CRITICAL', label: 'CRITICAL', description: '严重错误' },
+] as const
 
 export function LogViewerPage() {
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -38,6 +72,10 @@ export function LogViewerPage() {
   const [connected, setConnected] = useState(false)
   const [fontSize, setFontSize] = useState<FontSize>('xs') // 默认使用小字号以显示更多信息
   const [lineSpacing, setLineSpacing] = useState(4) // 行间距，默认4px（紧凑）
+  const [levelDialogOpen, setLevelDialogOpen] = useState(false)
+  const [moduleDialogOpen, setModuleDialogOpen] = useState(false)
+  const [controlsDialogOpen, setControlsDialogOpen] = useState(false)
+  const [isMobileViewport, setIsMobileViewport] = useState(false)
   const parentRef = useRef<HTMLDivElement>(null)
 
   // 订阅全局 WebSocket 连接
@@ -45,7 +83,7 @@ export function LogViewerPage() {
     // 初始化时加载缓存的日志
     const cachedLogs = logWebSocket.getAllLogs()
     setLogs(cachedLogs)
-    
+
     // 订阅日志消息 - 直接使用全局缓存而不是组件状态
     const unsubscribeLogs = logWebSocket.onLog(() => {
       // 每次收到新日志，重新从全局缓存加载
@@ -64,9 +102,18 @@ export function LogViewerPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 639px)')
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches)
+
+    updateViewport()
+    mediaQuery.addEventListener('change', updateViewport)
+    return () => mediaQuery.removeEventListener('change', updateViewport)
+  }, [])
+
   // 获取所有唯一的模块名（过滤掉空字符串）
   const uniqueModules = useMemo(() => {
-    const modules = new Set(logs.map(log => log.module).filter(m => m && m.trim() !== ''))
+    const modules = new Set(logs.map((log) => log.module).filter((m) => m && m.trim() !== ''))
     return Array.from(modules).sort()
   }, [logs])
 
@@ -76,13 +123,13 @@ export function LogViewerPage() {
       case 'DEBUG':
         return 'text-muted-foreground'
       case 'INFO':
-        return 'text-blue-500 dark:text-blue-400'
+        return 'text-primary'
       case 'WARNING':
-        return 'text-yellow-600 dark:text-yellow-500'
+        return 'text-orange-600 dark:text-orange-400'
       case 'ERROR':
         return 'text-red-600 dark:text-red-500'
       case 'CRITICAL':
-        return 'text-red-700 dark:text-red-400 font-bold'
+        return 'text-red-700 dark:text-red-400 font-semibold'
       default:
         return 'text-foreground'
     }
@@ -91,17 +138,34 @@ export function LogViewerPage() {
   const getLevelBgColor = (level: LogEntry['level']) => {
     switch (level) {
       case 'DEBUG':
-        return 'bg-gray-800/30 dark:bg-gray-800/50'
+        return 'bg-transparent'
       case 'INFO':
-        return 'bg-blue-900/20 dark:bg-blue-500/20'
+        return 'bg-[rgb(0_122_255_/_0.035)]'
       case 'WARNING':
-        return 'bg-yellow-900/20 dark:bg-yellow-500/20'
+        return 'bg-[rgb(255_149_0_/_0.055)]'
       case 'ERROR':
-        return 'bg-red-900/20 dark:bg-red-500/20'
+        return 'bg-[rgb(255_59_48_/_0.06)]'
       case 'CRITICAL':
-        return 'bg-red-900/30 dark:bg-red-600/30'
+        return 'bg-[rgb(255_59_48_/_0.09)]'
       default:
-        return 'bg-gray-800/20 dark:bg-gray-800/30'
+        return 'bg-transparent'
+    }
+  }
+
+  const getLevelPillClass = (level: LogEntry['level']) => {
+    switch (level) {
+      case 'DEBUG':
+        return 'bg-muted text-muted-foreground'
+      case 'INFO':
+        return 'bg-[rgb(0_122_255_/_0.12)] text-[#0066CC] dark:text-[#66B2FF]'
+      case 'WARNING':
+        return 'bg-[rgb(255_149_0_/_0.14)] text-[#B06000] dark:text-[#FFD099]'
+      case 'ERROR':
+        return 'bg-[rgb(255_59_48_/_0.14)] text-[#C9342B] dark:text-[#FF6961]'
+      case 'CRITICAL':
+        return 'bg-[rgb(255_59_48_/_0.18)] text-[#A82620] dark:text-[#FF8A83]'
+      default:
+        return 'bg-muted text-muted-foreground'
     }
   }
 
@@ -119,10 +183,10 @@ export function LogViewerPage() {
   // 导出日志为 TXT 格式
   const handleExport = () => {
     // 格式化日志为文本
-    const logText = filteredLogs.map(log => 
-      `${log.timestamp} [${log.level.padEnd(8)}] [${log.module}] ${log.message}`
-    ).join('\n')
-    
+    const logText = filteredLogs
+      .map((log) => `${log.timestamp} [${log.level.padEnd(8)}] [${log.module}] ${log.message}`)
+      .join('\n')
+
     const dataBlob = new Blob([logText], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(dataBlob)
     const link = document.createElement('a')
@@ -151,13 +215,13 @@ export function LogViewerPage() {
         searchQuery === '' ||
         log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
         log.module.toLowerCase().includes(searchQuery.toLowerCase())
-      
+
       // 级别过滤
       const matchesLevel = levelFilter === 'all' || log.level === levelFilter
-      
+
       // 模块过滤
       const matchesModule = moduleFilter === 'all' || log.module === moduleFilter
-      
+
       // 时间过滤
       let matchesDate = true
       if (dateFrom || dateTo) {
@@ -173,14 +237,27 @@ export function LogViewerPage() {
           matchesDate = matchesDate && logDate <= toDate
         }
       }
-      
+
       return matchesSearch && matchesLevel && matchesModule && matchesDate
     })
   }, [logs, searchQuery, levelFilter, moduleFilter, dateFrom, dateTo])
 
+  const activeLevelLabel =
+    LOG_LEVEL_OPTIONS.find((option) => option.value === levelFilter)?.label ?? levelFilter
+  const activeModuleLabel = moduleFilter === 'all' ? '全部模块' : moduleFilter
+  const dateRangeLabel =
+    dateFrom || dateTo
+      ? `${dateFrom ? format(dateFrom, 'MM-dd') : '不限'} 至 ${
+          dateTo ? format(dateTo, 'MM-dd') : '不限'
+        }`
+      : '不限时间'
+
   // 虚拟滚动配置 - 根据字号和行间距动态计算行高
-  const estimatedRowHeight = fontSizeConfig[fontSize].rowHeight + lineSpacing
-  
+  const estimatedRowHeight =
+    (isMobileViewport
+      ? fontSizeConfig[fontSize].mobileRowHeight
+      : fontSizeConfig[fontSize].desktopRowHeight) + lineSpacing
+
   const rowVirtualizer = useVirtualizer({
     count: filteredLogs.length,
     getScrollElement: () => parentRef.current,
@@ -192,6 +269,8 @@ export function LogViewerPage() {
   const isAutoScrollingRef = useRef(false)
   // 用于追踪上一次的日志数量
   const prevLogCountRef = useRef(filteredLogs.length)
+  // 首次加载缓存日志时保持列表从顶部开始，避免移动端圆角卡片顶端出现半截日志行。
+  const initialLogLoadHandledRef = useRef(false)
 
   // 检测用户滚动行为，当用户向上滚动时禁用自动滚动
   useEffect(() => {
@@ -204,7 +283,7 @@ export function LogViewerPage() {
 
       const { scrollTop, scrollHeight, clientHeight } = scrollElement
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-      
+
       // 如果距离底部超过 100px，说明用户在向上查看，禁用自动滚动
       if (distanceFromBottom > 100 && autoScroll) {
         setAutoScroll(false)
@@ -223,6 +302,13 @@ export function LogViewerPage() {
   useEffect(() => {
     // 只有在日志数量增加时才滚动（避免删除日志时触发）
     const logCountIncreased = filteredLogs.length > prevLogCountRef.current
+
+    if (!initialLogLoadHandledRef.current) {
+      initialLogLoadHandledRef.current = filteredLogs.length > 0
+      prevLogCountRef.current = filteredLogs.length
+      return
+    }
+
     prevLogCountRef.current = filteredLogs.length
 
     if (autoScroll && filteredLogs.length > 0 && logCountIncreased) {
@@ -241,50 +327,347 @@ export function LogViewerPage() {
   }, [filteredLogs.length, autoScroll, rowVirtualizer])
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 space-y-4 p-3 sm:p-4 lg:p-6">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex-shrink-0 space-y-4 px-5 py-5 sm:p-4 lg:p-6">
         {/* 标题 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold">日志查看器</h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-              实时查看和分析璃夜运行日志
+            <h1 className="ios-title">日志查看器</h1>
+            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+              实时查看和分析主程序运行日志
             </p>
           </div>
           {/* 连接状态指示器 */}
-          <div className="flex items-center gap-2">
-            <div
+          <div className="ios-group flex min-h-[52px] items-center gap-3 rounded-full px-3 py-2 sm:min-w-[168px]">
+            <span
               className={cn(
-                'h-2.5 w-2.5 sm:h-3 sm:w-3 rounded-full',
-                connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                'ios-symbol ios-symbol-sm',
+                connected ? 'ios-symbol-green' : 'ios-symbol-red'
               )}
-            />
-            <span className="text-xs sm:text-sm text-muted-foreground">
-              {connected ? '已连接' : '未连接'}
+            >
+              <Radio className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[14px] font-medium leading-5">
+                {connected ? '已连接' : '未连接'}
+              </span>
+              <span className="block truncate text-[12px] leading-4 text-muted-foreground">
+                {connected ? '实时日志流' : '等待日志流'}
+              </span>
             </span>
           </div>
         </div>
 
+        {/* 移动端控制栏 */}
+        <div className="space-y-3 sm:hidden">
+          <div className="ios-group overflow-hidden">
+            <div className="relative flex min-h-[58px] items-center gap-3 px-4 py-3 after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55">
+              <Search className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <Input
+                placeholder="搜索日志..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-9 border-0 bg-transparent px-0 text-[15px] shadow-none focus-visible:ring-0"
+              />
+            </div>
+
+            <Dialog open={levelDialogOpen} onOpenChange={setLevelDialogOpen}>
+              <DialogTrigger asChild>
+                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
+                  <span className="min-w-0">
+                    <span className="block text-[15px] font-medium leading-5">日志级别</span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      按严重程度筛选
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+                    <span className="truncate text-[15px] leading-5 text-foreground">
+                      {activeLevelLabel}
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0" />
+                  </span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-5">
+                  <DialogTitle>日志级别</DialogTitle>
+                  <DialogDescription>选择要显示的日志级别</DialogDescription>
+                </DialogHeader>
+                <div className="px-5">
+                  <div className="ios-group overflow-hidden">
+                    {LOG_LEVEL_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+                        onClick={() => {
+                          setLevelFilter(option.value)
+                          setLevelDialogOpen(false)
+                        }}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[16px] font-medium leading-6">
+                            {option.label}
+                          </span>
+                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                            {option.description}
+                          </span>
+                        </span>
+                        {levelFilter === option.value ? (
+                          <Check className="h-4 w-4 shrink-0 text-primary" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={moduleDialogOpen} onOpenChange={setModuleDialogOpen}>
+              <DialogTrigger asChild>
+                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
+                  <span className="min-w-0">
+                    <span className="block text-[15px] font-medium leading-5">模块</span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      按日志来源筛选
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+                    <span className="max-w-[9rem] truncate text-[15px] leading-5 text-foreground">
+                      {activeModuleLabel}
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0" />
+                  </span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-5">
+                  <DialogTitle>日志模块</DialogTitle>
+                  <DialogDescription>选择要显示的日志来源</DialogDescription>
+                </DialogHeader>
+                <div className="ios-scrollbar-none max-h-[58vh] overflow-y-auto px-5">
+                  <div className="ios-group overflow-hidden">
+                    {['all', ...uniqueModules].map((module) => (
+                      <button
+                        key={module}
+                        type="button"
+                        className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+                        onClick={() => {
+                          setModuleFilter(module)
+                          setModuleDialogOpen(false)
+                        }}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[16px] font-medium leading-6">
+                            {module === 'all' ? '全部模块' : module}
+                          </span>
+                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                            {module === 'all' ? '显示所有来源' : '仅显示此模块'}
+                          </span>
+                        </span>
+                        {moduleFilter === module ? (
+                          <Check className="h-4 w-4 shrink-0 text-primary" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={controlsDialogOpen} onOpenChange={setControlsDialogOpen}>
+              <DialogTrigger asChild>
+                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
+                  <span className="min-w-0">
+                    <span className="block text-[15px] font-medium leading-5">日志控制</span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      {dateRangeLabel} · {autoScroll ? '自动滚动' : '已暂停'} ·{' '}
+                      {filteredLogs.length}/{logs.length}
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </DialogTrigger>
+              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-5">
+                  <DialogTitle>日志控制</DialogTitle>
+                  <DialogDescription>调整时间范围、操作和显示方式</DialogDescription>
+                </DialogHeader>
+                <div className="ios-scrollbar-none max-h-[58vh] space-y-4 overflow-y-auto px-5">
+                  <div className="ios-group overflow-hidden">
+                    <div className="ios-row min-h-[72px] py-3">
+                      <span className="min-w-0">
+                        <span className="block text-[15px] font-medium leading-5">时间范围</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {dateRangeLabel}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-9 rounded-full px-3 focus-visible:bg-accent/70 focus-visible:ring-0"
+                            >
+                              开始
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="end">
+                            <Calendar
+                              mode="single"
+                              selected={dateFrom}
+                              onSelect={setDateFrom}
+                              initialFocus
+                              locale={zhCN}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-9 rounded-full px-3 focus-visible:bg-accent/70 focus-visible:ring-0"
+                            >
+                              结束
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="end">
+                            <Calendar
+                              mode="single"
+                              selected={dateTo}
+                              onSelect={setDateTo}
+                              initialFocus
+                              locale={zhCN}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        {(dateFrom || dateTo) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={clearDateFilter}
+                            className="h-9 w-9 rounded-full"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </span>
+                    </div>
+                    <div className="ios-row min-h-[58px] py-3">
+                      <span className="min-w-0">
+                        <span className="block text-[15px] font-medium leading-5">自动滚动</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          新日志出现时保持在底部
+                        </span>
+                      </span>
+                      <Switch checked={autoScroll} onCheckedChange={setAutoScroll} />
+                    </div>
+                    <div className="ios-row min-h-[58px] py-3">
+                      <span className="text-[15px] font-medium leading-5">操作</span>
+                      <span className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleRefresh}
+                          className="h-9 w-9 rounded-full"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleClear}
+                          className="h-9 w-9 rounded-full"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleExport}
+                          className="h-9 w-9 rounded-full"
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </span>
+                    </div>
+                    <div className="ios-row min-h-[58px] py-3">
+                      <span className="text-[15px] font-medium leading-5">当前显示</span>
+                      <span className="font-mono text-[14px] leading-5 text-muted-foreground">
+                        {filteredLogs.length} / {logs.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="ios-group overflow-hidden">
+                    <div className="ios-row min-h-[58px] py-3">
+                      <span className="flex items-center gap-2 text-[15px] font-medium leading-5">
+                        <Type className="h-4 w-4 text-muted-foreground" />
+                        字号
+                      </span>
+                      <span className="flex gap-1">
+                        {(Object.keys(fontSizeConfig) as FontSize[]).map((size) => (
+                          <Button
+                            key={size}
+                            variant={fontSize === size ? 'default' : 'ghost'}
+                            size="sm"
+                            onClick={() => setFontSize(size)}
+                            className="h-8 rounded-full px-3 text-xs"
+                          >
+                            {fontSizeConfig[size].label}
+                          </Button>
+                        ))}
+                      </span>
+                    </div>
+                    <div className="ios-row min-h-[58px] py-3">
+                      <span className="text-[15px] font-medium leading-5">行距</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-3 pl-4">
+                        <Slider
+                          value={[lineSpacing]}
+                          onValueChange={([value]) => setLineSpacing(value)}
+                          min={0}
+                          max={12}
+                          step={2}
+                          className="min-w-0 flex-1"
+                        />
+                        <span className="w-9 text-right text-xs text-muted-foreground">
+                          {lineSpacing}px
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
         {/* 控制栏 */}
-        <Card className="p-3 sm:p-4">
+        <div className="ios-group hidden overflow-hidden p-4 sm:block">
           <div className="flex flex-col gap-3 sm:gap-4">
             {/* 第一行：搜索和筛选 */}
             <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
               {/* 搜索框 */}
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="搜索日志..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-9 text-sm"
+                  className="h-10 rounded-[12px] border-0 bg-muted/75 pl-9 text-sm shadow-none focus-visible:ring-0"
                 />
               </div>
 
               {/* 日志级别筛选 */}
               <Select value={levelFilter} onValueChange={setLevelFilter}>
-                <SelectTrigger className="w-full sm:w-[140px] lg:w-[180px] h-9 text-sm">
-                  <Filter className="h-4 w-4 mr-2" />
+                <SelectTrigger className="h-10 w-full rounded-[12px] border-0 bg-muted/75 text-sm shadow-none sm:w-[140px] lg:w-[180px]">
+                  <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="级别" />
                 </SelectTrigger>
                 <SelectContent>
@@ -299,13 +682,13 @@ export function LogViewerPage() {
 
               {/* 模块筛选 */}
               <Select value={moduleFilter} onValueChange={setModuleFilter}>
-                <SelectTrigger className="w-full sm:w-[160px] lg:w-[200px] h-9 text-sm">
-                  <Filter className="h-4 w-4 mr-2" />
+                <SelectTrigger className="h-10 w-full rounded-[12px] border-0 bg-muted/75 text-sm shadow-none sm:w-[160px] lg:w-[200px]">
+                  <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="模块" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部模块</SelectItem>
-                  {uniqueModules.map(module => (
+                  {uniqueModules.map((module) => (
                     <SelectItem key={module} value={module}>
                       {module}
                     </SelectItem>
@@ -323,7 +706,7 @@ export function LogViewerPage() {
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'w-full sm:w-[200px] lg:w-[240px] justify-start text-left font-normal h-9',
+                      'h-10 w-full justify-start rounded-full text-left font-normal sm:w-[200px] lg:w-[240px]',
                       !dateFrom && 'text-muted-foreground'
                     )}
                   >
@@ -351,7 +734,7 @@ export function LogViewerPage() {
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'w-full sm:w-[200px] lg:w-[240px] justify-start text-left font-normal h-9',
+                      'h-10 w-full justify-start rounded-full text-left font-normal sm:w-[200px] lg:w-[240px]',
                       !dateTo && 'text-muted-foreground'
                     )}
                   >
@@ -378,63 +761,57 @@ export function LogViewerPage() {
                   variant="outline"
                   size="sm"
                   onClick={clearDateFilter}
-                  className="w-full sm:w-auto h-9"
+                  className="h-10 w-full rounded-full sm:w-auto"
                 >
                   <X className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline text-sm">清除时间筛选</span>
-                  <span className="sm:hidden text-sm">清除</span>
+                  <span className="hidden text-sm sm:inline">清除时间筛选</span>
+                  <span className="text-sm sm:hidden">清除</span>
                 </Button>
               )}
             </div>
 
             {/* 第三行：操作按钮 */}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   variant={autoScroll ? 'default' : 'outline'}
                   size="sm"
                   onClick={toggleAutoScroll}
-                  className="flex-1 sm:flex-none h-9"
+                  className="h-10 flex-1 rounded-full sm:flex-none"
                 >
-                  {autoScroll ? (
-                    <Pause className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                  <span className="ml-2 text-sm">
-                    {autoScroll ? '自动滚动' : '已暂停'}
-                  </span>
+                  {autoScroll ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  <span className="ml-2 text-sm">{autoScroll ? '自动滚动' : '已暂停'}</span>
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleRefresh}
-                  className="flex-1 sm:flex-none h-9"
+                  className="h-10 flex-1 rounded-full sm:flex-none"
                 >
                   <RefreshCw className="h-4 w-4" />
                   <span className="ml-2 text-sm">刷新</span>
                 </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleClear}
-                  className="flex-1 sm:flex-none h-9"
+                  className="h-10 flex-1 rounded-full sm:flex-none"
                 >
                   <Trash2 className="h-4 w-4" />
                   <span className="ml-2 text-sm">清空</span>
                 </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleExport}
-                  className="flex-1 sm:flex-none h-9"
+                  className="h-10 flex-1 rounded-full sm:flex-none"
                 >
                   <Download className="h-4 w-4" />
                   <span className="ml-2 text-sm">导出</span>
                 </Button>
               </div>
-              <div className="flex-1 hidden sm:block" />
-              <div className="text-xs sm:text-sm text-muted-foreground flex items-center justify-center sm:justify-end">
+              <div className="hidden flex-1 sm:block" />
+              <div className="flex items-center justify-center text-xs text-muted-foreground sm:justify-end sm:text-sm">
                 <span className="font-mono">
                   {filteredLogs.length} / {logs.length}
                 </span>
@@ -443,7 +820,7 @@ export function LogViewerPage() {
             </div>
 
             {/* 第四行：显示设置 */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6 pt-2 border-t border-border/50">
+            <div className="flex flex-col gap-3 border-t border-border/40 pt-3 sm:flex-row sm:items-center sm:gap-6">
               {/* 字号调整 */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -457,7 +834,7 @@ export function LogViewerPage() {
                       variant={fontSize === size ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => setFontSize(size)}
-                      className="h-7 px-3 text-xs"
+                      className="h-8 rounded-full px-3 text-xs"
                     >
                       {fontSizeConfig[size].label}
                     </Button>
@@ -466,8 +843,8 @@ export function LogViewerPage() {
               </div>
 
               {/* 行间距调整 */}
-              <div className="flex items-center gap-3 flex-1 max-w-xs">
-                <span className="text-sm text-muted-foreground whitespace-nowrap">行距</span>
+              <div className="flex max-w-xs flex-1 items-center gap-3">
+                <span className="whitespace-nowrap text-sm text-muted-foreground">行距</span>
                 <Slider
                   value={[lineSpacing]}
                   onValueChange={([value]) => setLineSpacing(value)}
@@ -476,36 +853,39 @@ export function LogViewerPage() {
                   step={2}
                   className="flex-1"
                 />
-                <span className="text-xs text-muted-foreground w-8">{lineSpacing}px</span>
+                <span className="w-8 text-xs text-muted-foreground">{lineSpacing}px</span>
               </div>
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
-        {/* 日志终端 - 使用虚拟滚动，填充剩余空间 */}
-        <div className="flex-1 min-h-0 px-3 sm:px-4 lg:px-6 pb-3 sm:pb-4 lg:pb-6">
-          <Card className="bg-black dark:bg-gray-950 border-gray-800 dark:border-gray-900 h-full overflow-hidden">
-            <div 
-              ref={parentRef}
-              className={cn(
-                "h-full overflow-auto",
-                // 自定义滚动条样式 - 类似 ScrollArea
-                "[&::-webkit-scrollbar]:w-2.5",
-                "[&::-webkit-scrollbar-track]:bg-transparent",
-                "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full",
-                "[&::-webkit-scrollbar-thumb:hover]:bg-border/80"
-              )}
+      {/* 日志终端 - 使用虚拟滚动，填充剩余空间 */}
+      <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 sm:px-4 sm:pb-4 lg:px-6 lg:pb-6">
+        <p className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground sm:hidden">
+          实时日志
+        </p>
+        <div className="ios-group min-h-0 flex-1 overflow-hidden">
+          <div ref={parentRef} className="ios-scrollbar-none h-full overflow-auto">
+            <div
+              className={cn('relative sm:font-mono', fontSizeConfig[fontSize].class)}
+              style={{
+                height: filteredLogs.length === 0 ? '100%' : `${rowVirtualizer.getTotalSize()}px`,
+              }}
             >
-              <div
-                className={cn("p-2 sm:p-3 font-mono relative", fontSizeConfig[fontSize].class)}
-                style={{
-                  height: `${rowVirtualizer.getTotalSize()}px`,
-                }}
-              >
               {filteredLogs.length === 0 ? (
-                <div className="text-gray-500 dark:text-gray-600 text-center py-8 text-sm">
-                  暂无日志数据
+                <div className="ios-empty-state h-full min-h-[260px]">
+                  <span className="ios-empty-illustration">
+                    <Radio className="h-7 w-7 text-primary" />
+                  </span>
+                  <span className="space-y-1.5">
+                    <span className="block text-[15px] font-semibold leading-5 text-foreground">
+                      暂无日志数据
+                    </span>
+                    <span className="block text-[13px] leading-5 text-muted-foreground">
+                      新日志出现后会自动显示在这里
+                    </span>
+                  </span>
                 </div>
               ) : (
                 rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -516,52 +896,50 @@ export function LogViewerPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                       className={cn(
-                        'absolute top-0 left-0 w-full px-2 sm:px-3 rounded hover:bg-white/5 transition-colors group',
+                        'absolute left-0 top-0 w-full px-4 transition-colors after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden hover:bg-accent/45 sm:border-b sm:border-border/45 sm:px-5 sm:after:hidden',
                         getLevelBgColor(log.level)
                       )}
                       style={{
                         transform: `translateY(${virtualRow.start}px)`,
+                        minHeight: `${estimatedRowHeight}px`,
                         paddingTop: `${lineSpacing / 2}px`,
                         paddingBottom: `${lineSpacing / 2}px`,
                       }}
                     >
-                      {/* 移动端：垂直布局 */}
-                      <div className="flex flex-col gap-0.5 sm:hidden">
-                        {/* 第一行：时间戳和级别 */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-500 dark:text-gray-600">
+                      {/* 移动端：列表布局 */}
+                      <div className="flex flex-col gap-1.5 py-2 sm:hidden">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 truncate font-mono text-[12px] leading-4 text-muted-foreground">
                             {log.timestamp}
                           </span>
                           <span
                             className={cn(
-                              'font-semibold',
-                              getLevelColor(log.level)
+                              'shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-4',
+                              getLevelPillClass(log.level)
                             )}
                           >
-                            [{log.level}]
+                            {log.level}
                           </span>
                         </div>
-                        {/* 第二行：模块名 */}
-                        <div className="text-cyan-400 dark:text-cyan-500 truncate">
-                          {log.module}
+                        <div className="truncate text-[13px] font-medium leading-5 text-muted-foreground">
+                          {log.module || 'system'}
                         </div>
-                        {/* 第三行：消息内容 */}
-                        <div className="text-gray-300 dark:text-gray-400 whitespace-pre-wrap break-words">
+                        <div className="whitespace-pre-wrap break-words text-[15px] leading-6 text-foreground">
                           {log.message}
                         </div>
                       </div>
 
                       {/* 平板/桌面端：水平布局 */}
-                      <div className="hidden sm:flex gap-2 items-start">
+                      <div className="hidden min-h-[34px] items-center gap-2 sm:flex">
                         {/* 时间戳 */}
-                        <span className="text-gray-500 dark:text-gray-600 flex-shrink-0 w-[130px] lg:w-[160px]">
+                        <span className="w-[130px] flex-shrink-0 text-muted-foreground lg:w-[160px]">
                           {log.timestamp}
                         </span>
 
                         {/* 日志级别 */}
                         <span
                           className={cn(
-                            'flex-shrink-0 w-[65px] lg:w-[75px] font-semibold',
+                            'w-[65px] flex-shrink-0 font-semibold lg:w-[75px]',
                             getLevelColor(log.level)
                           )}
                         >
@@ -569,12 +947,12 @@ export function LogViewerPage() {
                         </span>
 
                         {/* 模块名 */}
-                        <span className="text-cyan-400 dark:text-cyan-500 flex-shrink-0 w-[100px] lg:w-[130px] truncate">
+                        <span className="w-[100px] flex-shrink-0 truncate text-primary lg:w-[130px]">
                           {log.module}
                         </span>
 
                         {/* 消息内容 */}
-                        <span className="text-gray-300 dark:text-gray-400 flex-1 whitespace-pre-wrap break-words">
+                        <span className="text-foreground/88 flex-1 whitespace-pre-wrap break-words">
                           {log.message}
                         </span>
                       </div>
@@ -584,10 +962,8 @@ export function LogViewerPage() {
               )}
             </div>
           </div>
-        </Card>
+        </div>
       </div>
     </div>
   )
 }
-
-
