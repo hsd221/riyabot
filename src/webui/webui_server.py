@@ -290,6 +290,8 @@ class WebUIServer:
         try:
             with socket.socket(family, socket.SOCK_STREAM) as s:
                 s.settimeout(1)
+                # 与 uvicorn 的实际绑定行为保持一致，避免刚关闭服务后的 TIME_WAIT 被误判为端口占用。
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 # 尝试绑定端口
                 s.bind((test_host, self.port))
                 return True
