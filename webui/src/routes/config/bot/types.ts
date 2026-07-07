@@ -55,6 +55,11 @@ export interface ExpressionConfig {
   expression_auto_check_custom_criteria: string[]
 }
 
+export interface BehaviorConfig {
+  learning_list: Array<[string, string, string]>
+  behavior_groups: Array<string[]>
+}
+
 export interface EmojiConfig {
   emoji_chance: number
   max_reg_num: number
@@ -193,6 +198,7 @@ export interface AllBotConfigs {
   personalityConfig: PersonalityConfig | null
   chatConfig: ChatConfig | null
   expressionConfig: ExpressionConfig | null
+  behaviorConfig: BehaviorConfig | null
   emojiConfig: EmojiConfig | null
   memoryConfig: MemoryConfig | null
   toolConfig: ToolConfig | null
@@ -219,6 +225,7 @@ export type ConfigSectionName =
   | 'personality'
   | 'chat'
   | 'expression'
+  | 'behavior'
   | 'emoji'
   | 'memory'
   | 'tool'

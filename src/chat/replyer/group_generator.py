@@ -26,6 +26,7 @@ from src.chat.utils.chat_message_builder import (
     replace_user_references,
 )
 from src.bw_learner.expression_selector import expression_selector
+from src.bw_learner.behavior_selector import behavior_selector
 
 # from src.memory_system.memory_activator import MemoryActivator
 from src.common.person_stub import Person
@@ -412,6 +413,21 @@ class DefaultReplyer:
             expression_habits_block += f"{style_habits_str}\n"
 
         return f"{expression_habits_title}\n{expression_habits_block}", selected_ids
+
+    async def build_behavior_reference(self, chat_history: str, target: str, reply_reason: str = "") -> str:
+        context_parts = []
+        if reply_reason:
+            context_parts.append(f"回复理由：{reply_reason}")
+        if target:
+            context_parts.append(f"目标消息：{target}")
+        if chat_history:
+            context_parts.append(f"最近聊天：{chat_history}")
+        reference_block, _ = behavior_selector.build_reference_block(
+            self.chat_stream.stream_id,
+            "\n\n".join(context_parts),
+            max_num=3,
+        )
+        return reference_block
 
     async def build_tool_info(self, chat_history: str, sender: str, target: str, enable_tool: bool = True) -> str:
         """构建工具信息块
@@ -893,6 +909,9 @@ class DefaultReplyer:
                 "expression_habits",
             ),
             self._time_and_run_task(
+                self.build_behavior_reference(chat_talking_prompt_short, target, reply_reason), "behavior_reference"
+            ),
+            self._time_and_run_task(
                 self.build_tool_info(chat_talking_prompt_short, sender, target, enable_tool=enable_tool), "tool_info"
             ),
             self._time_and_run_task(self.get_prompt_info(chat_talking_prompt_short, sender, target), "prompt_info"),
@@ -917,6 +936,7 @@ class DefaultReplyer:
         # 任务名称中英文映射
         task_name_mapping = {
             "expression_habits": "选取表达方式",
+            "behavior_reference": "召回行为参考",
             "relation_info": "感受关系",
             "tool_info": "使用工具",
             "prompt_info": "获取知识",
@@ -945,6 +965,12 @@ class DefaultReplyer:
         expression_habits_block, selected_expressions = results_dict["expression_habits"]
         expression_habits_block: str
         selected_expressions: List[int]
+        behavior_reference: str = results_dict.get("behavior_reference") or ""
+        expression_habits_block = "\n".join(
+            block.strip() for block in (expression_habits_block, behavior_reference) if block and block.strip()
+        )
+        if expression_habits_block:
+            expression_habits_block += "\n"
         # relation_info: str = results_dict["relation_info"]
         tool_info: str = results_dict["tool_info"]
         prompt_info: str = results_dict["prompt_info"]  # 直接使用格式化后的结果

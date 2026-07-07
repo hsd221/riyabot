@@ -30,7 +30,7 @@ from src.memory.atom import (
     MemoryAtom as MemoryAtomDC,
     SemanticDetail,
 )
-from src.memory.layer2_encoder import BatchEncoder
+from src.memory.layer2_encoder import BatchEncoder, SOURCE_USER_IDS_DETAIL_KEY
 from src.memory.layer3_retrieval import MemoryWriter
 from src.memory.store import MemoryStore
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
@@ -115,6 +115,7 @@ class EncodingPipeline:
         content: str,
         timestamp: float,
         stream_type: str = "group_chat",
+        message_id: Optional[str] = None,
     ) -> None:
         """摄入一条消息到编码缓冲区
 
@@ -125,6 +126,7 @@ class EncodingPipeline:
             content: 消息文本内容
             timestamp: Unix 时间戳（秒）
             stream_type: 流类型（group_chat / private_chat）
+            message_id: 原始消息 ID（可选，用于缓冲去重）
         """
         self.encoder.set_stream_type(stream_id, stream_type)
         await self.encoder.ingest_message(
@@ -133,6 +135,7 @@ class EncodingPipeline:
             speaker=speaker,
             content=content,
             timestamp=datetime.fromtimestamp(timestamp),
+            message_id=message_id,
         )
         logger.debug(
             "消息摄入编码管线",
@@ -279,13 +282,14 @@ class EncodingPipeline:
                                 )
                             )
 
-                        if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and atom.entities:
+                        profile_entities = self._profile_target_entities(atom, detail)
+                        if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and profile_entities:
                             try:
                                 from src.memory.user_profile import ProfileBuilder, ProfileStore
 
                                 ps = ProfileStore()
                                 pb = ProfileBuilder(ps)
-                                for entity in atom.entities:
+                                for entity in profile_entities:
                                     pb.update_profile_from_atom(entity, atom)
                             except Exception:
                                 pass
@@ -301,7 +305,7 @@ class EncodingPipeline:
 
                                 ps = ProfileStore()
                                 pb = ProfileBuilder(ps)
-                                for entity in atom.entities:
+                                for entity in profile_entities:
                                     pb.update_profile_from_atom(entity, atom)
                             except Exception:
                                 pass
@@ -381,6 +385,26 @@ class EncodingPipeline:
                 logger.warning("原子关联构建异常", event_code="memory.encoding.association_failed", exc_info=True)
 
         return stats
+
+    @staticmethod
+    def _profile_target_entities(atom: MemoryAtomDC, detail: dict[str, Any]) -> list[str]:
+        """只允许本批真实消息发送者触发画像更新，避免 LLM 伪造 entities 串写画像。"""
+        source_user_ids = detail.get(SOURCE_USER_IDS_DETAIL_KEY, [])
+        if not isinstance(source_user_ids, list):
+            return []
+
+        allowed = {str(user_id).strip() for user_id in source_user_ids if str(user_id).strip()}
+        if not allowed:
+            return []
+
+        targets: list[str] = []
+        seen: set[str] = set()
+        for entity in atom.entities:
+            normalized = str(entity).strip()
+            if normalized in allowed and normalized not in seen:
+                targets.append(normalized)
+                seen.add(normalized)
+        return targets
 
     def _build_atom(
         self,

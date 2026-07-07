@@ -453,6 +453,7 @@ class BrainChatting:
                             content=msg.processed_plain_text or "",
                             timestamp=msg.time,
                             stream_type="private_chat",
+                            message_id=msg.message_id,
                         )
                     except Exception:
                         continue

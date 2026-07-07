@@ -20,6 +20,7 @@ from src.config.official_configs import (
     MessageReceiveConfig,
     EmojiConfig,
     ExpressionConfig,
+    BehaviorConfig,
     KeywordReactionConfig,
     ChineseTypoConfig,
     ResponsePostProcessConfig,
@@ -61,6 +62,7 @@ BOT_SECTION_SCHEMAS = {
     "message_receive": MessageReceiveConfig,
     "emoji": EmojiConfig,
     "expression": ExpressionConfig,
+    "behavior": BehaviorConfig,
     "keyword_reaction": KeywordReactionConfig,
     "chinese_typo": ChineseTypoConfig,
     "response_post_process": ResponsePostProcessConfig,
@@ -160,6 +162,7 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
     - message_receive: MessageReceiveConfig
     - emoji: EmojiConfig
     - expression: ExpressionConfig
+    - behavior: BehaviorConfig
     - keyword_reaction: KeywordReactionConfig
     - chinese_typo: ChineseTypoConfig
     - response_post_process: ResponsePostProcessConfig

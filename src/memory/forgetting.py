@@ -146,6 +146,7 @@ class ForgettingManager:
         """
         count = 0
         now_ts = datetime.now(timezone.utc).timestamp()
+        qdrant_updates: list[tuple[str, dict[str, Any]]] = []
 
         with memory_db:
             query = MemoryAtomModel.select().where(MemoryAtomModel.status == "active")
@@ -196,13 +197,7 @@ class ForgettingManager:
                         MemoryAtomModel.update(weight=new_weight).where(
                             MemoryAtomModel.atom_id == atom_model.atom_id
                         ).execute()
-                        try:
-                            await self._store.qdrant.set_atom_payload(
-                                atom_model.atom_id,
-                                {"weight": new_weight},
-                            )
-                        except Exception:
-                            pass  # Qdrant 同步是尽力而为的最佳操作
+                        qdrant_updates.append((atom_model.atom_id, {"weight": new_weight}))
                         count += 1
 
                     if idx % 10 == 0:
@@ -223,6 +218,12 @@ class ForgettingManager:
                     total=total,
                 )
 
+        for atom_id, payload in qdrant_updates:
+            try:
+                await self._store.qdrant.set_atom_payload(atom_id, payload)
+            except Exception:
+                pass  # Qdrant 同步是尽力而为的最佳操作
+
         logger.debug(f"衰减: {count} 个原子权重已更新")
         return count
 
@@ -239,6 +240,7 @@ class ForgettingManager:
             int: 归档的原子数量
         """
         count = 0
+        qdrant_delete_ids: list[str] = []
 
         with memory_db:
             query = MemoryAtomModel.select().where(
@@ -250,13 +252,16 @@ class ForgettingManager:
                     self._archive_one(atom_model)
                     atom_model.status = "archived"
                     atom_model.save()
-                    try:
-                        await self._store.qdrant.delete_atom_vector(atom_model.atom_id)
-                    except Exception:
-                        pass  # Qdrant 同步是尽力而为的最佳操作
+                    qdrant_delete_ids.append(atom_model.atom_id)
                     count += 1
                 except Exception as e:
                     logger.error(f"归档原子失败 ({atom_model.atom_id}): {e}")
+
+        for atom_id in qdrant_delete_ids:
+            try:
+                await self._store.qdrant.delete_atom_vector(atom_id)
+            except Exception:
+                pass  # Qdrant 同步是尽力而为的最佳操作
 
         if count > 0:
             logger.info(f"归档: {count} 个原子已归档 (weight < {self.archive_threshold})")

@@ -436,6 +436,19 @@ class WriteOpLogger:
         ops = self._read_all_ops()
         return [op for op in ops if op.status == OpStatus.FAILED and op.retry_count < max_retries]
 
+    def get_recoverable_ops(self, max_retries: int = 3) -> list[WriteOp]:
+        """获取启动恢复时可重放的操作。
+
+        包含失败但未超过重试上限的操作，以及上次进程崩溃时可能停在 pending/in_progress 的操作。
+        """
+        ops = self._read_all_ops()
+        recoverable = [
+            op
+            for op in ops
+            if op.retry_count < max_retries and op.status in (OpStatus.PENDING, OpStatus.IN_PROGRESS, OpStatus.FAILED)
+        ]
+        return sorted(recoverable, key=lambda op: op.created_at)
+
     def get_op(self, op_id: str) -> Optional[WriteOp]:
         """根据 op_id 查找单个操作记录"""
         ops = self._read_all_ops()
@@ -482,9 +495,9 @@ class WriteOpLogger:
     # ── 恢复机制 ─────────────────────────────────────────────
 
     async def replay_failed_ops(self, store) -> list[str]:
-        """重放所有失败操作，返回成功恢复的 op_id 列表
+        """重放所有可恢复操作，返回成功恢复的 op_id 列表
 
-        启动时调用，自动恢复上一次崩溃时未完成的写入。
+        启动时调用，自动恢复上一次崩溃时未完成或失败的写入。
 
         Args:
             store: MemoryStore 实例，需提供 insert_atom / update_atom / delete_atom 等方法
@@ -493,15 +506,15 @@ class WriteOpLogger:
             成功恢复的操作 ID 列表
         """
         recovered: list[str] = []
-        failed_ops = self.get_failed_ops(max_retries=3)
+        recoverable_ops = self.get_recoverable_ops(max_retries=3)
 
-        if not failed_ops:
-            logger.info("无失败操作需要重放")
+        if not recoverable_ops:
+            logger.info("无可恢复操作需要重放")
             return recovered
 
-        logger.info("开始重放失败操作", extra={"count": len(failed_ops)})
+        logger.info("开始重放可恢复操作", extra={"count": len(recoverable_ops)})
 
-        for op in failed_ops:
+        for op in recoverable_ops:
             op.retry_count += 1
             self._update_op(
                 op.op_id,
@@ -530,74 +543,118 @@ class WriteOpLogger:
             "操作重放完成",
             extra={
                 "recovered": len(recovered),
-                "total": len(failed_ops),
+                "total": len(recoverable_ops),
             },
         )
         return recovered
 
+    @staticmethod
+    def _replay_targets(op: WriteOp) -> set[str]:
+        target = (op.target or "").lower()
+        if target in {"both", "all"}:
+            return {"sqlite", "qdrant"}
+        if target in {"sqlite", "qdrant"}:
+            return {target}
+        return {"sqlite", "qdrant"}
+
+    @staticmethod
+    def _atom_vector_payload(atom_id: str, atom: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "atom_id": atom_id,
+            "atom_type": atom.get("atom_type", "factual"),
+            "user_id": atom.get("user_id"),
+            "group_id": atom.get("group_id"),
+            "weight": atom.get("weight", 0.5),
+            "importance": atom.get("importance", 0.5),
+            "confidence": atom.get("confidence", 0.5),
+            "status": atom.get("status", "active"),
+            "source_scene": atom.get("source_scene", "chat"),
+            "source_id": atom.get("source_id"),
+            "privacy_level": atom.get("privacy_level", "context_sensitive"),
+        }
+
+    async def _ensure_sqlite_atom(self, store, atom: dict[str, Any]) -> str:
+        atom_id = atom.get("atom_id")
+        if not atom_id:
+            raise ValueError("atom payload 缺少 atom_id")
+
+        existing = await store.get_atom(atom_id)
+        if existing is not None:
+            return atom_id
+        return await store.insert_atom(atom)
+
+    async def _upsert_qdrant_atom(self, store, atom_id: str, atom: dict[str, Any]) -> None:
+        content = atom.get("content", "")
+        if not content:
+            raise ValueError(f"Qdrant replay 缺少 content，无法生成 embedding: {atom_id}")
+
+        embedding = atom.get("embedding")
+        if not embedding:
+            embedding = await generate_embedding(content)
+        if not embedding:
+            raise RuntimeError(f"Qdrant replay 生成 embedding 失败: {atom_id}")
+
+        ok = await store.qdrant.upsert_atom_vector(
+            point_id=atom_id,
+            vector=embedding,
+            payload=self._atom_vector_payload(atom_id, atom),
+        )
+        if not ok:
+            raise RuntimeError(f"Qdrant replay upsert 失败: {atom_id}")
+
     async def _dispatch_replay(self, op: WriteOp, store) -> None:
         """根据操作类型分发到 store 的对应方法"""
         # 避免循环导入：store 作为参数传入，此处动态分发
+        targets = self._replay_targets(op)
+
         if op.op_type == OpType.INSERT_ATOM:
             atom = op.payload.get("atom")
             if atom is None:
                 raise ValueError("INSERT_ATOM payload 缺少 atom 字段")
-            atom_id = await store.insert_atom(atom)
-            # 生成 embedding 并同步到 Qdrant
-            if atom_id:
-                try:
-                    content = atom.get("content", "")
-                    if content:
-                        embedding = await generate_embedding(content)
-                        if embedding:
-                            await store.qdrant.upsert_atom_vector(
-                                point_id=atom_id,
-                                vector=embedding,
-                                payload={
-                                    "atom_id": atom_id,
-                                    "atom_type": atom.get("atom_type", "factual"),
-                                    "weight": atom.get("weight", 0.5),
-                                    "importance": atom.get("importance", 0.5),
-                                    "confidence": atom.get("confidence", 0.5),
-                                    "status": atom.get("status", "active"),
-                                    "source_scene": atom.get("source_scene", "chat"),
-                                    "source_id": atom.get("source_id"),
-                                    "privacy_level": atom.get("privacy_level", "context_sensitive"),
-                                },
-                            )
-                except Exception as e:
-                    logger.warning("Qdrant 同步失败 (INSERT_ATOM replay): %s", e)
+            atom_id = atom.get("atom_id") or (op.atom_ids[0] if op.atom_ids else None)
+            if not atom_id:
+                raise ValueError("INSERT_ATOM 缺少 atom_id")
+            if "sqlite" in targets:
+                atom_id = await self._ensure_sqlite_atom(store, atom)
+            if "qdrant" in targets:
+                existing = await store.get_atom(atom_id)
+                await self._upsert_qdrant_atom(store, atom_id, existing or atom)
 
         elif op.op_type == OpType.UPDATE_ATOM:
             if not op.atom_ids:
                 raise ValueError("UPDATE_ATOM 需要 atom_ids")
             updates = op.payload.get("updates", {})
-            await store.update_atom(op.atom_ids[0], updates)
-            # 同步到 Qdrant
-            try:
-                atom_id = op.atom_ids[0]
+            atom_id = op.atom_ids[0]
+            if "sqlite" in targets:
+                await store.update_atom(atom_id, updates)
+            if "qdrant" in targets:
                 qdrant_updates = {}
-                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene", "source_id"):
+                for key in (
+                    "weight",
+                    "importance",
+                    "confidence",
+                    "status",
+                    "privacy_level",
+                    "source_scene",
+                    "source_id",
+                ):
                     if key in updates:
                         qdrant_updates[key] = updates[key]
                 if qdrant_updates:
-                    await store.qdrant.set_atom_payload(atom_id, qdrant_updates)
-            except Exception as e:
-                logger.warning("Qdrant 同步失败 (UPDATE_ATOM replay): %s", e)
+                    ok = await store.qdrant.set_atom_payload(atom_id, qdrant_updates)
+                    if not ok:
+                        raise RuntimeError(f"Qdrant replay payload 更新失败: {atom_id}")
 
         elif op.op_type == OpType.DELETE_ATOM:
             if not op.atom_ids:
                 raise ValueError("DELETE_ATOM 需要 atom_ids")
             atom_id = op.atom_ids[0]
-            # 先尝试 SQLite 删除（Qdrant 侧由 store.delete_atom 处理）
-            await store.delete_atom(atom_id)
-            # 额外显式清理 Qdrant：处理 SQLite 已删除但 Qdrant 残留的孤魂向量
-            # store.delete_atom 仅在 SQLite rows > 0 时会调用 Qdrant 删除，
-            # 若 SQLite 记录已被其他路径删除，需此处兜底
-            try:
-                await store.qdrant.delete_atom_vector(atom_id)
-            except Exception as e:
-                logger.warning("Qdrant 向量删除失败 (DELETE_ATOM replay): %s", e)
+            if "sqlite" in targets:
+                await store.delete_atom(atom_id)
+            if "qdrant" in targets:
+                ok = await store.qdrant.delete_atom_vector(atom_id)
+                if not ok:
+                    raise RuntimeError(f"Qdrant replay 删除失败: {atom_id}")
 
         elif op.op_type == OpType.BATCH_INSERT:
             # 从 payload 读取原子数据（由 MemoryWriter.batch_write 存入，使用 "atom" 键）
@@ -609,78 +666,25 @@ class WriteOpLogger:
                 atoms = op.payload.get("atoms", [])  # 兼容旧格式
             if atoms:
                 # 有完整数据：重新插入 SQLite 并同步 Qdrant
-                inserted_atom_ids: list[str] = []
-                qdrant_points: list[tuple[str, list[float], dict[str, Any]]] = []
                 for atom_data in atoms:
-                    try:
-                        atom_id = atom_data.get("atom_id", "")
-                        if not atom_id:
-                            continue
-                        await store.insert_atom(atom_data)
-                        inserted_atom_ids.append(atom_id)
-                        # 尝试生成 embedding 并准备 Qdrant upsert
-                        content = atom_data.get("content", "")
-                        if content:
-                            embedding = await generate_embedding(content)
-                            if embedding:
-                                qdrant_points.append(
-                                    (
-                                        atom_id,
-                                        embedding,
-                                        {
-                                            "atom_id": atom_id,
-                                            "atom_type": atom_data.get("atom_type", "factual"),
-                                            "weight": atom_data.get("weight", 0.5),
-                                            "importance": atom_data.get("importance", 0.5),
-                                            "confidence": atom_data.get("confidence", 0.5),
-                                            "status": atom_data.get("status", "active"),
-                                            "source_scene": atom_data.get("source_scene", "chat"),
-                                            "source_id": atom_data.get("source_id"),
-                                            "privacy_level": atom_data.get("privacy_level", "context_sensitive"),
-                                        },
-                                    )
-                                )
-                    except Exception as e:
-                        logger.warning("BATCH_INSERT replay 插入原子失败 (%s): %s", atom_data.get("atom_id", "?"), e)
-                if qdrant_points:
-                    try:
-                        await store.qdrant.batch_upsert_atom_vectors(qdrant_points)
-                    except Exception as e:
-                        logger.warning("BATCH_INSERT replay Qdrant 批量同步失败: %s", e)
+                    atom_id = atom_data.get("atom_id", "")
+                    if not atom_id:
+                        raise ValueError("BATCH_INSERT atom payload 缺少 atom_id")
+                    if "sqlite" in targets:
+                        await self._ensure_sqlite_atom(store, atom_data)
+                    if "qdrant" in targets:
+                        existing = await store.get_atom(atom_id)
+                        await self._upsert_qdrant_atom(store, atom_id, existing or atom_data)
             else:
                 # 无 payload 数据：尝试从 SQLite 按 atom_ids 读取，仅补 Qdrant
                 logger.warning("BATCH_INSERT replay payload 缺少 atoms 字段，尝试从 SQLite 兜底")
+                if "sqlite" in targets:
+                    raise ValueError("BATCH_INSERT 缺少 payload，无法恢复 SQLite 插入")
                 for aid in op.atom_ids:
-                    try:
-                        existing = await store.get_atom(aid)
-                        if existing and existing.get("content"):
-                            embedding = await generate_embedding(existing["content"])
-                            if embedding:
-                                payload = {
-                                    "atom_id": aid,
-                                    "atom_type": existing.get("atom_type", "factual"),
-                                    "weight": existing.get("weight", 0.5),
-                                    "importance": existing.get("importance", 0.5),
-                                    "confidence": existing.get("confidence", 0.5),
-                                    "status": existing.get("status", "active"),
-                                    "source_scene": existing.get("source_scene", "chat"),
-                                    "source_id": existing.get("source_id"),
-                                    "privacy_level": existing.get("privacy_level", "context_sensitive"),
-                                }
-                                try:
-                                    await store.qdrant.upsert_atom_vector(
-                                        point_id=aid,
-                                        vector=embedding,
-                                        payload=payload,
-                                    )
-                                except Exception as e_inner:
-                                    logger.warning(
-                                        "BATCH_INSERT replay Qdrant upsert 失败 (%s): %s",
-                                        aid,
-                                        e_inner,
-                                    )
-                    except Exception as e:
-                        logger.warning("BATCH_INSERT replay 读取原子失败 (%s): %s", aid, e)
+                    existing = await store.get_atom(aid)
+                    if existing is None:
+                        raise ValueError(f"BATCH_INSERT replay 找不到原子: {aid}")
+                    await self._upsert_qdrant_atom(store, aid, existing)
 
         elif op.op_type == OpType.DREAM_CONSOLE:
             # 梦境巩固重放 — 记录到日志，由梦境系统自行处理一致性

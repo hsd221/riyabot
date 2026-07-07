@@ -14,6 +14,7 @@ import {
   DreamSection,
   FeaturesSection,
   ExpressionSection,
+  BehaviorSection,
   ProcessingSection,
 } from './bot/sections'
 import {
@@ -38,6 +39,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Bot,
+  BrainCircuit,
   Check,
   ChevronRight,
   CloudMoon,
@@ -75,6 +77,7 @@ import type {
   PersonalityConfig,
   ChatConfig,
   ExpressionConfig,
+  BehaviorConfig,
   EmojiConfig,
   MemoryConfig,
   ToolConfig,
@@ -114,6 +117,7 @@ type BotConfigTab =
   | 'personality'
   | 'chat'
   | 'expression'
+  | 'behavior'
   | 'features'
   | 'processing'
   | 'message_receive'
@@ -159,6 +163,13 @@ const CONFIG_TABS: ConfigTabItem[] = [
     description: '表达学习与黑话',
     Icon: Sparkles,
     color: 'ios-symbol-pink',
+  },
+  {
+    value: 'behavior',
+    label: '行为',
+    description: '行为学习与引用',
+    Icon: BrainCircuit,
+    color: 'ios-symbol-purple',
   },
   {
     value: 'features',
@@ -242,6 +253,7 @@ export function BotConfigPage() {
   const [personalityConfig, setPersonalityConfig] = useState<PersonalityConfig | null>(null)
   const [chatConfig, setChatConfig] = useState<ChatConfig | null>(null)
   const [expressionConfig, setExpressionConfig] = useState<ExpressionConfig | null>(null)
+  const [behaviorConfig, setBehaviorConfig] = useState<BehaviorConfig | null>(null)
   const [emojiConfig, setEmojiConfig] = useState<EmojiConfig | null>(null)
   const [memoryConfig, setMemoryConfig] = useState<MemoryConfig | null>(null)
   const [toolConfig, setToolConfig] = useState<ToolConfig | null>(null)
@@ -324,6 +336,12 @@ export function BotConfigPage() {
       expression_auto_check_interval: expression.expression_auto_check_interval ?? 3600,
       expression_auto_check_count: expression.expression_auto_check_count ?? 10,
       expression_auto_check_custom_criteria: expression.expression_auto_check_custom_criteria ?? [],
+    })
+
+    const behavior = (config.behavior ?? {}) as Partial<BehaviorConfig>
+    setBehaviorConfig({
+      learning_list: behavior.learning_list ?? [],
+      behavior_groups: behavior.behavior_groups ?? [],
     })
 
     setEmojiConfig(config.emoji as EmojiConfig)
@@ -435,6 +453,7 @@ export function BotConfigPage() {
       personality: personalityConfig,
       chat: chatConfig,
       expression: expressionConfig,
+      behavior: behaviorConfig,
       emoji: emojiConfig,
       memory: memoryConfig,
       tool: toolConfig,
@@ -457,6 +476,7 @@ export function BotConfigPage() {
     personalityConfig,
     chatConfig,
     expressionConfig,
+    behaviorConfig,
     emojiConfig,
     memoryConfig,
     toolConfig,
@@ -573,6 +593,7 @@ export function BotConfigPage() {
   useConfigAutoSave(personalityConfig, 'personality', initialLoadRef.current, triggerVisualAutoSave)
   useConfigAutoSave(chatConfig, 'chat', initialLoadRef.current, triggerVisualAutoSave)
   useConfigAutoSave(expressionConfig, 'expression', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(behaviorConfig, 'behavior', initialLoadRef.current, triggerVisualAutoSave)
   useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerVisualAutoSave)
   useConfigAutoSave(memoryConfig, 'memory', initialLoadRef.current, triggerVisualAutoSave)
   useConfigAutoSave(toolConfig, 'tool', initialLoadRef.current, triggerVisualAutoSave)
@@ -1032,6 +1053,9 @@ export function BotConfigPage() {
                 <TabsTrigger value="expression" className="min-w-[4.5rem] px-3 py-2 text-xs">
                   表达
                 </TabsTrigger>
+                <TabsTrigger value="behavior" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  行为
+                </TabsTrigger>
                 <TabsTrigger value="features" className="min-w-[4.5rem] px-3 py-2 text-xs">
                   功能
                 </TabsTrigger>
@@ -1078,6 +1102,13 @@ export function BotConfigPage() {
               <TabsContent value="expression" className="mt-5 space-y-5 sm:mt-6">
                 {expressionConfig && (
                   <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
+                )}
+              </TabsContent>
+
+              {/* 行为学习配置 */}
+              <TabsContent value="behavior" className="mt-5 space-y-5 sm:mt-6">
+                {behaviorConfig && (
+                  <BehaviorSection config={behaviorConfig} onChange={setBehaviorConfig} />
                 )}
               </TabsContent>
 

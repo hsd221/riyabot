@@ -95,6 +95,10 @@ class TopicSummary(TypedDict):
         first_seen: 首次出现时间戳
         last_updated: 最后更新时间戳
         is_closed: 是否关闭
+        topic_title: 话题标题（LLM 分段判断时生成）
+        start_message_id: 话题起始消息 ID
+        end_message_id: 话题结束消息 ID
+        messages: 话题包含的消息快照，用于未闭合尾段续传
     """
 
     topic_id: str
@@ -105,6 +109,10 @@ class TopicSummary(TypedDict):
     first_seen: float
     last_updated: float
     is_closed: bool
+    topic_title: NotRequired[str]
+    start_message_id: NotRequired[str]
+    end_message_id: NotRequired[str]
+    messages: NotRequired[list[dict[str, Any]]]
 
 
 class PayloadSchemaField(TypedDict):
@@ -126,6 +134,7 @@ class BufferMessage(TypedDict):
 
     Attributes:
         user_id: 用户 ID
+        message_id: 原始消息 ID（可选，用于去重）
         speaker: 发言人名称
         content: 消息内容
         timestamp: 时间戳
@@ -133,6 +142,7 @@ class BufferMessage(TypedDict):
     """
 
     user_id: str
+    message_id: NotRequired[str]
     speaker: str
     content: str
     timestamp: float

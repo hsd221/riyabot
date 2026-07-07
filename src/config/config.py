@@ -17,6 +17,7 @@ from src.config.official_configs import (
     BotConfig,
     PersonalityConfig,
     ExpressionConfig,
+    BehaviorConfig,
     ChatConfig,
     EmojiConfig,
     KeywordReactionConfig,
@@ -398,6 +399,7 @@ class Config(ConfigBase):
     debug: DebugConfig
     voice: VoiceConfig
     dream: DreamConfig
+    behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
 
 
 @dataclass

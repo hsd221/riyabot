@@ -191,6 +191,7 @@ class RawMessageArchive(BaseModel):
 
     class Meta:
         table_name = "raw_message_archive"
+        indexes = ((("stream_id", "message_id", "chat_type"), True),)
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +402,11 @@ def _ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_raw_archive_dream_status_ts ON raw_message_archive(dream_status, timestamp)",
         ),
         (
+            "idx_raw_archive_unique_message",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_raw_archive_unique_message "
+            "ON raw_message_archive(stream_id, message_id, chat_type)",
+        ),
+        (
             "idx_conflict_status_created",
             "CREATE INDEX IF NOT EXISTS idx_conflict_status_created ON conflict_observations(status, created_at)",
         ),
@@ -410,6 +416,61 @@ def _ensure_indexes():
             memory_db.execute_sql(ddl)
         except Exception as e:
             logger.warning("创建索引 %s 失败: %s", idx_name, e)
+
+
+def _dedupe_raw_message_archive() -> int:
+    """合并历史重复归档记录，确保唯一索引可安全创建。"""
+    if not memory_db.table_exists(RawMessageArchive):
+        return 0
+
+    duplicates = memory_db.execute_sql(
+        """
+        SELECT stream_id, message_id, chat_type
+        FROM raw_message_archive
+        GROUP BY stream_id, message_id, chat_type
+        HAVING COUNT(*) > 1
+        """
+    ).fetchall()
+    removed = 0
+    for stream_id, message_id, chat_type in duplicates:
+        rows = list(
+            RawMessageArchive.select()
+            .where(
+                RawMessageArchive.stream_id == stream_id,
+                RawMessageArchive.message_id == message_id,
+                RawMessageArchive.chat_type == chat_type,
+            )
+            .order_by(RawMessageArchive.id.asc())
+        )
+        if len(rows) <= 1:
+            continue
+
+        keep = rows[0]
+        for row in rows[1:]:
+            if _raw_archive_dream_state_rank(row.dream_status) > _raw_archive_dream_state_rank(keep.dream_status):
+                keep.dream_status = row.dream_status
+                keep.dream_route = row.dream_route
+                keep.dream_significance = row.dream_significance
+                keep.dream_processed_at = row.dream_processed_at
+            elif keep.dream_processed_at is None and row.dream_processed_at is not None:
+                keep.dream_route = row.dream_route
+                keep.dream_significance = row.dream_significance
+                keep.dream_processed_at = row.dream_processed_at
+            row.delete_instance()
+            removed += 1
+        keep.save()
+
+    if removed:
+        logger.warning("原始消息归档表已合并重复记录", removed=removed)
+    return removed
+
+
+def _raw_archive_dream_state_rank(status: str | None) -> int:
+    return {
+        "pending": 0,
+        "skipped": 1,
+        "triaged": 2,
+    }.get(status or "pending", 0)
 
 
 def _ensure_columns():
@@ -452,6 +513,7 @@ def create_tables():
     with memory_db:
         memory_db.create_tables(MODELS, safe=True)
         _ensure_columns()
+        _dedupe_raw_message_archive()
         _ensure_indexes()
     logger.info(f"记忆数据库表已创建: {_MEMORY_DB_FILE}")
 
@@ -466,6 +528,7 @@ def initialize_database():
                     memory_db.create_tables([model], safe=True)
                     logger.info(f"记忆表 '{model._meta.table_name}' 创建成功")
             _ensure_columns()
+            _dedupe_raw_message_archive()
             _ensure_indexes()
         logger.info("记忆数据库初始化完成")
     except Exception as e:

@@ -19,6 +19,7 @@ import {
   Sliders,
   Hash,
   BrainCircuit,
+  Activity,
   MoreHorizontal,
   X,
   ChevronRight,
@@ -63,6 +64,7 @@ const menuIconTileClasses: Record<string, string> = {
   '/config/adapter': 'ios-symbol-purple',
   '/resource/emoji': 'ios-symbol-yellow',
   '/resource/expression': 'ios-symbol-orange',
+  '/resource/behavior': 'ios-symbol-purple',
   '/resource/jargon': 'ios-symbol-pink',
   '/resource/person': 'ios-symbol-blue',
   '/resource/memory': 'ios-symbol-green',
@@ -135,6 +137,7 @@ export function Layout({ children }: LayoutProps) {
       items: [
         { icon: Smile, label: '表情包管理', path: '/resource/emoji' },
         { icon: MessageSquare, label: '表达方式管理', path: '/resource/expression' },
+        { icon: Activity, label: '行为学习管理', path: '/resource/behavior' },
         { icon: Hash, label: '黑话管理', path: '/resource/jargon' },
         { icon: UserCircle, label: '人物信息管理', path: '/resource/person' },
         { icon: BrainCircuit, label: '记忆系统概览', path: '/resource/memory' },

@@ -540,7 +540,7 @@ class MemoryWriter:
         # 2. 准备 SQLite 字典
         store_dict = self._atom_to_store_dict(atom)
 
-        # 3. 写入 SQLite
+        # 3. 写入 SQLite（主表与详情表必须同事务提交，避免半写入）
         try:
             async with WriteOperation(
                 self.op_logger,
@@ -549,16 +549,15 @@ class MemoryWriter:
                 atom_ids=[atom.atom_id],
                 payload={"atom": store_dict},
             ):
-                await self.store.insert_atom(store_dict)
+                with memory_db.atomic():
+                    await self.store.insert_atom(store_dict)
+                    if episodic_detail is not None:
+                        await self._write_episodic_detail(atom.atom_id, episodic_detail)
+                    if semantic_detail is not None:
+                        await self._write_semantic_detail(atom.atom_id, semantic_detail)
         except Exception as e:
             logger.error(f"写入记忆原子到 SQLite 失败: {atom.atom_id}, {e}")
             raise
-
-        # 4. 写入扩展详情表
-        if episodic_detail is not None:
-            await self._write_episodic_detail(atom.atom_id, episodic_detail)
-        if semantic_detail is not None:
-            await self._write_semantic_detail(atom.atom_id, semantic_detail)
 
         # 5. 生成 embedding（如果尚未设置）
         if not atom.embedding:
@@ -574,6 +573,7 @@ class MemoryWriter:
                     OpType.INSERT_ATOM,
                     "qdrant",
                     atom_ids=[atom.atom_id],
+                    payload={"atom": store_dict},
                 ):
                     if not await self._upsert_qdrant(atom):
                         raise RuntimeError("Qdrant upsert 返回 False")
@@ -607,49 +607,49 @@ class MemoryWriter:
 
         atom_ids: list[str] = []
 
-        with memory_db.atomic():
-            for atom in atoms:
-                if not self._validate_atom(atom):
-                    logger.warning(f"批量写入跳过校验失败的原子: {atom.atom_id}")
-                    continue
+        for atom in atoms:
+            if not self._validate_atom(atom):
+                logger.warning(f"批量写入跳过校验失败的原子: {atom.atom_id}")
+                continue
 
-                if atom.weight == 0.5:
-                    atom = update_weight(atom)
+            if atom.weight == 0.5:
+                atom = update_weight(atom)
 
-                store_dict = self._atom_to_store_dict(atom)
+            store_dict = self._atom_to_store_dict(atom)
 
-                try:
-                    async with WriteOperation(
-                        self.op_logger,
-                        OpType.BATCH_INSERT,
-                        "sqlite",
-                        atom_ids=[atom.atom_id],
-                        payload={"atom": store_dict},
-                    ):
-                        await self.store.insert_atom(store_dict)
-                    atom_ids.append(atom.atom_id)
+            try:
+                async with WriteOperation(
+                    self.op_logger,
+                    OpType.BATCH_INSERT,
+                    "sqlite",
+                    atom_ids=[atom.atom_id],
+                    payload={"atom": store_dict},
+                ):
+                    await self.store.insert_atom(store_dict)
+                atom_ids.append(atom.atom_id)
 
-                    # 生成 embedding（如果尚未设置）
-                    if not atom.embedding:
-                        emb_vec = await generate_embedding(atom.content)
-                        if emb_vec:
-                            atom.embedding = emb_vec
+                # 生成 embedding（如果尚未设置）
+                if not atom.embedding:
+                    emb_vec = await generate_embedding(atom.content)
+                    if emb_vec:
+                        atom.embedding = emb_vec
 
-                    # 独立写入 Qdrant
-                    if atom.embedding:
-                        try:
-                            async with WriteOperation(
-                                self.op_logger,
-                                OpType.BATCH_INSERT,
-                                "qdrant",
-                                atom_ids=[atom.atom_id],
-                            ):
-                                if not await self._upsert_qdrant(atom):
-                                    raise RuntimeError("Qdrant upsert 返回 False")
-                        except Exception as e:
-                            logger.warning(f"批量写入 Qdrant 失败: {atom.atom_id}, {e}")
-                except Exception as e:
-                    logger.error(f"批量写入原子失败: {atom.atom_id}, {e}")
+                # 独立写入 Qdrant
+                if atom.embedding:
+                    try:
+                        async with WriteOperation(
+                            self.op_logger,
+                            OpType.BATCH_INSERT,
+                            "qdrant",
+                            atom_ids=[atom.atom_id],
+                            payload={"atom": store_dict},
+                        ):
+                            if not await self._upsert_qdrant(atom):
+                                raise RuntimeError("Qdrant upsert 返回 False")
+                    except Exception as e:
+                        logger.warning(f"批量写入 Qdrant 失败: {atom.atom_id}, {e}")
+            except Exception as e:
+                logger.error(f"批量写入原子失败: {atom.atom_id}, {e}")
 
         logger.info(
             "批量写入完成",
@@ -925,47 +925,33 @@ class MemoryWriter:
 
     async def _write_episodic_detail(self, atom_id: str, detail: EpisodicDetail) -> None:
         """写入情景记忆扩展详情"""
-        try:
-            with memory_db:
-                EpisodicDetailModel.get_or_create(
-                    id=atom_id,
-                    defaults={
-                        "atom": atom_id,
-                        "event_time": (to_datetime(detail.event_time) if detail.event_time else None),
-                        "participants": (
-                            json.dumps(detail.participants, ensure_ascii=False) if detail.participants else None
-                        ),
-                        "emotion_tags": (
-                            json.dumps(detail.emotion_tags, ensure_ascii=False) if detail.emotion_tags else None
-                        ),
-                        "sensory_tags": (
-                            json.dumps(detail.sensory_tags, ensure_ascii=False) if detail.sensory_tags else None
-                        ),
-                        "temporal_context": detail.temporal_context or None,
-                    },
-                )
-        except Exception as e:
-            logger.error(f"写入情景详情失败 ({atom_id}): {e}")
+        EpisodicDetailModel.get_or_create(
+            id=atom_id,
+            defaults={
+                "atom": atom_id,
+                "event_time": (to_datetime(detail.event_time) if detail.event_time else None),
+                "participants": (json.dumps(detail.participants, ensure_ascii=False) if detail.participants else None),
+                "emotion_tags": (json.dumps(detail.emotion_tags, ensure_ascii=False) if detail.emotion_tags else None),
+                "sensory_tags": (json.dumps(detail.sensory_tags, ensure_ascii=False) if detail.sensory_tags else None),
+                "temporal_context": detail.temporal_context or None,
+            },
+        )
 
     async def _write_semantic_detail(self, atom_id: str, detail: SemanticDetail) -> None:
         """写入语义记忆扩展详情"""
-        try:
-            with memory_db:
-                SemanticDetailModel.get_or_create(
-                    id=atom_id,
-                    defaults={
-                        "atom": atom_id,
-                        "attr_category": detail.attr_category,
-                        "attr_name": detail.attr_name,
-                        "attr_value": detail.attr_value,
-                        "evidence_list": (
-                            json.dumps(detail.evidence_list, ensure_ascii=False) if detail.evidence_list else None
-                        ),
-                        "evidence_counter": detail.evidence_counter,
-                    },
-                )
-        except Exception as e:
-            logger.error(f"写入语义详情失败 ({atom_id}): {e}")
+        SemanticDetailModel.get_or_create(
+            id=atom_id,
+            defaults={
+                "atom": atom_id,
+                "attr_category": detail.attr_category,
+                "attr_name": detail.attr_name,
+                "attr_value": detail.attr_value,
+                "evidence_list": (
+                    json.dumps(detail.evidence_list, ensure_ascii=False) if detail.evidence_list else None
+                ),
+                "evidence_counter": detail.evidence_counter,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

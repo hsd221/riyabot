@@ -7,13 +7,14 @@ from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.utils.chat_message_builder import get_raw_msg_by_timestamp_with_chat_inclusive
 from src.bw_learner.expression_learner import expression_learner_manager
 from src.bw_learner.jargon_miner import miner_manager
+from src.bw_learner.behavior_learner import behavior_learner_manager
 
 logger = get_logger("bw_learner")
 
 
 class MessageRecorder:
     """
-    统一的消息记录器，负责管理时间窗口和消息提取，并将消息分发给 expression_learner 和 jargon_miner
+    统一的消息记录器，负责管理时间窗口和消息提取，并将消息分发给 expression_learner、jargon_miner 和 behavior_learner
     """
 
     def __init__(self, chat_id: str) -> None:
@@ -33,6 +34,7 @@ class MessageRecorder:
         # 获取 expression_learner 和 jargon_miner 实例
         self.expression_learner = expression_learner_manager.get_expression_learner(chat_id)
         self.jargon_miner = miner_manager.get_miner(chat_id)
+        self.behavior_learner = behavior_learner_manager.get_behavior_learner(chat_id)
 
     def _init_parameters(self) -> None:
         """初始化提取参数"""
@@ -40,6 +42,11 @@ class MessageRecorder:
         _, self.enable_expression_learning, self.enable_jargon_learning = (
             global_config.expression.get_expression_config_for_chat(self.chat_id)
         )
+        behavior_config = getattr(global_config, "behavior", None)
+        if behavior_config and hasattr(behavior_config, "get_behavior_config_for_chat"):
+            _, self.enable_behavior_learning = behavior_config.get_behavior_config_for_chat(self.chat_id)
+        else:
+            self.enable_behavior_learning = True
         self.min_messages_for_extraction = 30
         self.min_extraction_interval = 60
 
@@ -119,6 +126,8 @@ class MessageRecorder:
                 # 触发 expression_learner 和 jargon_miner 的处理
                 if self.enable_expression_learning:
                     asyncio.create_task(self._trigger_expression_learning(messages))
+                if self.enable_behavior_learning:
+                    asyncio.create_task(self._trigger_behavior_learning(messages))
 
             except Exception as e:
                 logger.error(f"为聊天流 {self.chat_name} 提取和分发消息失败: {e}")
@@ -146,6 +155,23 @@ class MessageRecorder:
                 logger.debug(f"聊天流 {self.chat_name} 表达学习未获得有效结果")
         except Exception as e:
             logger.error(f"为聊天流 {self.chat_name} 触发表达学习失败: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    async def _trigger_behavior_learning(self, messages: List[Any]) -> None:
+        """
+        触发 behavior 学习，使用指定的消息列表
+        """
+        try:
+            learnt_behaviors = await self.behavior_learner.learn_and_store(messages=messages)
+
+            if learnt_behaviors:
+                logger.info(f"聊天流 {self.chat_name} 行为学习完成")
+            else:
+                logger.debug(f"聊天流 {self.chat_name} 行为学习未获得有效结果")
+        except Exception as e:
+            logger.error(f"为聊天流 {self.chat_name} 触发行为学习失败: {e}")
             import traceback
 
             traceback.print_exc()

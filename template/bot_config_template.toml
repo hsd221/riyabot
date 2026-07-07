@@ -1,5 +1,5 @@
 [inner]
-version = "7.4.2"
+version = "7.5.0"
 
 #----以下是给开发人员阅读的，如果你只是部署了璃夜，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -97,6 +97,24 @@ allow_reflect = [] # 允许进行表达反思的聊天流ID列表，格式：["q
 all_global_jargon = true # 是否开启全局黑话模式，注意，此功能关闭后，已经记录的全局黑话不会改变，需要手动删除
 enable_jargon_explanation = true # 是否在回复前尝试对上下文中的黑话进行解释（关闭可减少一次LLM调用，仅影响回复前的黑话匹配与解释，不影响黑话学习）
 jargon_mode = "planner" # 黑话解释来源模式，可选： "context"（使用上下文自动匹配黑话） 或 "planner"（仅使用Planner在reply动作中给出的unknown_words列表）
+
+
+[behavior]
+# 行为学习配置
+learning_list = [ # 行为学习配置列表，支持按聊天流配置
+    ["", "enable", "enable"],  # 全局配置：使用行为参考，启用行为学习
+    ["qq:1919810:group", "enable", "enable"],  # 特定群聊配置：使用行为参考，启用行为学习
+    ["qq:114514:private", "enable", "disable"],  # 特定私聊配置：使用行为参考，禁用行为学习
+    # 格式说明：
+    # 第一位: chat_stream_id，空字符串表示全局配置
+    # 第二位: 是否使用学到的行为参考 ("enable"/"disable")
+    # 第三位: 是否学习行为 ("enable"/"disable")
+]
+
+behavior_groups = [
+    # ["*"], # 保留项：当前不会自动扩大到所有聊天流
+    ["qq:1919810:private","qq:114514:private","qq:1111111:group"], # 特定互通组，组内chat_id会共享学习到的行为参考
+]
 
 
 

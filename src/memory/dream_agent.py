@@ -464,6 +464,7 @@ class DreamTask(AsyncTask):
         limit = batch_size or CONSOLIDATION_BATCH_SIZE
         count = 0
         now_ts = time.time()
+        qdrant_updates: list[tuple[str, dict[str, Any]]] = []
 
         try:
             with memory_db:
@@ -505,16 +506,15 @@ class DreamTask(AsyncTask):
                             weight=updated.weight,
                             last_accessed_at=last_accessed_at,
                         ).where(MemoryAtomModel.atom_id == atom_model.atom_id).execute()
-                        try:
-                            await self._store.qdrant.set_atom_payload(
+                        qdrant_updates.append(
+                            (
                                 atom_model.atom_id,
                                 {
                                     "weight": updated.weight,
                                     "last_accessed_at": last_accessed_at.isoformat(),
                                 },
                             )
-                        except Exception:
-                            pass  # Qdrant 同步是尽力而为的最佳操作
+                        )
                         count += 1
 
                     except Exception as e:
@@ -522,6 +522,12 @@ class DreamTask(AsyncTask):
 
         except Exception as e:
             logger.error(f"记忆巩固阶段异常: {e}")
+
+        for atom_id, payload in qdrant_updates:
+            try:
+                await self._store.qdrant.set_atom_payload(atom_id, payload)
+            except Exception:
+                pass  # Qdrant 同步是尽力而为的最佳操作
 
         if count > 0:
             logger.info(f"梦境巩固: {count} 个原子权重已提升 (boost={CONSOLIDATION_BOOST})")
@@ -1093,6 +1099,7 @@ class DreamTask(AsyncTask):
         limit = batch_size or SCORE_REASSESS_BATCH_SIZE
         now_ts = time.time()
         updated_count = 0
+        qdrant_updates: list[tuple[str, dict[str, Any]]] = []
 
         try:
             with memory_db:
@@ -1149,8 +1156,8 @@ class DreamTask(AsyncTask):
                             confidence=new_confidence,
                             weight=new_weight,
                         ).where(MemoryAtomModel.atom_id == atom_model.atom_id).execute()
-                        try:
-                            await self._store.qdrant.set_atom_payload(
+                        qdrant_updates.append(
+                            (
                                 atom_model.atom_id,
                                 {
                                     "importance": new_importance,
@@ -1158,13 +1165,18 @@ class DreamTask(AsyncTask):
                                     "weight": new_weight,
                                 },
                             )
-                        except Exception:
-                            pass
+                        )
                         updated_count += 1
                     except Exception as e:
                         logger.error(f"重估原子评分失败 ({atom_model.atom_id}): {e}")
         except Exception as e:
             logger.error(f"梦境评分重估阶段异常: {e}")
+
+        for atom_id, payload in qdrant_updates:
+            try:
+                await self._store.qdrant.set_atom_payload(atom_id, payload)
+            except Exception:
+                pass
 
         if updated_count > 0:
             logger.info(f"梦境评分重估: 更新 {updated_count} 个原子")
@@ -1239,6 +1251,7 @@ class DreamTask(AsyncTask):
         """
         stats = {"locked_private": 0, "unlocked_public": 0}
         limit = batch_size or PRIVACY_REASSESS_BATCH_SIZE
+        qdrant_updates: list[tuple[str, dict[str, Any]]] = []
 
         try:
             with memory_db:
@@ -1263,13 +1276,7 @@ class DreamTask(AsyncTask):
                         MemoryAtomModel.update(privacy_level=target_level).where(
                             MemoryAtomModel.atom_id == atom_model.atom_id
                         ).execute()
-                        try:
-                            await self._store.qdrant.set_atom_payload(
-                                atom_model.atom_id,
-                                {"privacy_level": target_level},
-                            )
-                        except Exception:
-                            pass
+                        qdrant_updates.append((atom_model.atom_id, {"privacy_level": target_level}))
 
                         if target_level == "private":
                             stats["locked_private"] += 1
@@ -1279,6 +1286,12 @@ class DreamTask(AsyncTask):
                         logger.error(f"隐私重评失败 ({atom_model.atom_id}): {e}")
         except Exception as e:
             logger.error(f"梦境隐私重评阶段异常: {e}")
+
+        for atom_id, payload in qdrant_updates:
+            try:
+                await self._store.qdrant.set_atom_payload(atom_id, payload)
+            except Exception:
+                pass
 
         if stats["locked_private"] or stats["unlocked_public"]:
             logger.info(f"梦境隐私重评: 上锁{stats['locked_private']}条, 解锁{stats['unlocked_public']}条")

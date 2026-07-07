@@ -21,6 +21,7 @@ from .model_routes import router as model_router
 from .ws_auth import router as ws_auth_router
 from .annual_report_routes import router as annual_report_router
 from .memory_routes import router as memory_router
+from .behavior_routes import router as behavior_router
 
 logger = get_logger("webui.api")
 
@@ -53,6 +54,8 @@ router.include_router(ws_auth_router)
 router.include_router(annual_report_router)
 # 注册记忆系统路由
 router.include_router(memory_router)
+# 注册行为学习路由
+router.include_router(behavior_router)
 
 
 class TokenVerifyRequest(BaseModel):

@@ -17,6 +17,7 @@ import { ModelConfigPage } from './routes/config/model'
 import { AdapterConfigPage } from './routes/config/adapter'
 import { EmojiManagementPage } from './routes/resource/emoji'
 import { ExpressionManagementPage } from './routes/resource/expression'
+import { BehaviorManagementPage } from './routes/resource/behavior'
 import { JargonManagementPage } from './routes/resource/jargon'
 import { PersonManagementPage } from './routes/person'
 import { MemoryPage } from './routes/resource/memory'
@@ -123,6 +124,13 @@ const expressionManagementRoute = createRoute({
   component: ExpressionManagementPage,
 })
 
+// 资源管理路由 - 行为学习管理
+const behaviorManagementRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/resource/behavior',
+  component: BehaviorManagementPage,
+})
+
 // 资源管理路由 - 人物信息管理
 const personManagementRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -219,6 +227,7 @@ const routeTree = rootRoute.addChildren([
     adapterConfigRoute,
     emojiManagementRoute,
     expressionManagementRoute,
+    behaviorManagementRoute,
     jargonManagementRoute,
     personManagementRoute,
     memoryRoute,

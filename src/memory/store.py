@@ -209,6 +209,20 @@ class QdrantManager:
             return None
         return qdrant_models.Filter(must=conditions)
 
+    @staticmethod
+    def _collection_vector_size(collection_info: Any) -> Optional[int]:
+        """读取 Qdrant collection 的未命名向量维度。"""
+        config = getattr(collection_info, "config", None)
+        params = getattr(config, "params", None)
+        vectors = getattr(params, "vectors", None)
+        if vectors is None:
+            return None
+        if isinstance(vectors, dict):
+            if "" in vectors:
+                return getattr(vectors[""], "size", None)
+            return None
+        return getattr(vectors, "size", None)
+
     def _query_points(
         self,
         collection_name: str,
@@ -328,6 +342,20 @@ class QdrantManager:
             exists = any(c.name == collection_name for c in collections)
         except Exception:
             exists = False
+
+        if exists:
+            collection_info = self._client.get_collection(collection_name=collection_name)
+            vector_size = self._collection_vector_size(collection_info)
+            if vector_size is None:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' vector configuration is incompatible with unnamed vectors"
+                )
+            if vector_size != self.config.embedding_dimension:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' vector size {vector_size} "
+                    f"!= configured embedding_dimension {self.config.embedding_dimension}"
+                )
+            return
 
         if not exists:
             try:
@@ -726,7 +754,7 @@ class MemoryStore:
             atom_data["entities"] = json.dumps(atom_data["entities"], ensure_ascii=False)
 
         try:
-            with memory_db:
+            with memory_db.atomic():
                 MemoryAtom.create(**atom_data)
         except Exception:
             logger.exception("记忆原子写入失败", event_code="memory.atom.insert_failed", atom_id=atom_id)
@@ -1030,26 +1058,11 @@ class MemoryStore:
         Returns:
             int: 重建的向量数量
         """
-        if not QDRANT_AVAILABLE:
-            logger.warning("qdrant-client 未安装，无法重建索引", event_code="memory.qdrant.rebuild_unavailable")
-            return 0
-
-        count = 0
-        try:
-            with memory_db:
-                atoms = MemoryAtom.select().where(MemoryAtom.status == "active")
-                for atom in atoms:
-                    # embedding_id 为空时跳过（未生成嵌入向量）
-                    if not atom.embedding_id:
-                        continue
-                    # 注意：这里需要外部提供 vector，无法凭空重建
-                    # 此方法仅为框架，实际重建需要调用 embedding 模型
-                    count += 1
-            logger.info("Qdrant 索引重建完成", event_code="memory.qdrant.index_rebuilt", count=count)
-            return count
-        except Exception:
-            logger.exception("Qdrant 索引重建失败", event_code="memory.qdrant.index_rebuild_failed")
-            return 0
+        logger.warning(
+            "Qdrant 索引重建暂不可用：SQLite 未保存原始向量，不能仅凭 embedding_id 重建",
+            event_code="memory.qdrant.index_rebuild_unavailable",
+        )
+        return 0
 
     # -- 统计信息 -----------------------------------------------------------
 

@@ -53,6 +53,17 @@ MAX_LLM_PARSE_ATTEMPTS = 2
 # 单条原子 content 的最大字符数
 MAX_ATOM_CONTENT_LENGTH = 200
 
+# 单条原子允许关联的实体数量和长度上限
+MAX_ENTITIES_PER_ATOM = 12
+MAX_ENTITY_LENGTH = 200
+
+# LLM detail 字段上限，避免异常输出导致画像/详情字段膨胀
+MAX_DETAIL_TEXT_LENGTH = 300
+MAX_DETAIL_LIST_ITEMS = 12
+
+# 内部元数据键：EncodingPipeline 用它限制画像更新目标，避免信任 LLM 伪造 entities
+SOURCE_USER_IDS_DETAIL_KEY = "_source_user_ids"
+
 # ---------------------------------------------------------------------------
 # LLM 输出格式指令（嵌入到编码提示中）
 # ---------------------------------------------------------------------------
@@ -63,7 +74,7 @@ _OUTPUT_FORMAT_INSTRUCTION = """你必须以严格的 JSON 数组格式返回提
   {
     "content": "客观事实描述（第三人称，简练，50字以内）",
     "atom_type": "episodic | factual | relational | preference",
-    "entities": ["实体名1", "实体名2"],
+    "entities": ["稳定用户ID或实体名1", "实体名2"],
     "importance": 0.0~1.0,
     "detail": { ... }
   }
@@ -78,6 +89,7 @@ _OUTPUT_FORMAT_INSTRUCTION = """你必须以严格的 JSON 数组格式返回提
 规则:
 - 每条原子必须是独立的一个事实，不要合并多条信息
 - content 使用第三人称客观描述，不含推测
+- 涉及具体发言人时，entities 优先填写消息头中的稳定 user_id，而不是可能变化的群昵称
 - 只提取有充分依据的事实，不确定的不提取
 - 不要把一次临时发言概括成"通常"、"经常"、"固定习惯"、"稳定偏好"或人格特征
 - 寒暄、接梗、单字回复、当场追问、表情反应、低信息玩笑通常不应入库
@@ -116,10 +128,21 @@ class EncodingBuffer:
         speaker: str,
         content: str,
         timestamp: float,
-    ) -> None:
+        message_id: Optional[str] = None,
+    ) -> bool:
         """添加一条消息到缓冲区"""
+        normalized_message_id = str(message_id or "").strip()
+        if normalized_message_id and any(msg.get("message_id") == normalized_message_id for msg in self.messages):
+            logger.debug(
+                "EncodingBuffer 跳过重复消息",
+                stream_id=self.stream_id,
+                message_id=normalized_message_id,
+            )
+            return False
+
         self.messages.append(
             {
+                **({"message_id": normalized_message_id} if normalized_message_id else {}),
                 "user_id": user_id,
                 "speaker": speaker,
                 "content": content,
@@ -135,6 +158,7 @@ class EncodingBuffer:
                 f"dropped={overflow_count}, remaining={self.max_buffer_size}",
             )
             self.messages = self.messages[-self.max_buffer_size :]
+        return True
 
     def clear(self) -> None:
         """清空缓冲区但保留流状态"""
@@ -204,6 +228,7 @@ class BatchEncoder:
         speaker: str,
         content: str,
         timestamp: Optional[datetime] = None,
+        message_id: Optional[str] = None,
     ) -> None:
         """摄取一条消息到缓冲区
 
@@ -216,6 +241,7 @@ class BatchEncoder:
             speaker: 发送者显示名称
             content: 消息文本内容
             timestamp: 消息时间戳（默认当前时间）
+            message_id: 原始消息 ID（可选，用于缓冲去重）
         """
         ts = timestamp.timestamp() if timestamp else time.time()
 
@@ -230,15 +256,18 @@ class BatchEncoder:
             )
 
         buf = self.buffers[stream_id]
-        buf.add_message(user_id=user_id, speaker=speaker, content=content, timestamp=ts)
+        added = buf.add_message(user_id=user_id, speaker=speaker, content=content, timestamp=ts, message_id=message_id)
+        if not added:
+            return
 
         # 同步送入第1层摘要器
         if buf.stream_type == "group_chat":
-            self.group_summarizer.add_message(
+            await self.group_summarizer.add_message_async(
                 stream_id=stream_id,
                 message_text=content,
                 user_id=user_id,
                 timestamp=ts,
+                speaker=speaker,
             )
         else:
             self.private_summarizer.append_exchange(
@@ -375,6 +404,14 @@ class BatchEncoder:
 
         # 5. 解析 LLM 输出
         extracted = self._parse_llm_extraction(llm_output)
+        if extracted is None:
+            logger.warning("LLM 编码输出解析失败，保留缓冲区等待下次重试 | stream=%s", stream_id)
+            return []
+
+        source_user_ids = self._source_user_ids(messages)
+        if source_user_ids:
+            for _, _, detail in extracted:
+                detail[SOURCE_USER_IDS_DETAIL_KEY] = list(source_user_ids)
 
         # 6. 清空缓冲区
         buf.clear()
@@ -424,8 +461,9 @@ class BatchEncoder:
         lines: list[str] = []
         for msg in messages:
             speaker = neutralize_prompt_boundaries(str(msg.get("speaker", msg.get("user_id", "unknown"))))
+            user_id = neutralize_prompt_boundaries(str(msg.get("user_id", "unknown")))
             content = neutralize_prompt_boundaries(str(msg.get("content", "")))
-            lines.append(f"[{speaker}]: {content}")
+            lines.append(f"[speaker={speaker} user_id={user_id}]: {content}")
 
         conversation_text = "\n".join(lines)
         topic_summary = neutralize_prompt_boundaries(topic_summary or "（无）")
@@ -512,7 +550,7 @@ class BatchEncoder:
     def _parse_llm_extraction(
         self,
         llm_response: str,
-    ) -> list[tuple[str, AtomType, dict[str, Any]]]:
+    ) -> Optional[list[tuple[str, AtomType, dict[str, Any]]]]:
         """解析 LLM 返回的结构化提取结果
 
         支持纯 JSON 和 markdown 代码块两种格式。
@@ -525,7 +563,7 @@ class BatchEncoder:
         """
         if not llm_response:
             logger.warning("LLM 返回空响应，无可提取的记忆")
-            return []
+            return None
 
         # 尝试直接解析
         parsed = self._try_parse_json(llm_response)
@@ -540,13 +578,13 @@ class BatchEncoder:
             logger.warning(
                 f"LLM 响应无法解析为 JSON | response_preview={llm_response[:200]}",
             )
-            return []
+            return None
 
         if not isinstance(parsed, list):
             logger.warning(
                 f"LLM 响应不是 JSON 数组 | type={type(parsed).__name__}",
             )
-            return []
+            return None
 
         # 验证并转换每条原子
         result: list[tuple[str, AtomType, dict[str, Any]]] = []
@@ -599,6 +637,48 @@ class BatchEncoder:
 
         return None
 
+    @staticmethod
+    def _safe_text(value: Any, max_length: int = MAX_DETAIL_TEXT_LENGTH) -> str:
+        """把 LLM 输出收敛为短文本；复杂对象不做字符串化入库。"""
+        if value is None or not isinstance(value, (str, int, float, bool)):
+            return ""
+        return str(value).strip()[:max_length]
+
+    @staticmethod
+    def _safe_str_list(
+        value: Any,
+        max_items: int = MAX_DETAIL_LIST_ITEMS,
+        max_length: int = MAX_DETAIL_TEXT_LENGTH,
+    ) -> list[str]:
+        """把 LLM 输出收敛为去重短字符串列表。"""
+        if not isinstance(value, list):
+            return []
+
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = BatchEncoder._safe_text(item, max_length)
+            if not text or text in seen:
+                continue
+            result.append(text)
+            seen.add(text)
+            if len(result) >= max_items:
+                break
+        return result
+
+    @staticmethod
+    def _source_user_ids(messages: list[BufferMessage]) -> list[str]:
+        """提取本批真实消息里的 user_id，供画像更新做白名单。"""
+        user_ids: list[str] = []
+        seen: set[str] = set()
+        for msg in messages:
+            user_id = BatchEncoder._safe_text(msg.get("user_id"), MAX_ENTITY_LENGTH)
+            if not user_id or user_id in seen:
+                continue
+            user_ids.append(user_id)
+            seen.add(user_id)
+        return user_ids
+
     def _validate_atom_item(
         self,
         item: Any,
@@ -619,13 +699,12 @@ class BatchEncoder:
             return None
 
         # 提取 content
-        content = str(item.get("content", "")).strip()
+        content = self._safe_text(item.get("content", ""), MAX_ATOM_CONTENT_LENGTH)
         if not content:
             return None
-        content = content[:MAX_ATOM_CONTENT_LENGTH]
 
         # 提取 atom_type
-        raw_type = str(item.get("atom_type", "")).strip().lower()
+        raw_type = self._safe_text(item.get("atom_type", ""), 40).lower()
         try:
             atom_type = AtomType(raw_type)
         except ValueError:
@@ -639,9 +718,11 @@ class BatchEncoder:
         importance = max(0.0, min(1.0, float(importance)))
 
         # 提取 entities
-        entities = item.get("entities", [])
-        if not isinstance(entities, list):
-            entities = []
+        entities = self._safe_str_list(
+            item.get("entities", []),
+            max_items=MAX_ENTITIES_PER_ATOM,
+            max_length=MAX_ENTITY_LENGTH,
+        )
 
         # 提取 detail
         detail = item.get("detail", {})
@@ -687,8 +768,11 @@ class BatchEncoder:
         if any(not isinstance(e, str) or not e.strip() for e in entities):
             logger.debug(f"entities 包含空项 | entities={entities}")
             return False
-        if any(len(e) > 200 for e in entities):
-            logger.debug("entities 包含超长项（>200 字符）")
+        if len(entities) > MAX_ENTITIES_PER_ATOM:
+            logger.debug("entities 数量超限")
+            return False
+        if any(len(e) > MAX_ENTITY_LENGTH for e in entities):
+            logger.debug("entities 包含超长项")
             return False
 
         if atom_type == AtomType.FACTUAL:
@@ -730,23 +814,25 @@ class BatchEncoder:
             规范化后的 detail 字典
         """
         if atom_type == AtomType.EPISODIC:
-            participants = detail.get("participants") or entities
-            if isinstance(participants, list):
-                participants = [str(p) for p in participants]
-            else:
-                participants = [str(participants)] if participants else []
+            participants = BatchEncoder._safe_str_list(
+                detail.get("participants"),
+                max_items=MAX_ENTITIES_PER_ATOM,
+                max_length=MAX_ENTITY_LENGTH,
+            )
+            if not participants:
+                participants = entities[:MAX_ENTITIES_PER_ATOM]
             return {
                 "participants": participants,
-                "emotion_tags": [str(t) for t in (detail.get("emotion_tags") or [])],
-                "sensory_tags": [str(t) for t in (detail.get("sensory_tags") or [])],
-                "temporal_context": str(detail.get("temporal_context", "")),
+                "emotion_tags": BatchEncoder._safe_str_list(detail.get("emotion_tags")),
+                "sensory_tags": BatchEncoder._safe_str_list(detail.get("sensory_tags")),
+                "temporal_context": BatchEncoder._safe_text(detail.get("temporal_context", "")),
             }
 
         elif atom_type == AtomType.FACTUAL:
             return {
-                "attr_category": str(detail.get("attr_category", "general")),
-                "attr_name": str(detail.get("attr_name", "")),
-                "attr_value": str(detail.get("attr_value", "")),
+                "attr_category": BatchEncoder._safe_text(detail.get("attr_category", "general"), 80) or "general",
+                "attr_name": BatchEncoder._safe_text(detail.get("attr_name", ""), 120),
+                "attr_value": BatchEncoder._safe_text(detail.get("attr_value", "")),
             }
 
         elif atom_type == AtomType.RELATIONAL:
@@ -756,8 +842,8 @@ class BatchEncoder:
         elif atom_type == AtomType.PREFERENCE:
             return {
                 "attr_category": "preference",
-                "attr_name": str(detail.get("attr_name", "")),
-                "attr_value": str(detail.get("attr_value", "喜欢")),
+                "attr_name": BatchEncoder._safe_text(detail.get("attr_name", ""), 120),
+                "attr_value": BatchEncoder._safe_text(detail.get("attr_value", "喜欢")),
             }
 
         return {}

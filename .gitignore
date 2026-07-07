@@ -70,6 +70,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+!webui/src/lib/
+webui/src/lib/*
+!webui/src/lib/behavior-api.ts
 lib64/
 parts/
 sdist/

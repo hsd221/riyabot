@@ -285,6 +285,8 @@ class HeartFChatting:
             _rt = _bridge.restore_topics(self.stream_id)
             if _rt:
                 _restored_topics = _rt
+                if self.topic_summarizer is not None and hasattr(self.topic_summarizer, "restore_unclosed_topics"):
+                    self.topic_summarizer.restore_unclosed_topics(self.stream_id, _rt)
                 logger.info(f"{self.log_prefix} 恢复 {len(_rt)} 个未闭合话题")
         except Exception:
             pass
@@ -438,16 +440,31 @@ class HeartFChatting:
 
         # 同时更新话题摘要
         if self.topic_summarizer is not None:
-            for msg in messages:
-                try:
-                    self.topic_summarizer.add_message(
+            try:
+                if hasattr(self.topic_summarizer, "add_messages"):
+                    await self.topic_summarizer.add_messages(
                         stream_id=self.stream_id,
-                        message_text=msg.processed_plain_text or "",
-                        user_id=msg.user_id,
-                        timestamp=msg.time,
+                        messages=[
+                            {
+                                "message_id": msg.message_id,
+                                "text": msg.processed_plain_text or "",
+                                "user_id": msg.user_id,
+                                "speaker": msg.user_nickname or msg.user_id,
+                                "timestamp": msg.time,
+                            }
+                            for msg in messages
+                        ],
                     )
-                except Exception:
-                    continue
+                else:
+                    for msg in messages:
+                        self.topic_summarizer.add_message(
+                            stream_id=self.stream_id,
+                            message_text=msg.processed_plain_text or "",
+                            user_id=msg.user_id,
+                            timestamp=msg.time,
+                        )
+            except Exception:
+                pass
 
         # 送入编码管线（Layer 2 缓冲区）
         try:
@@ -464,6 +481,7 @@ class HeartFChatting:
                             content=msg.processed_plain_text or "",
                             timestamp=msg.time,
                             stream_type="group_chat",
+                            message_id=msg.message_id,
                         )
                     except Exception:
                         continue

@@ -526,6 +526,84 @@ class ExpressionConfig(ConfigBase):
 
 
 @dataclass
+class BehaviorConfig(ConfigBase):
+    """行为学习配置类"""
+
+    learning_list: list[list] = field(default_factory=lambda: [["", "enable", "enable"]])
+    """
+    行为学习配置列表，支持按聊天流配置
+    格式: [["chat_stream_id", "use_behavior", "enable_learning"], ...]
+    """
+
+    behavior_groups: list[list[str]] = field(default_factory=list)
+    """
+    行为学习互通组
+    格式: [["qq:12345:group", "qq:67890:private"]]
+    """
+
+    def _parse_stream_config_to_chat_id(self, stream_config_str: str) -> Optional[str]:
+        try:
+            parts = stream_config_str.split(":")
+            if len(parts) != 3:
+                return None
+            platform, id_str, stream_type = parts
+
+            from src.chat.message_receive.chat_stream import get_chat_manager
+
+            return get_chat_manager().get_stream_id(platform, str(id_str), is_group=stream_type == "group")
+        except (ValueError, IndexError):
+            return None
+
+    def get_behavior_config_for_chat(self, chat_stream_id: Optional[str] = None) -> tuple[bool, bool]:
+        """
+        根据聊天流ID获取行为学习配置。
+
+        Returns:
+            tuple: (是否使用行为参考, 是否学习行为)
+        """
+        if not self.learning_list:
+            return True, True
+
+        if chat_stream_id:
+            specific_config = self._get_stream_specific_config(chat_stream_id)
+            if specific_config is not None:
+                return specific_config
+
+        global_config = self._get_global_config()
+        if global_config is not None:
+            return global_config
+
+        return True, True
+
+    def _get_stream_specific_config(self, chat_stream_id: str) -> Optional[tuple[bool, bool]]:
+        for config_item in self.learning_list:
+            if not config_item or len(config_item) < 3:
+                continue
+            stream_config_str = config_item[0]
+            if stream_config_str == "":
+                continue
+            config_chat_id = self._parse_stream_config_to_chat_id(stream_config_str)
+            if config_chat_id != chat_stream_id:
+                continue
+            try:
+                return config_item[1].lower() == "enable", config_item[2].lower() == "enable"  # type: ignore
+            except (ValueError, IndexError):
+                continue
+        return None
+
+    def _get_global_config(self) -> Optional[tuple[bool, bool]]:
+        for config_item in self.learning_list:
+            if not config_item or len(config_item) < 3:
+                continue
+            if config_item[0] == "":
+                try:
+                    return config_item[1].lower() == "enable", config_item[2].lower() == "enable"  # type: ignore
+                except (ValueError, IndexError):
+                    continue
+        return None
+
+
+@dataclass
 class ToolConfig(ConfigBase):
     """工具配置类"""
 

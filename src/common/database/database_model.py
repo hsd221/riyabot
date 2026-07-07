@@ -332,6 +332,30 @@ class Jargon(BaseModel):
         table_name = "jargon"
 
 
+class BehaviorPattern(BaseModel):
+    """
+    用于存储行为学习到的可复用场景-行为-结果模式。
+    """
+
+    chat_id = TextField(index=True)
+    actor_type = TextField(index=True)
+    learning_type = TextField(index=True)
+    action = TextField()
+    outcome = TextField()
+    source_text = TextField(null=True)
+    source_ids = TextField(null=True)
+    count = IntegerField(default=1)
+    score = FloatField(default=1.0)
+    enabled = BooleanField(default=True)
+    selected_count = IntegerField(default=0)
+    last_selected_time = FloatField(null=True)
+    last_active_time = FloatField()
+    create_date = FloatField(null=True)
+
+    class Meta:
+        table_name = "behavior_pattern"
+
+
 class ChatHistory(BaseModel):
     """
     用于存储聊天历史概括的模型
@@ -365,6 +389,7 @@ MODELS = [
     Expression,
     ActionRecords,
     Jargon,
+    BehaviorPattern,
     ChatHistory,
 ]
 

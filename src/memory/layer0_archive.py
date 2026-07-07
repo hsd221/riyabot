@@ -16,6 +16,8 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
+from peewee import IntegrityError
+
 from src.common.logger import get_logger
 from src.memory.schema import RawMessageArchive, memory_db
 
@@ -144,8 +146,36 @@ class MessageArchiver:
         Returns:
             创建的 RawMessageArchive 实例
         """
-        with memory_db.atomic():
-            record = RawMessageArchive.create(**fields)
+        try:
+            with memory_db.atomic():
+                record = RawMessageArchive.get_or_none(
+                    RawMessageArchive.stream_id == fields["stream_id"],
+                    RawMessageArchive.message_id == fields["message_id"],
+                    RawMessageArchive.chat_type == fields["chat_type"],
+                )
+                if record is not None:
+                    logger.debug(
+                        "归档记录已存在，跳过重复写入",
+                        stream_id=record.stream_id,
+                        message_id=record.message_id,
+                        msg_type=record.chat_type,
+                    )
+                    return record
+                record = RawMessageArchive.create(**fields)
+        except IntegrityError:
+            record = RawMessageArchive.get_or_none(
+                RawMessageArchive.stream_id == fields["stream_id"],
+                RawMessageArchive.message_id == fields["message_id"],
+                RawMessageArchive.chat_type == fields["chat_type"],
+            )
+            if record is None:
+                raise
+            logger.debug(
+                "归档记录发生并发唯一冲突，返回已存在记录",
+                stream_id=record.stream_id,
+                message_id=record.message_id,
+                msg_type=record.chat_type,
+            )
         logger.debug(
             "写入归档记录",
             stream_id=record.stream_id,
@@ -200,7 +230,7 @@ class MessageArchiver:
         with memory_db.atomic():
             for msg in messages:
                 fields = self._extract_message_fields(msg, chat_type=getattr(msg, "chat_type", "group"))
-                record = RawMessageArchive.create(**fields)
+                record = self._insert_record(fields)
                 ids.append(str(record.id))
         self._logger.info(f"批量归档 {len(ids)} 条消息")
         return ids

@@ -171,6 +171,7 @@ class MainSystem:
             store = MemoryStore(memory_config)
             await store.initialize()
             logger.info("记忆存储初始化完成", event_code="memory.store.initialized")
+            forgetting_manager = None
 
             # 启动记忆遗忘定期扫描
             try:
@@ -200,6 +201,22 @@ class MainSystem:
                 logger.warning(
                     "记忆写操作日志记录器初始化失败", event_code="memory.write_op_logger.init_failed", exc_info=True
                 )
+
+            # 启动时先重放上次异常退出留下的 pending/in_progress/failed 写操作。
+            if memory_op_logger is not None:
+                try:
+                    recovered_ops = await memory_op_logger.replay_failed_ops(store)
+                    logger.info(
+                        "记忆写操作恢复完成",
+                        event_code="memory.write_ops.replay_completed",
+                        recovered_count=len(recovered_ops),
+                    )
+                except Exception:
+                    logger.warning(
+                        "记忆写操作恢复失败",
+                        event_code="memory.write_ops.replay_failed",
+                        exc_info=True,
+                    )
 
             # 启动编码管线（连接 Layer 2 → Layer 3）
             try:
