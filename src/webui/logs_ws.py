@@ -122,14 +122,14 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
 
     await websocket.accept()
     active_connections.add(websocket)
-    logger.info(
+    logger.debug(
         "日志 WebSocket 客户端已连接", event_code="webui.logs_ws.connected", connection_count=len(active_connections)
     )
 
     # 连接建立后，立即发送历史日志
     try:
         recent_logs = load_recent_logs(limit=100)
-        logger.info("历史日志已发送到客户端", event_code="webui.logs_ws.history_sent", count=len(recent_logs))
+        logger.debug("历史日志已发送到客户端", event_code="webui.logs_ws.history_sent", count=len(recent_logs))
 
         for log_entry in recent_logs:
             await websocket.send_text(json.dumps(log_entry, ensure_ascii=False))
@@ -150,7 +150,7 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
 
     except WebSocketDisconnect:
         active_connections.discard(websocket)
-        logger.info(
+        logger.debug(
             "日志 WebSocket 客户端已断开",
             event_code="webui.logs_ws.disconnected",
             connection_count=len(active_connections),

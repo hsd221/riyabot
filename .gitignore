@@ -332,6 +332,16 @@ plugins/onebot_adapter/plugin_config.toml
 plugins/onebot_adapter/config_backup/
 plugins/onebot_adapter/data/
 plugins/onebot_adapter/logs/
+!/plugins/bilibili_live_companion/
+!/plugins/bilibili_live_companion/_manifest.json
+!/plugins/bilibili_live_companion/plugin.py
+!/plugins/bilibili_live_companion/*.py
+!/plugins/bilibili_live_companion/README.md
+plugins/bilibili_live_companion/**/__pycache__/
+plugins/bilibili_live_companion/**/*.py[cod]
+plugins/bilibili_live_companion/plugin_config.toml
+plugins/bilibili_live_companion/data/
+plugins/bilibili_live_companion/logs/
 !/plugins/hello_world_plugin
 !/plugins/emoji_manage_plugin
 !/plugins/take_picture_plugin

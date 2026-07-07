@@ -235,6 +235,11 @@ async def _send_message(message: MessageSending, show_log=True) -> bool:
     group_id = message.message_info.group_info.group_id if message.message_info.group_info else None
 
     try:
+        if platform == "bilibili_live":
+            if show_log:
+                logger.info(f"已处理 B站直播平台消息 '{message_preview}'（本地表现层输出，无外部平台发送）")
+            return True
+
         # 检查是否是 WebUI 平台的消息，或者是 WebUI 虚拟群的消息
         chat_manager, webui_platform = get_webui_chat_broadcaster()
         is_webui_message = (platform == webui_platform) or is_webui_virtual_group(group_id)

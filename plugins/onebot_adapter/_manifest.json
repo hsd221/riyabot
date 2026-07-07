@@ -9,8 +9,15 @@
   "license": "GPL-v3.0-or-later",
   "homepage_url": "https://github.com/hsd221/riyabot",
   "repository_url": "https://github.com/hsd221/riyabot",
-  "keywords": ["onebot", "napcat", "adapter", "qq"],
-  "categories": ["Adapter"],
+  "keywords": [
+    "onebot",
+    "napcat",
+    "adapter",
+    "qq"
+  ],
+  "categories": [
+    "Adapter"
+  ],
   "default_locale": "zh-CN",
   "plugin_info": {
     "plugin_type": "adapter",
@@ -26,5 +33,6 @@
         "description": "主程序关闭时停止 OneBot/NapCat 适配器"
       }
     ]
-  }
+  },
+  "id": "RiyaBot.riyabot"
 }
