@@ -216,14 +216,21 @@
 
   .ios-symbol {
     @apply grid shrink-0 place-items-center text-white shadow-[0_1px_0_rgba(255,255,255,0.24)_inset,0_5px_12px_rgba(0,0,0,0.12)];
+    color: rgb(255 255 255 / 0.98);
+  }
+
+  .ios-symbol > svg {
+    stroke: currentColor;
+    stroke-width: 2.75;
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.18));
   }
 
   .ios-symbol-sm {
-    @apply h-8 w-8 rounded-[9px];
+    @apply h-8 w-8 rounded-[7px];
   }
 
   .ios-symbol-md {
-    @apply h-9 w-9 rounded-[10px];
+    @apply h-9 w-9 rounded-[8px];
   }
 
   .ios-symbol-blue {

@@ -272,14 +272,12 @@ export function Layout({ children }: LayoutProps) {
                               <span
                                 className={cn(
                                   'ios-symbol ios-symbol-sm',
-                                  iconTileClass,
-                                  'lg:h-auto lg:w-auto lg:bg-transparent lg:text-muted-foreground lg:shadow-none',
-                                  isActive && 'lg:text-primary'
+                                  iconTileClass
                                 )}
                               >
                                 <Icon
-                                  className="h-[18px] w-[18px] flex-shrink-0 lg:h-5 lg:w-5"
-                                  strokeWidth={2}
+                                  className="h-[19px] w-[19px] flex-shrink-0"
+                                  strokeWidth={2.75}
                                   fill="none"
                                 />
                               </span>

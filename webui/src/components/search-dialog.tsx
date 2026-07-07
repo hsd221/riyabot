@@ -307,7 +307,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                             <span className="flex min-w-0 items-center gap-3">
                               <span
                                 className={cn(
-                                  'ios-symbol h-8 w-8 rounded-[9px] sm:h-7 sm:w-7 sm:rounded-[8px]',
+                                  'ios-symbol h-8 w-8 rounded-[7px] sm:h-7 sm:w-7 sm:rounded-[6px]',
                                   iconTileClass
                                 )}
                               >
