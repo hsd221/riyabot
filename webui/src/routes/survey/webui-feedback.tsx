@@ -24,12 +24,15 @@ export function WebUIFeedbackSurveyPage() {
   }, [])
 
   // 预填充的答案（版本号自动填写）
-  const initialAnswers: QuestionAnswer[] = useMemo(() => [
-    {
-      questionId: 'webui_version',
-      value: `v${APP_VERSION}`,
-    },
-  ], [])
+  const initialAnswers: QuestionAnswer[] = useMemo(
+    () => [
+      {
+        questionId: 'webui_version',
+        value: `v${APP_VERSION}`,
+      },
+    ],
+    []
+  )
 
   // 提交成功回调
   const handleSubmitSuccess = useCallback((submissionId: string) => {
@@ -56,9 +59,7 @@ export function WebUIFeedbackSurveyPage() {
       <div className="ios-page flex min-h-full flex-col items-center justify-center gap-4">
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            无法加载问卷配置
-          </AlertDescription>
+          <AlertDescription>无法加载问卷配置</AlertDescription>
         </Alert>
         <Button variant="outline" onClick={() => window.location.reload()}>
           重试
@@ -68,8 +69,8 @@ export function WebUIFeedbackSurveyPage() {
   }
 
   return (
-    <div className="ios-page">
-      <div className="ios-content max-w-3xl">
+    <div className="ios-page flex h-full min-h-0 flex-col">
+      <div className="ios-content flex min-h-0 max-w-3xl flex-1 flex-col">
         <div>
           <h1 className="ios-title">WebUI 反馈</h1>
           <p className="ios-subtitle">帮助我们改进控制台的可用性、稳定性和视觉体验。</p>
@@ -81,6 +82,7 @@ export function WebUIFeedbackSurveyPage() {
           paginateQuestions={false}
           onSubmitSuccess={handleSubmitSuccess}
           onSubmitError={handleSubmitError}
+          className="min-h-0 flex-1"
         />
       </div>
     </div>

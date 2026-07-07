@@ -115,141 +115,143 @@ export function SettingsPage() {
   const activeTabItem = SETTINGS_TABS.find((item) => item.value === activeTab) ?? SETTINGS_TABS[0]
 
   return (
-    <div className="ios-page">
-      <div className="ios-content">
-        {/* 页面标题 */}
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="ios-title">系统设置</h1>
-            <p className="ios-subtitle">管理您的应用偏好设置</p>
-          </div>
-        </div>
-
-        <Dialog open={tabDialogOpen} onOpenChange={setTabDialogOpen}>
-          <DialogTrigger asChild>
-            <button
-              type="button"
-              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.symbolClass)}>
-                  <activeTabItem.Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[15px] font-medium leading-5 text-foreground">
-                    当前分类
-                  </span>
-                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                    {activeTabItem.label} · {activeTabItem.description}
-                  </span>
-                </span>
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </button>
-          </DialogTrigger>
-          <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-            <DialogHeader className="px-5 pb-1 pt-5">
-              <DialogTitle>设置分类</DialogTitle>
-              <DialogDescription>选择要管理的偏好设置</DialogDescription>
-            </DialogHeader>
-            <div className="px-5 pb-5">
-              <div className="ios-group overflow-hidden">
-                {SETTINGS_TABS.map((item) => {
-                  const selected = item.value === activeTab
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
-                      aria-current={selected ? 'page' : undefined}
-                      onClick={() => {
-                        setActiveTab(item.value)
-                        setTabDialogOpen(false)
-                      }}
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className={cn('ios-symbol ios-symbol-sm', item.symbolClass)}>
-                          <item.Icon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[15px] font-medium leading-5 text-foreground">
-                            {item.label}
-                          </span>
-                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                            {item.description}
-                          </span>
-                        </span>
-                      </span>
-                      {selected ? (
-                        <Check className="h-4 w-4 shrink-0 text-primary" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
+    <ScrollArea className="h-full">
+      <div className="ios-page">
+        <div className="ios-content">
+          {/* 页面标题 */}
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <h1 className="ios-title">系统设置</h1>
+              <p className="ios-subtitle">管理您的应用偏好设置</p>
             </div>
-          </DialogContent>
-        </Dialog>
+          </div>
 
-        {/* 标签页 */}
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as SettingsTab)}
-          className="w-full"
-        >
-          <TabsList className="hidden h-auto w-full grid-cols-2 gap-0.5 p-1 sm:grid sm:grid-cols-4 sm:gap-1">
-            <TabsTrigger
-              value="appearance"
-              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
-            >
-              <Palette className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-              <span>外观</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="security"
-              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
-            >
-              <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-              <span>安全</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="other"
-              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
-            >
-              <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-              <span>其他</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="about"
-              className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
-            >
-              <Info className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
-              <span>关于</span>
-            </TabsTrigger>
-          </TabsList>
+          <Dialog open={tabDialogOpen} onOpenChange={setTabDialogOpen}>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.symbolClass)}>
+                    <activeTabItem.Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[15px] font-medium leading-5 text-foreground">
+                      当前分类
+                    </span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      {activeTabItem.label} · {activeTabItem.description}
+                    </span>
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            </DialogTrigger>
+            <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+              <DialogHeader className="px-5 pb-1 pt-5">
+                <DialogTitle>设置分类</DialogTitle>
+                <DialogDescription>选择要管理的偏好设置</DialogDescription>
+              </DialogHeader>
+              <div className="px-5 pb-5">
+                <div className="ios-group overflow-hidden">
+                  {SETTINGS_TABS.map((item) => {
+                    const selected = item.value === activeTab
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
+                        aria-current={selected ? 'page' : undefined}
+                        onClick={() => {
+                          setActiveTab(item.value)
+                          setTabDialogOpen(false)
+                        }}
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className={cn('ios-symbol ios-symbol-sm', item.symbolClass)}>
+                            <item.Icon className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-[15px] font-medium leading-5 text-foreground">
+                              {item.label}
+                            </span>
+                            <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                              {item.description}
+                            </span>
+                          </span>
+                        </span>
+                        {selected ? (
+                          <Check className="h-4 w-4 shrink-0 text-primary" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
 
-          <ScrollArea className="mt-4 h-auto sm:mt-6 sm:h-[calc(100vh-280px)]">
-            <TabsContent value="appearance" className="mt-0">
-              <AppearanceTab />
-            </TabsContent>
+          {/* 标签页 */}
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as SettingsTab)}
+            className="w-full"
+          >
+            <TabsList className="hidden h-auto w-full grid-cols-2 gap-0.5 p-1 sm:grid sm:grid-cols-4 sm:gap-1">
+              <TabsTrigger
+                value="appearance"
+                className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+              >
+                <Palette className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+                <span>外观</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="security"
+                className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+              >
+                <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+                <span>安全</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="other"
+                className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+              >
+                <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+                <span>其他</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="about"
+                className="gap-1 px-2 py-2 text-xs sm:gap-2 sm:px-3 sm:text-sm"
+              >
+                <Info className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2} fill="none" />
+                <span>关于</span>
+              </TabsTrigger>
+            </TabsList>
 
-            <TabsContent value="security" className="mt-0">
-              <SecurityTab />
-            </TabsContent>
+            <ScrollArea className="mt-4 h-auto sm:mt-6 sm:h-[calc(100vh-280px)]">
+              <TabsContent value="appearance" className="mt-0">
+                <AppearanceTab />
+              </TabsContent>
 
-            <TabsContent value="other" className="mt-0">
-              <OtherTab />
-            </TabsContent>
+              <TabsContent value="security" className="mt-0">
+                <SecurityTab />
+              </TabsContent>
 
-            <TabsContent value="about" className="mt-0">
-              <AboutTab />
-            </TabsContent>
-          </ScrollArea>
-        </Tabs>
+              <TabsContent value="other" className="mt-0">
+                <OtherTab />
+              </TabsContent>
+
+              <TabsContent value="about" className="mt-0">
+                <AboutTab />
+              </TabsContent>
+            </ScrollArea>
+          </Tabs>
+        </div>
       </div>
-    </div>
+    </ScrollArea>
   )
 }
 
@@ -1003,7 +1005,7 @@ function SecurityTab() {
         <DialogContent className="ios-sheet w-[calc(100vw-2rem)] rounded-[26px] p-5 sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              <AlertTriangle className="h-5 w-5 text-[rgb(255_149_0)]" />
               新的 Access Token
             </DialogTitle>
             <DialogDescription>
@@ -1023,10 +1025,10 @@ function SecurityTab() {
             </div>
 
             {/* 警告提示 */}
-            <div className="ios-group border-yellow-200 bg-yellow-50/80 p-3 dark:border-yellow-900 dark:bg-yellow-950/30">
+            <div className="ios-group border-[rgb(255_149_0_/_0.18)] bg-[rgb(255_149_0_/_0.08)] p-3 dark:border-[rgb(255_189_94_/_0.22)] dark:bg-[rgb(255_149_0_/_0.1)]">
               <div className="flex gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-yellow-600 dark:text-yellow-500" />
-                <div className="space-y-1 text-sm text-yellow-800 dark:text-yellow-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(178_92_0)] dark:text-[rgb(255_189_94)]" />
+                <div className="space-y-1 text-sm text-[rgb(128_72_0)] dark:text-[rgb(255_210_145)]">
                   <p className="font-semibold">重要提示</p>
                   <ul className="list-inside list-disc space-y-0.5 text-xs">
                     <li>此 Token 仅显示一次，关闭后无法再查看</li>
@@ -1043,7 +1045,7 @@ function SecurityTab() {
             <Button variant="outline" onClick={copyGeneratedToken} className="gap-2 rounded-full">
               {tokenCopied ? (
                 <>
-                  <Check className="h-4 w-4 text-green-500" />
+                  <Check className="h-4 w-4 text-[rgb(52_199_89)]" />
                   已复制
                 </>
               ) : (
@@ -1121,7 +1123,11 @@ function SecurityTab() {
               className="h-10 w-10 flex-shrink-0 rounded-full"
               disabled={!currentToken}
             >
-              {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+              {copied ? (
+                <Check className="h-4 w-4 text-[rgb(52_199_89)]" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -1201,13 +1207,15 @@ function SecurityTab() {
               {tokenValidation.rules.map((rule) => (
                 <div key={rule.id} className="flex items-center gap-2 text-sm">
                   {rule.passed ? (
-                    <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-500" />
+                    <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[rgb(52_199_89)]" />
                   ) : (
                     <XCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                   )}
                   <span
                     className={cn(
-                      rule.passed ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
+                      rule.passed
+                        ? 'text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]'
+                        : 'text-muted-foreground'
                     )}
                   >
                     {rule.label}
@@ -1216,7 +1224,7 @@ function SecurityTab() {
               ))}
             </div>
             {tokenValidation.isValid && (
-              <div className="mt-1 flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <div className="mt-1 flex items-center gap-2 text-sm text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]">
                 <Check className="h-4 w-4" />
                 <span className="font-medium">Token 格式正确，可以使用</span>
               </div>
@@ -1236,7 +1244,7 @@ function SecurityTab() {
 
       {/* 安全提示 */}
       <div className="px-1 text-[13px] leading-6 text-muted-foreground sm:px-2">
-        <h4 className="mb-1 text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+        <h4 className="mb-1 text-sm font-semibold text-[rgb(128_72_0)] dark:text-[rgb(255_210_145)]">
           安全提示
         </h4>
         <ul className="list-disc space-y-1 pl-4">
@@ -1760,7 +1768,7 @@ function OtherTab() {
         <h3 className="mb-2 px-1 text-[13px] font-medium leading-5 text-muted-foreground">
           开发者工具
         </h3>
-        <div className="ios-group overflow-hidden border-yellow-500/30 bg-yellow-500/5">
+        <div className="ios-group overflow-hidden border-[rgb(255_149_0_/_0.2)] bg-[rgb(255_149_0_/_0.06)]">
           <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
             <div className="min-w-0">
               <p className="text-[15px] font-medium leading-5 text-foreground">错误边界测试</p>

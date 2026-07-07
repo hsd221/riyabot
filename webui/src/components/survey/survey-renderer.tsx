@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Loader2, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react'
 import { SurveyQuestion } from './survey-question'
 import { submitSurvey, checkUserSubmission } from '@/lib/survey-api'
@@ -310,31 +311,8 @@ export function SurveyRenderer({
 
   // 问卷展示
   const questionsToShow = paginateQuestions ? [config.questions[currentPage]] : config.questions
-
-  return (
-    <div className={cn('space-y-4', className)}>
-      {/* 问卷头部 */}
-      <div className="ios-group overflow-hidden">
-        <div className="ios-row min-h-[72px] py-4">
-          <div className="min-w-0">
-            <h2 className="text-[17px] font-semibold leading-6">{config.title}</h2>
-            {config.description && (
-              <p className="mt-1 text-[14px] leading-5 text-muted-foreground">
-                {config.description}
-              </p>
-            )}
-          </div>
-          <div className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-[12px] font-medium leading-4 text-muted-foreground">
-            {answeredCount}/{config.questions.length}
-          </div>
-        </div>
-        {showProgress && (
-          <div className="px-4 py-3 sm:px-5">
-            <Progress value={progress} className="h-1.5 bg-muted/70" />
-          </div>
-        )}
-      </div>
-
+  const questionContent = (
+    <>
       {/* 问卷内容 */}
       <div className="ios-group overflow-hidden">
         {questionsToShow.map((question, index) => (
@@ -416,6 +394,40 @@ export function SurveyRenderer({
           )}
         </div>
       </div>
+    </>
+  )
+
+  return (
+    <div className={cn('flex min-h-0 flex-col gap-4', className)}>
+      {/* 问卷头部 */}
+      <div className="ios-group overflow-hidden">
+        <div className="ios-row min-h-[72px] py-4">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-semibold leading-6">{config.title}</h2>
+            {config.description && (
+              <p className="mt-1 text-[14px] leading-5 text-muted-foreground">
+                {config.description}
+              </p>
+            )}
+          </div>
+          <div className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-[12px] font-medium leading-4 text-muted-foreground">
+            {answeredCount}/{config.questions.length}
+          </div>
+        </div>
+        {showProgress && (
+          <div className="px-4 py-3 sm:px-5">
+            <Progress value={progress} className="h-1.5 bg-muted/70" />
+          </div>
+        )}
+      </div>
+
+      {paginateQuestions ? (
+        <div className="space-y-4">{questionContent}</div>
+      ) : (
+        <ScrollArea className="min-h-0 flex-1 rounded-[19px]">
+          <div className="space-y-4 pr-3">{questionContent}</div>
+        </ScrollArea>
+      )}
     </div>
   )
 }

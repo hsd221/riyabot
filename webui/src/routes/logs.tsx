@@ -125,11 +125,11 @@ export function LogViewerPage() {
       case 'INFO':
         return 'text-primary'
       case 'WARNING':
-        return 'text-orange-600 dark:text-orange-400'
+        return 'text-[rgb(178_92_0)] dark:text-[rgb(255_189_94)]'
       case 'ERROR':
-        return 'text-red-600 dark:text-red-500'
+        return 'text-[rgb(201_52_43)] dark:text-[rgb(255_105_97)]'
       case 'CRITICAL':
-        return 'text-red-700 dark:text-red-400 font-semibold'
+        return 'font-semibold text-[rgb(168_38_32)] dark:text-[rgb(255_138_131)]'
       default:
         return 'text-foreground'
     }

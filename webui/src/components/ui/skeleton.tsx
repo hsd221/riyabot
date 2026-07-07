@@ -4,7 +4,7 @@ function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>)
   return (
     <div
       className={cn(
-        'animate-[ios-shimmer_1.45s_ease-in-out_infinite] rounded-md bg-[linear-gradient(90deg,hsl(var(--muted)_/_0.62),hsl(var(--muted)_/_0.94),hsl(var(--muted)_/_0.62))] bg-[length:220%_100%]',
+        'animate-[ios-shimmer_1.45s_ease-in-out_infinite] rounded-[12px] bg-[linear-gradient(90deg,hsl(var(--muted)_/_0.52),hsl(var(--muted)_/_0.86),hsl(var(--muted)_/_0.52))] bg-[length:220%_100%] shadow-[0_1px_0_rgba(255,255,255,0.42)_inset]',
         className
       )}
       {...props}

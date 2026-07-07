@@ -1,7 +1,7 @@
-import * as React from "react"
-import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
-import { Check, ChevronRight, Circle } from "lucide-react"
-import { cn } from "@/lib/utils"
+import * as React from 'react'
+import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
+import { Check, ChevronRight, Circle } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const ContextMenu = ContextMenuPrimitive.Root
 
@@ -15,6 +15,12 @@ const ContextMenuSub = ContextMenuPrimitive.Sub
 
 const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup
 
+const contextMenuContentClass =
+  'z-50 origin-[--radix-context-menu-content-transform-origin] overflow-hidden rounded-[18px] border border-black/[0.035] bg-white/[0.88] p-1.5 text-card-foreground shadow-[0_1px_0_rgba(255,255,255,0.74)_inset,0_18px_48px_rgba(31,41,55,0.14),0_4px_12px_rgba(0,0,0,0.055)] backdrop-blur-2xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:border-white/10 dark:bg-zinc-950/[0.88] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_48px_rgba(0,0,0,0.42)]'
+
+const contextMenuItemClass =
+  'relative flex min-h-11 cursor-default select-none items-center rounded-[13px] px-3 py-2.5 text-[15px] leading-5 outline-none transition-[background-color,transform] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:bg-[rgb(120_120_128_/_0.12)] focus:text-accent-foreground active:scale-[0.99] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 dark:focus:bg-white/[0.08]'
+
 const ContextMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubTrigger> & {
@@ -24,8 +30,9 @@ const ContextMenuSubTrigger = React.forwardRef<
   <ContextMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex min-h-10 cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none focus:bg-accent/80 focus:text-accent-foreground data-[state=open]:bg-accent/80 data-[state=open]:text-accent-foreground",
-      inset && "pl-8",
+      contextMenuItemClass,
+      'data-[state=open]:bg-[rgb(120_120_128_/_0.12)] dark:data-[state=open]:bg-white/[0.08]',
+      inset && 'pl-8',
       className
     )}
     {...props}
@@ -42,10 +49,7 @@ const ContextMenuSubContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.SubContent
     ref={ref}
-    className={cn(
-      "z-50 min-w-[8rem] overflow-hidden rounded-lg border border-black/5 bg-card/95 p-1 text-card-foreground shadow-[0_16px_46px_rgba(0,0,0,0.14),0_3px_10px_rgba(0,0,0,0.06)] backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-context-menu-content-transform-origin] dark:border-white/10",
-      className
-    )}
+    className={cn('min-w-[8rem]', contextMenuContentClass, className)}
     {...props}
   />
 ))
@@ -59,7 +63,8 @@ const ContextMenuContent = React.forwardRef<
     <ContextMenuPrimitive.Content
       ref={ref}
       className={cn(
-        "z-50 max-h-[--radix-context-menu-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-lg border border-black/5 bg-card/95 p-1 text-card-foreground shadow-[0_16px_46px_rgba(0,0,0,0.14),0_3px_10px_rgba(0,0,0,0.06)] backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-context-menu-content-transform-origin] dark:border-white/10",
+        'max-h-[--radix-context-menu-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden',
+        contextMenuContentClass,
         className
       )}
       {...props}
@@ -76,11 +81,7 @@ const ContextMenuItem = React.forwardRef<
 >(({ className, inset, ...props }, ref) => (
   <ContextMenuPrimitive.Item
     ref={ref}
-    className={cn(
-      "relative flex min-h-10 cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none focus:bg-accent/80 focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      inset && "pl-8",
-      className
-    )}
+    className={cn(contextMenuItemClass, inset && 'pl-8', className)}
     {...props}
   />
 ))
@@ -92,14 +93,11 @@ const ContextMenuCheckboxItem = React.forwardRef<
 >(({ className, children, checked, ...props }, ref) => (
   <ContextMenuPrimitive.CheckboxItem
     ref={ref}
-    className={cn(
-      "relative flex min-h-10 cursor-default select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none focus:bg-accent/80 focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      className
-    )}
+    className={cn(contextMenuItemClass, 'pl-8 pr-3', className)}
     checked={checked}
     {...props}
   >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute left-3 flex h-4 w-4 items-center justify-center text-primary">
       <ContextMenuPrimitive.ItemIndicator>
         <Check className="h-4 w-4" />
       </ContextMenuPrimitive.ItemIndicator>
@@ -107,8 +105,7 @@ const ContextMenuCheckboxItem = React.forwardRef<
     {children}
   </ContextMenuPrimitive.CheckboxItem>
 ))
-ContextMenuCheckboxItem.displayName =
-  ContextMenuPrimitive.CheckboxItem.displayName
+ContextMenuCheckboxItem.displayName = ContextMenuPrimitive.CheckboxItem.displayName
 
 const ContextMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.RadioItem>,
@@ -116,13 +113,10 @@ const ContextMenuRadioItem = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <ContextMenuPrimitive.RadioItem
     ref={ref}
-    className={cn(
-      "relative flex min-h-10 cursor-default select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none focus:bg-accent/80 focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      className
-    )}
+    className={cn(contextMenuItemClass, 'pl-8 pr-3', className)}
     {...props}
   >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute left-3 flex h-4 w-4 items-center justify-center text-primary">
       <ContextMenuPrimitive.ItemIndicator>
         <Circle className="h-2 w-2 fill-current" />
       </ContextMenuPrimitive.ItemIndicator>
@@ -141,8 +135,8 @@ const ContextMenuLabel = React.forwardRef<
   <ContextMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-3 py-2 text-xs font-semibold text-muted-foreground",
-      inset && "pl-8",
+      'px-3 py-2 text-[12px] font-medium leading-5 text-muted-foreground',
+      inset && 'pl-8',
       className
     )}
     {...props}
@@ -156,27 +150,21 @@ const ContextMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.Separator
     ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-border", className)}
+    className={cn('mx-2 my-1 h-px bg-border/55', className)}
     {...props}
   />
 ))
 ContextMenuSeparator.displayName = ContextMenuPrimitive.Separator.displayName
 
-const ContextMenuShortcut = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLSpanElement>) => {
+const ContextMenuShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
   return (
     <span
-      className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground",
-        className
-      )}
+      className={cn('ml-auto text-[11px] tracking-normal text-muted-foreground', className)}
       {...props}
     />
   )
 }
-ContextMenuShortcut.displayName = "ContextMenuShortcut"
+ContextMenuShortcut.displayName = 'ContextMenuShortcut'
 
 export {
   ContextMenu,

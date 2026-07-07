@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
@@ -334,19 +335,19 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
           </ScrollArea>
         </div>
 
-        <div className="hidden border-t px-4 py-3 text-xs text-muted-foreground sm:flex sm:items-center sm:justify-between">
+        <div className="hidden border-t border-border/55 px-4 py-3 text-xs text-muted-foreground sm:flex sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
-              <kbd className="rounded border bg-muted px-1.5 py-0.5">↑</kbd>
-              <kbd className="rounded border bg-muted px-1.5 py-0.5">↓</kbd>
+              <Kbd size="sm">↑</Kbd>
+              <Kbd size="sm">↓</Kbd>
               导航
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="rounded border bg-muted px-1.5 py-0.5">Enter</kbd>
+              <Kbd size="sm">Enter</Kbd>
               选择
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="rounded border bg-muted px-1.5 py-0.5">Esc</kbd>
+              <Kbd size="sm">Esc</Kbd>
               关闭
             </span>
           </div>

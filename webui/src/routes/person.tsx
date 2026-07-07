@@ -361,7 +361,7 @@ export function PersonManagementPage() {
               >
                 <SelectTrigger
                   id="filter-known"
-                  className="h-auto min-h-0 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
+                  className="h-auto min-h-11 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -391,7 +391,7 @@ export function PersonManagementPage() {
               >
                 <SelectTrigger
                   id="filter-platform"
-                  className="h-auto min-h-0 w-auto max-w-[11rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
+                  className="h-auto min-h-11 w-auto max-w-[11rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -435,7 +435,7 @@ export function PersonManagementPage() {
                 >
                   <SelectTrigger
                     id="page-size"
-                    className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                    className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
                   >
                     <SelectValue />
                   </SelectTrigger>

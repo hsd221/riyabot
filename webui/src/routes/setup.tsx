@@ -187,10 +187,7 @@ export function SetupPage() {
       } catch (error) {
         toast({
           title: '加载配置失败',
-          description:
-            error instanceof Error
-              ? error.message
-              : '无法加载现有配置，将使用默认值',
+          description: error instanceof Error ? error.message : '无法加载现有配置，将使用默认值',
           variant: 'destructive',
         })
       } finally {
@@ -312,8 +309,8 @@ export function SetupPage() {
       let restartSuccess = false
 
       while (attempt < maxAttempts && !restartSuccess) {
-        await new Promise(resolve => setTimeout(resolve, 1000)) // 每秒检查一次
-        
+        await new Promise((resolve) => setTimeout(resolve, 1000)) // 每秒检查一次
+
         try {
           const status = await getRiyaBotStatus()
           if (status.running) {
@@ -385,9 +382,7 @@ export function SetupPage() {
       case 'bot-basic':
         return <BotBasicForm config={botBasic} onChange={setBotBasic} />
       case 'personality':
-        return (
-          <PersonalityForm config={personality} onChange={setPersonality} />
-        )
+        return <PersonalityForm config={personality} onChange={setPersonality} />
       case 'emoji':
         return <EmojiForm config={emoji} onChange={setEmoji} />
       case 'other':
@@ -439,7 +434,7 @@ export function SetupPage() {
       {isRestarting && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-xl">
           <div className="ios-card mx-auto flex w-full max-w-md flex-col items-center space-y-6 p-6 text-center sm:p-8">
-            <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex h-20 w-20 items-center justify-center rounded-[22px] bg-[rgb(0_122_255_/_0.11)] shadow-[0_1px_0_rgba(255,255,255,0.64)_inset]">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
             <div className="space-y-2">
@@ -448,12 +443,13 @@ export function SetupPage() {
             </div>
             <div className="w-full">
               <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                <div className="h-full w-full animate-pulse bg-primary" style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite' }} />
+                <div
+                  className="h-full w-full animate-pulse bg-primary"
+                  style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite' }}
+                />
               </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              请稍候，这可能需要一分钟...
-            </p>
+            <p className="text-sm text-muted-foreground">请稍候，这可能需要一分钟...</p>
           </div>
         </div>
       )}
@@ -462,13 +458,11 @@ export function SetupPage() {
       {isLoading ? (
         <div className="flex min-h-[calc(100vh-2rem)] items-center justify-center">
           <div className="ios-card w-full max-w-sm p-6 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-primary/10">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[rgb(0_122_255_/_0.11)] shadow-[0_1px_0_rgba(255,255,255,0.64)_inset]">
               <Loader2 className="h-7 w-7 animate-spin text-primary" />
             </div>
             <p className="text-lg font-semibold">加载配置中...</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              正在读取现有配置
-            </p>
+            <p className="mt-2 text-sm text-muted-foreground">正在读取现有配置</p>
           </div>
         </div>
       ) : (
@@ -486,20 +480,18 @@ export function SetupPage() {
                   />
                 </div>
                 <div className="min-w-0">
-                  <h1 className="truncate text-[22px] font-semibold leading-tight tracking-normal sm:text-3xl">首次配置向导</h1>
-                  <p className="ios-subtitle line-clamp-2">
-                    让我们一起完成 {APP_NAME} 的初始配置
-                  </p>
+                  <h1 className="truncate text-[22px] font-semibold leading-tight tracking-normal sm:text-3xl">
+                    首次配置向导
+                  </h1>
+                  <p className="ios-subtitle line-clamp-2">让我们一起完成 {APP_NAME} 的初始配置</p>
                 </div>
               </div>
-              <div className="hidden min-w-56 rounded-lg bg-card/80 px-4 py-3 shadow-[0_6px_18px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.035)] backdrop-blur-xl sm:block">
+              <div className="hidden min-w-56 rounded-[18px] border border-black/[0.025] bg-white/[0.78] px-4 py-3 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_24px_rgba(31,41,55,0.05),0_1px_2px_rgba(0,0,0,0.025)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.08] sm:block">
                 <div className="mb-2 flex items-center justify-between text-sm">
                   <span className="font-medium text-foreground">
                     步骤 {currentStep + 1} / {steps.length}
                   </span>
-                  <span className="font-semibold text-primary">
-                    {Math.round(progress)}%
-                  </span>
+                  <span className="font-semibold text-primary">{Math.round(progress)}%</span>
                 </div>
                 <Progress value={progress} className="h-1.5" />
               </div>
@@ -526,7 +518,7 @@ export function SetupPage() {
                         onClick={() => index <= currentStep && setCurrentStep(index)}
                         disabled={index > currentStep}
                         className={cn(
-                          'ios-touch relative flex min-h-16 w-full items-center gap-3 rounded-lg px-4 py-3 text-left disabled:cursor-not-allowed',
+                          'ios-touch relative flex min-h-16 w-full items-center gap-3 rounded-[15px] px-4 py-3 text-left disabled:cursor-not-allowed',
                           isActive
                             ? 'bg-muted/90 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.03)]'
                             : isDone
@@ -571,7 +563,9 @@ export function SetupPage() {
                   <div className="ios-group overflow-hidden">
                     <div className="px-4 py-3">
                       <div className="mb-2 flex items-center justify-between text-sm">
-                        <span className="font-medium">步骤 {currentStep + 1} / {steps.length}</span>
+                        <span className="font-medium">
+                          步骤 {currentStep + 1} / {steps.length}
+                        </span>
                         <span className="font-semibold text-primary">{Math.round(progress)}%</span>
                       </div>
                       <Progress value={progress} className="h-1.5" />
@@ -621,7 +615,7 @@ export function SetupPage() {
                                       setStepDialogOpen(false)
                                     }
                                   }}
-                                  className="ios-row min-h-[62px] w-full text-left transition-colors duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent/50 active:bg-accent/70 disabled:opacity-55 focus-visible:outline-none"
+                                  className="ios-row min-h-[62px] w-full text-left transition-colors duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent/50 focus-visible:outline-none active:bg-accent/70 disabled:opacity-55"
                                 >
                                   <span className="flex min-w-0 items-center gap-3">
                                     <span
@@ -635,7 +629,11 @@ export function SetupPage() {
                                       )}
                                     >
                                       {isDone ? (
-                                        <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} fill="none" />
+                                        <CheckCircle2
+                                          className="h-4 w-4"
+                                          strokeWidth={2.5}
+                                          fill="none"
+                                        />
                                       ) : (
                                         <Icon className="h-4 w-4" />
                                       )}
@@ -650,7 +648,11 @@ export function SetupPage() {
                                     </span>
                                   </span>
                                   {isActive ? (
-                                    <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" strokeWidth={2.5} fill="none" />
+                                    <CheckCircle2
+                                      className="h-4 w-4 shrink-0 text-primary"
+                                      strokeWidth={2.5}
+                                      fill="none"
+                                    />
                                   ) : (
                                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
                                   )}
@@ -679,9 +681,7 @@ export function SetupPage() {
 
                       {/* 表单内容 */}
                       <ScrollArea className="min-h-0 min-w-0 flex-1">
-                        <div className="min-w-0 p-4 pb-28 sm:p-6">
-                          {renderStepForm()}
-                        </div>
+                        <div className="min-w-0 p-4 pb-28 sm:p-6">{renderStepForm()}</div>
                       </ScrollArea>
                     </div>
 
@@ -719,9 +719,7 @@ export function SetupPage() {
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>取消</AlertDialogCancel>
-                              <AlertDialogAction onClick={handleSkip}>
-                                确认跳过
-                              </AlertDialogAction>
+                              <AlertDialogAction onClick={handleSkip}>确认跳过</AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
@@ -762,11 +760,7 @@ export function SetupPage() {
                             ) : (
                               <>
                                 下一步
-                                <ArrowRight
-                                  className="ml-2 h-4 w-4"
-                                  strokeWidth={2}
-                                  fill="none"
-                                />
+                                <ArrowRight className="ml-2 h-4 w-4" strokeWidth={2} fill="none" />
                               </>
                             )}
                           </Button>

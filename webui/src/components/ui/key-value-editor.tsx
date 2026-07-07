@@ -398,7 +398,7 @@ export function KeyValueEditor({
                       const type = inferType(val)
                       return (
                         <div key={key} className="flex items-center gap-2 text-sm">
-                          <code className="rounded bg-background px-1.5 py-0.5 text-xs font-medium">
+                          <code className="rounded-[7px] border border-black/[0.035] bg-white/[0.58] px-1.5 py-0.5 text-xs font-medium shadow-[0_1px_0_rgba(255,255,255,0.54)_inset] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.08]">
                             {key}
                           </code>
                           <span className="text-muted-foreground">=</span>

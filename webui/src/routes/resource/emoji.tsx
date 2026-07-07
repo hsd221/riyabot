@@ -484,7 +484,7 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-0 w-auto max-w-[12rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 sm:max-w-[16rem] [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[12rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 sm:max-w-[16rem] [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -511,7 +511,7 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -538,7 +538,7 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -565,7 +565,7 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -596,7 +596,7 @@ export function EmojiManagementPage() {
                   value={cardSize}
                   onValueChange={(value: 'small' | 'medium' | 'large') => setCardSize(value)}
                 >
-                  <SelectTrigger className="h-auto min-h-0 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                  <SelectTrigger className="h-auto min-h-11 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -615,7 +615,7 @@ export function EmojiManagementPage() {
                     setSelectedIds(new Set())
                   }}
                 >
-                  <SelectTrigger className="h-auto min-h-0 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                  <SelectTrigger className="h-auto min-h-11 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1032,7 +1032,7 @@ function EmojiDetailDialog({
           <div className="space-y-4">
             {/* 表情包预览图 - 使用原图 */}
             <div className="flex justify-center">
-              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-lg bg-muted">
+              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-[24px] bg-muted/80 shadow-[0_1px_0_rgba(255,255,255,0.64)_inset,0_10px_24px_rgba(31,41,55,0.055)]">
                 <img
                   src={getEmojiOriginalUrl(emoji.id)}
                   alt={emoji.description || '表情包'}

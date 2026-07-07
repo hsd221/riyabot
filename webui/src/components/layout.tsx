@@ -303,7 +303,7 @@ export function Layout({ children }: LayoutProps) {
                                   to={item.path}
                                   data-tour={item.tourId}
                                   className={cn(
-                                    'group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-lg lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
+                                    'group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-[14px] lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
                                     'hover:bg-accent/45 hover:text-accent-foreground dark:hover:bg-white/[0.08] lg:hover:bg-white/55 lg:hover:shadow-[0_4px_14px_rgba(31,41,55,0.045)]',
                                     isActive
                                       ? 'bg-[rgb(120_120_128_/_0.12)] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.58)] dark:bg-white/[0.08] lg:bg-[rgb(120_120_128_/_0.11)] lg:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025),0_6px_18px_rgba(31,41,55,0.055)]'

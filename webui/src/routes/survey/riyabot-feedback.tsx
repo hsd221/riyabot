@@ -38,12 +38,15 @@ export function RiyaBotFeedbackSurveyPage() {
   }, [])
 
   // 预填充的答案（版本号自动填写）
-  const initialAnswers: QuestionAnswer[] = useMemo(() => [
-    {
-      questionId: 'riyabot_version',
-      value: riyabotVersion,
-    },
-  ], [riyabotVersion])
+  const initialAnswers: QuestionAnswer[] = useMemo(
+    () => [
+      {
+        questionId: 'riyabot_version',
+        value: riyabotVersion,
+      },
+    ],
+    [riyabotVersion]
+  )
 
   // 提交成功回调
   const handleSubmitSuccess = useCallback((submissionId: string) => {
@@ -70,9 +73,7 @@ export function RiyaBotFeedbackSurveyPage() {
       <div className="ios-page flex min-h-full flex-col items-center justify-center gap-4">
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            无法加载问卷配置
-          </AlertDescription>
+          <AlertDescription>无法加载问卷配置</AlertDescription>
         </Alert>
         <Button variant="outline" onClick={() => window.location.reload()}>
           重试
@@ -82,8 +83,8 @@ export function RiyaBotFeedbackSurveyPage() {
   }
 
   return (
-    <div className="ios-page">
-      <div className="ios-content max-w-3xl">
+    <div className="ios-page flex h-full min-h-0 flex-col">
+      <div className="ios-content flex min-h-0 max-w-3xl flex-1 flex-col">
         <div>
           <h1 className="ios-title">RiyaBot 反馈</h1>
           <p className="ios-subtitle">分享真实使用感受，帮助我们调整体验和能力优先级。</p>
@@ -95,6 +96,7 @@ export function RiyaBotFeedbackSurveyPage() {
           paginateQuestions={false}
           onSubmitSuccess={handleSubmitSuccess}
           onSubmitError={handleSubmitError}
+          className="min-h-0 flex-1"
         />
       </div>
     </div>

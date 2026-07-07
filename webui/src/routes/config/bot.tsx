@@ -41,12 +41,14 @@ import {
   Check,
   ChevronRight,
   CloudMoon,
+  Code2,
   Filter,
   FlaskConical,
   Layers3,
   MessageCircle,
   Mic2,
   Power,
+  RefreshCw,
   Save,
   Server,
   Settings2,
@@ -55,11 +57,17 @@ import {
   UserRound,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { getBotConfig, updateBotConfig } from '@/lib/config-api'
+import {
+  getBotConfig,
+  getBotConfigRaw,
+  updateBotConfig,
+  updateBotConfigRaw,
+} from '@/lib/config-api'
 import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
+import { CodeEditor } from '@/components/CodeEditor'
 
 // 导入模块化的类型定义
 import type {
@@ -83,6 +91,7 @@ import type {
   WebUIConfig,
   ExperimentalConfig,
   DreamConfig,
+  ConfigSectionName,
 } from './bot/types'
 
 // 导入 useAutoSave hook
@@ -209,17 +218,24 @@ const CONFIG_TABS: ConfigTabItem[] = [
   },
 ]
 
+type ConfigEditMode = 'visual' | 'toml'
+
 export function BotConfigPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [visualUnsavedChanges, setVisualUnsavedChanges] = useState(false)
+  const [rawUnsavedChanges, setRawUnsavedChanges] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [showRestartOverlay, setShowRestartOverlay] = useState(false)
+  const [configMode, setConfigMode] = useState<ConfigEditMode>('visual')
   const [activeTab, setActiveTab] = useState<BotConfigTab>('bot')
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
+  const [rawConfig, setRawConfig] = useState('')
+  const [rawLoading, setRawLoading] = useState(false)
   const { toast } = useToast()
   const activeTabItem = CONFIG_TABS.find((item) => item.value === activeTab) ?? CONFIG_TABS[0]
+  const hasUnsavedChanges = configMode === 'toml' ? rawUnsavedChanges : visualUnsavedChanges
 
   // 配置状态
   const [botConfig, setBotConfig] = useState<BotConfig | null>(null)
@@ -251,7 +267,9 @@ export function BotConfigPage() {
 
   // 用于标记初始加载和配置缓存
   const initialLoadRef = useRef(true)
+  const suppressAutoSaveRef = useRef(false)
   const configRef = useRef<Record<string, unknown>>({})
+  const rawConfigSnapshotRef = useRef('')
 
   // ==================== 辅助函数 ====================
 
@@ -463,7 +481,7 @@ export function BotConfigPage() {
       setLoading(true)
       const config = await getBotConfig()
       parseAndSetConfig(config)
-      setHasUnsavedChanges(false)
+      setVisualUnsavedChanges(false)
       initialLoadRef.current = false
     } catch (error) {
       console.error('加载配置失败:', error)
@@ -481,56 +499,131 @@ export function BotConfigPage() {
     loadConfig()
   }, [loadConfig])
 
+  const loadRawConfig = useCallback(async () => {
+    try {
+      setRawLoading(true)
+      const content = await getBotConfigRaw()
+      setRawConfig(content)
+      rawConfigSnapshotRef.current = content
+      setRawUnsavedChanges(false)
+    } catch (error) {
+      console.error('加载 TOML 配置失败:', error)
+      toast({
+        title: '加载失败',
+        description: '无法加载 TOML 源码',
+        variant: 'destructive',
+      })
+    } finally {
+      setRawLoading(false)
+    }
+  }, [toast])
+
+  const handleModeChange = useCallback(
+    async (mode: ConfigEditMode) => {
+      if (mode === configMode) return
+
+      setConfigMode(mode)
+      if (mode === 'toml') {
+        if (!rawConfig) {
+          await loadRawConfig()
+        }
+        return
+      }
+
+      suppressAutoSaveRef.current = true
+      try {
+        const config = await getBotConfig()
+        parseAndSetConfig(config)
+        setVisualUnsavedChanges(false)
+      } catch (error) {
+        console.error('刷新视觉配置失败:', error)
+        toast({
+          title: '刷新失败',
+          description: '无法同步最新配置',
+          variant: 'destructive',
+        })
+      } finally {
+        window.setTimeout(() => {
+          suppressAutoSaveRef.current = false
+        }, 0)
+      }
+    },
+    [configMode, loadRawConfig, parseAndSetConfig, rawConfig, toast]
+  )
+
   // 使用模块化的 useAutoSave hook
   const { triggerAutoSave, cancelPendingAutoSave } = useAutoSave(
     initialLoadRef.current,
     setAutoSaving,
-    setHasUnsavedChanges
+    setVisualUnsavedChanges
+  )
+
+  const triggerVisualAutoSave = useCallback(
+    (sectionName: ConfigSectionName, sectionData: unknown) => {
+      if (configMode !== 'visual' || suppressAutoSaveRef.current) return
+      triggerAutoSave(sectionName, sectionData)
+    },
+    [configMode, triggerAutoSave]
   )
 
   // 使用 useConfigAutoSave hook 简化配置变化监听
   // 注意: useConfigAutoSave 是一个 hook，不能在条件语句或循环中调用
   // 因此我们仍然需要逐个调用，但代码更简洁
-  useConfigAutoSave(botConfig, 'bot', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(personalityConfig, 'personality', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(chatConfig, 'chat', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(expressionConfig, 'expression', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(memoryConfig, 'memory', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(toolConfig, 'tool', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(botConfig, 'bot', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(personalityConfig, 'personality', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(chatConfig, 'chat', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(expressionConfig, 'expression', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(memoryConfig, 'memory', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(toolConfig, 'tool', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerVisualAutoSave)
   useConfigAutoSave(
     messageReceiveConfig,
     'message_receive',
     initialLoadRef.current,
-    triggerAutoSave
+    triggerVisualAutoSave
   )
   useConfigAutoSave(
     keywordReactionConfig,
     'keyword_reaction',
     initialLoadRef.current,
-    triggerAutoSave
+    triggerVisualAutoSave
   )
   useConfigAutoSave(
     responsePostProcessConfig,
     'response_post_process',
     initialLoadRef.current,
-    triggerAutoSave
+    triggerVisualAutoSave
   )
-  useConfigAutoSave(chineseTypoConfig, 'chinese_typo', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(
+    chineseTypoConfig,
+    'chinese_typo',
+    initialLoadRef.current,
+    triggerVisualAutoSave
+  )
   useConfigAutoSave(
     responseSplitterConfig,
     'response_splitter',
     initialLoadRef.current,
-    triggerAutoSave
+    triggerVisualAutoSave
   )
-  useConfigAutoSave(logConfig, 'log', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(debugConfig, 'debug', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(maimMessageConfig, 'maim_message', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(telemetryConfig, 'telemetry', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(webuiConfig, 'webui', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(experimentalConfig, 'experimental', initialLoadRef.current, triggerAutoSave)
-  useConfigAutoSave(dreamConfig, 'dream', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(logConfig, 'log', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(debugConfig, 'debug', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(
+    maimMessageConfig,
+    'maim_message',
+    initialLoadRef.current,
+    triggerVisualAutoSave
+  )
+  useConfigAutoSave(telemetryConfig, 'telemetry', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(webuiConfig, 'webui', initialLoadRef.current, triggerVisualAutoSave)
+  useConfigAutoSave(
+    experimentalConfig,
+    'experimental',
+    initialLoadRef.current,
+    triggerVisualAutoSave
+  )
+  useConfigAutoSave(dreamConfig, 'dream', initialLoadRef.current, triggerVisualAutoSave)
 
   // 手动保存
   const saveConfig = async () => {
@@ -539,8 +632,19 @@ export function BotConfigPage() {
       // 取消待处理的自动保存
       cancelPendingAutoSave()
 
+      if (configMode === 'toml') {
+        await updateBotConfigRaw(rawConfig)
+        rawConfigSnapshotRef.current = rawConfig
+        setRawUnsavedChanges(false)
+        toast({
+          title: '保存成功',
+          description: 'TOML 源码已保存',
+        })
+        return
+      }
+
       await updateBotConfig(buildFullConfig())
-      setHasUnsavedChanges(false)
+      setVisualUnsavedChanges(false)
       toast({
         title: '保存成功',
         description: '主程序配置已保存',
@@ -586,8 +690,14 @@ export function BotConfigPage() {
       // 取消待处理的自动保存
       cancelPendingAutoSave()
 
-      await updateBotConfig(buildFullConfig())
-      setHasUnsavedChanges(false)
+      if (configMode === 'toml') {
+        await updateBotConfigRaw(rawConfig)
+        rawConfigSnapshotRef.current = rawConfig
+        setRawUnsavedChanges(false)
+      } else {
+        await updateBotConfig(buildFullConfig())
+        setVisualUnsavedChanges(false)
+      }
       toast({
         title: '保存成功',
         description: '配置已保存，即将重启主程序...',
@@ -802,219 +912,307 @@ export function BotConfigPage() {
           </AlertDialog>
         </div>
 
-        <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
-          <DialogTrigger asChild>
-            <button
-              type="button"
-              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.color)}>
-                  <activeTabItem.Icon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[15px] font-medium leading-5 text-foreground">
-                    当前分类
-                  </span>
-                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                    {activeTabItem.label} · {activeTabItem.description}
-                  </span>
-                </span>
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </button>
-          </DialogTrigger>
-          <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-            <DialogHeader className="px-5 pb-1 pt-5">
-              <DialogTitle>配置分类</DialogTitle>
-              <DialogDescription>选择要编辑的主程序配置</DialogDescription>
-            </DialogHeader>
-            <div className="ios-scrollbar-none max-h-[min(64vh,560px)] overflow-y-auto px-5 pb-5">
-              <div className="ios-group overflow-hidden">
-                {CONFIG_TABS.map((item) => {
-                  const selected = item.value === activeTab
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
-                      aria-current={selected ? 'page' : undefined}
-                      onClick={() => {
-                        setActiveTab(item.value)
-                        setCategoryDialogOpen(false)
-                      }}
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className={cn('ios-symbol ios-symbol-sm', item.color)}>
-                          <item.Icon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[15px] font-medium leading-5 text-foreground">
-                            {item.label}
-                          </span>
-                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                            {item.description}
-                          </span>
-                        </span>
+        <div className="ios-group grid grid-cols-2 gap-1 p-1 sm:w-fit sm:min-w-[21rem]">
+          <button
+            type="button"
+            onClick={() => void handleModeChange('visual')}
+            className={cn(
+              'ios-touch flex h-10 items-center justify-center gap-2 rounded-[14px] px-3 text-[15px] font-medium leading-5',
+              configMode === 'visual'
+                ? 'bg-background text-foreground shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_6px_16px_rgba(31,41,55,0.07)] dark:bg-white/10'
+                : 'text-muted-foreground'
+            )}
+            aria-pressed={configMode === 'visual'}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            视觉表单
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleModeChange('toml')}
+            className={cn(
+              'ios-touch flex h-10 items-center justify-center gap-2 rounded-[14px] px-3 text-[15px] font-medium leading-5',
+              configMode === 'toml'
+                ? 'bg-background text-foreground shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_6px_16px_rgba(31,41,55,0.07)] dark:bg-white/10'
+                : 'text-muted-foreground'
+            )}
+            aria-pressed={configMode === 'toml'}
+          >
+            <Code2 className="h-4 w-4" />
+            TOML 源码
+          </button>
+        </div>
+
+        {configMode === 'visual' ? (
+          <>
+            <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+              <DialogTrigger asChild>
+                <button
+                  type="button"
+                  className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.color)}>
+                      <activeTabItem.Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-medium leading-5 text-foreground">
+                        当前分类
                       </span>
-                      {selected ? (
-                        <Check className="h-4 w-4 shrink-0 text-primary" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
-                      )}
-                    </button>
-                  )
-                })}
+                      <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                        {activeTabItem.label} · {activeTabItem.description}
+                      </span>
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </DialogTrigger>
+              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pb-1 pt-5">
+                  <DialogTitle>配置分类</DialogTitle>
+                  <DialogDescription>选择要编辑的主程序配置</DialogDescription>
+                </DialogHeader>
+                <div className="ios-scrollbar-none max-h-[min(64vh,560px)] overflow-y-auto px-5 pb-5">
+                  <div className="ios-group overflow-hidden">
+                    {CONFIG_TABS.map((item) => {
+                      const selected = item.value === activeTab
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
+                          aria-current={selected ? 'page' : undefined}
+                          onClick={() => {
+                            setActiveTab(item.value)
+                            setCategoryDialogOpen(false)
+                          }}
+                        >
+                          <span className="flex min-w-0 items-center gap-3">
+                            <span className={cn('ios-symbol ios-symbol-sm', item.color)}>
+                              <item.Icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[15px] font-medium leading-5 text-foreground">
+                                {item.label}
+                              </span>
+                              <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                                {item.description}
+                              </span>
+                            </span>
+                          </span>
+                          {selected ? (
+                            <Check className="h-4 w-4 shrink-0 text-primary" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* 标签页 */}
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as BotConfigTab)}
+              className="w-full space-y-1"
+            >
+              <TabsList className="hidden h-auto w-fit max-w-full flex-wrap justify-start gap-1 rounded-[16px] p-1 sm:inline-flex">
+                <TabsTrigger value="bot" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  基本信息
+                </TabsTrigger>
+                <TabsTrigger value="personality" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  人格
+                </TabsTrigger>
+                <TabsTrigger value="chat" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  聊天
+                </TabsTrigger>
+                <TabsTrigger value="expression" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  表达
+                </TabsTrigger>
+                <TabsTrigger value="features" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  功能
+                </TabsTrigger>
+                <TabsTrigger value="processing" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  处理
+                </TabsTrigger>
+                <TabsTrigger value="message_receive" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  过滤
+                </TabsTrigger>
+                <TabsTrigger value="voice" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  语音
+                </TabsTrigger>
+                <TabsTrigger value="service" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  服务
+                </TabsTrigger>
+                <TabsTrigger value="experimental" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  实验
+                </TabsTrigger>
+                <TabsTrigger value="dream" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  Dream
+                </TabsTrigger>
+                <TabsTrigger value="other" className="min-w-[4.5rem] px-3 py-2 text-xs">
+                  其他
+                </TabsTrigger>
+              </TabsList>
+              {/* 基本信息 */}
+              <TabsContent value="bot" className="mt-5 space-y-5 sm:mt-6">
+                {botConfig && <BotInfoSection config={botConfig} onChange={setBotConfig} />}
+              </TabsContent>
+
+              {/* 人格配置 */}
+              <TabsContent value="personality" className="mt-5 space-y-5 sm:mt-6">
+                {personalityConfig && (
+                  <PersonalitySection config={personalityConfig} onChange={setPersonalityConfig} />
+                )}
+              </TabsContent>
+
+              {/* 聊天配置 */}
+              <TabsContent value="chat" className="mt-5 space-y-5 sm:mt-6">
+                {chatConfig && <ChatSection config={chatConfig} onChange={setChatConfig} />}
+              </TabsContent>
+
+              {/* 表达配置 */}
+              <TabsContent value="expression" className="mt-5 space-y-5 sm:mt-6">
+                {expressionConfig && (
+                  <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
+                )}
+              </TabsContent>
+
+              {/* 功能配置（合并表情、记忆、工具） */}
+              <TabsContent value="features" className="mt-5 space-y-5 sm:mt-6">
+                {emojiConfig && memoryConfig && toolConfig && (
+                  <FeaturesSection
+                    emojiConfig={emojiConfig}
+                    memoryConfig={memoryConfig}
+                    toolConfig={toolConfig}
+                    onEmojiChange={setEmojiConfig}
+                    onMemoryChange={setMemoryConfig}
+                    onToolChange={setToolConfig}
+                  />
+                )}
+              </TabsContent>
+
+              {/* 处理配置（关键词反应和回复后处理） */}
+              <TabsContent value="processing" className="mt-5 space-y-5 sm:mt-6">
+                {keywordReactionConfig &&
+                  responsePostProcessConfig &&
+                  chineseTypoConfig &&
+                  responseSplitterConfig && (
+                    <ProcessingSection
+                      keywordReactionConfig={keywordReactionConfig}
+                      responsePostProcessConfig={responsePostProcessConfig}
+                      chineseTypoConfig={chineseTypoConfig}
+                      responseSplitterConfig={responseSplitterConfig}
+                      onKeywordReactionChange={setKeywordReactionConfig}
+                      onResponsePostProcessChange={setResponsePostProcessConfig}
+                      onChineseTypoChange={setChineseTypoConfig}
+                      onResponseSplitterChange={setResponseSplitterConfig}
+                    />
+                  )}
+              </TabsContent>
+
+              {/* 语音配置 */}
+              <TabsContent value="voice" className="mt-5 space-y-5 sm:mt-6">
+                {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
+              </TabsContent>
+
+              {/* 消息过滤配置 */}
+              <TabsContent value="message_receive" className="mt-5 space-y-5 sm:mt-6">
+                {messageReceiveConfig && (
+                  <MessageReceiveSection
+                    config={messageReceiveConfig}
+                    onChange={setMessageReceiveConfig}
+                  />
+                )}
+              </TabsContent>
+
+              {/* 服务配置 */}
+              <TabsContent value="service" className="mt-5 space-y-5 sm:mt-6">
+                {webuiConfig && <WebUISection config={webuiConfig} onChange={setWebuiConfig} />}
+                {maimMessageConfig && (
+                  <MaimMessageSection config={maimMessageConfig} onChange={setMaimMessageConfig} />
+                )}
+                {telemetryConfig && (
+                  <TelemetrySection config={telemetryConfig} onChange={setTelemetryConfig} />
+                )}
+              </TabsContent>
+
+              {/* 实验配置 */}
+              <TabsContent value="experimental" className="mt-5 space-y-5 sm:mt-6">
+                {experimentalConfig && (
+                  <ExperimentalSection
+                    config={experimentalConfig}
+                    onChange={setExperimentalConfig}
+                  />
+                )}
+              </TabsContent>
+
+              {/* Dream 配置 */}
+              <TabsContent value="dream" className="mt-5 space-y-5 sm:mt-6">
+                {dreamConfig && <DreamSection config={dreamConfig} onChange={setDreamConfig} />}
+              </TabsContent>
+
+              {/* 其他配置 */}
+              <TabsContent value="other" className="mt-5 space-y-5 sm:mt-6">
+                {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
+                {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
+              </TabsContent>
+            </Tabs>
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="ios-group overflow-hidden">
+              <div className="ios-row min-h-[68px]">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                    <Code2 className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[16px] font-semibold leading-6">TOML 源码</span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      编辑未出现在视觉表单中的完整配置字段
+                    </span>
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadRawConfig}
+                  disabled={rawLoading || saving || restarting}
+                  className="h-9 w-9 shrink-0 rounded-full px-0"
+                  aria-label="重新载入 TOML"
+                  title="重新载入 TOML"
+                >
+                  <RefreshCw className={cn('h-4 w-4', rawLoading && 'animate-spin')} />
+                </Button>
+              </div>
+              <div className="p-2 sm:p-3">
+                {rawLoading ? (
+                  <div className="flex h-[clamp(360px,58vh,680px)] items-center justify-center rounded-[16px] bg-muted/55 text-sm text-muted-foreground">
+                    正在加载 TOML...
+                  </div>
+                ) : (
+                  <CodeEditor
+                    value={rawConfig}
+                    onChange={(value) => {
+                      setRawConfig(value)
+                      setRawUnsavedChanges(value !== rawConfigSnapshotRef.current)
+                    }}
+                    language="toml"
+                    height="clamp(360px,58vh,680px)"
+                    theme="dark"
+                    className="rounded-[16px] border-black/[0.04] dark:border-white/10"
+                    placeholder="正在等待配置内容..."
+                  />
+                )}
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* 标签页 */}
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as BotConfigTab)}
-          className="w-full space-y-1"
-        >
-          <TabsList className="hidden h-auto w-fit max-w-full flex-wrap justify-start gap-1 rounded-[16px] p-1 sm:inline-flex">
-            <TabsTrigger value="bot" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              基本信息
-            </TabsTrigger>
-            <TabsTrigger value="personality" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              人格
-            </TabsTrigger>
-            <TabsTrigger value="chat" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              聊天
-            </TabsTrigger>
-            <TabsTrigger value="expression" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              表达
-            </TabsTrigger>
-            <TabsTrigger value="features" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              功能
-            </TabsTrigger>
-            <TabsTrigger value="processing" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              处理
-            </TabsTrigger>
-            <TabsTrigger value="message_receive" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              过滤
-            </TabsTrigger>
-            <TabsTrigger value="voice" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              语音
-            </TabsTrigger>
-            <TabsTrigger value="service" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              服务
-            </TabsTrigger>
-            <TabsTrigger value="experimental" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              实验
-            </TabsTrigger>
-            <TabsTrigger value="dream" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              Dream
-            </TabsTrigger>
-            <TabsTrigger value="other" className="min-w-[4.5rem] px-3 py-2 text-xs">
-              其他
-            </TabsTrigger>
-          </TabsList>
-          {/* 基本信息 */}
-          <TabsContent value="bot" className="mt-5 space-y-5 sm:mt-6">
-            {botConfig && <BotInfoSection config={botConfig} onChange={setBotConfig} />}
-          </TabsContent>
-
-          {/* 人格配置 */}
-          <TabsContent value="personality" className="mt-5 space-y-5 sm:mt-6">
-            {personalityConfig && (
-              <PersonalitySection config={personalityConfig} onChange={setPersonalityConfig} />
-            )}
-          </TabsContent>
-
-          {/* 聊天配置 */}
-          <TabsContent value="chat" className="mt-5 space-y-5 sm:mt-6">
-            {chatConfig && <ChatSection config={chatConfig} onChange={setChatConfig} />}
-          </TabsContent>
-
-          {/* 表达配置 */}
-          <TabsContent value="expression" className="mt-5 space-y-5 sm:mt-6">
-            {expressionConfig && (
-              <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
-            )}
-          </TabsContent>
-
-          {/* 功能配置（合并表情、记忆、工具） */}
-          <TabsContent value="features" className="mt-5 space-y-5 sm:mt-6">
-            {emojiConfig && memoryConfig && toolConfig && (
-              <FeaturesSection
-                emojiConfig={emojiConfig}
-                memoryConfig={memoryConfig}
-                toolConfig={toolConfig}
-                onEmojiChange={setEmojiConfig}
-                onMemoryChange={setMemoryConfig}
-                onToolChange={setToolConfig}
-              />
-            )}
-          </TabsContent>
-
-          {/* 处理配置（关键词反应和回复后处理） */}
-          <TabsContent value="processing" className="mt-5 space-y-5 sm:mt-6">
-            {keywordReactionConfig &&
-              responsePostProcessConfig &&
-              chineseTypoConfig &&
-              responseSplitterConfig && (
-                <ProcessingSection
-                  keywordReactionConfig={keywordReactionConfig}
-                  responsePostProcessConfig={responsePostProcessConfig}
-                  chineseTypoConfig={chineseTypoConfig}
-                  responseSplitterConfig={responseSplitterConfig}
-                  onKeywordReactionChange={setKeywordReactionConfig}
-                  onResponsePostProcessChange={setResponsePostProcessConfig}
-                  onChineseTypoChange={setChineseTypoConfig}
-                  onResponseSplitterChange={setResponseSplitterConfig}
-                />
-              )}
-          </TabsContent>
-
-          {/* 语音配置 */}
-          <TabsContent value="voice" className="mt-5 space-y-5 sm:mt-6">
-            {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
-          </TabsContent>
-
-          {/* 消息过滤配置 */}
-          <TabsContent value="message_receive" className="mt-5 space-y-5 sm:mt-6">
-            {messageReceiveConfig && (
-              <MessageReceiveSection
-                config={messageReceiveConfig}
-                onChange={setMessageReceiveConfig}
-              />
-            )}
-          </TabsContent>
-
-          {/* 服务配置 */}
-          <TabsContent value="service" className="mt-5 space-y-5 sm:mt-6">
-            {webuiConfig && <WebUISection config={webuiConfig} onChange={setWebuiConfig} />}
-            {maimMessageConfig && (
-              <MaimMessageSection config={maimMessageConfig} onChange={setMaimMessageConfig} />
-            )}
-            {telemetryConfig && (
-              <TelemetrySection config={telemetryConfig} onChange={setTelemetryConfig} />
-            )}
-          </TabsContent>
-
-          {/* 实验配置 */}
-          <TabsContent value="experimental" className="mt-5 space-y-5 sm:mt-6">
-            {experimentalConfig && (
-              <ExperimentalSection config={experimentalConfig} onChange={setExperimentalConfig} />
-            )}
-          </TabsContent>
-
-          {/* Dream 配置 */}
-          <TabsContent value="dream" className="mt-5 space-y-5 sm:mt-6">
-            {dreamConfig && <DreamSection config={dreamConfig} onChange={setDreamConfig} />}
-          </TabsContent>
-
-          {/* 其他配置 */}
-          <TabsContent value="other" className="mt-5 space-y-5 sm:mt-6">
-            {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
-            {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
 
         {/* 重启遮罩层 */}
         {showRestartOverlay && (

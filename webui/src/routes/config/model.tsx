@@ -48,6 +48,7 @@ import {
   Check,
   ChevronRight,
   ChevronsUpDown,
+  CircleHelp,
   Cpu,
   Info,
   Loader2,
@@ -147,7 +148,7 @@ export function ModelConfigPage() {
   const { toast } = useToast()
 
   // Tour 引导 (使用 hook 封装的逻辑)
-  const { isRunning: tourIsRunning } = useModelTour({
+  const { startTour, isRunning: tourIsRunning } = useModelTour({
     onCloseEditDialog: () => setEditDialogOpen(false),
   })
 
@@ -509,6 +510,7 @@ export function ModelConfigPage() {
       setModels(newModels)
       // 立即更新模型名称列表
       setModelNames(newModels.map((m) => m.name))
+      setSelectedModels(new Set())
       toast({
         title: '删除成功',
         description: '模型已从列表中移除',
@@ -685,6 +687,18 @@ export function ModelConfigPage() {
           </div>
           <div className="hidden w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-2 sm:flex sm:w-auto">
             <Button
+              onClick={startTour}
+              disabled={tourIsRunning}
+              size="sm"
+              variant="outline"
+              className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[112px] sm:px-4"
+              aria-label="启动配置引导"
+              title="启动配置引导"
+            >
+              <CircleHelp className="h-4 w-4 sm:mr-2" strokeWidth={2} fill="none" />
+              <span className="hidden sm:inline">{tourIsRunning ? '引导中' : '配置引导'}</span>
+            </Button>
+            <Button
               onClick={saveConfig}
               disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
               size="sm"
@@ -812,6 +826,27 @@ export function ModelConfigPage() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          <button
+            type="button"
+            onClick={startTour}
+            disabled={tourIsRunning}
+            className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                <CircleHelp className="h-4 w-4" strokeWidth={2} fill="none" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[15px] font-medium leading-5">
+                  {tourIsRunning ? '引导进行中' : '配置引导'}
+                </span>
+                <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                  逐步配置提供商、模型和任务分配
+                </span>
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+          </button>
         </div>
         <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
           <DialogTrigger asChild>
@@ -1006,6 +1041,9 @@ export function ModelConfigPage() {
               paginatedModels={paginatedModels}
               allModels={models}
               onEdit={openEditDialog}
+              onDelete={openDeleteDialog}
+              selectedModels={selectedModels}
+              onToggleSelection={toggleModelSelection}
               isModelUsed={isModelUsed}
               searchQuery={searchQuery}
             />

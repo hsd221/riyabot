@@ -1155,7 +1155,7 @@ export function ChatPage() {
     <div className="flex h-full flex-col overflow-hidden bg-background">
       {/* 虚拟身份配置对话框 */}
       <Dialog open={showVirtualConfig} onOpenChange={setShowVirtualConfig}>
-        <DialogContent className="bottom-0 top-auto flex max-h-[86vh] translate-y-0 flex-col overflow-hidden rounded-b-none rounded-t-[28px] sm:bottom-auto sm:top-[50%] sm:max-w-[500px] sm:translate-y-[-50%] sm:rounded-lg">
+        <DialogContent className="bottom-0 top-auto flex max-h-[86vh] translate-y-0 flex-col overflow-hidden rounded-b-none rounded-t-[28px] sm:bottom-auto sm:top-[50%] sm:max-w-[500px] sm:translate-y-[-50%] sm:rounded-[24px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCircle2 className="h-5 w-5" />

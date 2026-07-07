@@ -2,8 +2,9 @@
  * 模型列表 - 移动端卡片视图
  */
 import React from 'react'
-import { ChevronRight, Cpu } from 'lucide-react'
+import { Check, ChevronRight, Cpu, Trash2 } from 'lucide-react'
 import type { ModelInfo } from '../types'
+import { cn } from '@/lib/utils'
 
 interface ModelCardListProps {
   /** 当前页显示的模型 (分页后的) */
@@ -12,6 +13,12 @@ interface ModelCardListProps {
   allModels: ModelInfo[]
   /** 编辑模型回调 */
   onEdit: (model: ModelInfo, index: number) => void
+  /** 删除模型回调 */
+  onDelete: (index: number) => void
+  /** 已选择模型索引 */
+  selectedModels: Set<number>
+  /** 切换模型选择 */
+  onToggleSelection: (index: number) => void
   /** 检查模型是否被使用 */
   isModelUsed: (modelName: string) => boolean
   /** 搜索关键词 */
@@ -22,6 +29,9 @@ export const ModelCardList = React.memo(function ModelCardList({
   paginatedModels,
   allModels,
   onEdit,
+  onDelete,
+  selectedModels,
+  onToggleSelection,
   isModelUsed,
   searchQuery,
 }: ModelCardListProps) {
@@ -48,50 +58,88 @@ export const ModelCardList = React.memo(function ModelCardList({
       {paginatedModels.map((model, displayIndex) => {
         const actualIndex = allModels.findIndex((m) => m === model)
         const used = isModelUsed(model.name)
+        const selected = selectedModels.has(actualIndex)
         const modelDetails = [
           model.api_provider,
           model.temperature != null ? `温度 ${model.temperature}` : '默认温度',
         ]
 
         return (
-          <button
+          <div
             key={displayIndex}
-            type="button"
-            onClick={() => onEdit(model, actualIndex)}
-            className="ios-touch relative grid min-h-[92px] w-full grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left leading-normal after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden focus-visible:bg-accent/70 focus-visible:ring-0"
+            className="relative grid min-h-[96px] w-full grid-cols-[36px_minmax(0,1fr)_36px] items-center gap-3 px-4 py-3 after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden"
           >
-            <span className="ios-symbol ios-symbol-md ios-symbol-blue">
-              <Cpu className="h-4 w-4" />
-            </span>
-            <span className="min-w-0 self-center">
-              <span className="block truncate text-[16px] font-semibold leading-6">
-                {model.name}
-              </span>
+            <button
+              type="button"
+              onClick={() => actualIndex >= 0 && onToggleSelection(actualIndex)}
+              disabled={actualIndex < 0}
+              className={cn(
+                'ios-touch grid h-9 w-9 place-items-center rounded-full focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-50',
+                selected && 'bg-primary/12 text-primary'
+              )}
+              aria-label={selected ? `取消选择 ${model.name}` : `选择 ${model.name}`}
+              aria-pressed={selected}
+            >
               <span
-                className="block truncate text-[13px] leading-5 text-muted-foreground"
-                title={model.model_identifier}
+                className={cn(
+                  'grid h-5 w-5 place-items-center rounded-[7px] border border-muted-foreground/35',
+                  selected && 'border-primary bg-primary text-primary-foreground'
+                )}
               >
-                {model.model_identifier}
+                {selected && <Check className="h-3.5 w-3.5" />}
               </span>
-              <span className="mt-1 block truncate text-[12.5px] leading-[18px] text-muted-foreground/90">
-                {modelDetails.join(' · ')}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => actualIndex >= 0 && onEdit(model, actualIndex)}
+              disabled={actualIndex < 0}
+              className="ios-touch -mx-1 grid min-w-0 grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-[13px] px-1 py-1 text-left leading-normal focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-50"
+            >
+              <span className="ios-symbol ios-symbol-md ios-symbol-blue">
+                <Cpu className="h-4 w-4" />
               </span>
-            </span>
-            <span className="flex shrink-0 items-center gap-1.5">
-              <span className="rounded-full bg-secondary px-2 py-0.5">
+              <span className="min-w-0 self-center">
+                <span className="block truncate text-[16px] font-semibold leading-6">
+                  {model.name}
+                </span>
                 <span
-                  className={
-                    used
-                      ? 'text-[13px] font-medium leading-5 text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
-                      : 'text-[13px] leading-5 text-muted-foreground'
-                  }
+                  className="block truncate text-[13px] leading-5 text-muted-foreground"
+                  title={model.model_identifier}
                 >
-                  {used ? '已使用' : '未使用'}
+                  {model.model_identifier}
+                </span>
+                <span className="mt-1 block truncate text-[12.5px] leading-[18px] text-muted-foreground/90">
+                  {modelDetails.join(' · ')}
                 </span>
               </span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
-            </span>
-          </button>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <span className="rounded-full bg-secondary px-2 py-0.5">
+                  <span
+                    className={
+                      used
+                        ? 'text-[13px] font-medium leading-5 text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
+                        : 'text-[13px] leading-5 text-muted-foreground'
+                    }
+                  >
+                    {used ? '已使用' : '未使用'}
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => actualIndex >= 0 && onDelete(actualIndex)}
+              disabled={actualIndex < 0}
+              className="ios-touch text-destructive focus-visible:bg-destructive/10 grid h-9 w-9 place-items-center rounded-full focus-visible:ring-0 disabled:opacity-50"
+              aria-label={`删除 ${model.name}`}
+              title="删除模型"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
         )
       })}
     </div>

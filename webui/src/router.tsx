@@ -1,4 +1,10 @@
-import { createRootRoute, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router'
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  redirect,
+} from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/router-devtools'
 import { IndexPage } from './routes/index'
 import { SettingsPage } from './routes/settings'
@@ -24,12 +30,14 @@ import { Layout } from './components/layout'
 import { checkAuth } from './hooks/use-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
 
+const showRouterDevtools = import.meta.env.DEV && import.meta.env.VITE_ROUTER_DEVTOOLS === 'true'
+
 // Root 路由
 const rootRoute = createRootRoute({
   component: () => (
     <>
       <Outlet />
-      {import.meta.env.DEV && <TanStackRouterDevtools />}
+      {showRouterDevtools && <TanStackRouterDevtools />}
     </>
   ),
   beforeLoad: () => {
@@ -227,7 +235,7 @@ const routeTree = rootRoute.addChildren([
 ])
 
 // 创建路由器
-export const router = createRouter({ 
+export const router = createRouter({
   routeTree,
   defaultNotFoundComponent: NotFoundPage,
   defaultErrorComponent: ({ error }) => <RouteErrorBoundary error={error} />,
