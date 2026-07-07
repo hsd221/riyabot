@@ -10,6 +10,7 @@ from src.common.logger import get_logger
 from src.common.database.database_model import Expression
 from src.chat.utils.prompt_builder import global_prompt_manager
 from src.bw_learner.learner_utils import weighted_sample
+from src.bw_learner.expression_vector_index import expression_vector_index
 from src.chat.message_receive.chat_stream import get_chat_manager
 
 logger = get_logger("expression_selector")
@@ -209,6 +210,166 @@ class ExpressionSelector:
             logger.error(f"随机选择表达方式失败: {e}")
             return []
 
+    def _load_all_expression_candidates(self, chat_id: str) -> List[Dict[str, Any]]:
+        related_chat_ids = self.get_related_chat_ids(chat_id)
+        base_conditions = (Expression.chat_id.in_(related_chat_ids)) & (~Expression.rejected)
+        if global_config.expression.expression_checked_only:
+            base_conditions = base_conditions & (Expression.checked)
+        style_query = Expression.select().where(base_conditions)
+
+        return [
+            {
+                "id": expr.id,
+                "situation": expr.situation,
+                "style": expr.style,
+                "last_active_time": expr.last_active_time,
+                "source_id": expr.chat_id,
+                "create_date": expr.create_date if expr.create_date is not None else expr.last_active_time,
+                "count": expr.count if getattr(expr, "count", None) is not None else 1,
+                "checked": expr.checked if getattr(expr, "checked", None) is not None else False,
+            }
+            for expr in style_query
+        ]
+
+    @staticmethod
+    def _build_vector_query_text(
+        chat_info: str,
+        target_message: Optional[str],
+        reply_reason: Optional[str],
+    ) -> str:
+        query_parts = []
+        if reply_reason:
+            query_parts.append(f"回复理由：\n{reply_reason.strip()}")
+        if target_message:
+            query_parts.append(f"目标消息：\n{target_message.strip()}")
+        if chat_info:
+            query_parts.append(f"最近聊天：\n{chat_info.strip()[-3000:]}")
+        return "\n\n".join(part for part in query_parts if part.strip())
+
+    async def _select_from_candidate_pool(
+        self,
+        candidate_exprs: List[Dict[str, Any]],
+        chat_info: str,
+        max_num: int,
+        target_message: Optional[str],
+        reply_reason: Optional[str],
+    ) -> Tuple[List[Dict[str, Any]], List[int]]:
+        all_expressions: List[Dict[str, Any]] = []
+        all_situations: List[str] = []
+
+        for expr in candidate_exprs:
+            expr = expr.copy()
+            all_expressions.append(expr)
+            all_situations.append(f"{len(all_expressions)}.当 {expr['situation']} 时，使用 {expr['style']}")
+
+        if not all_expressions:
+            logger.warning("没有找到可用的表达方式")
+            return [], []
+
+        all_situations_str = "\n".join(all_situations)
+
+        if target_message:
+            target_message_str = f'，现在你想要对这条消息进行回复："{target_message}"'
+            target_message_extra_block = "4.考虑你要回复的目标消息"
+        else:
+            target_message_str = ""
+            target_message_extra_block = ""
+
+        chat_context = f"以下是正在进行的聊天内容：{chat_info}"
+
+        if reply_reason:
+            reply_reason_block = f"你的回复理由是：{reply_reason}"
+            chat_context = ""
+        else:
+            reply_reason_block = ""
+
+        prompt = (await global_prompt_manager.get_prompt_async("expression_evaluation_prompt")).format(
+            bot_name=global_config.bot.nickname,
+            chat_observe_info=chat_context,
+            all_situations=all_situations_str,
+            max_num=max_num,
+            target_message=target_message_str,
+            target_message_extra_block=target_message_extra_block,
+            reply_reason_block=reply_reason_block,
+        )
+
+        content, _ = await self.llm_model.generate_response_async(prompt=prompt)
+
+        if not content:
+            logger.warning("LLM返回空结果")
+            return [], []
+
+        result = repair_json(content)
+        if isinstance(result, str):
+            result = json.loads(result)
+
+        if not isinstance(result, dict) or "selected_situations" not in result:
+            logger.error("LLM返回格式错误")
+            logger.info(f"LLM返回结果: \n{content}")
+            return [], []
+
+        selected_indices = result["selected_situations"]
+        if not isinstance(selected_indices, list):
+            logger.error("LLM返回 selected_situations 格式错误")
+            logger.info(f"LLM返回结果: \n{content}")
+            return [], []
+
+        valid_expressions: List[Dict[str, Any]] = []
+        selected_ids = []
+        for idx in selected_indices:
+            if isinstance(idx, int) and 1 <= idx <= len(all_expressions):
+                expression = all_expressions[idx - 1]
+                selected_ids.append(expression["id"])
+                valid_expressions.append(expression)
+
+        if valid_expressions:
+            self.update_expressions_last_active_time(valid_expressions)
+
+        logger.debug(f"从{len(all_expressions)}个情境中选择了{len(valid_expressions)}个")
+        return valid_expressions, selected_ids
+
+    async def _select_expressions_vector(
+        self,
+        chat_id: str,
+        chat_info: str,
+        max_num: int,
+        target_message: Optional[str],
+        reply_reason: Optional[str],
+        think_level: int,
+    ) -> Optional[Tuple[List[Dict[str, Any]], List[int]]]:
+        try:
+            all_style_exprs = self._load_all_expression_candidates(chat_id)
+            query_text = self._build_vector_query_text(chat_info, target_message, reply_reason)
+            vector_candidates = await expression_vector_index.select_candidates(
+                candidates=all_style_exprs,
+                query_text=query_text,
+            )
+            if vector_candidates is None:
+                return None
+            if not vector_candidates:
+                return [], []
+
+            if think_level == 0:
+                selected_count = max(0, min(5, max_num))
+                if selected_count <= 0:
+                    return [], []
+                selected_expressions = vector_candidates[:selected_count]
+                self.update_expressions_last_active_time(selected_expressions)
+                selected_ids = [expr["id"] for expr in selected_expressions]
+                logger.debug(f"表达向量简单选择完成：选中{len(selected_expressions)}个")
+                return selected_expressions, selected_ids
+
+            return await self._select_from_candidate_pool(
+                vector_candidates,
+                chat_info,
+                max_num,
+                target_message,
+                reply_reason,
+            )
+        except Exception as e:
+            logger.warning(f"表达向量选择不可用，回退传统表达选择: {e}")
+            return None
+
     async def select_suitable_expressions(
         self,
         chat_id: str,
@@ -237,8 +398,19 @@ class ExpressionSelector:
             logger.debug(f"聊天流 {chat_id} 不允许使用表达，返回空列表")
             return [], []
 
-        # 使用classic模式（随机选择+LLM选择）
-        logger.debug(f"使用classic模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
+        vector_result = await self._select_expressions_vector(
+            chat_id,
+            chat_info,
+            max_num,
+            target_message,
+            reply_reason,
+            think_level,
+        )
+        if vector_result is not None:
+            logger.debug(f"使用向量模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
+            return vector_result
+
+        logger.debug(f"表达向量不可用，使用classic模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
         return await self._select_expressions_classic(
             chat_id, chat_info, max_num, target_message, reply_reason, think_level
         )
@@ -344,86 +516,13 @@ class ExpressionSelector:
 
             random.shuffle(candidate_exprs)
 
-            # 2. 构建所有表达方式的索引和情境列表
-            all_expressions: List[Dict[str, Any]] = []
-            all_situations: List[str] = []
-
-            # 添加style表达方式
-            for expr in candidate_exprs:
-                expr = expr.copy()
-                all_expressions.append(expr)
-                all_situations.append(f"{len(all_expressions)}.当 {expr['situation']} 时，使用 {expr['style']}")
-
-            if not all_expressions:
-                logger.warning("没有找到可用的表达方式")
-                return [], []
-
-            all_situations_str = "\n".join(all_situations)
-
-            if target_message:
-                target_message_str = f'，现在你想要对这条消息进行回复："{target_message}"'
-                target_message_extra_block = "4.考虑你要回复的目标消息"
-            else:
-                target_message_str = ""
-                target_message_extra_block = ""
-
-            chat_context = f"以下是正在进行的聊天内容：{chat_info}"
-
-            # 构建reply_reason块
-            if reply_reason:
-                reply_reason_block = f"你的回复理由是：{reply_reason}"
-                chat_context = ""
-            else:
-                reply_reason_block = ""
-
-            # 3. 构建prompt（只包含情境，不包含完整的表达方式）
-            prompt = (await global_prompt_manager.get_prompt_async("expression_evaluation_prompt")).format(
-                bot_name=global_config.bot.nickname,
-                chat_observe_info=chat_context,
-                all_situations=all_situations_str,
-                max_num=max_num,
-                target_message=target_message_str,
-                target_message_extra_block=target_message_extra_block,
-                reply_reason_block=reply_reason_block,
+            return await self._select_from_candidate_pool(
+                candidate_exprs,
+                chat_info,
+                max_num,
+                target_message,
+                reply_reason,
             )
-
-            # 4. 调用LLM
-            content, (reasoning_content, model_name, _) = await self.llm_model.generate_response_async(prompt=prompt)
-
-            # print(prompt)
-            # print(content)
-
-            if not content:
-                logger.warning("LLM返回空结果")
-                return [], []
-
-            # 5. 解析结果
-            result = repair_json(content)
-            if isinstance(result, str):
-                result = json.loads(result)
-
-            if not isinstance(result, dict) or "selected_situations" not in result:
-                logger.error("LLM返回格式错误")
-                logger.info(f"LLM返回结果: \n{content}")
-                return [], []
-
-            selected_indices = result["selected_situations"]
-
-            # 根据索引获取完整的表达方式
-            valid_expressions: List[Dict[str, Any]] = []
-            selected_ids = []
-            for idx in selected_indices:
-                if isinstance(idx, int) and 1 <= idx <= len(all_expressions):
-                    expression = all_expressions[idx - 1]  # 索引从1开始
-                    selected_ids.append(expression["id"])
-                    valid_expressions.append(expression)
-
-            # 对选中的所有表达方式，更新last_active_time
-            if valid_expressions:
-                self.update_expressions_last_active_time(valid_expressions)
-
-            logger.debug(f"从{len(all_expressions)}个情境中选择了{len(valid_expressions)}个")
-            return valid_expressions, selected_ids
 
         except Exception as e:
             logger.error(f"classic模式处理表达方式选择时出错: {e}")
