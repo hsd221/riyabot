@@ -55,87 +55,121 @@ export const Pagination = React.memo(function Pagination({
   if (totalItems === 0) return null
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
-      <div className="flex items-center gap-2">
-        <Label htmlFor="page-size-model" className="text-sm whitespace-nowrap">每页显示</Label>
-        <Select
-          value={pageSize.toString()}
-          onValueChange={handlePageSizeChange}
-        >
-          <SelectTrigger id="page-size-model" className="w-20">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <SelectItem key={size} value={size.toString()}>
-                {size}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-sm text-muted-foreground">
-          显示 {(page - 1) * pageSize + 1} 到{' '}
-          {Math.min(page * pageSize, totalItems)} 条，共 {totalItems} 条
-        </span>
+    <div className="mt-5 space-y-3">
+      <div className="ios-group flex items-center justify-between gap-3 px-4 py-3 sm:hidden">
+        <div className="min-w-0">
+          <p className="text-[15px] font-medium">
+            第 {page} / {totalPages} 页
+          </p>
+          <p className="mt-1 truncate text-[13px] leading-5 text-muted-foreground">
+            显示 {(page - 1) * pageSize + 1} 到 {Math.min(page * pageSize, totalItems)} 条，共{' '}
+            {totalItems} 条
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page === 1}
+            className="h-9 w-9 rounded-full"
+            aria-label="上一页"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= totalPages}
+            className="h-9 w-9 rounded-full"
+            aria-label="下一页"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(1)}
-          disabled={page === 1}
-          className="hidden sm:flex"
-        >
-          <ChevronsLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-          disabled={page === 1}
-        >
-          <ChevronLeft className="h-4 w-4 sm:mr-1" />
-          <span className="hidden sm:inline">上一页</span>
-        </Button>
+      <div className="ios-group hidden items-center justify-between gap-4 px-5 py-3 sm:flex">
         <div className="flex items-center gap-2">
-          <Input
-            type="number"
-            value={jumpToPage}
-            onChange={(e) => onJumpToPageChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={page.toString()}
-            className="w-16 h-8 text-center"
-            min={1}
-            max={totalPages}
-          />
+          <Label htmlFor="page-size-model" className="whitespace-nowrap text-sm">
+            每页显示
+          </Label>
+          <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+            <SelectTrigger id="page-size-model" className="w-20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <SelectItem key={size} value={size.toString()}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-sm text-muted-foreground">
+            显示 {(page - 1) * pageSize + 1} 到 {Math.min(page * pageSize, totalItems)} 条，共{' '}
+            {totalItems} 条
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={onJumpToPage}
-            disabled={!jumpToPage}
-            className="h-8"
+            onClick={() => onPageChange(1)}
+            disabled={page === 1}
+            className="hidden sm:flex"
           >
-            跳转
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page === 1}
+          >
+            <ChevronLeft className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">上一页</span>
+          </Button>
+          <div className="flex min-w-0 items-center gap-2">
+            <Input
+              type="number"
+              value={jumpToPage}
+              onChange={(e) => onJumpToPageChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={page.toString()}
+              className="h-8 w-16 text-center"
+              min={1}
+              max={totalPages}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onJumpToPage}
+              disabled={!jumpToPage}
+              className="h-8"
+            >
+              跳转
+            </Button>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= totalPages}
+          >
+            <span className="hidden sm:inline">下一页</span>
+            <ChevronRight className="h-4 w-4 sm:ml-1" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPageChange(totalPages)}
+            disabled={page >= totalPages}
+            className="hidden sm:flex"
+          >
+            <ChevronsRight className="h-4 w-4" />
           </Button>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(page + 1)}
-          disabled={page >= totalPages}
-        >
-          <span className="hidden sm:inline">下一页</span>
-          <ChevronRight className="h-4 w-4 sm:ml-1" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(totalPages)}
-          disabled={page >= totalPages}
-          className="hidden sm:flex"
-        >
-          <ChevronsRight className="h-4 w-4" />
-        </Button>
       </div>
     </div>
   )

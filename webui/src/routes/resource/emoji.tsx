@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Filter,
+  Search,
   RefreshCw,
   Trash2,
   Edit,
@@ -16,6 +17,7 @@ import {
   Check,
   X,
   ImageIcon,
+  SlidersHorizontal,
 } from 'lucide-react'
 import Uppy from '@uppy/core'
 import Dashboard from '@uppy/react/dashboard'
@@ -26,13 +28,6 @@ import '@/styles/uppy-custom.css'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmojiThumbnail } from '@/components/emoji-thumbnail'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -53,6 +48,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { IosGridSkeleton } from '@/components/ui/skeleton'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -66,6 +62,7 @@ import {
 
 import { Markdown } from '@/components/ui/markdown'
 import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 import type { Emoji, EmojiStats } from '@/types/emoji'
 import {
   getEmojiList,
@@ -81,6 +78,48 @@ import {
   getEmojiUploadUrl,
 } from '@/lib/emoji-api'
 
+const SORT_OPTIONS = [
+  { value: 'usage_count-desc', label: '使用次数', description: '多到少' },
+  { value: 'usage_count-asc', label: '使用次数', description: '少到多' },
+  { value: 'register_time-desc', label: '注册时间', description: '新到旧' },
+  { value: 'register_time-asc', label: '注册时间', description: '旧到新' },
+  { value: 'record_time-desc', label: '记录时间', description: '新到旧' },
+  { value: 'record_time-asc', label: '记录时间', description: '旧到新' },
+  { value: 'last_used_time-desc', label: '最后使用', description: '新到旧' },
+  { value: 'last_used_time-asc', label: '最后使用', description: '旧到新' },
+] as const
+
+const REGISTER_OPTIONS = [
+  { value: 'all', label: '全部', description: '不限注册状态' },
+  { value: 'registered', label: '已注册', description: '只看已注册表情包' },
+  { value: 'unregistered', label: '未注册', description: '只看未注册表情包' },
+] as const
+
+const BAN_OPTIONS = [
+  { value: 'all', label: '全部', description: '不限封禁状态' },
+  { value: 'banned', label: '已封禁', description: '只看已封禁表情包' },
+  { value: 'unbanned', label: '未封禁', description: '只看未封禁表情包' },
+] as const
+
+const CARD_SIZE_OPTIONS = [
+  { value: 'small', label: '小' },
+  { value: 'medium', label: '中' },
+  { value: 'large', label: '大' },
+] as const
+
+const PAGE_SIZE_OPTIONS = [20, 40, 60, 100] as const
+
+const softGreenBadgeClass =
+  'border-0 bg-[rgb(52_199_89_/_0.13)] text-[rgb(36_138_61)] shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:text-[rgb(48_209_88)]'
+const softRedBadgeClass =
+  'border-0 bg-[rgb(255_59_48_/_0.12)] text-[rgb(174_37_31)] shadow-[0_1px_0_rgba(255,255,255,0.42)_inset] dark:text-[rgb(255_105_97)]'
+const softGreenIconClass =
+  'text-[rgb(36_138_61)] hover:bg-[rgb(52_199_89_/_0.1)] hover:text-[rgb(30_126_52)] dark:text-[rgb(48_209_88)]'
+const softOrangeIconClass =
+  'text-[rgb(178_93_0)] hover:bg-[rgb(255_149_0_/_0.1)] hover:text-[rgb(148_78_0)] dark:text-[rgb(255_159_10)]'
+const softRedIconClass =
+  'text-[rgb(174_37_31)] hover:bg-[rgb(255_59_48_/_0.1)] hover:text-[rgb(150_32_27)] dark:text-[rgb(255_105_97)]'
+
 export function EmojiManagementPage() {
   const [emojiList, setEmojiList] = useState<Emoji[]>([])
   const [stats, setStats] = useState<EmojiStats | null>(null)
@@ -88,6 +127,7 @@ export function EmojiManagementPage() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [pageSize, setPageSize] = useState(20)
+  const [search, setSearch] = useState('')
   const [registeredFilter, setRegisteredFilter] = useState<string>('all')
   const [bannedFilter, setBannedFilter] = useState<string>('all')
   const [formatFilter, setFormatFilter] = useState<string>('all')
@@ -112,6 +152,7 @@ export function EmojiManagementPage() {
       const response = await getEmojiList({
         page,
         page_size: pageSize,
+        search: search || undefined,
         is_registered: registeredFilter === 'all' ? undefined : registeredFilter === 'registered',
         is_banned: bannedFilter === 'all' ? undefined : bannedFilter === 'banned',
         format: formatFilter === 'all' ? undefined : formatFilter,
@@ -130,7 +171,17 @@ export function EmojiManagementPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, registeredFilter, bannedFilter, formatFilter, sortBy, sortOrder, toast])
+  }, [
+    page,
+    pageSize,
+    search,
+    registeredFilter,
+    bannedFilter,
+    formatFilter,
+    sortBy,
+    sortOrder,
+    toast,
+  ])
 
   // 加载统计数据
   const loadStats = async () => {
@@ -253,6 +304,14 @@ export function EmojiManagementPage() {
     setSelectedIds(newSelected)
   }
 
+  const toggleSelectAll = () => {
+    if (selectedIds.size === emojiList.length && emojiList.length > 0) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(emojiList.map((emoji) => emoji.id)))
+    }
+  }
+
   // 批量删除
   const handleBatchDelete = async () => {
     try {
@@ -292,76 +351,132 @@ export function EmojiManagementPage() {
 
   // 获取格式选项
   const formatOptions = stats?.formats ? Object.keys(stats.formats) : []
+  const currentSortValue = `${sortBy}-${sortOrder}`
+  const currentSortLabel =
+    SORT_OPTIONS.find((option) => option.value === currentSortValue)?.label ?? '使用次数'
+  const currentCardSizeLabel =
+    CARD_SIZE_OPTIONS.find((option) => option.value === cardSize)?.label ?? '中'
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const emojiStatItems = stats
+    ? [
+        {
+          label: '总数',
+          value: stats.total,
+          detail: '全部资源',
+          Icon: ImageIcon,
+          symbolClassName: 'ios-symbol-blue',
+        },
+        {
+          label: '已注册',
+          value: stats.registered,
+          detail: '可直接使用',
+          Icon: CheckCircle2,
+          symbolClassName: 'ios-symbol-green',
+        },
+        {
+          label: '已封禁',
+          value: stats.banned,
+          detail: '不会被使用',
+          Icon: Ban,
+          symbolClassName: 'ios-symbol-red',
+        },
+        {
+          label: '未注册',
+          value: stats.unregistered,
+          detail: '等待整理',
+          Icon: X,
+          symbolClassName: 'ios-symbol-gray',
+        },
+      ]
+    : []
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col p-4 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
       {/* 页面标题 */}
-      <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="mb-4 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">表情包管理</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            管理璃夜的表情包资源
-          </p>
+          <h1 className="ios-title">表情包管理</h1>
+          <p className="ios-subtitle">管理当前实例的表情包资源</p>
         </div>
-        <Button onClick={() => setUploadDialogOpen(true)} className="gap-2">
+        <Button onClick={() => setUploadDialogOpen(true)} className="hidden gap-2 sm:inline-flex">
           <Upload className="h-4 w-4" />
           上传表情包
         </Button>
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 pr-4">
+        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+          <button
+            type="button"
+            onClick={() => setUploadDialogOpen(true)}
+            className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                <Upload className="h-4 w-4" />
+              </span>
+              <span className="block min-w-0 truncate text-[16px] font-normal leading-6">
+                上传表情包
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
 
-      {/* 统计卡片 */}
-      {stats && (
-        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>总数</CardDescription>
-              <CardTitle className="text-2xl">{stats.total}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>已注册</CardDescription>
-              <CardTitle className="text-2xl text-green-600">
-                {stats.registered}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>已封禁</CardDescription>
-              <CardTitle className="text-2xl text-red-600">
-                {stats.banned}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>未注册</CardDescription>
-              <CardTitle className="text-2xl text-gray-600">
-                {stats.unregistered}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-        </div>
-      )}
+          {/* 统计 */}
+          {stats && (
+            <div className="ios-stat-grid">
+              {emojiStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
+                <div key={label} className="ios-stat-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                        {label}
+                      </p>
+                      <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                        {detail}
+                      </p>
+                    </div>
+                    <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                  </div>
+                  <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
 
-      {/* 筛选和排序 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="h-5 w-5" />
-            筛选和排序
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label>排序方式</Label>
+          <div className="ios-search-field">
+            <Search className="pointer-events-none absolute left-3.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索描述或哈希"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                setPage(1)
+              }}
+              className="ios-search-input"
+            />
+          </div>
+
+          {/* 筛选和显示 */}
+          <div className="ios-group overflow-hidden">
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                  <Filter className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">排序</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {currentSortLabel}
+                  </span>
+                </span>
+              </span>
               <Select
-                value={`${sortBy}-${sortOrder}`}
+                value={currentSortValue}
                 onValueChange={(value) => {
                   const [newSortBy, newSortOrder] = value.split('-')
                   setSortBy(newSortBy)
@@ -369,24 +484,26 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[12rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 sm:max-w-[16rem] [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="usage_count-desc">使用次数 (多→少)</SelectItem>
-                  <SelectItem value="usage_count-asc">使用次数 (少→多)</SelectItem>
-                  <SelectItem value="register_time-desc">注册时间 (新→旧)</SelectItem>
-                  <SelectItem value="register_time-asc">注册时间 (旧→新)</SelectItem>
-                  <SelectItem value="record_time-desc">记录时间 (新→旧)</SelectItem>
-                  <SelectItem value="record_time-asc">记录时间 (旧→新)</SelectItem>
-                  <SelectItem value="last_used_time-desc">最后使用 (新→旧)</SelectItem>
-                  <SelectItem value="last_used_time-asc">最后使用 (旧→新)</SelectItem>
+                  {SORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label} · {option.description}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>注册状态</Label>
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                  <CheckCircle2 className="h-4 w-4" />
+                </span>
+                <span className="text-[16px] font-normal leading-6">注册状态</span>
+              </span>
               <Select
                 value={registeredFilter}
                 onValueChange={(value) => {
@@ -394,19 +511,26 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="registered">已注册</SelectItem>
-                  <SelectItem value="unregistered">未注册</SelectItem>
+                  {REGISTER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>封禁状态</Label>
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-red">
+                  <Ban className="h-4 w-4" />
+                </span>
+                <span className="text-[16px] font-normal leading-6">封禁状态</span>
+              </span>
               <Select
                 value={bannedFilter}
                 onValueChange={(value) => {
@@ -414,19 +538,26 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="banned">已封禁</SelectItem>
-                  <SelectItem value="unbanned">未封禁</SelectItem>
+                  {BAN_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>格式</Label>
+            <div className="ios-row min-h-[64px]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
+                  <ImageIcon className="h-4 w-4" />
+                </span>
+                <span className="text-[16px] font-normal leading-6">格式</span>
+              </span>
               <Select
                 value={formatFilter}
                 onValueChange={(value) => {
@@ -434,361 +565,406 @@ export function EmojiManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="all">全部格式</SelectItem>
                   {formatOptions.map((format) => (
                     <SelectItem key={format} value={format}>
-                      {format.toUpperCase()} ({stats?.formats[format]})
+                      {format.toUpperCase()} ({stats?.formats[format] ?? 0})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t">
-            <div className="flex items-center gap-4">
-              {selectedIds.size > 0 && (
-                <span className="text-sm text-muted-foreground">已选择 {selectedIds.size} 个表情包</span>
-              )}
-              {/* 卡片尺寸切换 */}
-              <div className="flex items-center gap-2">
-                <Label className="text-sm whitespace-nowrap">卡片大小</Label>
+            <div className="ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between">
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">显示设置</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {currentCardSizeLabel}卡片 · 每页 {pageSize} 条 · 已选 {selectedIds.size}
+                  </span>
+                </span>
+              </span>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                 <Select
                   value={cardSize}
                   onValueChange={(value: 'small' | 'medium' | 'large') => setCardSize(value)}
                 >
-                  <SelectTrigger className="w-24">
+                  <SelectTrigger className="h-auto min-h-11 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="small">小</SelectItem>
-                    <SelectItem value="medium">中</SelectItem>
-                    <SelectItem value="large">大</SelectItem>
+                    {CARD_SIZE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}卡片
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                <Select
+                  value={pageSize.toString()}
+                  onValueChange={(value) => {
+                    setPageSize(parseInt(value))
+                    setPage(1)
+                    setSelectedIds(new Set())
+                  }}
+                >
+                  <SelectTrigger className="h-auto min-h-11 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <SelectItem key={size} value={size.toString()}>
+                        {size} 条
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={loadEmojiList}
+                  disabled={loading}
+                  className="h-9 w-9 rounded-full"
+                  title="刷新"
+                >
+                  <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                </Button>
+                {selectedIds.size > 0 && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedIds(new Set())}
+                      className="h-9 rounded-full px-3"
+                    >
+                      取消选择
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setBatchDeleteDialogOpen(true)}
+                      className="h-9 rounded-full px-3"
+                    >
+                      <Trash2 className="mr-1 h-4 w-4" />
+                      批量删除
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="emoji-page-size" className="text-sm whitespace-nowrap">每页显示</Label>
-              <Select
-                value={pageSize.toString()}
-                onValueChange={(value) => {
-                  setPageSize(parseInt(value))
-                  setPage(1)
-                  setSelectedIds(new Set())
-                }}
-              >
-                <SelectTrigger id="emoji-page-size" className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="20">20</SelectItem>
-                  <SelectItem value="40">40</SelectItem>
-                  <SelectItem value="60">60</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
-              {selectedIds.size > 0 && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedIds(new Set())}
-                  >
-                    取消选择
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setBatchDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    批量删除
-                  </Button>
-                </>
+          </div>
+
+          {/* 表情包卡片列表 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[13px] font-medium leading-5 text-muted-foreground">表情包列表</p>
+              {emojiList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                >
+                  {selectedIds.size === emojiList.length ? '取消全选' : '全选'}
+                </button>
               )}
             </div>
-          </div>
-
-          <div className="flex justify-end pt-4 border-t">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={loadEmojiList}
-              disabled={loading}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 表情包卡片列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>表情包列表</CardTitle>
-          <CardDescription>
-            共 {total} 个表情包，当前第 {page} 页
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* 卡片网格视图 */}
-          {emojiList.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              暂无数据
-            </div>
-          ) : (
-            <div className={`grid gap-3 ${
-              cardSize === 'small' 
-                ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10' 
-                : cardSize === 'medium'
-                ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
-                : 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
-            }`}>
-              {emojiList.map((emoji) => (
-                <div 
-                  key={emoji.id} 
-                  className={`group relative rounded-lg border bg-card overflow-hidden hover:ring-2 hover:ring-primary transition-all cursor-pointer ${
-                    selectedIds.has(emoji.id) ? 'ring-2 ring-primary bg-primary/5' : ''
-                  }`}
-                  onClick={() => toggleSelect(emoji.id)}
-                >
-                  {/* 选中指示器 */}
-                  <div className={`absolute top-1 left-1 z-10 transition-opacity ${
-                    selectedIds.has(emoji.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                  }`}>
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                      selectedIds.has(emoji.id) 
-                        ? 'bg-primary border-primary text-primary-foreground' 
-                        : 'bg-background/80 border-muted-foreground/50'
-                    }`}>
-                      {selectedIds.has(emoji.id) && <CheckCircle2 className="h-3 w-3" />}
+            <div className="ios-group overflow-hidden">
+              <div>
+                {/* 卡片网格视图 */}
+                {loading ? (
+                  <IosGridSkeleton />
+                ) : emojiList.length === 0 ? (
+                  <div className="ios-empty-state">
+                    <span className="ios-empty-illustration">
+                      <ImageIcon className="relative z-10 h-7 w-7 text-primary" />
+                    </span>
+                    <div>
+                      <p className="text-[16px] font-semibold leading-6 text-foreground">
+                        暂无表情包
+                      </p>
+                      <p className="mt-1 max-w-sm text-[13px] leading-5">
+                        上传图片后，可以在这里统一注册、封禁和整理表情资源。
+                      </p>
                     </div>
+                    <Button
+                      onClick={() => setUploadDialogOpen(true)}
+                      size="sm"
+                      className="h-9 px-4"
+                    >
+                      <Upload className="mr-1 h-4 w-4" />
+                      上传表情包
+                    </Button>
                   </div>
-
-                  {/* 状态标签 */}
-                  <div className="absolute top-1 right-1 z-10 flex flex-col gap-0.5">
-                    {emoji.is_registered && (
-                      <Badge variant="default" className="bg-green-600 text-[10px] px-1 py-0">
-                        已注册
-                      </Badge>
+                ) : (
+                  <div
+                    className={cn(
+                      'grid gap-3 p-3 sm:p-4',
+                      cardSize === 'small'
+                        ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10'
+                        : cardSize === 'medium'
+                          ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
+                          : 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
                     )}
-                    {emoji.is_banned && (
-                      <Badge variant="destructive" className="text-[10px] px-1 py-0">
-                        已封禁
-                      </Badge>
-                    )}
-                  </div>
-
-                  {/* 图片 */}
-                  <div className={`aspect-square bg-muted flex items-center justify-center overflow-hidden ${
-                    cardSize === 'small' ? 'p-1' : cardSize === 'medium' ? 'p-2' : 'p-3'
-                  }`}>
-                    <EmojiThumbnail
-                      src={getEmojiThumbnailUrl(emoji.id)}
-                      alt="表情包"
-                    />
-                  </div>
-
-                  {/* 底部信息和操作 */}
-                  <div className={`border-t bg-card ${cardSize === 'small' ? 'p-1' : 'p-2'}`}>
-                    {/* 使用次数和格式 */}
-                    <div className="flex items-center justify-between gap-1 text-xs text-muted-foreground mb-1">
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">
-                        {emoji.format.toUpperCase()}
-                      </Badge>
-                      <span className="font-mono">{emoji.usage_count}次</span>
-                    </div>
-                    
-                    {/* 操作按钮 - 悬停时显示 */}
-                    <div className={`flex gap-1 justify-center opacity-0 group-hover:opacity-100 transition-opacity ${
-                      cardSize === 'small' ? 'flex-wrap' : ''
-                    }`}>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleEdit(emoji)
-                        }}
-                        title="编辑"
-                      >
-                        <Edit className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleViewDetail(emoji)
-                        }}
-                        title="详情"
-                      >
-                        <Info className="h-3 w-3" />
-                      </Button>
-                      {!emoji.is_registered && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-green-600 hover:text-green-700"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRegister(emoji)
-                          }}
-                          title="注册"
-                        >
-                          <CheckCircle2 className="h-3 w-3" />
-                        </Button>
-                      )}
-                      {!emoji.is_banned && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-orange-600 hover:text-orange-700"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleBan(emoji)
-                          }}
-                          title="封禁"
-                        >
-                          <Ban className="h-3 w-3" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-red-600 hover:text-red-700"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(emoji)
-                        }}
-                        title="删除"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* 分页 */}
-          {/* 分页 - 增强版 */}
-          {total > 0 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
-              <div className="text-sm text-muted-foreground">
-                显示 {(page - 1) * pageSize + 1} 到{' '}
-                {Math.min(page * pageSize, total)} 条，共 {total} 条
-              </div>
-              <div className="flex items-center gap-2">
-                {/* 首页 */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage(1)}
-                  disabled={page === 1}
-                  className="hidden sm:flex"
-                >
-                  <ChevronsLeft className="h-4 w-4" />
-                </Button>
-                
-                {/* 上一页 */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">上一页</span>
-                </Button>
-
-                {/* 页码跳转 */}
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    value={jumpToPage}
-                    onChange={(e) => setJumpToPage(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
-                    placeholder={page.toString()}
-                    className="w-16 h-8 text-center"
-                    min={1}
-                    max={Math.ceil(total / pageSize)}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleJumpToPage}
-                    disabled={!jumpToPage}
-                    className="h-8"
                   >
-                    跳转
-                  </Button>
-                </div>
-                
-                {/* 下一页 */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= Math.ceil(total / pageSize)}
-                >
-                  <span className="hidden sm:inline">下一页</span>
-                  <ChevronRight className="h-4 w-4 sm:ml-1" />
-                </Button>
+                    {emojiList.map((emoji) => (
+                      <div
+                        key={emoji.id}
+                        className={cn(
+                          'ios-touch group relative cursor-pointer overflow-hidden rounded-[16px] border border-black/[0.035] bg-white/[0.78] shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_6px_18px_rgba(31,41,55,0.035),0_1px_2px_rgba(0,0,0,0.024)] backdrop-blur-xl hover:ring-2 hover:ring-primary/70 active:scale-[0.98] active:shadow-[0_1px_0_rgba(255,255,255,0.55)_inset,0_2px_8px_rgba(31,41,55,0.045)] dark:border-white/10 dark:bg-white/[0.09]',
+                          selectedIds.has(emoji.id) && 'bg-primary/5 ring-2 ring-primary'
+                        )}
+                        onClick={() => toggleSelect(emoji.id)}
+                      >
+                        {/* 选中指示器 */}
+                        <div
+                          className={`absolute left-1 top-1 z-10 transition-opacity ${
+                            selectedIds.has(emoji.id)
+                              ? 'opacity-100'
+                              : 'opacity-0 group-hover:opacity-100'
+                          }`}
+                        >
+                          <div
+                            className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${
+                              selectedIds.has(emoji.id)
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : 'border-muted-foreground/50 bg-background/80'
+                            }`}
+                          >
+                            {selectedIds.has(emoji.id) && <CheckCircle2 className="h-3 w-3" />}
+                          </div>
+                        </div>
 
-                {/* 末页 */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage(Math.ceil(total / pageSize))}
-                  disabled={page >= Math.ceil(total / pageSize)}
-                  className="hidden sm:flex"
-                >
-                  <ChevronsRight className="h-4 w-4" />
-                </Button>
+                        {/* 状态标签 */}
+                        <div className="absolute right-1 top-1 z-10 flex flex-col gap-0.5">
+                          {emoji.is_registered && (
+                            <Badge
+                              variant="secondary"
+                              className={cn('px-1.5 py-0 text-[10px]', softGreenBadgeClass)}
+                            >
+                              已注册
+                            </Badge>
+                          )}
+                          {emoji.is_banned && (
+                            <Badge
+                              variant="secondary"
+                              className={cn('px-1.5 py-0 text-[10px]', softRedBadgeClass)}
+                            >
+                              已封禁
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* 图片 */}
+                        <div
+                          className={`flex aspect-square items-center justify-center overflow-hidden bg-muted/70 ${
+                            cardSize === 'small' ? 'p-1' : cardSize === 'medium' ? 'p-2' : 'p-3'
+                          }`}
+                        >
+                          <EmojiThumbnail src={getEmojiThumbnailUrl(emoji.id)} alt="表情包" />
+                        </div>
+
+                        {/* 底部信息和操作 */}
+                        <div
+                          className={`border-t border-border/55 bg-white/[0.72] backdrop-blur-xl dark:bg-white/[0.08] ${
+                            cardSize === 'small' ? 'p-1' : 'p-2'
+                          }`}
+                        >
+                          {/* 使用次数和格式 */}
+                          <div className="mb-1 flex items-center justify-between gap-1 text-xs text-muted-foreground">
+                            <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                              {emoji.format.toUpperCase()}
+                            </Badge>
+                            <span className="font-mono">{emoji.usage_count}次</span>
+                          </div>
+
+                          {/* 操作按钮 - 悬停时显示 */}
+                          <div
+                            className={`flex justify-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 ${
+                              cardSize === 'small' ? 'flex-wrap' : ''
+                            }`}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleEdit(emoji)
+                              }}
+                              title="编辑"
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleViewDetail(emoji)
+                              }}
+                              title="详情"
+                            >
+                              <Info className="h-3 w-3" />
+                            </Button>
+                            {!emoji.is_registered && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={cn('h-6 w-6', softGreenIconClass)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleRegister(emoji)
+                                }}
+                                title="注册"
+                              >
+                                <CheckCircle2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                            {!emoji.is_banned && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={cn('h-6 w-6', softOrangeIconClass)}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleBan(emoji)
+                                }}
+                                title="封禁"
+                              >
+                                <Ban className="h-3 w-3" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn('h-6 w-6', softRedIconClass)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDelete(emoji)
+                              }}
+                              title="删除"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 分页 */}
+                {total > 0 && (
+                  <div className="ios-row ios-row-plain min-h-[68px] flex-col !items-stretch !justify-start gap-3 border-t border-border/60 sm:flex-row sm:!items-center sm:!justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      共 {total} 个表情包，第 {page} / {totalPages} 页
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setPage(1)}
+                        disabled={page === 1}
+                        className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      >
+                        <ChevronsLeft className="h-4 w-4" />
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                        className="h-9 rounded-full px-3"
+                      >
+                        <ChevronLeft className="h-4 w-4 sm:mr-1" />
+                        <span className="hidden sm:inline">上一页</span>
+                      </Button>
+
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          value={jumpToPage}
+                          onChange={(e) => setJumpToPage(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
+                          placeholder={page.toString()}
+                          className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                          min={1}
+                          max={totalPages}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleJumpToPage}
+                          disabled={!jumpToPage}
+                          className="h-9 rounded-full px-3"
+                        >
+                          跳转
+                        </Button>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => p + 1)}
+                        disabled={page >= totalPages}
+                        className="h-9 rounded-full px-3"
+                      >
+                        <span className="hidden sm:inline">下一页</span>
+                        <ChevronRight className="h-4 w-4 sm:ml-1" />
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setPage(totalPages)}
+                        disabled={page >= totalPages}
+                        className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      >
+                        <ChevronsRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </div>
 
-      {/* 详情对话框 */}
-      <EmojiDetailDialog
-        emoji={selectedEmoji}
-        open={detailDialogOpen}
-        onOpenChange={setDetailDialogOpen}
-      />
+          {/* 详情对话框 */}
+          <EmojiDetailDialog
+            emoji={selectedEmoji}
+            open={detailDialogOpen}
+            onOpenChange={setDetailDialogOpen}
+          />
 
-      {/* 编辑对话框 */}
-      <EmojiEditDialog
-        emoji={selectedEmoji}
-        open={editDialogOpen}
-        onOpenChange={setEditDialogOpen}
-        onSuccess={() => {
-          loadEmojiList()
-          loadStats()
-        }}
-      />
+          {/* 编辑对话框 */}
+          <EmojiEditDialog
+            emoji={selectedEmoji}
+            open={editDialogOpen}
+            onOpenChange={setEditDialogOpen}
+            onSuccess={() => {
+              loadEmojiList()
+              loadStats()
+            }}
+          />
 
-      {/* 上传对话框 */}
-      <EmojiUploadDialog
-        open={uploadDialogOpen}
-        onOpenChange={setUploadDialogOpen}
-        onSuccess={() => {
-          loadEmojiList()
-          loadStats()
-        }}
-      />
-
+          {/* 上传对话框 */}
+          <EmojiUploadDialog
+            open={uploadDialogOpen}
+            onOpenChange={setUploadDialogOpen}
+            onSuccess={() => {
+              loadEmojiList()
+              loadStats()
+            }}
+          />
         </div>
       </ScrollArea>
 
@@ -803,9 +979,7 @@ export function EmojiManagementPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBatchDelete}>
-              确认删除
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleBatchDelete}>确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -815,15 +989,10 @@ export function EmojiManagementPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>确认删除</DialogTitle>
-            <DialogDescription>
-              确定要删除这个表情包吗？此操作无法撤销。
-            </DialogDescription>
+            <DialogDescription>确定要删除这个表情包吗？此操作无法撤销。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               取消
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
@@ -855,119 +1024,122 @@ function EmojiDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh]">
+      <DialogContent className="max-h-[90vh] max-w-2xl">
         <DialogHeader>
           <DialogTitle>表情包详情</DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-[calc(90vh-8rem)] pr-4">
           <div className="space-y-4">
-          {/* 表情包预览图 - 使用原图 */}
-          <div className="flex justify-center">
-            <div className="w-32 h-32 bg-muted rounded-lg flex items-center justify-center overflow-hidden">
-              <img
-                src={getEmojiOriginalUrl(emoji.id)}
-                alt={emoji.description || '表情包'}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement
-                  target.style.display = 'none'
-                  const parent = target.parentElement
-                  if (parent) {
-                    parent.innerHTML = '<svg class="h-16 w-16 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>'
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label className="text-muted-foreground">ID</Label>
-              <div className="mt-1 font-mono">{emoji.id}</div>
-            </div>
-            <div>
-              <Label className="text-muted-foreground">格式</Label>
-              <div className="mt-1">
-                <Badge variant="outline">{emoji.format.toUpperCase()}</Badge>
+            {/* 表情包预览图 - 使用原图 */}
+            <div className="flex justify-center">
+              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-[24px] bg-muted/80 shadow-[0_1px_0_rgba(255,255,255,0.64)_inset,0_10px_24px_rgba(31,41,55,0.055)]">
+                <img
+                  src={getEmojiOriginalUrl(emoji.id)}
+                  alt={emoji.description || '表情包'}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement
+                    target.style.display = 'none'
+                    const parent = target.parentElement
+                    if (parent) {
+                      parent.innerHTML =
+                        '<svg class="h-16 w-16 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>'
+                    }
+                  }}
+                />
               </div>
             </div>
-          </div>
 
-          <div>
-            <Label className="text-muted-foreground">文件路径</Label>
-            <div className="mt-1 font-mono text-sm break-all bg-muted p-2 rounded">
-              {emoji.full_path}
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-muted-foreground">哈希值</Label>
-            <div className="mt-1 font-mono text-sm break-all bg-muted p-2 rounded">
-              {emoji.emoji_hash}
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-muted-foreground">描述</Label>
-            {emoji.description ? (
-              <div className="mt-1 rounded-lg border bg-muted/50 p-3">
-                <Markdown className="prose-sm">{emoji.description}</Markdown>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label className="text-muted-foreground">ID</Label>
+                <div className="mt-1 font-mono">{emoji.id}</div>
               </div>
-            ) : (
-              <div className="mt-1 text-sm text-muted-foreground">-</div>
-            )}
-          </div>
+              <div>
+                <Label className="text-muted-foreground">格式</Label>
+                <div className="mt-1">
+                  <Badge variant="outline">{emoji.format.toUpperCase()}</Badge>
+                </div>
+              </div>
+            </div>
 
-          <div>
-            <Label className="text-muted-foreground">情绪</Label>
-            <div className="mt-1">
-              {emoji.emotion ? (
-                <span className="text-sm">{emoji.emotion}</span>
+            <div>
+              <Label className="text-muted-foreground">文件路径</Label>
+              <div className="mt-1 break-all rounded-[14px] bg-muted/35 p-3 font-mono text-sm">
+                {emoji.full_path}
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-muted-foreground">哈希值</Label>
+              <div className="mt-1 break-all rounded-[14px] bg-muted/35 p-3 font-mono text-sm">
+                {emoji.emoji_hash}
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-muted-foreground">描述</Label>
+              {emoji.description ? (
+                <div className="mt-1 rounded-[14px] border border-black/[0.035] bg-muted/35 p-3 dark:border-white/10">
+                  <Markdown className="prose-sm">{emoji.description}</Markdown>
+                </div>
               ) : (
-                <span className="text-sm text-muted-foreground">-</span>
+                <div className="mt-1 text-sm text-muted-foreground">-</div>
               )}
             </div>
-          </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label className="text-muted-foreground">状态</Label>
-              <div className="mt-2 flex gap-2">
-                {emoji.is_registered && (
-                  <Badge variant="default" className="bg-green-600">
-                    已注册
-                  </Badge>
-                )}
-                {emoji.is_banned && (
-                  <Badge variant="destructive">已封禁</Badge>
-                )}
-                {!emoji.is_registered && !emoji.is_banned && (
-                  <Badge variant="outline">未注册</Badge>
+              <Label className="text-muted-foreground">情绪</Label>
+              <div className="mt-1">
+                {emoji.emotion ? (
+                  <span className="text-sm">{emoji.emotion}</span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">-</span>
                 )}
               </div>
             </div>
-            <div>
-              <Label className="text-muted-foreground">使用次数</Label>
-              <div className="mt-1 font-mono text-lg">{emoji.usage_count}</div>
-            </div>
-          </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label className="text-muted-foreground">记录时间</Label>
-              <div className="mt-1 text-sm">{formatTime(emoji.record_time)}</div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label className="text-muted-foreground">状态</Label>
+                <div className="mt-2 flex gap-2">
+                  {emoji.is_registered && (
+                    <Badge variant="secondary" className={softGreenBadgeClass}>
+                      已注册
+                    </Badge>
+                  )}
+                  {emoji.is_banned && (
+                    <Badge variant="secondary" className={softRedBadgeClass}>
+                      已封禁
+                    </Badge>
+                  )}
+                  {!emoji.is_registered && !emoji.is_banned && (
+                    <Badge variant="outline">未注册</Badge>
+                  )}
+                </div>
+              </div>
+              <div>
+                <Label className="text-muted-foreground">使用次数</Label>
+                <div className="mt-1 font-mono text-lg">{emoji.usage_count}</div>
+              </div>
             </div>
-            <div>
-              <Label className="text-muted-foreground">注册时间</Label>
-              <div className="mt-1 text-sm">{formatTime(emoji.register_time)}</div>
-            </div>
-          </div>
 
-          <div>
-            <Label className="text-muted-foreground">最后使用</Label>
-            <div className="mt-1 text-sm">{formatTime(emoji.last_used_time)}</div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label className="text-muted-foreground">记录时间</Label>
+                <div className="mt-1 text-sm">{formatTime(emoji.record_time)}</div>
+              </div>
+              <div>
+                <Label className="text-muted-foreground">注册时间</Label>
+                <div className="mt-1 text-sm">{formatTime(emoji.register_time)}</div>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-muted-foreground">最后使用</Label>
+              <div className="mt-1 text-sm">{formatTime(emoji.last_used_time)}</div>
+            </div>
           </div>
-        </div>
         </ScrollArea>
       </DialogContent>
     </Dialog>
@@ -1056,9 +1228,7 @@ function EmojiEditDialog({
               rows={2}
               className="mt-1"
             />
-            <p className="text-xs text-muted-foreground mt-1">
-              输入情绪相关的文本描述
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">输入情绪相关的文本描述</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1175,7 +1345,8 @@ function EmojiUploadDialog({
           dropPasteBoth: '将文件拖放到这里，%{browseFiles} 或 %{browseFolders}',
           dropPasteImportFiles: '将文件拖放到这里，%{browseFiles} 或从以下位置导入：',
           dropPasteImportFolders: '将文件拖放到这里，%{browseFolders} 或从以下位置导入：',
-          dropPasteImportBoth: '将文件拖放到这里，%{browseFiles}，%{browseFolders} 或从以下位置导入：',
+          dropPasteImportBoth:
+            '将文件拖放到这里，%{browseFiles}，%{browseFolders} 或从以下位置导入：',
           editFile: '编辑文件',
           editing: '正在编辑 %{file}',
           emptyFolderAdded: '未从空文件夹添加文件',
@@ -1273,7 +1444,7 @@ function EmojiUploadDialog({
         },
       },
     })
-    
+
     return uppyInstance
   }, [])
 
@@ -1282,7 +1453,7 @@ function EmojiUploadDialog({
     const handleUpload = () => {
       const files = uppy.getFiles()
       if (files.length === 0) return
-      
+
       // 将选择的文件转换为我们的数据结构
       const fileInfos: UploadedFileInfo[] = files.map((file) => ({
         id: file.id,
@@ -1293,9 +1464,9 @@ function EmojiUploadDialog({
         isRegistered: true,
         file: file.data as File,
       }))
-      
+
       setUploadedFiles(fileInfos)
-      
+
       // 根据文件数量决定进入哪个步骤
       if (files.length === 1) {
         setSelectedFileId(fileInfos[0].id)
@@ -1324,9 +1495,7 @@ function EmojiUploadDialog({
 
   // 更新单个文件的元数据
   const updateFileInfo = useCallback((fileId: string, updates: Partial<UploadedFileInfo>) => {
-    setUploadedFiles(prev => 
-      prev.map(f => f.id === fileId ? { ...f, ...updates } : f)
-    )
+    setUploadedFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, ...updates } : f)))
   }, [])
 
   // 检查文件是否填写完成必填项（情感标签必填）
@@ -1341,7 +1510,7 @@ function EmojiUploadDialog({
 
   // 获取当前选中的文件
   const selectedFile = useMemo(() => {
-    return uploadedFiles.find(f => f.id === selectedFileId) || null
+    return uploadedFiles.find((f) => f.id === selectedFileId) || null
   }, [uploadedFiles, selectedFileId])
 
   // 返回上一步
@@ -1419,7 +1588,7 @@ function EmojiUploadDialog({
   // 渲染文件选择步骤
   const renderSelectStep = () => (
     <div className="space-y-4">
-      <div className="border rounded-lg overflow-hidden w-full">
+      <div className="w-full overflow-hidden rounded-[18px] border border-black/[0.035] bg-white/[0.78] shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_26px_rgba(31,41,55,0.045)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.09]">
         <Dashboard
           uppy={uppy}
           proudlyDisplayPoweredByUppy={false}
@@ -1442,7 +1611,7 @@ function EmojiUploadDialog({
       <div className="space-y-4">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="sm" onClick={handleBack}>
-            <ArrowLeft className="h-4 w-4 mr-1" />
+            <ArrowLeft className="mr-1 h-4 w-4" />
             返回
           </Button>
           <span className="text-sm text-muted-foreground">编辑表情包信息</span>
@@ -1451,14 +1620,14 @@ function EmojiUploadDialog({
         <div className="flex gap-6">
           {/* 预览图 */}
           <div className="flex-shrink-0">
-            <div className="w-32 h-32 rounded-lg border overflow-hidden bg-muted flex items-center justify-center">
+            <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-[18px] border border-black/[0.035] bg-muted/35 dark:border-white/10">
               <img
                 src={file.previewUrl}
                 alt={file.name}
-                className="max-w-full max-h-full object-contain"
+                className="max-h-full max-w-full object-contain"
               />
             </div>
-            <p className="text-xs text-muted-foreground mt-2 text-center truncate max-w-32">
+            <p className="mt-2 max-w-32 truncate text-center text-xs text-muted-foreground">
               {file.name}
             </p>
           </div>
@@ -1476,9 +1645,7 @@ function EmojiUploadDialog({
                 placeholder="多个标签用逗号分隔，如：开心,高兴"
                 className={!file.emotion.trim() ? 'border-destructive' : ''}
               />
-              <p className="text-xs text-muted-foreground">
-                用于情感匹配，多个标签用逗号分隔
-              </p>
+              <p className="text-xs text-muted-foreground">用于情感匹配，多个标签用逗号分隔</p>
             </div>
 
             <div className="space-y-2">
@@ -1495,20 +1662,19 @@ function EmojiUploadDialog({
               <Checkbox
                 id="single-is-registered"
                 checked={file.isRegistered}
-                onCheckedChange={(checked) => updateFileInfo(file.id, { isRegistered: checked === true })}
+                onCheckedChange={(checked) =>
+                  updateFileInfo(file.id, { isRegistered: checked === true })
+                }
               />
               <Label htmlFor="single-is-registered" className="cursor-pointer">
-                上传后立即注册（可被璃夜使用）
+                上传后立即注册（可被当前实例使用）
               </Label>
             </div>
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            onClick={handleSubmit}
-            disabled={!allFilesComplete || uploading}
-          >
+          <Button onClick={handleSubmit} disabled={!allFilesComplete || uploading}>
             {uploading ? '上传中...' : '上传'}
           </Button>
         </DialogFooter>
@@ -1526,7 +1692,7 @@ function EmojiUploadDialog({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={handleBack}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
+              <ArrowLeft className="mr-1 h-4 w-4" />
               返回
             </Button>
             <span className="text-sm text-muted-foreground">
@@ -1535,9 +1701,15 @@ function EmojiUploadDialog({
           </div>
           <Badge variant={allFilesComplete ? 'default' : 'secondary'}>
             {allFilesComplete ? (
-              <><Check className="h-3 w-3 mr-1" />全部完成</>
+              <>
+                <Check className="mr-1 h-3 w-3" />
+                全部完成
+              </>
             ) : (
-              <><X className="h-3 w-3 mr-1" />未完成</>
+              <>
+                <X className="mr-1 h-3 w-3" />
+                未完成
+              </>
             )}
           </Badge>
         </div>
@@ -1553,29 +1725,31 @@ function EmojiUploadDialog({
                   <div
                     key={file.id}
                     onClick={() => setSelectedFileId(file.id)}
-                    className={`
-                      flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all
-                      ${isSelected ? 'ring-2 ring-primary' : ''}
-                      ${complete ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : 'border-border hover:border-muted-foreground/50'}
-                    `}
+                    className={cn(
+                      'ios-touch flex cursor-pointer items-center gap-3 rounded-[16px] border border-black/[0.035] bg-white/[0.76] p-3 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset] transition-all dark:border-white/10 dark:bg-white/[0.08]',
+                      isSelected && 'ring-2 ring-primary/70',
+                      complete
+                        ? 'border-[rgb(52_199_89_/_0.22)] bg-[rgb(52_199_89_/_0.08)] dark:bg-[rgb(48_209_88_/_0.1)]'
+                        : 'hover:bg-muted/35'
+                    )}
                   >
-                    <div className="w-12 h-12 rounded border overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center">
+                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-black/[0.035] bg-muted/35 dark:border-white/10">
                       <img
                         src={file.previewUrl}
                         alt={file.name}
-                        className="max-w-full max-h-full object-contain"
+                        className="max-h-full max-w-full object-contain"
                       />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{file.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
                         {file.emotion || '未填写情感标签'}
                       </p>
                     </div>
                     {complete ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+                      <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]" />
                     ) : (
-                      <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30 flex-shrink-0" />
+                      <div className="h-5 w-5 flex-shrink-0 rounded-full border-2 border-muted-foreground/30" />
                     )}
                   </div>
                 )
@@ -1584,22 +1758,22 @@ function EmojiUploadDialog({
           </ScrollArea>
 
           {/* 右侧：选中文件的编辑表单 */}
-          <div className="border rounded-lg p-4">
+          <div className="rounded-[18px] border border-black/[0.035] bg-muted/20 p-4 dark:border-white/10">
             {selectedFile ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-16 h-16 rounded border overflow-hidden bg-muted flex items-center justify-center">
+                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[16px] border border-black/[0.035] bg-muted/35 dark:border-white/10">
                     <img
                       src={selectedFile.previewUrl}
                       alt={selectedFile.name}
-                      className="max-w-full max-h-full object-contain"
+                      className="max-h-full max-w-full object-contain"
                     />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{selectedFile.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{selectedFile.name}</p>
                     {isFileComplete(selectedFile) && (
-                      <Badge variant="outline" className="text-green-600 border-green-600">
-                        <Check className="h-3 w-3 mr-1" />
+                      <Badge variant="secondary" className={softGreenBadgeClass}>
+                        <Check className="mr-1 h-3 w-3" />
                         已完成
                       </Badge>
                     )}
@@ -1624,7 +1798,9 @@ function EmojiUploadDialog({
                   <Input
                     id="multi-description"
                     value={selectedFile.description}
-                    onChange={(e) => updateFileInfo(selectedFile.id, { description: e.target.value })}
+                    onChange={(e) =>
+                      updateFileInfo(selectedFile.id, { description: e.target.value })
+                    }
                     placeholder="输入表情包描述..."
                   />
                 </div>
@@ -1633,7 +1809,9 @@ function EmojiUploadDialog({
                   <Checkbox
                     id="multi-is-registered"
                     checked={selectedFile.isRegistered}
-                    onCheckedChange={(checked) => updateFileInfo(selectedFile.id, { isRegistered: checked === true })}
+                    onCheckedChange={(checked) =>
+                      updateFileInfo(selectedFile.id, { isRegistered: checked === true })
+                    }
                   />
                   <Label htmlFor="multi-is-registered" className="cursor-pointer text-sm">
                     上传后立即注册
@@ -1641,9 +1819,9 @@ function EmojiUploadDialog({
                 </div>
               </div>
             ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
+              <div className="flex h-full items-center justify-center text-muted-foreground">
                 <div className="text-center">
-                  <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <ImageIcon className="mx-auto mb-2 h-12 w-12 opacity-50" />
                   <p>点击左侧卡片编辑</p>
                 </div>
               </div>
@@ -1652,10 +1830,7 @@ function EmojiUploadDialog({
         </div>
 
         <DialogFooter>
-          <Button
-            onClick={handleSubmit}
-            disabled={!allFilesComplete || uploading}
-          >
+          <Button onClick={handleSubmit} disabled={!allFilesComplete || uploading}>
             {uploading ? '上传中...' : `上传全部 (${totalCount})`}
           </Button>
         </DialogFooter>
@@ -1665,7 +1840,7 @@ function EmojiUploadDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden">
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
@@ -1674,7 +1849,8 @@ function EmojiUploadDialog({
             {step === 'edit-multiple' && '上传表情包 - 批量编辑'}
           </DialogTitle>
           <DialogDescription>
-            {step === 'select' && '支持 JPG、PNG、GIF、WebP 格式，单个文件最大 10MB，可同时上传多个文件'}
+            {step === 'select' &&
+              '支持 JPG、PNG、GIF、WebP 格式，单个文件最大 10MB，可同时上传多个文件'}
             {step === 'edit-single' && '请填写表情包的情感标签（必填）和描述'}
             {step === 'edit-multiple' && '点击左侧卡片编辑每个表情包的信息，情感标签为必填项'}
           </DialogDescription>

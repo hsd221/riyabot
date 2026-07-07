@@ -30,6 +30,43 @@ const languageExtensions: Record<Language, any[]> = {
   text: [],
 }
 
+const iosEditorTheme = EditorView.theme({
+  '&': {
+    backgroundColor: 'transparent',
+    fontSize: '13px',
+  },
+  '&.cm-focused': {
+    outline: 'none',
+  },
+  '.cm-scroller': {
+    fontFamily:
+      'ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
+    lineHeight: '1.62',
+  },
+  '.cm-content': {
+    padding: '14px 0',
+  },
+  '.cm-line': {
+    padding: '0 14px',
+  },
+  '.cm-gutters': {
+    borderRight: '1px solid rgb(120 120 128 / 0.16)',
+    backgroundColor: 'rgb(120 120 128 / 0.08)',
+  },
+  '.cm-lineNumbers .cm-gutterElement': {
+    minWidth: '42px',
+    padding: '0 10px 0 12px',
+    color: 'rgb(142 142 147 / 0.86)',
+  },
+  '.cm-activeLine': {
+    backgroundColor: 'rgb(120 120 128 / 0.11)',
+  },
+  '.cm-activeLineGutter': {
+    backgroundColor: 'rgb(120 120 128 / 0.12)',
+    color: 'rgb(174 174 178)',
+  },
+})
+
 export function CodeEditor({
   value,
   onChange,
@@ -51,7 +88,7 @@ export function CodeEditor({
   if (!mounted) {
     return (
       <div
-        className={`rounded-md border bg-muted animate-pulse ${className}`}
+        className={`animate-pulse rounded-[18px] border border-black/[0.035] bg-muted/65 shadow-[0_1px_0_rgba(255,255,255,0.58)_inset] ${className}`}
         style={{ height, minHeight, maxHeight }}
       />
     )
@@ -60,6 +97,7 @@ export function CodeEditor({
   const extensions = [
     ...(languageExtensions[language] || []),
     EditorView.lineWrapping,
+    iosEditorTheme,
   ]
 
   if (readOnly) {
@@ -67,7 +105,9 @@ export function CodeEditor({
   }
 
   return (
-    <div className={`rounded-md overflow-hidden border ${className}`}>
+    <div
+      className={`overflow-hidden rounded-[18px] border border-black/[0.035] bg-white/[0.78] shadow-[0_1px_0_rgba(255,255,255,0.68)_inset,0_10px_28px_rgba(31,41,55,0.052)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.08] ${className}`}
+    >
       <CodeMirror
         value={value}
         height={height}

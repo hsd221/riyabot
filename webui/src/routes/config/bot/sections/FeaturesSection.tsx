@@ -51,7 +51,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
   return (
     <div className="space-y-6">
       {/* 工具设置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+      <div className="ios-group p-4 sm:p-6 space-y-4">
         <div>
           <h3 className="text-lg font-semibold mb-4">工具设置</h3>
           <div className="flex items-center space-x-2">
@@ -65,13 +65,13 @@ export const FeaturesSection = React.memo(function FeaturesSection({
             </Label>
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            允许璃夜使用各种工具来增强功能
+            允许当前实例使用各种工具来增强功能
           </p>
         </div>
       </div>
 
       {/* 记忆设置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+      <div className="ios-group p-4 sm:p-6 space-y-4">
         <div>
           <h3 className="text-lg font-semibold mb-4">记忆设置</h3>
           <div className="grid gap-4">
@@ -169,7 +169,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
               </p>
             </div>
 
-            <div className="grid gap-4 rounded-lg border p-4">
+            <div className="grid gap-4 rounded-[16px] border border-border/45 bg-muted/35 p-4">
               <div>
                 <h4 className="text-sm font-semibold">记忆存储</h4>
                 <p className="text-xs text-muted-foreground mt-1">
@@ -275,7 +275,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
       </div>
 
       {/* 表情包设置 */}
-      <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+      <div className="ios-group p-4 sm:p-6 space-y-4">
         <div>
           <h3 className="text-lg font-semibold mb-4">表情包设置</h3>
           <div className="grid gap-4">
@@ -306,7 +306,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
                   onEmojiChange({ ...emojiConfig, max_reg_num: parseInt(e.target.value) })
                 }
               />
-              <p className="text-xs text-muted-foreground">璃夜最多可以注册的表情包数量</p>
+              <p className="text-xs text-muted-foreground">当前实例最多可以注册的表情包数量</p>
             </div>
 
             <div className="grid gap-2">
@@ -351,7 +351,7 @@ export const FeaturesSection = React.memo(function FeaturesSection({
               </Label>
             </div>
             <p className="text-xs text-muted-foreground -mt-2">
-              允许璃夜将看到的表情包据为己有
+              允许当前实例将看到的表情包据为己有
             </p>
 
             <div className="flex items-center space-x-2">

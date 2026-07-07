@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,7 +25,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Settings,
   Package,
   AlertCircle,
   CheckCircle2,
@@ -75,15 +73,9 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label>{field.label}</Label>
-            {field.hint && (
-              <p className="text-xs text-muted-foreground">{field.hint}</p>
-            )}
+            {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
           </div>
-          <Switch
-            checked={Boolean(value)}
-            onCheckedChange={onChange}
-            disabled={field.disabled}
-          />
+          <Switch checked={Boolean(value)} onCheckedChange={onChange} disabled={field.disabled} />
         </div>
       )
 
@@ -93,7 +85,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
           <Label>{field.label}</Label>
           <Input
             type="number"
-            value={value as number ?? field.default}
+            value={(value as number) ?? field.default}
             onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
             min={field.min}
             max={field.max}
@@ -101,9 +93,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
             placeholder={field.placeholder}
             disabled={field.disabled}
           />
-          {field.hint && (
-            <p className="text-xs text-muted-foreground">{field.hint}</p>
-          )}
+          {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
         </div>
       )
 
@@ -113,20 +103,18 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
           <div className="flex items-center justify-between">
             <Label>{field.label}</Label>
             <span className="text-sm text-muted-foreground">
-              {value as number ?? field.default}
+              {(value as number) ?? field.default}
             </span>
           </div>
           <Slider
-            value={[value as number ?? field.default as number]}
+            value={[(value as number) ?? (field.default as number)]}
             onValueChange={(v) => onChange(v[0])}
             min={field.min ?? 0}
             max={field.max ?? 100}
             step={field.step ?? 1}
             disabled={field.disabled}
           />
-          {field.hint && (
-            <p className="text-xs text-muted-foreground">{field.hint}</p>
-          )}
+          {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
         </div>
       )
 
@@ -150,9 +138,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
               ))}
             </SelectContent>
           </Select>
-          {field.hint && (
-            <p className="text-xs text-muted-foreground">{field.hint}</p>
-          )}
+          {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
         </div>
       )
 
@@ -161,15 +147,13 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         <div className="space-y-2">
           <Label>{field.label}</Label>
           <Textarea
-            value={value as string ?? field.default}
+            value={(value as string) ?? field.default}
             onChange={(e) => onChange(e.target.value)}
             placeholder={field.placeholder}
             rows={field.rows ?? 3}
             disabled={field.disabled}
           />
-          {field.hint && (
-            <p className="text-xs text-muted-foreground">{field.hint}</p>
-          )}
+          {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
         </div>
       )
 
@@ -180,7 +164,7 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
           <div className="relative">
             <Input
               type={showPassword ? 'text' : 'password'}
-              value={value as string ?? ''}
+              value={(value as string) ?? ''}
               onChange={(e) => onChange(e.target.value)}
               placeholder={field.placeholder}
               disabled={field.disabled}
@@ -193,16 +177,10 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
               className="absolute right-0 top-0 h-full px-3"
               onClick={() => setShowPassword(!showPassword)}
             >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </Button>
           </div>
-          {field.hint && (
-            <p className="text-xs text-muted-foreground">{field.hint}</p>
-          )}
+          {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
         </div>
       )
 
@@ -213,15 +191,13 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
           <Label>{field.label}</Label>
           <Input
             type="text"
-            value={value as string ?? field.default ?? ''}
+            value={(value as string) ?? field.default ?? ''}
             onChange={(e) => onChange(e.target.value)}
             placeholder={field.placeholder}
             maxLength={field.max_length}
             disabled={field.disabled}
           />
-          {field.hint && (
-            <p className="text-xs text-muted-foreground">{field.hint}</p>
-          )}
+          {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
         </div>
       )
   }
@@ -236,7 +212,7 @@ interface SectionRendererProps {
 
 function SectionRenderer({ section, config, onChange }: SectionRendererProps) {
   const [isOpen, setIsOpen] = useState(!section.collapsed)
-  
+
   // 按 order 排序字段
   const sortedFields = Object.entries(section.fields)
     .filter(([, field]) => !field.hidden)
@@ -244,43 +220,51 @@ function SectionRenderer({ section, config, onChange }: SectionRendererProps) {
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <Card>
+      <div className="ios-group overflow-hidden">
         <CollapsibleTrigger asChild>
-          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="ios-row ios-touch min-h-[64px] w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
                 {isOpen ? (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  <ChevronDown className="h-4 w-4" />
                 ) : (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  <ChevronRight className="h-4 w-4" />
                 )}
-                <CardTitle className="text-lg">{section.title}</CardTitle>
-              </div>
-              <Badge variant="secondary" className="text-xs">
-                {sortedFields.length} 项
-              </Badge>
-            </div>
-            {section.description && (
-              <CardDescription className="ml-6">
-                {section.description}
-              </CardDescription>
-            )}
-          </CardHeader>
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[15px] font-medium leading-5">
+                  {section.title}
+                </span>
+                {section.description && (
+                  <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">
+                    {section.description}
+                  </span>
+                )}
+              </span>
+            </span>
+            <span className="shrink-0 text-[13px] leading-5 text-muted-foreground">
+              {sortedFields.length} 项
+            </span>
+          </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="space-y-4 pt-0">
+          <div className="divide-y divide-border/55">
             {sortedFields.map(([fieldName, field]) => (
-              <FieldRenderer
-                key={fieldName}
-                field={field}
-                value={(config[section.name] as Record<string, unknown>)?.[fieldName]}
-                onChange={(value) => onChange(section.name, fieldName, value)}
-                sectionName={section.name}
-              />
+              <div key={fieldName} className="px-4 py-4 sm:px-5">
+                <FieldRenderer
+                  field={field}
+                  value={(config[section.name] as Record<string, unknown>)?.[fieldName]}
+                  onChange={(value) => onChange(section.name, fieldName, value)}
+                  sectionName={section.name}
+                />
+              </div>
             ))}
-          </CardContent>
+          </div>
         </CollapsibleContent>
-      </Card>
+      </div>
     </Collapsible>
   )
 }
@@ -307,7 +291,7 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
     try {
       const [schemaData, configData] = await Promise.all([
         getPluginConfigSchema(plugin.id),
-        getPluginConfig(plugin.id)
+        getPluginConfig(plugin.id),
       ])
       setSchema(schemaData)
       setConfig(configData)
@@ -316,7 +300,7 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
       toast({
         title: '加载配置失败',
         description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive'
+        variant: 'destructive',
       })
     } finally {
       setLoading(false)
@@ -334,12 +318,12 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
 
   // 处理字段变化
   const handleFieldChange = (sectionName: string, fieldName: string, value: unknown) => {
-    setConfig(prev => ({
+    setConfig((prev) => ({
       ...prev,
       [sectionName]: {
-        ...(prev[sectionName] as Record<string, unknown> || {}),
-        [fieldName]: value
-      }
+        ...((prev[sectionName] as Record<string, unknown>) || {}),
+        [fieldName]: value,
+      },
     }))
   }
 
@@ -351,13 +335,13 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
       setOriginalConfig(JSON.parse(JSON.stringify(config)))
       toast({
         title: '配置已保存',
-        description: '更改将在插件重新加载后生效'
+        description: '更改将在插件重新加载后生效',
       })
     } catch (error) {
       toast({
         title: '保存失败',
         description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive'
+        variant: 'destructive',
       })
     } finally {
       setSaving(false)
@@ -370,7 +354,7 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
       await resetPluginConfig(plugin.id)
       toast({
         title: '配置已重置',
-        description: '下次加载插件时将使用默认配置'
+        description: '下次加载插件时将使用默认配置',
       })
       setResetDialogOpen(false)
       loadConfig()
@@ -378,7 +362,7 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
       toast({
         title: '重置失败',
         description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive'
+        variant: 'destructive',
       })
     }
   }
@@ -389,33 +373,52 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
       const result = await togglePlugin(plugin.id)
       toast({
         title: result.message,
-        description: result.note
+        description: result.note,
       })
       loadConfig()
     } catch (error) {
       toast({
         title: '切换状态失败',
         description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive'
+        variant: 'destructive',
       })
     }
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="ios-empty-state min-h-[260px]">
+        <span className="ios-empty-illustration">
+          <Loader2 className="h-7 w-7 animate-spin text-primary" />
+        </span>
+        <span className="space-y-1.5">
+          <span className="block text-[15px] font-semibold leading-5 text-foreground">
+            正在加载配置
+          </span>
+          <span className="block text-[13px] leading-5 text-muted-foreground">
+            正在读取插件配置项
+          </span>
+        </span>
       </div>
     )
   }
 
   if (!schema) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 space-y-4">
-        <AlertCircle className="h-12 w-12 text-muted-foreground" />
-        <p className="text-muted-foreground">无法加载配置</p>
+      <div className="ios-empty-state min-h-[260px]">
+        <span className="ios-empty-illustration">
+          <AlertCircle className="h-7 w-7 text-primary" />
+        </span>
+        <span className="space-y-1.5">
+          <span className="block text-[15px] font-semibold leading-5 text-foreground">
+            无法加载配置
+          </span>
+          <span className="block text-[13px] leading-5 text-muted-foreground">
+            返回插件列表后可以重新进入
+          </span>
+        </span>
         <Button onClick={onBack} variant="outline">
-          <ArrowLeft className="h-4 w-4 mr-2" />
+          <ArrowLeft className="mr-2 h-4 w-4" />
           返回
         </Button>
       </div>
@@ -423,78 +426,128 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
   }
 
   // 按 order 排序 sections
-  const sortedSections = Object.values(schema.sections)
-    .sort((a, b) => a.order - b.order)
+  const sortedSections = Object.values(schema.sections).sort((a, b) => a.order - b.order)
 
   // 获取当前启用状态
   const isEnabled = (config.plugin as Record<string, unknown>)?.enabled !== false
 
+  const pluginTitle = plugin.manifest.name || schema.plugin_info.name || plugin.id
+  const pluginVersion = schema.plugin_info.version || plugin.manifest.version
+
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="mx-auto w-full max-w-4xl space-y-5 sm:space-y-6">
       {/* 头部 */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">
-              {schema.plugin_info.name || plugin.manifest.name}
+      <div className="space-y-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="ios-touch inline-flex h-9 items-center gap-1 rounded-full px-2 text-[15px] font-medium text-primary hover:bg-accent/70 focus-visible:bg-accent/70 focus-visible:ring-0"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          插件配置
+        </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 max-w-full">
+            <h1 className="ios-title ios-break-anywhere max-w-full text-[24px] leading-[1.12] sm:text-3xl">
+              {pluginTitle}
             </h1>
-            <div className="flex items-center gap-2 mt-1">
-              <Badge variant={isEnabled ? 'default' : 'secondary'}>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[15px] leading-5">
+              <span
+                className={
+                  isEnabled
+                    ? 'inline-flex h-6 items-center rounded-full bg-[rgb(52_199_89_/_0.14)] px-2.5 text-[13px] font-medium text-[color:rgb(36_138_61)] dark:text-[color:rgb(99_230_131)]'
+                    : 'inline-flex h-6 items-center rounded-full bg-muted px-2.5 text-[13px] font-medium text-muted-foreground'
+                }
+              >
                 {isEnabled ? '已启用' : '已禁用'}
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                v{schema.plugin_info.version || plugin.manifest.version}
               </span>
+              <span className="text-[15px] leading-5 text-muted-foreground">v{pluginVersion}</span>
             </div>
           </div>
+          <div className="hidden gap-2 sm:flex">
+            <Button variant="outline" size="sm" onClick={handleToggle}>
+              <Power className="mr-2 h-4 w-4" />
+              {isEnabled ? '禁用' : '启用'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              重置
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={!hasChanges || saving}>
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              保存
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2 ml-10 sm:ml-0">
-          <Button
-            variant="outline"
-            size="sm"
+
+        <div className="ios-group overflow-hidden sm:hidden">
+          <button
+            type="button"
             onClick={handleToggle}
+            className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
           >
-            <Power className="h-4 w-4 mr-2" />
-            {isEnabled ? '禁用' : '启用'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
+            <span className="flex min-w-0 items-center gap-3">
+              <span
+                className={`ios-symbol ios-symbol-sm ${isEnabled ? 'ios-symbol-red' : 'ios-symbol-green'}`}
+              >
+                <Power className="h-4 w-4" />
+              </span>
+              <span className="text-[15px] font-medium leading-5">
+                {isEnabled ? '禁用插件' : '启用插件'}
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
+          </button>
+          <button
+            type="button"
             onClick={() => setResetDialogOpen(true)}
+            className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
           >
-            <RotateCcw className="h-4 w-4 mr-2" />
-            重置
-          </Button>
-          <Button
-            size="sm"
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
+                <RotateCcw className="h-4 w-4" />
+              </span>
+              <span className="text-[15px] font-medium leading-5">重置配置</span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground/70" />
+          </button>
+          <button
+            type="button"
             onClick={handleSave}
             disabled={!hasChanges || saving}
+            className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-55 disabled:active:scale-100"
           >
-            {saving ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            保存
-          </Button>
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+              </span>
+              <span className="text-[15px] font-medium leading-5">
+                {saving ? '保存中' : '保存配置'}
+              </span>
+            </span>
+            <span className="text-[13px] leading-5 text-muted-foreground">
+              {hasChanges ? '待保存' : '已保存'}
+            </span>
+          </button>
         </div>
       </div>
 
       {/* 未保存提示 */}
       {hasChanges && (
-        <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900">
-          <CardContent className="py-3">
-            <div className="flex items-center gap-2">
-              <Info className="h-4 w-4 text-orange-600" />
-              <p className="text-sm text-orange-800 dark:text-orange-200">
-                有未保存的更改
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="ios-group flex items-center gap-3 border-[rgb(255_149_0_/_0.22)] bg-[rgb(255_149_0_/_0.08)] px-4 py-3 text-[rgb(138_75_0)] dark:border-[rgb(255_159_10_/_0.28)] dark:bg-[rgb(255_159_10_/_0.12)] dark:text-[rgb(255_214_102)]">
+          <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
+            <Info className="h-4 w-4" />
+          </span>
+          <p className="text-[14px] leading-5">有未保存的更改</p>
+        </div>
       )}
 
       {/* 配置区域 */}
@@ -502,7 +555,7 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
         // 标签页布局
         <Tabs defaultValue={schema.layout.tabs[0]?.id}>
           <TabsList>
-            {schema.layout.tabs.map(tab => (
+            {schema.layout.tabs.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>
                 {tab.title}
                 {tab.badge && (
@@ -513,9 +566,9 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
               </TabsTrigger>
             ))}
           </TabsList>
-          {schema.layout.tabs.map(tab => (
-            <TabsContent key={tab.id} value={tab.id} className="space-y-4 mt-4">
-              {tab.sections.map(sectionName => {
+          {schema.layout.tabs.map((tab) => (
+            <TabsContent key={tab.id} value={tab.id} className="mt-4 space-y-4">
+              {tab.sections.map((sectionName) => {
                 const section = schema.sections[sectionName]
                 if (!section) return null
                 return (
@@ -530,10 +583,10 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
             </TabsContent>
           ))}
         </Tabs>
-      ) : (
-        // 自动布局
+      ) : // 自动布局
+      sortedSections.length > 0 ? (
         <div className="space-y-4">
-          {sortedSections.map(section => (
+          {sortedSections.map((section) => (
             <SectionRenderer
               key={section.name}
               section={section}
@@ -541,6 +594,22 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
               onChange={handleFieldChange}
             />
           ))}
+        </div>
+      ) : (
+        <div className="ios-group overflow-hidden">
+          <div className="ios-empty-state">
+            <span className="ios-empty-illustration">
+              <Info className="h-7 w-7 text-primary" />
+            </span>
+            <span className="space-y-1.5">
+              <span className="block text-[15px] font-semibold leading-5 text-foreground">
+                暂无可视化配置
+              </span>
+              <span className="block text-[13px] leading-5 text-muted-foreground">
+                此插件没有暴露可在 WebUI 中编辑的配置项。
+              </span>
+            </span>
+          </div>
         </div>
       )}
 
@@ -585,7 +654,7 @@ export function PluginConfigPage() {
       toast({
         title: '加载插件列表失败',
         description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive'
+        variant: 'destructive',
       })
     } finally {
       setLoading(false)
@@ -594,11 +663,11 @@ export function PluginConfigPage() {
 
   useEffect(() => {
     loadPlugins()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 过滤插件
-  const filteredPlugins = plugins.filter(plugin => {
+  const filteredPlugins = plugins.filter((plugin) => {
     const query = searchQuery.toLowerCase()
     return (
       plugin.id.toLowerCase().includes(query) ||
@@ -615,11 +684,10 @@ export function PluginConfigPage() {
   if (selectedPlugin) {
     return (
       <ScrollArea className="h-full">
-        <div className="p-4 sm:p-6">
-          <PluginConfigEditor
-            plugin={selectedPlugin}
-            onBack={() => setSelectedPlugin(null)}
-          />
+        <div className="min-w-0 max-w-full overflow-hidden px-5 py-5 sm:p-6">
+          <div className="mx-auto w-[calc(100vw-2.5rem)] max-w-4xl sm:w-full">
+            <PluginConfigEditor plugin={selectedPlugin} onBack={() => setSelectedPlugin(null)} />
+          </div>
         </div>
       </ScrollArea>
     )
@@ -627,131 +695,156 @@ export function PluginConfigPage() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        {/* 标题 */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">插件配置</h1>
-            <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">
-              管理和配置已安装的插件
-            </p>
+      <div className="min-w-0 max-w-full overflow-hidden px-5 py-5 sm:p-6">
+        <div className="mx-auto w-[calc(100vw-2.5rem)] max-w-5xl space-y-5 sm:w-full sm:space-y-6">
+          {/* 标题 */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="ios-title">插件配置</h1>
+              <p className="ios-subtitle">管理和配置已安装的插件</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadPlugins}
+              className="hidden sm:inline-flex"
+            >
+              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              刷新
+            </Button>
           </div>
-          <Button variant="outline" size="sm" onClick={loadPlugins}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            刷新
-          </Button>
-        </div>
 
-        {/* 统计卡片 */}
-        <div className="grid gap-4 grid-cols-1 xs:grid-cols-2 lg:grid-cols-3">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">已安装插件</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{plugins.length}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {loading ? '正在加载...' : '个插件'}
-              </p>
-            </CardContent>
-          </Card>
+          <button
+            type="button"
+            onClick={loadPlugins}
+            className="ios-group ios-touch flex w-full min-w-0 items-center justify-between gap-4 overflow-hidden px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[16px] font-normal leading-6">
+                  刷新插件配置
+                </span>
+                <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                  更新插件列表和配置状态
+                </span>
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">已启用</CardTitle>
-              <CheckCircle2 className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{enabledCount}</div>
-              <p className="text-xs text-muted-foreground mt-1">运行中的插件</p>
-            </CardContent>
-          </Card>
+          {/* 统计 */}
+          <div className="ios-group overflow-hidden">
+            <div className="ios-row min-h-[60px] px-4 py-3">
+              <span className="flex min-w-0 flex-1 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                  <Package className="h-4 w-4" />
+                </span>
+                <span className="truncate text-[16px] font-medium leading-6">已安装插件</span>
+              </span>
+              <span className="shrink-0 text-[17px] font-semibold tabular-nums">
+                {plugins.length}
+              </span>
+            </div>
+            <div className="ios-row min-h-[60px] px-4 py-3">
+              <span className="flex min-w-0 flex-1 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                  <CheckCircle2 className="h-4 w-4" />
+                </span>
+                <span className="truncate text-[16px] font-medium leading-6">已启用</span>
+              </span>
+              <span className="shrink-0 text-[17px] font-semibold tabular-nums">
+                {enabledCount}
+              </span>
+            </div>
+            <div className="ios-row min-h-[60px] px-4 py-3">
+              <span className="flex min-w-0 flex-1 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
+                  <AlertCircle className="h-4 w-4" />
+                </span>
+                <span className="truncate text-[16px] font-medium leading-6">已禁用</span>
+              </span>
+              <span className="shrink-0 text-[17px] font-semibold tabular-nums">
+                {disabledCount}
+              </span>
+            </div>
+          </div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">已禁用</CardTitle>
-              <AlertCircle className="h-4 w-4 text-orange-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{disabledCount}</div>
-              <p className="text-xs text-muted-foreground mt-1">未激活的插件</p>
-            </CardContent>
-          </Card>
-        </div>
+          {/* 搜索框 */}
+          <div className="ios-search-field">
+            <Search className="pointer-events-none absolute left-3.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索插件"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="ios-search-input"
+            />
+          </div>
 
-        {/* 搜索框 */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索插件..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-
-        {/* 插件列表 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>已安装的插件</CardTitle>
-            <CardDescription>点击插件查看和编辑配置</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredPlugins.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 space-y-4">
-                <Package className="h-16 w-16 text-muted-foreground/50" />
-                <div className="text-center space-y-2">
-                  <p className="text-lg font-medium text-muted-foreground">
-                    {searchQuery ? '没有找到匹配的插件' : '暂无已安装的插件'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {searchQuery ? '尝试其他搜索关键词' : '前往插件市场安装插件'}
-                  </p>
+          {/* 插件列表 */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-[13px] font-medium leading-5 text-muted-foreground">
+                已安装的插件
+              </h2>
+              <span className="text-[13px] leading-5 text-muted-foreground">
+                共 {filteredPlugins.length} 个
+              </span>
+            </div>
+            <div className="ios-group overflow-hidden">
+              {loading ? (
+                <div className="ios-row ios-row-plain min-h-[132px] !justify-center text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin" />
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredPlugins.map(plugin => (
-                  <div
+              ) : filteredPlugins.length === 0 ? (
+                <div className="ios-empty-state">
+                  <span className="ios-empty-illustration">
+                    <Package className="h-7 w-7 text-primary" />
+                  </span>
+                  <span className="space-y-1.5">
+                    <span className="block text-[15px] font-semibold leading-5 text-foreground">
+                      {searchQuery ? '没有找到匹配的插件' : '暂无已安装的插件'}
+                    </span>
+                    <span className="block text-[13px] leading-5 text-muted-foreground">
+                      {searchQuery ? '尝试其他搜索关键词' : '前往插件市场安装插件'}
+                    </span>
+                  </span>
+                </div>
+              ) : (
+                filteredPlugins.map((plugin) => (
+                  <button
                     key={plugin.id}
-                    className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
+                    type="button"
+                    className="ios-row ios-touch min-h-[76px] w-full min-w-0 overflow-hidden text-left focus-visible:bg-accent/70 focus-visible:ring-0"
                     onClick={() => setSelectedPlugin(plugin)}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <Package className="h-5 w-5 text-primary" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium truncate">
+                    <span className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+                      <span className="ios-symbol ios-symbol-md ios-symbol-blue shrink-0">
+                        <Package className="h-5 w-5" />
+                      </span>
+                      <span className="min-w-0 flex-1 overflow-hidden">
+                        <span className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden">
+                          <span className="block min-w-0 flex-1 truncate text-[16px] font-medium leading-6">
                             {plugin.manifest.name}
-                          </h3>
-                          <Badge variant="secondary" className="text-xs flex-shrink-0">
+                          </span>
+                          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[12px] font-medium leading-4 text-muted-foreground">
                             v{plugin.manifest.version}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground truncate">
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block min-w-0 max-w-full truncate text-[13px] leading-5 text-muted-foreground">
                           {plugin.manifest.description || '暂无描述'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Button variant="ghost" size="sm">
-                        <Settings className="h-4 w-4" />
-                      </Button>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                        </span>
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </ScrollArea>
   )

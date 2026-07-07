@@ -44,8 +44,8 @@ export function ThemeProvider({
       const root = document.documentElement
       const colors = {
         blue: { 
-          hsl: '221.2 83.2% 53.3%', 
-          darkHsl: '217.2 91.2% 59.8%',
+          hsl: '211.29 100% 50%',
+          darkHsl: '210.12 100% 51.96%',
           gradient: null
         },
         purple: { 
@@ -83,7 +83,7 @@ export function ThemeProvider({
         'gradient-ocean': { 
           hsl: '200 90% 55%', 
           darkHsl: '200 90% 60%',
-          gradient: 'linear-gradient(135deg, hsl(221.2 83.2% 53.3%) 0%, hsl(189 94% 43%) 100%)'
+          gradient: 'linear-gradient(135deg, hsl(211.29 100% 50%) 0%, hsl(189 94% 43%) 100%)'
         },
         'gradient-forest': { 
           hsl: '150 70% 45%', 
@@ -109,7 +109,8 @@ export function ThemeProvider({
 
       const selectedColor = colors[savedAccentColor as keyof typeof colors]
       if (selectedColor) {
-        root.style.setProperty('--primary', selectedColor.hsl)
+        const isDark = root.classList.contains('dark')
+        root.style.setProperty('--primary', isDark ? selectedColor.darkHsl : selectedColor.hsl)
         
         // 设置渐变（如果有）
         if (selectedColor.gradient) {
@@ -121,7 +122,7 @@ export function ThemeProvider({
         }
       }
     }
-  }, [])
+  }, [theme])
 
   const value = {
     theme,

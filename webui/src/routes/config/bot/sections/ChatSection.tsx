@@ -22,18 +22,110 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import { Plus, Trash2, Eye, Clock } from 'lucide-react'
+  Plus,
+  Trash2,
+  Eye,
+  Clock,
+  MessageCircle,
+  AtSign,
+  History,
+  SlidersHorizontal,
+  FileClock,
+  Quote,
+  ListChecks,
+} from 'lucide-react'
 import type { ChatConfig } from '../types'
 
 interface ChatSectionProps {
   config: ChatConfig
   onChange: (config: ChatConfig) => void
 }
+
+interface MobileNumberRowProps {
+  icon: React.ReactNode
+  iconClassName: string
+  label: string
+  description?: string
+  value: number
+  step?: string
+  min?: string
+  max?: string
+  onValueChange: (value: string) => void
+}
+
+const MobileNumberRow = React.memo(function MobileNumberRow({
+  icon,
+  iconClassName,
+  label,
+  description,
+  value,
+  step,
+  min,
+  max,
+  onValueChange,
+}: MobileNumberRowProps) {
+  return (
+    <div className="ios-row min-h-[72px]">
+      <span className="flex min-w-0 items-center gap-3">
+        <span className={`ios-symbol ios-symbol-sm ${iconClassName}`}>{icon}</span>
+        <span className="min-w-0">
+          <span className="block text-[15px] font-medium leading-tight">{label}</span>
+          {description && (
+            <span className="mt-1 block text-[12px] leading-tight text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </span>
+      </span>
+      <Input
+        type="number"
+        step={step}
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        className="h-9 w-20 shrink-0 border-0 bg-transparent px-0 text-right shadow-none focus-visible:ring-0"
+      />
+    </div>
+  )
+})
+
+interface MobileSwitchRowProps {
+  icon: React.ReactNode
+  iconClassName: string
+  label: string
+  description?: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}
+
+const MobileSwitchRow = React.memo(function MobileSwitchRow({
+  icon,
+  iconClassName,
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: MobileSwitchRowProps) {
+  return (
+    <div className="ios-row min-h-[72px]">
+      <span className="flex min-w-0 items-center gap-3">
+        <span className={`ios-symbol ios-symbol-sm ${iconClassName}`}>{icon}</span>
+        <span className="min-w-0">
+          <span className="block text-[15px] font-medium leading-tight">{label}</span>
+          {description && (
+            <span className="mt-1 block text-[12px] leading-tight text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </span>
+      </span>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  )
+})
 
 // 时间选择组件
 const TimeRangePicker = React.memo(function TimeRangePicker({
@@ -75,14 +167,14 @@ const TimeRangePicker = React.memo(function TimeRangePicker({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" className="w-full justify-start font-mono text-sm">
-          <Clock className="h-4 w-4 mr-2" />
+          <Clock className="mr-2 h-4 w-4" />
           {value || '选择时间段'}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 sm:w-80">
         <div className="space-y-4">
           <div>
-            <h4 className="font-medium text-sm mb-3">开始时间</h4>
+            <h4 className="mb-3 text-sm font-medium">开始时间</h4>
             <div className="grid grid-cols-2 gap-2 sm:gap-3">
               <div>
                 <Label className="text-xs">小时</Label>
@@ -129,7 +221,7 @@ const TimeRangePicker = React.memo(function TimeRangePicker({
             </div>
           </div>
           <div>
-            <h4 className="font-medium text-sm mb-3">结束时间</h4>
+            <h4 className="mb-3 text-sm font-medium">结束时间</h4>
             <div className="grid grid-cols-2 gap-2 sm:gap-3">
               <div>
                 <Label className="text-xs">小时</Label>
@@ -182,26 +274,26 @@ const TimeRangePicker = React.memo(function TimeRangePicker({
 })
 
 // 预览窗口组件
-const RulePreview = React.memo(function RulePreview({ rule }: { rule: { target: string; time: string; value: number } }) {
+const RulePreview = React.memo(function RulePreview({
+  rule,
+}: {
+  rule: { target: string; time: string; value: number }
+}) {
   const previewText = `{ target = "${rule.target}", time = "${rule.time}", value = ${rule.value.toFixed(1)} }`
-  
+
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm">
-          <Eye className="h-4 w-4 mr-1" />
+          <Eye className="mr-1 h-4 w-4" />
           预览
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 sm:w-96">
         <div className="space-y-2">
-          <h4 className="font-medium text-sm">配置预览</h4>
-          <div className="rounded-md bg-muted p-3 font-mono text-xs break-all">
-            {previewText}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            这是保存到 bot_config.toml 文件中的格式
-          </p>
+          <h4 className="text-sm font-medium">配置预览</h4>
+          <div className="break-all rounded-md bg-muted p-3 font-mono text-xs">{previewText}</div>
+          <p className="text-xs text-muted-foreground">这是保存到 bot_config.toml 文件中的格式</p>
         </div>
       </PopoverContent>
     </Popover>
@@ -215,10 +307,7 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
   const addTalkValueRule = () => {
     onChange({
       ...config,
-      talk_value_rules: [
-        ...talkValueRules,
-        { target: '', time: '00:00-23:59', value: 1.0 },
-      ],
+      talk_value_rules: [...talkValueRules, { target: '', time: '00:00-23:59', value: 1.0 }],
     })
   }
 
@@ -248,125 +337,205 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-4">聊天设置</h3>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="talk_value">聊天频率（基础值）</Label>
-            <Input
-              id="talk_value"
-              type="number"
-              step="0.1"
-              min="0"
-              max="1"
-              value={config.talk_value}
-              onChange={(e) => onChange({ ...config, talk_value: parseFloat(e.target.value) })}
-            />
-            <p className="text-xs text-muted-foreground">越小越沉默，范围 0-1</p>
-          </div>
+    <>
+      <div className="space-y-4 sm:hidden">
+        <div className="ios-group overflow-hidden">
+          <MobileNumberRow
+            icon={<MessageCircle className="h-4 w-4" />}
+            iconClassName="ios-symbol-blue"
+            label="聊天频率"
+            description="越小越沉默"
+            value={config.talk_value}
+            step="0.1"
+            min="0"
+            max="1"
+            onValueChange={(value) => onChange({ ...config, talk_value: parseFloat(value) })}
+          />
+          <MobileSwitchRow
+            icon={<AtSign className="h-4 w-4" />}
+            iconClassName="ios-symbol-green"
+            label="提及必回复"
+            checked={config.mentioned_bot_reply}
+            onCheckedChange={(checked) => onChange({ ...config, mentioned_bot_reply: checked })}
+          />
+          <MobileNumberRow
+            icon={<AtSign className="h-4 w-4" />}
+            iconClassName="ios-symbol-teal"
+            label="@ 回复增幅"
+            description="1 为 100% 回复"
+            value={config.at_bot_inevitable_reply}
+            step="0.1"
+            min="0"
+            max="1"
+            onValueChange={(value) =>
+              onChange({ ...config, at_bot_inevitable_reply: parseFloat(value) })
+            }
+          />
+          <MobileNumberRow
+            icon={<History className="h-4 w-4" />}
+            iconClassName="ios-symbol-purple"
+            label="上下文长度"
+            value={config.max_context_size}
+            min="1"
+            onValueChange={(value) => onChange({ ...config, max_context_size: parseInt(value) })}
+          />
+          <MobileNumberRow
+            icon={<SlidersHorizontal className="h-4 w-4" />}
+            iconClassName="ios-symbol-orange"
+            label="规划器平滑"
+            description="推荐 1-5"
+            value={config.planner_smooth}
+            step="1"
+            min="0"
+            onValueChange={(value) => onChange({ ...config, planner_smooth: parseFloat(value) })}
+          />
+          <MobileNumberRow
+            icon={<FileClock className="h-4 w-4" />}
+            iconClassName="ios-symbol-purple"
+            label="日志保留数"
+            value={config.plan_reply_log_max_per_chat}
+            min="1"
+            onValueChange={(value) =>
+              onChange({ ...config, plan_reply_log_max_per_chat: parseInt(value) })
+            }
+          />
+        </div>
 
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="mentioned_bot_reply"
-              checked={config.mentioned_bot_reply}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, mentioned_bot_reply: checked })
-              }
-            />
-            <Label htmlFor="mentioned_bot_reply" className="cursor-pointer">
-              启用提及必回复
-            </Label>
-          </div>
+        <div className="ios-group overflow-hidden">
+          <MobileSwitchRow
+            icon={<Quote className="h-4 w-4" />}
+            iconClassName="ios-symbol-pink"
+            label="允许引用消息"
+            checked={config.llm_quote}
+            onCheckedChange={(checked) => onChange({ ...config, llm_quote: checked })}
+          />
+          <MobileSwitchRow
+            icon={<ListChecks className="h-4 w-4" />}
+            iconClassName="ios-symbol-green"
+            label="动态发言规则"
+            description="按时段或聊天流调整频率"
+            checked={config.enable_talk_value_rules}
+            onCheckedChange={(checked) => onChange({ ...config, enable_talk_value_rules: checked })}
+          />
+        </div>
+      </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="at_bot_inevitable_reply">@ Bot 回复增幅</Label>
-            <Input
-              id="at_bot_inevitable_reply"
-              type="number"
-              step="0.1"
-              min="0"
-              max="1"
-              value={config.at_bot_inevitable_reply}
-              onChange={(e) =>
-                onChange({ ...config, at_bot_inevitable_reply: parseFloat(e.target.value) })
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              @bot 时额外提高回复概率，1 为 100% 回复，0 为不额外增幅
-            </p>
-          </div>
+      <div className="ios-group hidden space-y-6 p-4 sm:block sm:p-6">
+        <div>
+          <h3 className="mb-4 text-lg font-semibold">聊天设置</h3>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="talk_value">聊天频率（基础值）</Label>
+              <Input
+                id="talk_value"
+                type="number"
+                step="0.1"
+                min="0"
+                max="1"
+                value={config.talk_value}
+                onChange={(e) => onChange({ ...config, talk_value: parseFloat(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">越小越沉默，范围 0-1</p>
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="max_context_size">上下文长度</Label>
-            <Input
-              id="max_context_size"
-              type="number"
-              min="1"
-              value={config.max_context_size}
-              onChange={(e) =>
-                onChange({ ...config, max_context_size: parseInt(e.target.value) })
-              }
-            />
-          </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="mentioned_bot_reply"
+                checked={config.mentioned_bot_reply}
+                onCheckedChange={(checked) => onChange({ ...config, mentioned_bot_reply: checked })}
+              />
+              <Label htmlFor="mentioned_bot_reply" className="cursor-pointer">
+                启用提及必回复
+              </Label>
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="planner_smooth">规划器平滑</Label>
-            <Input
-              id="planner_smooth"
-              type="number"
-              step="1"
-              min="0"
-              value={config.planner_smooth}
-              onChange={(e) =>
-                onChange({ ...config, planner_smooth: parseFloat(e.target.value) })
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              增大数值会减小 planner 负荷，推荐 1-5，0 为关闭
-            </p>
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="at_bot_inevitable_reply">@ 提及回复增幅</Label>
+              <Input
+                id="at_bot_inevitable_reply"
+                type="number"
+                step="0.1"
+                min="0"
+                max="1"
+                value={config.at_bot_inevitable_reply}
+                onChange={(e) =>
+                  onChange({ ...config, at_bot_inevitable_reply: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                被 @ 提及时额外提高回复概率，1 为 100% 回复，0 为不额外增幅
+              </p>
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="plan_reply_log_max_per_chat">每个聊天保存的 Plan/Reply 日志数</Label>
-            <Input
-              id="plan_reply_log_max_per_chat"
-              type="number"
-              min="1"
-              value={config.plan_reply_log_max_per_chat}
-              onChange={(e) =>
-                onChange({ ...config, plan_reply_log_max_per_chat: parseInt(e.target.value) })
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              超过此数量时会自动删除最老的 Plan/Reply 日志
-            </p>
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="max_context_size">上下文长度</Label>
+              <Input
+                id="max_context_size"
+                type="number"
+                min="1"
+                value={config.max_context_size}
+                onChange={(e) =>
+                  onChange({ ...config, max_context_size: parseInt(e.target.value) })
+                }
+              />
+            </div>
 
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="llm_quote"
-              checked={config.llm_quote}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, llm_quote: checked })
-              }
-            />
-            <Label htmlFor="llm_quote" className="cursor-pointer">
-              允许 LLM 控制引用消息
-            </Label>
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="planner_smooth">规划器平滑</Label>
+              <Input
+                id="planner_smooth"
+                type="number"
+                step="1"
+                min="0"
+                value={config.planner_smooth}
+                onChange={(e) =>
+                  onChange({ ...config, planner_smooth: parseFloat(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                增大数值会减小 planner 负荷，推荐 1-5，0 为关闭
+              </p>
+            </div>
 
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="enable_talk_value_rules"
-              checked={config.enable_talk_value_rules}
-              onCheckedChange={(checked) =>
-                onChange({ ...config, enable_talk_value_rules: checked })
-              }
-            />
-            <Label htmlFor="enable_talk_value_rules" className="cursor-pointer">
-              启用动态发言频率规则
-            </Label>
+            <div className="grid gap-2">
+              <Label htmlFor="plan_reply_log_max_per_chat">每个聊天保存的 Plan/Reply 日志数</Label>
+              <Input
+                id="plan_reply_log_max_per_chat"
+                type="number"
+                min="1"
+                value={config.plan_reply_log_max_per_chat}
+                onChange={(e) =>
+                  onChange({ ...config, plan_reply_log_max_per_chat: parseInt(e.target.value) })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                超过此数量时会自动删除最老的 Plan/Reply 日志
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="llm_quote"
+                checked={config.llm_quote}
+                onCheckedChange={(checked) => onChange({ ...config, llm_quote: checked })}
+              />
+              <Label htmlFor="llm_quote" className="cursor-pointer">
+                允许 LLM 控制引用消息
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="enable_talk_value_rules"
+                checked={config.enable_talk_value_rules}
+                onCheckedChange={(checked) =>
+                  onChange({ ...config, enable_talk_value_rules: checked })
+                }
+              />
+              <Label htmlFor="enable_talk_value_rules" className="cursor-pointer">
+                启用动态发言频率规则
+              </Label>
+            </div>
           </div>
         </div>
       </div>
@@ -374,15 +543,15 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
       {/* 动态发言频率规则配置 */}
       {config.enable_talk_value_rules && (
         <div className="border-t pt-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex items-center justify-between">
             <div>
               <h4 className="text-base font-semibold">动态发言频率规则</h4>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="mt-1 text-xs text-muted-foreground">
                 按时段或聊天流ID调整发言频率，优先匹配具体聊天，再匹配全局规则
               </p>
             </div>
             <Button onClick={addTalkValueRule} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               添加规则
             </Button>
           </div>
@@ -390,7 +559,10 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
           {talkValueRules.length > 0 ? (
             <div className="space-y-4">
               {talkValueRules.map((rule, index) => (
-                <div key={index} className="rounded-lg border p-4 bg-muted/50 space-y-4">
+                <div
+                  key={index}
+                  className="space-y-4 rounded-[16px] border border-border/45 bg-muted/35 p-4"
+                >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-muted-foreground">
                       规则 #{index + 1}
@@ -400,7 +572,7 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="ghost" size="sm">
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            <Trash2 className="text-destructive h-4 w-4" />
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
@@ -446,69 +618,82 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
                     </div>
 
                     {/* 详细配置选项 - 只在非全局时显示 */}
-                    {rule.target !== '' && (() => {
-                      const parts = rule.target.split(':')
-                      const platform = parts[0] || 'qq'
-                      const chatId = parts[1] || ''
-                      const chatType = parts[2] || 'group'
-                      
-                      return (
-                        <div className="grid gap-4 p-3 sm:p-4 rounded-lg bg-muted/50">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <div className="grid gap-2">
-                              <Label className="text-xs font-medium">平台</Label>
-                              <Select
-                                value={platform}
-                                onValueChange={(value) => {
-                                  updateTalkValueRule(index, 'target', `${value}:${chatId}:${chatType}`)
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="qq">QQ</SelectItem>
-                                  <SelectItem value="wx">微信</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
+                    {rule.target !== '' &&
+                      (() => {
+                        const parts = rule.target.split(':')
+                        const platform = parts[0] || 'qq'
+                        const chatId = parts[1] || ''
+                        const chatType = parts[2] || 'group'
 
-                            <div className="grid gap-2">
-                              <Label className="text-xs font-medium">群 ID</Label>
-                              <Input
-                                value={chatId}
-                                onChange={(e) => {
-                                  updateTalkValueRule(index, 'target', `${platform}:${e.target.value}:${chatType}`)
-                                }}
-                                placeholder="输入群 ID"
-                                className="font-mono text-sm"
-                              />
-                            </div>
+                        return (
+                          <div className="grid gap-4 rounded-[14px] bg-muted/45 p-3 sm:p-4">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <div className="grid gap-2">
+                                <Label className="text-xs font-medium">平台</Label>
+                                <Select
+                                  value={platform}
+                                  onValueChange={(value) => {
+                                    updateTalkValueRule(
+                                      index,
+                                      'target',
+                                      `${value}:${chatId}:${chatType}`
+                                    )
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="qq">QQ</SelectItem>
+                                    <SelectItem value="wx">微信</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
 
-                            <div className="grid gap-2">
-                              <Label className="text-xs font-medium">类型</Label>
-                              <Select
-                                value={chatType}
-                                onValueChange={(value) => {
-                                  updateTalkValueRule(index, 'target', `${platform}:${chatId}:${value}`)
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="group">群组（group）</SelectItem>
-                                  <SelectItem value="private">私聊（private）</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <div className="grid gap-2">
+                                <Label className="text-xs font-medium">群 ID</Label>
+                                <Input
+                                  value={chatId}
+                                  onChange={(e) => {
+                                    updateTalkValueRule(
+                                      index,
+                                      'target',
+                                      `${platform}:${e.target.value}:${chatType}`
+                                    )
+                                  }}
+                                  placeholder="输入群 ID"
+                                  className="font-mono text-sm"
+                                />
+                              </div>
+
+                              <div className="grid gap-2">
+                                <Label className="text-xs font-medium">类型</Label>
+                                <Select
+                                  value={chatType}
+                                  onValueChange={(value) => {
+                                    updateTalkValueRule(
+                                      index,
+                                      'target',
+                                      `${platform}:${chatId}:${value}`
+                                    )
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="group">群组（group）</SelectItem>
+                                    <SelectItem value="private">私聊（private）</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
+                            <p className="text-xs text-muted-foreground">
+                              当前聊天流 ID：{rule.target || '（未设置）'}
+                            </p>
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            当前聊天流 ID：{rule.target || '（未设置）'}
-                          </p>
-                        </div>
-                      )
-                    })()}
+                        )
+                      })()}
 
                     {/* 时间段选择器 */}
                     <div className="grid gap-2">
@@ -541,14 +726,12 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
                               updateTalkValueRule(index, 'value', Math.max(0.01, Math.min(1, val)))
                             }
                           }}
-                          className="w-20 h-8 text-xs"
+                          className="h-8 w-20 text-xs"
                         />
                       </div>
                       <Slider
                         value={[rule.value]}
-                        onValueChange={(values) =>
-                          updateTalkValueRule(index, 'value', values[0])
-                        }
+                        onValueChange={(values) => updateTalkValueRule(index, 'value', values[0])}
                         min={0.01}
                         max={1}
                         step={0.01}
@@ -565,25 +748,33 @@ export const ChatSection = React.memo(function ChatSection({ config, onChange }:
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="py-8 text-center text-muted-foreground">
               <p className="text-sm">暂无规则，点击"添加规则"按钮创建</p>
             </div>
           )}
 
-          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <h5 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">
-              📝 规则说明
-            </h5>
-            <ul className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
-              <li>• <strong>Target 为空</strong>：全局规则，对所有聊天生效</li>
-              <li>• <strong>Target 指定</strong>：仅对特定聊天流生效（格式：platform:id:type）</li>
-              <li>• <strong>优先级</strong>：先匹配具体聊天流规则，再匹配全局规则</li>
-              <li>• <strong>时间支持跨夜</strong>：例如 23:00-02:00 表示晚上11点到次日凌晨2点</li>
-              <li>• <strong>数值范围</strong>：建议 0-1，0 表示完全沉默，1 表示正常发言</li>
+          <div className="ios-group mt-4 p-4">
+            <h5 className="mb-2 text-sm font-semibold text-foreground">规则说明</h5>
+            <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+              <li>
+                • <strong>Target 为空</strong>：全局规则，对所有聊天生效
+              </li>
+              <li>
+                • <strong>Target 指定</strong>：仅对特定聊天流生效（格式：platform:id:type）
+              </li>
+              <li>
+                • <strong>优先级</strong>：先匹配具体聊天流规则，再匹配全局规则
+              </li>
+              <li>
+                • <strong>时间支持跨夜</strong>：例如 23:00-02:00 表示晚上11点到次日凌晨2点
+              </li>
+              <li>
+                • <strong>数值范围</strong>：建议 0-1，0 表示完全沉默，1 表示正常发言
+              </li>
             </ul>
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 })

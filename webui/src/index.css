@@ -4,60 +4,60 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    --background: 240 14% 95%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
+    --primary: 211.29 100% 50%;
     --primary-foreground: 210 40% 98%;
     --primary-gradient: none; /* 默认无渐变 */
-    --secondary: 210 40% 96.1%;
+    --secondary: 240 9% 91%;
     --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
+    --muted: 240 7% 91%;
     --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
+    --accent: 240 7% 91%;
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --border: 240 6% 84%;
+    --input: 240 7% 88%;
+    --ring: 211.29 100% 50%;
     --radius: 0.5rem;
-    --chart-1: 221.2 83.2% 53.3%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --chart-1: 211.29 100% 50%;
+    --chart-2: 142 62% 47%;
+    --chart-3: 35 100% 50%;
+    --chart-4: 242 74% 66%;
+    --chart-5: 347 100% 59%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 240 6% 10%;
     --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    --card: 240 4% 16%;
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 240 4% 16%;
     --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 210.12 100% 51.96%;
+    --primary-foreground: 210 40% 98%;
     --primary-gradient: none; /* 默认无渐变 */
-    --secondary: 217.2 32.6% 17.5%;
+    --secondary: 240 3% 22%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
+    --muted: 240 3% 20%;
     --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
+    --accent: 240 3% 22%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
-    --chart-1: 217.2 91.2% 59.8%;
-    --chart-2: 160 60% 50%;
-    --chart-3: 30 80% 60%;
-    --chart-4: 280 65% 65%;
-    --chart-5: 340 75% 60%;
+    --border: 240 3% 25%;
+    --input: 240 3% 24%;
+    --ring: 210.12 100% 51.96%;
+    --chart-1: 210.12 100% 51.96%;
+    --chart-2: 142 70% 50%;
+    --chart-3: 39 100% 52%;
+    --chart-4: 242 82% 70%;
+    --chart-5: 347 100% 61%;
   }
 }
 
@@ -66,33 +66,373 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', 'PingFang SC',
+      'Microsoft YaHei', sans-serif;
+    font-feature-settings: 'kern';
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+    background: linear-gradient(
+        180deg,
+        hsl(240 18% 97%) 0%,
+        hsl(240 12% 95%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
   }
-  
+
+  .dark body {
+    background: linear-gradient(
+        180deg,
+        hsl(240 6% 8%) 0%,
+        hsl(240 5% 10%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+  }
+
   /* 隐藏数字输入框的默认上下箭头 */
-  input[type="number"]::-webkit-inner-spin-button,
-  input[type="number"]::-webkit-outer-spin-button {
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
   }
-  
-  input[type="number"] {
+
+  input[type='number'] {
     -moz-appearance: textfield;
     appearance: textfield;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.22);
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.34);
+  }
+
+  * {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.24) transparent;
+    scrollbar-width: thin;
   }
 }
 
 @layer utilities {
+  .ios-page {
+    @apply min-h-full px-5 py-5 sm:px-7 sm:py-7;
+    background: linear-gradient(
+        180deg,
+        hsl(240 18% 97%) 0%,
+        hsl(240 12% 95%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+    padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 1.25rem));
+    padding-left: max(1.25rem, env(safe-area-inset-left));
+    padding-right: max(1.25rem, env(safe-area-inset-right));
+    padding-bottom: max(1.25rem, calc(env(safe-area-inset-bottom) + 1.25rem));
+  }
+
+  .dark .ios-page {
+    background: linear-gradient(
+        180deg,
+        hsl(240 6% 8%) 0%,
+        hsl(240 5% 10%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+  }
+
+  .ios-content {
+    @apply mx-auto w-full max-w-7xl space-y-5 sm:space-y-7;
+  }
+
+  .ios-title {
+    @apply text-[30px] font-semibold leading-[1.12] tracking-normal sm:text-[34px];
+  }
+
+  .ios-break-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .ios-subtitle {
+    @apply mt-1.5 text-[15px] leading-[1.48] text-muted-foreground sm:text-base sm:leading-6;
+  }
+
+  .ios-card {
+    @apply rounded-[20px] border border-black/[0.024] bg-white/[0.86] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset,0_18px_44px_rgba(31,41,55,0.072),0_5px_14px_rgba(31,41,55,0.04),0_1px_2px_rgba(0,0,0,0.026)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_44px_rgba(0,0,0,0.32),0_5px_14px_rgba(0,0,0,0.24)];
+  }
+
+  .ios-group {
+    @apply rounded-[19px] border border-black/[0.022] bg-white/[0.86] shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_13px_34px_rgba(31,41,55,0.058),0_3px_9px_rgba(31,41,55,0.035),0_1px_2px_rgba(0,0,0,0.022)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_14px_36px_rgba(0,0,0,0.28),0_3px_10px_rgba(0,0,0,0.2)];
+  }
+
+  .ios-row {
+    @apply relative flex min-h-[58px] items-center justify-between gap-3 px-4 py-3 leading-normal sm:px-5;
+  }
+
+  .ios-row::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 3.75rem;
+    height: 1px;
+    background: rgb(60 60 67 / 0.14);
+  }
+
+  .dark .ios-row::after {
+    background: rgb(84 84 88 / 0.48);
+  }
+
+  .ios-row:last-child::after {
+    display: none;
+  }
+
+  .ios-row-plain::after {
+    left: 1rem;
+  }
+
+  .ios-value {
+    @apply shrink-0 text-[16px] font-normal leading-5 text-muted-foreground tabular-nums;
+  }
+
+  .ios-section-label {
+    @apply px-1 text-[13px] font-medium uppercase leading-5 tracking-normal text-muted-foreground;
+  }
+
+  .ios-symbol {
+    @apply grid shrink-0 place-items-center text-white shadow-[0_1px_0_rgba(255,255,255,0.24)_inset,0_5px_12px_rgba(0,0,0,0.12)];
+  }
+
+  .ios-symbol-sm {
+    @apply h-8 w-8 rounded-[9px];
+  }
+
+  .ios-symbol-md {
+    @apply h-9 w-9 rounded-[10px];
+  }
+
+  .ios-symbol-blue {
+    background: linear-gradient(180deg, #2f9bff 0%, #007aff 100%);
+  }
+
+  .ios-symbol-green {
+    background: linear-gradient(180deg, #4ade6c 0%, #34c759 100%);
+  }
+
+  .ios-symbol-orange {
+    background: linear-gradient(180deg, #ffad32 0%, #ff9500 100%);
+  }
+
+  .ios-symbol-red {
+    background: linear-gradient(180deg, #ff5a4f 0%, #ff3b30 100%);
+  }
+
+  .ios-symbol-pink {
+    background: linear-gradient(180deg, #ff5d86 0%, #ff2d55 100%);
+  }
+
+  .ios-symbol-purple {
+    background: linear-gradient(180deg, #706ef0 0%, #5856d6 100%);
+  }
+
+  .ios-symbol-teal {
+    background: linear-gradient(180deg, #7be0ff 0%, #5ac8fa 100%);
+  }
+
+  .ios-symbol-gray {
+    background: linear-gradient(180deg, #a7a7ad 0%, #8e8e93 100%);
+  }
+
+  .ios-symbol-yellow {
+    background: linear-gradient(180deg, #ffda45 0%, #ffcc00 100%);
+  }
+
+  .ios-stat-grid {
+    @apply grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4;
+  }
+
+  .ios-stat-card {
+    @apply min-h-[116px] rounded-[19px] border border-black/[0.022] bg-white/[0.86] p-4 shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_13px_34px_rgba(31,41,55,0.058),0_3px_9px_rgba(31,41,55,0.035),0_1px_2px_rgba(0,0,0,0.022)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_14px_36px_rgba(0,0,0,0.28),0_3px_10px_rgba(0,0,0,0.2)] sm:min-h-[126px] sm:p-5;
+  }
+
+  .ios-metric-card {
+    @apply rounded-[22px] border border-black/[0.022] bg-white/[0.86] p-5 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_16px_38px_rgba(31,41,55,0.062),0_4px_12px_rgba(31,41,55,0.036)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_16px_40px_rgba(0,0,0,0.3)];
+  }
+
+  .ios-search-field {
+    @apply relative flex h-11 items-center rounded-[13px] bg-muted/80 shadow-[0_1px_0_rgba(255,255,255,0.56)_inset] transition-colors duration-200 focus-within:bg-muted;
+  }
+
+  .ios-search-input {
+    @apply h-11 border-0 bg-transparent pl-10 pr-3 text-[16px] shadow-none placeholder:text-muted-foreground/80 focus-visible:ring-0;
+  }
+
+  .ios-bottom-bar {
+    @apply border-t border-border/55 bg-white/[0.8] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.74];
+  }
+
+  .ios-touch {
+    @apply transition-[background-color,color,box-shadow,transform,filter] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35 active:scale-[0.985];
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    will-change: transform;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .ios-touch:hover {
+      background-color: rgb(120 120 128 / 0.075);
+      transform: translateY(-0.5px);
+    }
+  }
+
+  .ios-touch:active {
+    background-color: rgb(120 120 128 / 0.13);
+    filter: saturate(0.98);
+    transform: scale(0.98);
+  }
+
+  .ios-spin-slow {
+    animation: ios-spin 2.4s linear infinite;
+  }
+
+  .ios-sheet {
+    @apply border border-black/[0.035] bg-white/[0.84] shadow-[0_-10px_40px_rgba(31,41,55,0.12),0_1px_1px_rgba(255,255,255,0.72)_inset] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.84] dark:shadow-[0_-14px_44px_rgba(0,0,0,0.42),0_1px_0_rgba(255,255,255,0.08)_inset];
+  }
+
+  .ios-scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .ios-scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ios-dialog-close,
+  .ios-dialog-close:focus-visible {
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  .ios-hairline {
+    @apply border-border/55;
+  }
+
+  .ios-table-surface {
+    @apply rounded-[14px] border border-black/[0.04] bg-white/[0.84] shadow-[0_1px_1px_rgba(255,255,255,0.72)_inset,0_10px_28px_rgba(31,41,55,0.052),0_2px_6px_rgba(0,0,0,0.028)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.09] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_12px_30px_rgba(0,0,0,0.24)];
+  }
+
+  .ios-empty-state {
+    @apply flex min-h-[196px] flex-col items-center justify-center gap-4 px-6 py-10 text-center text-muted-foreground;
+  }
+
+  .ios-empty-icon {
+    @apply grid h-14 w-14 place-items-center rounded-[18px] bg-muted/80 text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.72)_inset];
+  }
+
+  .ios-empty-illustration {
+    @apply relative grid h-[76px] w-[76px] place-items-center rounded-[24px] border border-black/[0.035] bg-white/[0.72] shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_10px_26px_rgba(31,41,55,0.06)] backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.09];
+  }
+
+  .ios-empty-illustration::before,
+  .ios-empty-illustration::after {
+    content: '';
+    position: absolute;
+    border-radius: 999px;
+    background: rgb(0 122 255 / 0.12);
+  }
+
+  .ios-empty-illustration::before {
+    inset: 14px 12px auto auto;
+    width: 22px;
+    height: 6px;
+  }
+
+  .ios-empty-illustration::after {
+    inset: auto auto 14px 14px;
+    width: 28px;
+    height: 6px;
+  }
+
+  .rounded-lg.border.bg-card {
+    border-color: rgb(0 0 0 / 0.032);
+    background-color: rgb(255 255 255 / 0.86);
+    box-shadow:
+      inset 0 1px 1px rgb(255 255 255 / 0.8),
+      0 13px 34px rgb(31 41 55 / 0.056),
+      0 3px 9px rgb(31 41 55 / 0.034),
+      0 1px 3px rgb(0 0 0 / 0.024);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+  }
+
+  @media (max-width: 640px) {
+    .ios-page {
+      padding-top: max(1rem, calc(env(safe-area-inset-top) + 1rem));
+      padding-left: max(1.25rem, env(safe-area-inset-left));
+      padding-right: max(1.25rem, env(safe-area-inset-right));
+      padding-bottom: max(1rem, calc(env(safe-area-inset-bottom) + 1rem));
+    }
+
+    .ios-content {
+      @apply space-y-4;
+    }
+
+    .ios-title {
+      font-size: 1.75rem;
+      line-height: 1.14;
+      font-weight: 600;
+    }
+
+    .ios-subtitle {
+      font-size: 0.90625rem;
+      line-height: 1.45;
+    }
+
+    .ios-row {
+      min-height: 3.375rem;
+      padding: 0.625rem 1rem;
+      border-bottom-color: rgb(60 60 67 / 0.13);
+    }
+
+    .ios-touch:active {
+      background-color: rgb(120 120 128 / 0.12);
+    }
+  }
+
+  .dark .rounded-lg.border.bg-card {
+    border-color: rgb(255 255 255 / 0.1);
+    background-color: rgb(255 255 255 / 0.08);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.08),
+      0 14px 34px rgb(0 0 0 / 0.24);
+  }
+
   /* 渐变色背景工具类 */
   .bg-primary-gradient {
     background: var(--primary-gradient, hsl(var(--primary)));
   }
-  
+
   /* 渐变色文字工具类 - 默认使用普通文字颜色 */
   .text-primary-gradient {
     color: hsl(var(--primary));
   }
-  
+
   /* 当应用了 has-gradient 类时，使用渐变文字效果 */
   .has-gradient .text-primary-gradient {
     background: var(--primary-gradient);
@@ -101,10 +441,39 @@
     -webkit-text-fill-color: transparent;
     color: transparent;
   }
-  
+
   /* 渐变色边框工具类 */
   .border-primary-gradient {
-    border-image: var(--primary-gradient, linear-gradient(to right, hsl(var(--primary)), hsl(var(--primary)))) 1;
+    border-image: var(
+        --primary-gradient,
+        linear-gradient(to right, hsl(var(--primary)), hsl(var(--primary)))
+      )
+      1;
+  }
+}
+
+@keyframes ios-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ios-shimmer {
+  0% {
+    background-position: 160% 0;
+  }
+  100% {
+    background-position: -160% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ios-spin-slow {
+    animation: none;
+  }
+
+  .animate-\[ios-shimmer_1\.45s_ease-in-out_infinite\] {
+    animation: none;
   }
 }
 
@@ -160,5 +529,3 @@
 #tour-portal-container * {
   pointer-events: auto;
 }
-
-

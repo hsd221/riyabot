@@ -41,7 +41,7 @@ export const MessageReceiveSection = React.memo(function MessageReceiveSection({
     values: string[],
     placeholder: string
   ) => (
-    <div className="rounded-lg border p-4 space-y-3">
+    <div className="rounded-[16px] border border-border/45 bg-muted/35 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <Label>{title}</Label>
@@ -81,7 +81,7 @@ export const MessageReceiveSection = React.memo(function MessageReceiveSection({
   )
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+    <div className="ios-group p-4 sm:p-6 space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">消息过滤</h3>
         <div className="space-y-4">

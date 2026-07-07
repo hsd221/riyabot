@@ -41,7 +41,7 @@ export const TASK_CONFIGS = [
   {
     key: 'planner' as const,
     title: '决策模型 (planner)',
-    description: '负责决定璃夜该什么时候回复',
+    description: '负责决定当前 Bot 该什么时候回复',
   },
   {
     key: 'vlm' as const,

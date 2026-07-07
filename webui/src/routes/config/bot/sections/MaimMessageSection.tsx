@@ -49,7 +49,7 @@ export const MaimMessageSection = React.memo(function MaimMessageSection({ confi
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+    <div className="ios-group p-4 sm:p-6 space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">MaimMessage 配置</h3>
         <div className="space-y-4">
@@ -67,7 +67,7 @@ export const MaimMessageSection = React.memo(function MaimMessageSection({ confi
           </div>
 
           {config.enable_api_server && (
-            <div className="space-y-4 rounded-lg border p-4">
+            <div className="space-y-4 rounded-[16px] border border-border/45 bg-muted/35 p-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="api_server_host">主机地址</Label>

@@ -34,13 +34,13 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
   }
 
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+    <div className="ios-card space-y-5 p-5 sm:p-6">
       <div>
-        <h4 className="font-semibold text-base sm:text-lg">{title}</h4>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-1">{description}</p>
+        <h4 className="text-base font-semibold sm:text-lg">{title}</h4>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{description}</p>
       </div>
 
-      <div className="grid gap-4">
+      <div className="grid gap-5">
         {/* 模型列表 */}
         <div className="grid gap-2" data-tour={dataTour}>
           <Label>模型列表</Label>
@@ -54,7 +54,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         </div>
 
         {/* 温度和最大 Token */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           {!hideTemperature && (
             <div className="grid gap-3">
               <div className="flex items-center justify-between">
@@ -71,7 +71,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
                       onChange('temperature', value)
                     }
                   }}
-                  className="w-20 h-8 text-sm"
+                  className="h-11 w-24 rounded-2xl text-center text-base"
                 />
               </div>
               <Slider
@@ -86,7 +86,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
           )}
 
           {!hideMaxTokens && (
-            <div className="grid gap-2">
+            <div className="grid gap-2.5">
               <Label>最大 Token</Label>
               <Input
                 type="number"
@@ -100,7 +100,7 @@ export const TaskConfigCard = React.memo(function TaskConfigCard({
         </div>
 
         {/* 慢请求阈值 */}
-        <div className="grid gap-2">
+        <div className="grid gap-2.5">
           <div className="flex items-center justify-between">
             <Label>慢请求阈值 (秒)</Label>
             <span className="text-xs text-muted-foreground">超时警告</span>

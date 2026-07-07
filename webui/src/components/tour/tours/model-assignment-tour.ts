@@ -7,7 +7,7 @@ export const modelAssignmentTourSteps: Step[] = [
   // Step 1: 全屏介绍
   {
     target: 'body',
-    content: '本引导旨在帮助你配置模型提供商和对应的模型，并为璃夜的各个组件分配合适的模型。',
+    content: '本引导旨在帮助你配置模型提供商和对应的模型，并为各个组件分配合适的模型。',
     placement: 'center' as Placement,
     disableBeacon: true,
     disableOverlayClose: true,
@@ -109,7 +109,7 @@ export const modelAssignmentTourSteps: Step[] = [
   // Step 11: 侧边栏 - 模型管理与分配按钮（点击下一步会自动导航）
   {
     target: '[data-tour="sidebar-model-management"]',
-    content: '配置好模型提供商后，接下来我们需要为璃夜添加模型并分配功能。点击"下一步"进入模型管理页面。',
+    content: '配置好模型提供商后，接下来我们需要添加模型并分配功能。点击"下一步"进入模型管理页面。',
     placement: 'right' as Placement,
     disableBeacon: true,
     disableOverlayClose: true,
@@ -119,7 +119,7 @@ export const modelAssignmentTourSteps: Step[] = [
   // Step 12: 添加模型按钮
   {
     target: '[data-tour="add-model-button"]',
-    content: '在为璃夜的组件分配模型之前，首先需要添加你想要分配的模型，点击"添加模型"按钮开始添加。',
+    content: '在为各个组件分配模型之前，首先需要添加你想要分配的模型，点击"添加模型"按钮开始添加。',
     placement: 'bottom' as Placement,
     disableBeacon: true,
     disableOverlayClose: true,
@@ -191,7 +191,7 @@ export const modelAssignmentTourSteps: Step[] = [
   // Step 19: 为模型分配功能标签页
   {
     target: '[data-tour="tasks-tab-trigger"]',
-    content: '最后一步，添加好模型后，切换到"为模型分配功能"标签页，为璃夜的各个组件分配合适的模型。',
+    content: '最后一步，添加好模型后，切换到"为模型分配功能"标签页，为各个组件分配合适的模型。',
     placement: 'bottom' as Placement,
     disableBeacon: true,
     disableOverlayClose: true,

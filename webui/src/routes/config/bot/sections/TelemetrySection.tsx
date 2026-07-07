@@ -10,13 +10,13 @@ interface TelemetrySectionProps {
 
 export const TelemetrySection = React.memo(function TelemetrySection({ config, onChange }: TelemetrySectionProps) {
   return (
-    <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-4">
+    <div className="ios-group p-4 sm:p-6 space-y-4">
       <h3 className="text-lg font-semibold">统计信息</h3>
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">
           <Label>启用统计信息发送</Label>
           <p className="text-sm text-muted-foreground">
-            发送匿名统计信息，帮助我们了解全球有多少只璃夜在运行
+            发送匿名统计信息，帮助我们了解当前项目的运行规模
           </p>
         </div>
         <Switch

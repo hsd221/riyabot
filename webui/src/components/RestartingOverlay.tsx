@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
+import { Button } from '@/components/ui/button'
 
 interface RestartingOverlayProps {
   onRestartComplete?: () => void
@@ -9,7 +10,9 @@ interface RestartingOverlayProps {
 
 export function RestartingOverlay({ onRestartComplete, onRestartFailed }: RestartingOverlayProps) {
   const [progress, setProgress] = useState(0)
-  const [status, setStatus] = useState<'restarting' | 'checking' | 'success' | 'failed'>('restarting')
+  const [status, setStatus] = useState<'restarting' | 'checking' | 'success' | 'failed'>(
+    'restarting'
+  )
   const [elapsedTime, setElapsedTime] = useState(0)
   const [checkAttempts, setCheckAttempts] = useState(0)
 
@@ -43,11 +46,11 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
 
   const startHealthCheck = () => {
     const maxAttempts = 60 // 最多尝试60次（约2分钟）
-    
+
     const checkHealth = async () => {
       try {
         setCheckAttempts((prev) => prev + 1)
-        
+
         const response = await fetch('/api/webui/system/status', {
           method: 'GET',
           headers: {
@@ -87,46 +90,57 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  const statusHint = {
+    restarting: '配置已保存，正在重启主程序。',
+    checking: '正在等待服务恢复，请勿关闭页面。',
+    success: '配置已生效，服务运行正常。',
+    failed: '如果长时间无响应，请尝试手动重启。',
+  }[status]
+
   return (
-    <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="max-w-md w-full mx-4 space-y-8">
+    <div className="bg-background/82 fixed inset-0 z-50 flex items-center justify-center p-5 backdrop-blur-2xl">
+      <div className="ios-card mx-auto w-full max-w-md space-y-7 p-6 sm:p-7">
         {/* 图标和状态 */}
         <div className="flex flex-col items-center space-y-4">
           {status === 'restarting' && (
             <>
-              <Loader2 className="h-16 w-16 text-primary animate-spin" />
-              <h2 className="text-2xl font-bold">正在重启璃夜</h2>
-              <p className="text-muted-foreground text-center">
-                请稍候，璃夜正在重启中...
-              </p>
+              <span className="ios-symbol ios-symbol-blue flex h-16 w-16 rounded-[20px]">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </span>
+              <h2 className="text-2xl font-semibold">正在重启主程序</h2>
+              <p className="text-center text-muted-foreground">请稍候，主程序正在重启中。</p>
             </>
           )}
-          
+
           {status === 'checking' && (
             <>
-              <Loader2 className="h-16 w-16 text-primary animate-spin" />
-              <h2 className="text-2xl font-bold">检查服务状态</h2>
-              <p className="text-muted-foreground text-center">
+              <span className="ios-symbol ios-symbol-blue flex h-16 w-16 rounded-[20px]">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </span>
+              <h2 className="text-2xl font-semibold">检查服务状态</h2>
+              <p className="text-center text-muted-foreground">
                 等待服务恢复... (尝试 {checkAttempts}/60)
               </p>
             </>
           )}
-          
+
           {status === 'success' && (
             <>
-              <CheckCircle2 className="h-16 w-16 text-green-500" />
-              <h2 className="text-2xl font-bold">重启成功</h2>
-              <p className="text-muted-foreground text-center">
-                正在跳转到登录页面...
-              </p>
+              <span className="ios-symbol ios-symbol-green flex h-16 w-16 rounded-[20px]">
+                <CheckCircle2 className="h-8 w-8" />
+              </span>
+              <h2 className="text-2xl font-semibold">重启成功</h2>
+              <p className="text-center text-muted-foreground">正在跳转到登录页面。</p>
             </>
           )}
-          
+
           {status === 'failed' && (
             <>
-              <AlertCircle className="h-16 w-16 text-destructive" />
-              <h2 className="text-2xl font-bold">重启超时</h2>
-              <p className="text-muted-foreground text-center">
+              <span className="ios-symbol ios-symbol-red flex h-16 w-16 rounded-[20px]">
+                <AlertCircle className="h-8 w-8" />
+              </span>
+              <h2 className="text-2xl font-semibold">重启超时</h2>
+              <p className="text-center text-muted-foreground">
                 服务未能在预期时间内恢复，请手动检查或刷新页面
               </p>
             </>
@@ -145,34 +159,27 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
         )}
 
         {/* 提示信息 */}
-        <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-          <p className="text-sm text-muted-foreground">
-            {status === 'restarting' && '🔄 配置已保存，正在重启主程序...'}
-            {status === 'checking' && '⏳ 正在等待服务恢复，请勿关闭页面...'}
-            {status === 'success' && '✅ 配置已生效，服务运行正常'}
-            {status === 'failed' && '⚠️ 如果长时间无响应，请尝试手动重启'}
-          </p>
+        <div className="ios-group px-4 py-3">
+          <p className="text-sm leading-5 text-muted-foreground">{statusHint}</p>
         </div>
 
         {/* 失败时的操作按钮 */}
         {status === 'failed' && (
           <div className="flex gap-2">
-            <button
-              onClick={() => window.location.reload()}
-              className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-            >
+            <Button onClick={() => window.location.reload()} className="flex-1">
               刷新页面
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => {
                 setStatus('checking')
                 setCheckAttempts(0)
                 startHealthCheck()
               }}
-              className="flex-1 px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90"
+              className="flex-1"
             >
               重试检测
-            </button>
+            </Button>
           </div>
         )}
       </div>

@@ -15,11 +15,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import {
   DndContext,
@@ -63,14 +59,9 @@ function SortableBadge({
   label: string
   onRemove: (value: string) => void
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: value })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: value,
+  })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -96,30 +87,30 @@ function SortableBadge({
       style={style}
       className={cn(
         'inline-flex items-center gap-1',
-        isDragging && 'shadow-lg'
+        isDragging && 'drop-shadow-[0_8px_16px_rgba(31,41,55,0.14)]'
       )}
     >
       <Badge
         variant="secondary"
-        className="cursor-move hover:bg-secondary/80 flex items-center gap-1"
+        className="flex min-h-7 cursor-move items-center gap-1 border-black/[0.025] bg-white/[0.68] px-2.5 hover:bg-white/[0.82] dark:border-white/10 dark:bg-white/[0.1]"
       >
         <div
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing flex items-center"
+          className="flex cursor-grab items-center active:cursor-grabbing"
         >
           <GripVertical className="h-3 w-3 text-muted-foreground" />
         </div>
         <span>{label}</span>
         <button
           type="button"
-          className="ml-1 rounded-sm hover:bg-destructive/20 focus:outline-none focus:ring-1 focus:ring-destructive"
+          className="ios-touch hover:bg-destructive/20 focus:ring-destructive ml-1 flex h-5 w-5 items-center justify-center rounded-full focus:outline-none focus:ring-1"
           onClick={handleRemoveClick}
           onPointerDown={handleRemovePointerDown}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <X
-            className="h-3 w-3 cursor-pointer hover:text-destructive"
+            className="hover:text-destructive h-3 w-3 cursor-pointer"
             strokeWidth={2}
             fill="none"
           />
@@ -182,18 +173,18 @@ export function MultiSelect({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn('w-full justify-between min-h-10 h-auto', className)}
+          className={cn(
+            'h-auto min-h-12 w-full justify-between rounded-[15px] px-4 py-2.5 text-left',
+            className
+          )}
         >
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <SortableContext
-              items={selected}
-              strategy={horizontalListSortingStrategy}
-            >
-              <div className="flex gap-1 flex-wrap flex-1">
+            <SortableContext items={selected} strategy={horizontalListSortingStrategy}>
+              <div className="flex flex-1 flex-wrap gap-1.5">
                 {selected.length === 0 ? (
                   <span className="text-muted-foreground">{placeholder}</span>
                 ) : (
@@ -212,12 +203,16 @@ export function MultiSelect({
               </div>
             </SortableContext>
           </DndContext>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" strokeWidth={2} fill="none" />
+          <ChevronsUpDown
+            className="ml-2 h-4 w-4 shrink-0 text-muted-foreground"
+            strokeWidth={2}
+            fill="none"
+          />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-full p-0" align="start">
+      <PopoverContent className="w-full p-1.5" align="start">
         <Command>
-          <CommandInput placeholder="搜索..." className="h-9" />
+          <CommandInput placeholder="搜索..." />
           <CommandList>
             <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
@@ -231,9 +226,9 @@ export function MultiSelect({
                   >
                     <div
                       className={cn(
-                        'mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary',
+                        'mr-2 grid h-5 w-5 place-content-center rounded-[7px] border border-black/[0.12] bg-white/[0.72] text-white shadow-[0_1px_0_rgba(255,255,255,0.7)_inset,0_1px_2px_rgba(0,0,0,0.06)] backdrop-blur-xl transition-colors dark:border-white/15 dark:bg-white/[0.08]',
                         isSelected
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'border-transparent bg-[linear-gradient(180deg,hsl(var(--primary)_/_0.92),hsl(var(--primary)))]'
                           : 'opacity-50 [&_svg]:invisible'
                       )}
                     >
