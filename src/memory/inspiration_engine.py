@@ -4,7 +4,7 @@
 通过关键词交叉引用和时间覆盖率验证，判断哪些噪声值得晋升为正式记忆。
 
 工作流程:
-    1. 查询候选噪声（retention_days 天内、significance > 0.3、最多 100 条）
+    1. 查询候选噪声（retention_days 天内，高显著性优先，同时保留低显著性抽样名额）
     2. 对每条候选噪声提取关键词，与现有活跃原子做交叉引用计数
     3. 时间覆盖率验证：检查噪声中是否含时间语境词，以及对应时间段是否已被覆盖
     4. 若关键词匹配 >= 3 且时间验证通过，晋升为 EPISODIC 类型记忆原子；否则丢弃
@@ -16,6 +16,7 @@ Classes:
 from __future__ import annotations
 
 import datetime
+import json
 import uuid
 from functools import reduce
 from typing import Any
@@ -24,7 +25,7 @@ from src.common.logger import get_logger
 from src.memory.atom import MemoryAtom as MemoryAtomDC, AtomType
 from src.memory.layer1_summarizer import extract_keywords
 from src.memory.layer3_retrieval import MemoryWriter
-from src.memory.schema import NoisePool, MemoryAtom as MemoryAtomModel, memory_db
+from src.memory.schema import InsightPool, NoisePool, MemoryAtom as MemoryAtomModel, memory_db
 from src.memory.store import MemoryStore
 
 logger = get_logger("memory.inspiration")
@@ -46,12 +47,20 @@ class InspirationEngine:
 
     # 关键词匹配阈值：噪声与 >= N 个现有原子共享关键词时才视为潜在信号
     KEYWORD_MATCH_MIN: int = 3
-    # 候选噪声最低显著性
+    # 兼容旧配置：候选不再按初始显著性过滤，低显著性片段也可能成为伏笔
     SIGNIFICANCE_MIN: float = 0.3
     # 每批最大候选数
     CANDIDATE_LIMIT: int = 100
+    # 每批保留给低显著性/早期片段的偏差抽样名额
+    LOW_SIGNAL_SAMPLE_LIMIT: int = 30
     # 晋升原子的置信度（来源为噪声，置信度偏低）
     PROMOTED_CONFIDENCE: float = 0.3
+    # 伏笔洞见的最小相关活跃原子数
+    FORESHADOW_MATCH_MIN: int = 2
+    # 伏笔洞见的置信度（保守低置信，避免写成事实）
+    FORESHADOW_CONFIDENCE: float = 0.45
+    # 单条伏笔洞见最多保留多少来源原子
+    FORESHADOW_SOURCE_LIMIT: int = 5
 
     def __init__(
         self,
@@ -78,10 +87,11 @@ class InspirationEngine:
         candidates = self._query_candidates()
         if not candidates:
             logger.debug("噪声回收: 无候选噪声")
-            return {"promoted": 0, "discarded": 0}
+            return {"promoted": 0, "discarded": 0, "insights": 0}
 
         promoted = 0
         discarded = 0
+        insights = 0
 
         for noise in candidates:
             content = noise.content
@@ -95,12 +105,13 @@ class InspirationEngine:
                 discarded += 1
                 continue
 
-            match_count = self._count_keyword_matches(keywords)
+            matched_atoms = self._matched_keyword_atoms(keywords)
+            match_count = len(matched_atoms)
 
             # ── Step 3: 时间覆盖率验证 ──
             temporal_gap = self._has_temporal_gap(content)
 
-            # ── Step 4: 晋升或丢弃 ──
+            # ── Step 4: 晋升、生成伏笔洞见或丢弃 ──
             if match_count >= self.KEYWORD_MATCH_MIN and temporal_gap:
                 await self._promote(noise)
                 promoted += 1
@@ -113,6 +124,10 @@ class InspirationEngine:
                         "keyword_matches": match_count,
                     },
                 )
+            elif match_count >= self.FORESHADOW_MATCH_MIN:
+                self._write_foreshadowing_insight(noise, keywords, matched_atoms)
+                self._delete_noise(noise.id)
+                insights += 1
             else:
                 self._delete_noise(noise.id)
                 discarded += 1
@@ -122,10 +137,11 @@ class InspirationEngine:
             extra={
                 "promoted": promoted,
                 "discarded": discarded,
+                "insights": insights,
                 "total_candidates": len(candidates),
             },
         )
-        return {"promoted": promoted, "discarded": discarded}
+        return {"promoted": promoted, "discarded": discarded, "insights": insights}
 
     # ── 内部方法 ──────────────────────────────────────────────
 
@@ -134,8 +150,8 @@ class InspirationEngine:
 
         条件:
             - 创建时间在 retention_days 内
-            - significance > SIGNIFICANCE_MIN
-            - 最多 CANDIDATE_LIMIT 条
+            - 高显著性优先
+            - 保留一部分低显著性/较早片段，避免真正的伏笔被高分噪声队列挤掉
 
         Returns:
             NoisePool 模型实例列表
@@ -143,14 +159,24 @@ class InspirationEngine:
         cutoff = datetime.datetime.now() - datetime.timedelta(days=self._retention_days)
         try:
             with memory_db:
-                return list(
+                low_signal_limit = min(self.LOW_SIGNAL_SAMPLE_LIMIT, self.CANDIDATE_LIMIT)
+                high_signal_limit = max(0, self.CANDIDATE_LIMIT - low_signal_limit)
+                high_signal_rows = list(
                     NoisePool.select()
-                    .where(
-                        NoisePool.created_at >= cutoff,
-                        NoisePool.significance > self.SIGNIFICANCE_MIN,
-                    )
-                    .limit(self.CANDIDATE_LIMIT)
+                    .where(NoisePool.created_at >= cutoff)
+                    .order_by(NoisePool.significance.desc(), NoisePool.created_at.desc())
+                    .limit(high_signal_limit)
                 )
+                low_signal_rows = list(
+                    NoisePool.select()
+                    .where(NoisePool.created_at >= cutoff)
+                    .order_by(NoisePool.significance.asc(), NoisePool.created_at.asc())
+                    .limit(low_signal_limit)
+                )
+                candidates: dict[int, Any] = {}
+                for row in high_signal_rows + low_signal_rows:
+                    candidates[int(row.id)] = row
+                return list(candidates.values())[: self.CANDIDATE_LIMIT]
         except Exception as e:
             logger.error(f"噪声回收: 查询候选失败: {e}")
             return []
@@ -171,23 +197,33 @@ class InspirationEngine:
         if not keywords:
             return 0
 
+        return len(self._matched_keyword_atoms(keywords))
+
+    def _matched_keyword_atoms(self, keywords: list[str], limit: int | None = None) -> list[MemoryAtomModel]:
+        """查询与关键词共享内容的活跃原子，供晋升和伏笔洞见共用。"""
+        if not keywords:
+            return []
+
         try:
             with memory_db:
                 # 构建 OR 条件: content LIKE '%kw1%' OR content LIKE '%kw2%' ...
                 kw_conditions = [MemoryAtomModel.content.contains(kw) for kw in keywords]
                 combined = reduce(lambda a, b: a | b, kw_conditions)
 
-                return (
+                query = (
                     MemoryAtomModel.select()
                     .where(
                         MemoryAtomModel.status == "active",
                         combined,
                     )
-                    .count()
+                    .order_by(MemoryAtomModel.weight.desc(), MemoryAtomModel.last_accessed_at.desc())
                 )
+                if limit is not None:
+                    query = query.limit(limit)
+                return list(query)
         except Exception as e:
             logger.warning(f"噪声回收: 关键词匹配失败: {e}")
-            return 0
+            return []
 
     def _has_temporal_gap(self, content: str) -> bool:
         """检查噪声内容是否指向一个未被记忆原子覆盖的时间段
@@ -263,6 +299,37 @@ class InspirationEngine:
             self._delete_noise(noise.id)
         except Exception as e:
             logger.error(f"噪声回收: 晋升失败 (id={noise.id}): {e}")
+
+    def _write_foreshadowing_insight(
+        self,
+        noise: Any,
+        keywords: list[str],
+        matched_atoms: list[MemoryAtomModel],
+    ) -> None:
+        """把能和已有记忆串起来的噪声保存为低置信伏笔洞见。"""
+        source_atoms = [atom.atom_id for atom in matched_atoms[: self.FORESHADOW_SOURCE_LIMIT]]
+        keyword_text = "、".join(keywords[:5]) if keywords else "相关线索"
+        content_preview = " ".join(str(noise.content or "").split())[:100]
+        content = f"伏笔洞见: 噪声片段可能与已有记忆通过「{keyword_text}」串联；原片段：{content_preview}"
+
+        try:
+            with memory_db:
+                InsightPool.create(
+                    content=content,
+                    source_atoms=json.dumps(source_atoms, ensure_ascii=False),
+                    agent_name="dream_foreshadowing",
+                    confidence=self.FORESHADOW_CONFIDENCE,
+                )
+            logger.info(
+                "噪声回收: 生成伏笔洞见",
+                extra={
+                    "noise_id": noise.id,
+                    "matched_atoms": len(source_atoms),
+                    "content_preview": content_preview[:60],
+                },
+            )
+        except Exception as e:
+            logger.warning(f"噪声回收: 写入伏笔洞见失败 (id={noise.id}): {e}")
 
     @staticmethod
     def _delete_noise(noise_id: int) -> None:

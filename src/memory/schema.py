@@ -184,6 +184,10 @@ class RawMessageArchive(BaseModel):
     content = TextField()  # 消息内容
     timestamp = DoubleField()  # 消息时间戳
     chat_type = TextField()  # 聊天类型: group/private
+    dream_status = TextField(default="pending", index=True)  # 梦境处理状态: pending/triaged/skipped
+    dream_route = TextField(null=True, index=True)  # 梦境分诊路由: high/medium/low/skipped
+    dream_significance = FloatField(null=True)  # 梦境分诊显著性评分
+    dream_processed_at = DateTimeField(null=True)  # 梦境分诊完成时间
 
     class Meta:
         table_name = "raw_message_archive"
@@ -215,11 +219,12 @@ class ConflictObservation(BaseModel):
 
 
 class NoisePool(BaseModel):
-    """噪声池 — 低显著性信息，7天保留期"""
+    """噪声池 — 低显著性信息，等待梦境回收"""
 
     id = AutoField()
     content = TextField()  # 内容
     source_scene = TextField(default="chat")  # 来源场景
+    source_id = TextField(null=True, index=True)  # 来源 ID，如 raw_message_archive:<id>
     significance = FloatField(default=0.0)  # 显著性评分
     created_at = DateTimeField(default=datetime.datetime.now)  # 创建时间
     ttl_days = IntegerField(default=7)  # 保留天数
@@ -392,6 +397,10 @@ def _ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_raw_archive_stream_ts ON raw_message_archive(stream_id, timestamp)",
         ),
         (
+            "idx_raw_archive_dream_status_ts",
+            "CREATE INDEX IF NOT EXISTS idx_raw_archive_dream_status_ts ON raw_message_archive(dream_status, timestamp)",
+        ),
+        (
             "idx_conflict_status_created",
             "CREATE INDEX IF NOT EXISTS idx_conflict_status_created ON conflict_observations(status, created_at)",
         ),
@@ -408,11 +417,32 @@ def _ensure_columns():
     try:
         if not memory_db.table_exists(MemoryAtom):
             return
-        rows = memory_db.execute_sql("PRAGMA table_info(memory_atoms)").fetchall()
-        columns = {row[1] for row in rows}
-        if "source_id" not in columns:
+        atom_rows = memory_db.execute_sql("PRAGMA table_info(memory_atoms)").fetchall()
+        atom_columns = {row[1] for row in atom_rows}
+        if "source_id" not in atom_columns:
             memory_db.execute_sql("ALTER TABLE memory_atoms ADD COLUMN source_id TEXT")
             logger.info("记忆表 memory_atoms 已补充 source_id 列")
+
+        if memory_db.table_exists(RawMessageArchive):
+            raw_rows = memory_db.execute_sql("PRAGMA table_info(raw_message_archive)").fetchall()
+            raw_columns = {row[1] for row in raw_rows}
+            raw_column_defs = {
+                "dream_status": "ALTER TABLE raw_message_archive ADD COLUMN dream_status TEXT DEFAULT 'pending'",
+                "dream_route": "ALTER TABLE raw_message_archive ADD COLUMN dream_route TEXT",
+                "dream_significance": "ALTER TABLE raw_message_archive ADD COLUMN dream_significance REAL",
+                "dream_processed_at": "ALTER TABLE raw_message_archive ADD COLUMN dream_processed_at DATETIME",
+            }
+            for column, ddl in raw_column_defs.items():
+                if column not in raw_columns:
+                    memory_db.execute_sql(ddl)
+                    logger.info("原始消息归档表 raw_message_archive 已补充 %s 列", column)
+
+        if memory_db.table_exists(NoisePool):
+            noise_rows = memory_db.execute_sql("PRAGMA table_info(noise_pool)").fetchall()
+            noise_columns = {row[1] for row in noise_rows}
+            if "source_id" not in noise_columns:
+                memory_db.execute_sql("ALTER TABLE noise_pool ADD COLUMN source_id TEXT")
+                logger.info("噪声池 noise_pool 已补充 source_id 列")
     except Exception as e:
         logger.warning("补齐记忆表字段失败: %s", e)
 

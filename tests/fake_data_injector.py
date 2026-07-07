@@ -616,7 +616,11 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             user_id TEXT NOT NULL,
             content TEXT NOT NULL,
             timestamp REAL NOT NULL,
-            chat_type TEXT NOT NULL
+            chat_type TEXT NOT NULL,
+            dream_status TEXT DEFAULT 'pending',
+            dream_route TEXT,
+            dream_significance REAL,
+            dream_processed_at DATETIME
         )
     """)
     cursor.execute("""
@@ -630,6 +634,10 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_raw_archive_stream_ts
         ON raw_message_archive(stream_id, timestamp)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_raw_archive_dream_status_ts
+        ON raw_message_archive(dream_status, timestamp)
     """)
 
     cursor.execute("""
@@ -651,7 +659,8 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             privacy_level TEXT DEFAULT 'public',
             trace_chain_id TEXT,
             status TEXT DEFAULT 'active',
-            embedding_id TEXT
+            embedding_id TEXT,
+            source_id TEXT
         )
     """)
     cursor.execute("""
