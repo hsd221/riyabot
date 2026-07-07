@@ -771,8 +771,7 @@ class BrainChatting:
                             atoms = [ReinforcementTracker._dict_to_atom(d) for d in atom_data_list if d is not None]
                             if atoms:
                                 usage = tracker.analyze_reply_for_memory_usage(reply_text, atoms)
-                                for aid, level in usage.items():
-                                    await tracker.apply_reinforcement([aid], level)
+                                await tracker.apply_usage_feedback(usage)
                                 logger.debug(f"{self.log_prefix} 记忆强化反馈: {len(usage)} 个原子已处理")
                     except Exception as e:
                         logger.debug(f"{self.log_prefix} 记忆反馈跳过: {e}")

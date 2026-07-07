@@ -195,10 +195,10 @@ ban_msgs_regex = [
 ]
 
 
-[lpmm_knowledge] # lpmm知识库配置
-enable = false # 是否启用lpmm知识库
+[lpmm_knowledge] # 旧 LPMM 知识入口兼容配置
+enable = false # 是否启用旧知识入口的按需记忆查询兼容桥，默认关闭，避免和新记忆主链路重复查询
 lpmm_mode = "agent"
-# 可选择classic传统模式/agent 模式，结合新的记忆一同使用
+# 可选择 classic/agent；只有 enable=true 且 classic 时才额外启用兼容桥
 rag_synonym_search_top_k = 10 # 同义检索TopK
 rag_synonym_threshold = 0.8 # 同义阈值，相似度高于该值的关系会被当作同义词
 info_extraction_workers = 3 # 实体抽取同时执行线程数，非Pro模型不要设置超过5

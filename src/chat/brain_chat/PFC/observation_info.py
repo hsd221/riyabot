@@ -1,13 +1,13 @@
 from typing import List, Optional, Dict, Any, Set
 from maim_message import UserInfo
 import time
-from src.common.logger import get_module_logger
+from src.common.logger import get_logger
 from .chat_observer import ChatObserver
 from .chat_states import NotificationHandler, NotificationType, Notification
-from src.chat.utils.chat_message_builder import build_readable_messages
+from .pfc_KnowledgeFetcher import format_pfc_chat_history
 import traceback  # 导入 traceback 用于调试
 
-logger = get_module_logger("observation_info")
+logger = get_logger("observation_info")
 
 
 class ObservationInfoHandler(NotificationHandler):
@@ -366,13 +366,7 @@ class ObservationInfo:
         # 更新历史记录字符串 (只使用最近一部分生成，例如20条)
         history_slice_for_str = self.chat_history[-20:]
         try:
-            self.chat_history_str = await build_readable_messages(
-                history_slice_for_str,
-                replace_bot_name=True,
-                merge_messages=False,
-                timestamp_mode="relative",
-                read_mark=0.0,  # read_mark 可能需要根据逻辑调整
-            )
+            self.chat_history_str = format_pfc_chat_history(history_slice_for_str)
         except Exception as e:
             logger.error(f"[私聊][{self.private_name}]构建聊天记录字符串时出错: {e}")
             self.chat_history_str = "[构建聊天记录出错]"  # 提供错误提示

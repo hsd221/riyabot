@@ -20,6 +20,7 @@ import json
 import math
 import datetime as _dt
 import hashlib
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -49,6 +50,10 @@ from src.memory.write_ops import WriteOpLogger, OpType, WriteOperation
 from src.memory.embedding_utils import generate_embedding, generate_query_embedding
 
 logger = get_logger("memory.layer3")
+
+_MIN_QUERY_RELEVANCE = 0.08
+_MIN_SEMANTIC_QUERY_RELEVANCE = 0.5
+_CJK_RELEVANCE_STOP_CHARS = set("的一是在了有和与及或也就都还很被把给吗呢啊吧呀哦嗯我你他她它们这那个")
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -137,6 +142,61 @@ def _entities_include_user(entities: Any, user_id: str) -> bool:
         return any(_entities_include_user(item, user_id) for item in entities)
 
     return str(entities) == user_id
+
+
+def _normalize_relevance_text(text: str) -> str:
+    """归一化用于轻量相关性判断的文本。"""
+    normalized = str(text or "").lower()
+    normalized = re.sub(r"近邻上下文[:：][^\n]*", " ", normalized)
+    normalized = re.sub(
+        r"(当前目标消息|当前目标|目标消息|需要查证的问题|检索问题|待理解词语|追问线索|近邻上下文|当前发言人)[:：]",
+        " ",
+        normalized,
+    )
+    return re.sub(r"\s+", "", normalized)
+
+
+def _relevance_units(text: str) -> set[str]:
+    """提取中文双字片段与英文/数字词，用于避免无关高权重记忆进入 prompt。"""
+    normalized = _normalize_relevance_text(text)
+    units: set[str] = set(re.findall(r"[a-z0-9_+#.-]{2,}", normalized))
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]", normalized)
+    if cjk_chars:
+        if len(cjk_chars) == 1:
+            units.add(cjk_chars[0])
+        else:
+            units.update("".join(cjk_chars[i : i + 2]) for i in range(len(cjk_chars) - 1))
+    return units
+
+
+def _query_relevance(query_text: str, content: str, similarity_score: float = 0.0) -> float:
+    """计算查询与记忆文本的保守相关度，取向量相似与词面重合的较高值。"""
+    query = _normalize_relevance_text(query_text)
+    content_text = _normalize_relevance_text(content)
+    if not query or not content_text:
+        return max(0.0, float(similarity_score or 0.0))
+    if query in content_text or content_text in query:
+        return 1.0
+
+    query_units = _relevance_units(query)
+    content_units = _relevance_units(content_text)
+    unit_score = 0.0
+    if query_units and content_units:
+        unit_score = len(query_units & content_units) / max(len(query_units), 1)
+
+    query_chars = {c for c in query if "\u4e00" <= c <= "\u9fff" and c not in _CJK_RELEVANCE_STOP_CHARS}
+    content_chars = {c for c in content_text if "\u4e00" <= c <= "\u9fff" and c not in _CJK_RELEVANCE_STOP_CHARS}
+    char_score = 0.0
+    if query_chars and content_chars:
+        overlap = query_chars & content_chars
+        if len(overlap) >= 2:
+            char_score = len(overlap) / max(len(query_chars), 1)
+
+    lexical_score = max(unit_score, char_score * 0.65)
+    semantic_score = float(similarity_score or 0.0)
+    if lexical_score >= _MIN_QUERY_RELEVANCE and semantic_score >= _MIN_SEMANTIC_QUERY_RELEVANCE:
+        return max(lexical_score, semantic_score)
+    return lexical_score
 
 
 # ---------------------------------------------------------------------------
@@ -696,7 +756,15 @@ class MemoryWriter:
             else:
                 # 非内容字段变更：仅更新 Qdrant payload
                 qdrant_updates = {}
-                for key in ("weight", "importance", "confidence", "status", "privacy_level", "source_scene", "source_id"):
+                for key in (
+                    "weight",
+                    "importance",
+                    "confidence",
+                    "status",
+                    "privacy_level",
+                    "source_scene",
+                    "source_id",
+                ):
                     if key in store_updates:
                         qdrant_updates[key] = store_updates[key]
                 if qdrant_updates:
@@ -1069,12 +1137,7 @@ class MemoryRetriever:
                 ]
                 if source_scene:
                     conditions.append(MemoryAtomModel.source_scene == source_scene)
-                query = (
-                    MemoryAtomModel.select()
-                    .where(*conditions)
-                    .order_by(MemoryAtomModel.weight.desc())
-                    .limit(limit)
-                )
+                query = MemoryAtomModel.select().where(*conditions).order_by(MemoryAtomModel.weight.desc()).limit(limit)
                 return [self._model_to_result(atom) for atom in query if atom.weight >= min_weight]
         except Exception as e:
             logger.error(f"按来源检索失败 ({source_id}): {e}")
@@ -1180,12 +1243,13 @@ class MemoryRetriever:
         enable_association_expansion: bool = True,
         include_sensory_tags: bool = True,
         include_global: Optional[bool] = None,
+        query_text: str = "",
     ) -> str:
         """获取回复上下文 — 为 LLM 生成检索到的记忆文本块
 
         检索策略:
-            - 优先该 stream 下权重最高的记忆
-            - 如果指定了 user_id，同时检索该用户的记忆
+            - 有 query_text 时优先检索并保留与当前目标相关的记忆
+            - 如果指定了 user_id，同时补充该用户的候选记忆
             - 仅包含 fade_level 为"完整"或"摘要"的记忆
             - 按 final_score 排序，截断至 max_chars
             - 如果启用关联扩展，自动追加关联记忆
@@ -1200,160 +1264,21 @@ class MemoryRetriever:
             enable_association_expansion: 是否启用关联扩展（默认 True）
             include_sensory_tags: 是否在格式化中插入感官/情绪/时间标签前缀（默认 True）
             include_global: 是否补充同场景全局记忆；None 时读取配置
+            query_text: 当前目标消息/检索问题，用于相关性排序与过滤
 
         Returns:
             格式化的记忆文本块，可用于 LLM prompt 拼接
         """
-        candidates: list[dict[str, Any]] = []
-
-        scene = _resolve_scene_type(stream_id, scene_type)
-        include_global = _global_memory_allowed(stream_id, include_global)
-        blacklisted_source_ids = _global_memory_blacklist_source_ids() if include_global else set()
-
-        # 1. 优先检索当前聊天流的本地记忆
-        local_atoms = await self.retrieve_by_source(
-            source_id=stream_id,
-            source_scene=scene,
-            limit=max_atoms * 3,
-            min_weight=0.0,
-        )
-        candidates.extend(local_atoms)
-
-        # 2. 配置允许时补充同场景全局记忆
-        if include_global:
-            scene_atoms = await self.retrieve_by_scene(
-                source_scene=scene,
-                limit=max_atoms * 3,
-                min_weight=0.0,
-            )
-            privacy_filter = PrivacyFilter()
-            global_atoms = [
-                atom
-                for atom in scene_atoms
-                if atom.get("source_id") != stream_id and atom.get("source_id") not in blacklisted_source_ids
-            ]
-            candidates.extend(privacy_filter.filter_atoms(global_atoms, scene, stream_id))
-
-        # 3. 如果指定了用户，补充当前聊天流内该用户的记忆
-        if user_id:
-            user_atoms = await self.retrieve_by_user(
-                user_id=user_id,
-                source_id=stream_id,
-                source_scene=scene,
-                limit=max_atoms * 2,
-            )
-            candidates.extend(user_atoms)
-            if include_global:
-                global_user_atoms = await self.retrieve_by_user(
-                    user_id=user_id,
-                    limit=max_atoms * 2,
-                )
-                privacy_filter = PrivacyFilter()
-                global_user_atoms = [
-                    atom for atom in global_user_atoms if atom.get("source_id") not in blacklisted_source_ids
-                ]
-                candidates.extend(privacy_filter.filter_atoms(global_user_atoms, scene, stream_id))
-
-        if not candidates:
-            return ""
-
-        # 4. 去重（按 atom_id 去重，保留 first_score 更高的那条）
-        seen: set[str] = set()
-        unique: list[dict[str, Any]] = []
-        for atom in candidates:
-            aid = atom.get("atom_id", "")
-            if aid not in seen:
-                seen.add(aid)
-                # 确保有 final_score
-                if "final_score" not in atom:
-                    weight = float(atom.get("weight", 0.0))
-                    atom["final_score"] = weight
-                unique.append(atom)
-
-        # 5. 仅保留 fade_level ∈ {完整, 摘要}
-        filtered = [a for a in unique if get_fade_level(float(a.get("weight", 0.0))) in ("完整", "摘要")]
-
-        # 6. 按 final_score 排序
-        filtered.sort(key=lambda a: a.get("final_score", 0.0), reverse=True)
-
-        # 7. 感官标签增强（从 EpisodicDetail 表加载并注入前缀到 content）
-        top_atoms = filtered[:max_atoms]
-        if include_sensory_tags:
-            try:
-                episodic_atom_ids = [a.get("atom_id", "") for a in top_atoms if a.get("atom_type") == "episodic"]
-                if episodic_atom_ids:
-                    with memory_db:
-                        detail_rows = EpisodicDetailModel.select().where(
-                            EpisodicDetailModel.atom.in_(episodic_atom_ids)
-                        )
-                        tag_map: dict[str, list[str]] = {}
-                        for row in detail_rows:
-                            aids = row.atom
-                            try:
-                                sensory = json.loads(row.sensory_tags) if row.sensory_tags else []
-                            except (json.JSONDecodeError, TypeError):
-                                sensory = []
-                            emotional = [t for t in sensory if t.startswith("emotional:")]
-                            other = [t for t in sensory if not t.startswith("emotional:")]
-                            prefixes: list[str] = []
-                            if emotional:
-                                labels = [e.split(":", 1)[1] for e in emotional]
-                                prefixes.append(f"[情感: {'/'.join(labels)}]")
-                            if other:
-                                prefixes.append(f"[感官: {'/'.join(other)}]")
-                            if row.temporal_context:
-                                prefixes.append(f"[时间: {row.temporal_context}]")
-                            if prefixes:
-                                tag_map[aids] = prefixes
-
-                    for atom in top_atoms:
-                        aid = atom.get("atom_id", "")
-                        prefixes = tag_map.get(aid)
-                        if prefixes:
-                            prefix_str = " ".join(prefixes)
-                            orig_content = atom.get("content", "")
-                            atom["content"] = f"{prefix_str} {orig_content}"
-            except Exception as e:
-                logger.warning("感官标签增强失败: %s", e)
-
-        # 8. 格式化 & 截断
-        formatted = self._format_atoms_for_prompt(top_atoms)
-        if len(formatted) > max_chars:
-            formatted = formatted[:max_chars].rsplit("\n", 1)[0]
-
-        # 9. 关联扩展
-        if enable_association_expansion and top_atoms:
-            try:
-                expanded = await self._expand_with_associations(top_atoms, max_depth=2)
-                if expanded:
-                    # 过滤也在得分范围内的关联
-                    existing_ids = {a.get("atom_id", "") for a in top_atoms}
-                    assoc_lines: list[str] = []
-                    for i, atom in enumerate(expanded, 1):
-                        aid = atom.get("atom_id", "")
-                        if aid and aid not in existing_ids:
-                            content = atom.get("content", "")
-                            assoc_lines.append(f"[关联记忆{i}] {content}")
-
-                    if assoc_lines:
-                        assoc_text = "\n" + "\n".join(assoc_lines)
-                        remaining = max_chars - len(formatted)
-                        if remaining > 0:
-                            if len(assoc_text) > remaining:
-                                assoc_text = assoc_text[:remaining].rsplit("\n", 1)[0]
-                            formatted += assoc_text
-            except Exception as e:
-                logger.warning("关联扩展失败 (get_context_for_reply): %s", e)
-
-        logger.info(
-            "构建记忆检索上下文",
-            scene_type=scene,
-            atom_count=len(candidates),
-            context_chars=len(formatted),
-        )
-        logger.debug(
-            "检索上下文详情",
-            atom_types=dict(Counter(a.get("atom_type", "unknown") for a in candidates)),
+        formatted, _ = await self.get_context_for_reply_with_ids(
+            stream_id=stream_id,
+            user_id=user_id,
+            scene_type=scene_type,
+            max_atoms=max_atoms,
+            max_chars=max_chars,
+            include_sensory_tags=include_sensory_tags,
+            enable_association_expansion=enable_association_expansion,
+            include_global=include_global,
+            query_text=query_text,
         )
         return formatted
 
@@ -1367,6 +1292,7 @@ class MemoryRetriever:
         include_sensory_tags: bool = True,
         enable_association_expansion: bool = True,
         include_global: Optional[bool] = None,
+        query_text: str = "",
     ) -> tuple[str, list[str]]:
         """获取回复上下文同时返回 atom_ids — 与 get_context_for_reply() 逻辑一致
 
@@ -1384,6 +1310,7 @@ class MemoryRetriever:
             include_sensory_tags: 是否在格式化中插入感官/情绪/时间标签前缀（默认 True）
             enable_association_expansion: 是否启用关联扩展（默认 True）
             include_global: 是否补充同场景全局记忆；None 时读取配置
+            query_text: 当前目标消息/检索问题，用于相关性排序与过滤
 
         Returns:
             tuple[str, list[str]]: (格式化后的记忆文本块, 检索到的 atom_id 列表)
@@ -1393,6 +1320,22 @@ class MemoryRetriever:
         scene = _resolve_scene_type(stream_id, scene_type)
         include_global = _global_memory_allowed(stream_id, include_global)
         blacklisted_source_ids = _global_memory_blacklist_source_ids() if include_global else set()
+        query_text = query_text.strip()
+        has_query = bool(_relevance_units(query_text))
+
+        if has_query:
+            local_query_atoms = await self.retrieve_by_vector(
+                query_text=query_text,
+                filters={
+                    "source_scene": scene,
+                    "source_id": stream_id,
+                    "status": "active",
+                    "keyword": query_text,
+                },
+                top_k=max_atoms * 4,
+                min_weight=0.0,
+            )
+            candidates.extend(local_query_atoms)
 
         # 1. 优先检索当前聊天流的本地记忆
         local_atoms = await self.retrieve_by_source(
@@ -1405,6 +1348,25 @@ class MemoryRetriever:
 
         # 2. 配置允许时补充同场景全局记忆
         if include_global:
+            if has_query:
+                scene_query_atoms = await self.retrieve_by_vector(
+                    query_text=query_text,
+                    filters={
+                        "source_scene": scene,
+                        "status": "active",
+                        "keyword": query_text,
+                    },
+                    top_k=max_atoms * 4,
+                    min_weight=0.0,
+                )
+                privacy_filter = PrivacyFilter()
+                global_query_atoms = [
+                    atom
+                    for atom in scene_query_atoms
+                    if atom.get("source_id") != stream_id and atom.get("source_id") not in blacklisted_source_ids
+                ]
+                candidates.extend(privacy_filter.filter_atoms(global_query_atoms, scene, stream_id))
+
             scene_atoms = await self.retrieve_by_scene(
                 source_scene=scene,
                 limit=max_atoms * 3,
@@ -1446,13 +1408,23 @@ class MemoryRetriever:
         unique: list[dict[str, Any]] = []
         for atom in candidates:
             aid = atom.get("atom_id", "")
-            if aid not in seen:
-                seen.add(aid)
-                # 确保有 final_score
-                if "final_score" not in atom:
-                    weight = float(atom.get("weight", 0.0))
-                    atom["final_score"] = weight
-                unique.append(atom)
+            if aid in seen:
+                continue
+            weight = float(atom.get("weight", 0.0))
+            if has_query:
+                relevance = _query_relevance(
+                    query_text,
+                    str(atom.get("content", "")),
+                    float(atom.get("similarity_score", 0.0)),
+                )
+                if relevance < _MIN_QUERY_RELEVANCE:
+                    continue
+                atom["relevance_score"] = relevance
+                atom["final_score"] = max(float(atom.get("final_score", 0.0)), weight * relevance)
+            elif "final_score" not in atom:
+                atom["final_score"] = weight
+            seen.add(aid)
+            unique.append(atom)
 
         # 5. 仅保留 fade_level ∈ {完整, 摘要}
         filtered = [a for a in unique if get_fade_level(float(a.get("weight", 0.0))) in ("完整", "摘要")]
@@ -1502,59 +1474,60 @@ class MemoryRetriever:
             except Exception as e:
                 logger.warning("感官标签增强失败 (get_context_for_reply_with_ids): %s", e)
 
-        # 8. 取 top-N 并收集 atom_ids
-        atom_ids: list[str] = [a.get("atom_id", "") for a in top_atoms if a.get("atom_id")]
+        # 8. 格式化，并只收集实际写入 prompt 的 atom_ids
+        formatted, atom_ids = self._format_atoms_for_prompt_with_ids(top_atoms, max_chars=max_chars)
+        included_atom_ids = set(atom_ids)
+        included_top_atoms = [a for a in top_atoms if a.get("atom_id", "") in included_atom_ids]
 
-        # 9. 格式化 & 截断
-        formatted = self._format_atoms_for_prompt(top_atoms)
-        if len(formatted) > max_chars:
-            formatted = formatted[:max_chars].rsplit("\n", 1)[0]
-
-        # 10. 关联扩展
-        if enable_association_expansion and top_atoms:
+        # 9. 关联扩展
+        if enable_association_expansion and included_top_atoms:
             try:
-                expanded = await self._expand_with_associations(top_atoms, max_depth=2)
+                expanded = await self._expand_with_associations(included_top_atoms, max_depth=2)
                 if expanded:
-                    existing_ids = {a.get("atom_id", "") for a in top_atoms}
-                    assoc_lines: list[str] = []
+                    existing_ids = set(atom_ids)
                     for i, atom in enumerate(expanded, 1):
                         aid = atom.get("atom_id", "")
                         if aid and aid not in existing_ids:
                             content = atom.get("content", "")
-                            assoc_lines.append(f"[关联记忆{i}] {content}")
-
-                    if assoc_lines:
-                        assoc_text = "\n" + "\n".join(assoc_lines)
-                        remaining = max_chars - len(formatted)
-                        if remaining > 0:
-                            if len(assoc_text) > remaining:
-                                assoc_text = assoc_text[:remaining].rsplit("\n", 1)[0]
-                            formatted += assoc_text
+                            if has_query:
+                                relevance = _query_relevance(
+                                    query_text,
+                                    str(content),
+                                    float(atom.get("similarity_score", 0.0)),
+                                )
+                                if relevance < _MIN_QUERY_RELEVANCE:
+                                    continue
+                            line = f"- A{i} [关联] {content}"
+                            formatted, added = self._append_prompt_line(formatted, line, max_chars)
+                            if added:
+                                existing_ids.add(aid)
+                                atom_ids.append(aid)
             except Exception as e:
                 logger.warning("关联扩展失败 (get_context_for_reply_with_ids): %s", e)
 
-        # 11. 图谱关联扩展
-        if self.graph_store is not None and enable_association_expansion and top_atoms:
+        # 10. 图谱关联扩展
+        if self.graph_store is not None and enable_association_expansion and atom_ids:
             try:
                 graph_expanded = await self._expand_with_graph(atom_ids, max_depth=1)
                 if graph_expanded:
                     existing_ids = set(atom_ids)
-                    graph_lines: list[str] = []
                     for atom in graph_expanded:
                         aid = atom.get("atom_id", "")
                         if aid and aid not in existing_ids:
                             content = atom.get("content", "")
-                            graph_lines.append(f"[关联实体] {content}")
-                            existing_ids.add(aid)
-                            atom_ids.append(aid)
-
-                    if graph_lines:
-                        graph_text = "\n" + "\n".join(graph_lines)
-                        remaining = max_chars - len(formatted)
-                        if remaining > 0:
-                            if len(graph_text) > remaining:
-                                graph_text = graph_text[:remaining].rsplit("\n", 1)[0]
-                            formatted += graph_text
+                            if has_query:
+                                relevance = _query_relevance(
+                                    query_text,
+                                    str(content),
+                                    float(atom.get("similarity_score", 0.0)),
+                                )
+                                if relevance < _MIN_QUERY_RELEVANCE:
+                                    continue
+                            line = f"- G [关联实体] {content}"
+                            formatted, added = self._append_prompt_line(formatted, line, max_chars)
+                            if added:
+                                existing_ids.add(aid)
+                                atom_ids.append(aid)
             except Exception as e:
                 logger.warning("图谱关联扩展失败 (get_context_for_reply_with_ids): %s", e)
 
@@ -1564,6 +1537,7 @@ class MemoryRetriever:
             atom_count=len(candidates),
             context_chars=len(formatted),
             atom_ids_count=len(atom_ids),
+            query_relevance=has_query,
         )
         logger.debug(
             "检索上下文详情（带ID）",
@@ -1773,6 +1747,7 @@ class MemoryRetriever:
         max_atoms: int = 3,
         max_chars: int = 400,
         cross_scene_atoms: int = 5,
+        query_text: str = "",
     ) -> str:
         """跨场景记忆检索 — 从其他场景获取记忆并应用隐私过滤
 
@@ -1794,14 +1769,37 @@ class MemoryRetriever:
             max_atoms: 最终返回的最大记忆条数
             max_chars: 返回文本的最大字符数
             cross_scene_atoms: 跨场景检索的候选数量
+            query_text: 当前目标消息/检索问题，用于相关性排序与过滤
 
         Returns:
             格式化后的跨场景记忆文本，无可返回的内容时返回空字符串
         """
+        formatted, _ = await self.get_cross_scene_context_with_ids(
+            scene_type=scene_type,
+            stream_id=stream_id,
+            user_id=user_id,
+            max_atoms=max_atoms,
+            max_chars=max_chars,
+            cross_scene_atoms=cross_scene_atoms,
+            query_text=query_text,
+        )
+        return formatted
+
+    async def get_cross_scene_context_with_ids(
+        self,
+        scene_type: str,
+        stream_id: str,
+        user_id: str = "",
+        max_atoms: int = 3,
+        max_chars: int = 400,
+        cross_scene_atoms: int = 5,
+        query_text: str = "",
+    ) -> tuple[str, list[str]]:
+        """跨场景记忆检索，并返回实际注入 prompt 的 atom_ids。"""
         try:
             target_scene = "group_chat" if "group" in str(scene_type) else "private_chat"
             if not _global_memory_allowed(stream_id):
-                return ""
+                return "", []
 
             target_scope = stream_id
             blacklisted_source_ids = _global_memory_blacklist_source_ids()
@@ -1810,16 +1808,34 @@ class MemoryRetriever:
             other_scene = "private_chat" if target_scene == "group_chat" else "group_chat"
 
             cross_candidates: list[AtomDict] = []
+            query_text = query_text.strip()
+            has_query = bool(_relevance_units(query_text))
 
             # 1. 从另一场景检索记忆
-            other_atoms = await self.retrieve_by_scene(
-                source_scene=other_scene,
-                limit=cross_scene_atoms * 3,
-                min_weight=0.0,
-            )
-            cross_candidates.extend(
-                atom for atom in other_atoms if atom.get("source_id") not in blacklisted_source_ids
-            )
+            if has_query:
+                other_atoms = await self.retrieve_by_vector(
+                    query_text=query_text,
+                    filters={
+                        "source_scene": other_scene,
+                        "status": "active",
+                        "keyword": query_text,
+                    },
+                    top_k=cross_scene_atoms * 3,
+                    min_weight=0.0,
+                )
+                fallback_atoms = await self.retrieve_by_scene(
+                    source_scene=other_scene,
+                    limit=cross_scene_atoms * 3,
+                    min_weight=0.0,
+                )
+                other_atoms.extend(fallback_atoms)
+            else:
+                other_atoms = await self.retrieve_by_scene(
+                    source_scene=other_scene,
+                    limit=cross_scene_atoms * 3,
+                    min_weight=0.0,
+                )
+            cross_candidates.extend(atom for atom in other_atoms if atom.get("source_id") not in blacklisted_source_ids)
 
             # 2. 补充该用户跨场景的记忆
             if user_id:
@@ -1833,7 +1849,7 @@ class MemoryRetriever:
                 )
 
             if not cross_candidates:
-                return ""
+                return "", []
 
             # 3. 按 atom_id 去重
             seen: set[str] = set()
@@ -1853,27 +1869,39 @@ class MemoryRetriever:
             )
 
             if not filtered:
-                return ""
+                return "", []
 
-            # 5. 按权重排序
+            # 5. 按权重/相关度排序
+            scored: list[AtomDict] = []
             for atom in filtered:
-                if "final_score" not in atom:
-                    atom["final_score"] = float(atom.get("weight", 0.0))
-            filtered.sort(key=lambda a: a.get("final_score", 0.0), reverse=True)
+                weight = float(atom.get("weight", 0.0))
+                if has_query:
+                    relevance = _query_relevance(
+                        query_text,
+                        str(atom.get("content", "")),
+                        float(atom.get("similarity_score", 0.0)),
+                    )
+                    if relevance < _MIN_QUERY_RELEVANCE:
+                        continue
+                    atom["relevance_score"] = relevance
+                    atom["final_score"] = max(float(atom.get("final_score", 0.0)), weight * relevance)
+                elif "final_score" not in atom:
+                    atom["final_score"] = weight
+                scored.append(atom)
+            scored.sort(key=lambda a: a.get("final_score", 0.0), reverse=True)
 
             # 6. 取 top-N 并格式化
-            top = filtered[:cross_scene_atoms]
-            formatted = self._format_atoms_for_prompt(top)
-            if len(formatted) > max_chars:
-                formatted = formatted[:max_chars].rsplit("\n", 1)[0]
+            top = scored[:max_atoms]
+            formatted, atom_ids = self._format_atoms_for_prompt_with_ids(top, max_chars=max_chars)
 
             logger.info(
                 "跨场景检索完成",
                 target_scene=target_scene,
                 other_scene=other_scene,
                 total_candidates=len(unique),
-                after_filter=len(filtered),
+                after_filter=len(scored),
                 result_chars=len(formatted),
+                query_relevance=has_query,
             )
 
             # 如果跨场景检索结果为空字符串，也记录调试日志
@@ -1881,14 +1909,14 @@ class MemoryRetriever:
                 logger.debug(
                     "跨场景记忆详情",
                     scene_type=target_scene,
-                    atom_ids=list(seen),
+                    atom_ids=atom_ids,
                 )
 
-            return formatted
+            return formatted, atom_ids
 
         except Exception as e:
             logger.error(f"跨场景检索失败: {e}")
-            return ""
+            return "", []
 
     # ── 内部方法 ───────────────────────────────────────────
 
@@ -1984,7 +2012,7 @@ class MemoryRetriever:
     def _format_atoms_for_prompt(atoms: list[AtomDict]) -> str:
         """将检索结果格式化为 LLM prompt 用的文本块
 
-        每条记忆占一行，格式: [记忆{N}][{褪色等级}] {内容}
+        每条候选证据占一行，格式: - M{N} [类型/褪色/相关度] {内容}
 
         Args:
             atoms: 排序后的原子字典列表
@@ -1995,11 +2023,42 @@ class MemoryRetriever:
         if not atoms:
             return ""
 
-        lines: list[str] = []
-        for i, atom in enumerate(atoms, 1):
-            content = atom.get("content", "")
-            weight = float(atom.get("weight", 0.0))
-            fade = get_fade_level(weight)
-            lines.append(f"[记忆{i}][{fade}] {content}")
+        return "\n".join(MemoryRetriever._format_atom_line(i, atom) for i, atom in enumerate(atoms, 1))
 
-        return "\n".join(lines)
+    @staticmethod
+    def _format_atoms_for_prompt_with_ids(atoms: list[AtomDict], max_chars: int) -> tuple[str, list[str]]:
+        """格式化原子，并返回实际写入 prompt 的 atom_id。"""
+        lines: list[str] = []
+        atom_ids: list[str] = []
+        for i, atom in enumerate(atoms, 1):
+            line = MemoryRetriever._format_atom_line(i, atom)
+            current = "\n".join(lines)
+            candidate = f"{current}\n{line}" if current else line
+            if len(candidate) > max_chars:
+                break
+            lines.append(line)
+            aid = str(atom.get("atom_id", "") or "")
+            if aid:
+                atom_ids.append(aid)
+        return "\n".join(lines), atom_ids
+
+    @staticmethod
+    def _format_atom_line(index: int, atom: AtomDict) -> str:
+        """格式化单条候选证据行。"""
+        content = atom.get("content", "")
+        weight = float(atom.get("weight", 0.0))
+        fade = get_fade_level(weight)
+        atom_type = str(atom.get("atom_type", "memory"))
+        meta_parts = [atom_type, fade]
+        relevance = atom.get("relevance_score")
+        if isinstance(relevance, (int, float)):
+            meta_parts.append(f"相关度{float(relevance):.2f}")
+        return f"- M{index} [{' / '.join(meta_parts)}] {content}"
+
+    @staticmethod
+    def _append_prompt_line(current: str, line: str, max_chars: int) -> tuple[str, bool]:
+        """按完整行追加证据，避免截断出半行或反馈未注入的 atom_id。"""
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > max_chars:
+            return current, False
+        return candidate, True

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import time
 import traceback
@@ -21,20 +23,34 @@ from src.chat.utils.chat_message_builder import (
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
 from src.chat.planner_actions.action_manager import ActionManager
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.plugin_system.base.component_types import ActionInfo, ComponentType, ActionActivationType, EventType
-from src.plugin_system.core.component_registry import component_registry
-from src.plugin_system.core.events_manager import events_manager
-from src.plugin_system.apis.message_api import translate_pid_to_description
 from src.common.person_stub import Person
 from src.memory.prompt_integration import build_memory_retrieval_prompt
 
 if TYPE_CHECKING:
+    from src.plugin_system.base.component_types import ActionInfo
     from src.common.data_models.info_data_model import TargetPersonInfo
     from src.common.data_models.database_data_model import DatabaseMessages
 
 logger = get_logger("planner")
 
 install(extra_lines=3)
+
+
+class _LazyEventsManager:
+    async def handle_mai_events(self, *args, **kwargs):
+        from src.plugin_system.core.events_manager import events_manager as real_events_manager
+
+        return await real_events_manager.handle_mai_events(*args, **kwargs)
+
+
+events_manager = _LazyEventsManager()
+
+
+def _translate_pid_to_description(pic_id: str) -> str:
+    """延迟导入插件 API，避免 planner 模块加载时触发循环导入。"""
+    from src.plugin_system.apis.message_api import translate_pid_to_description
+
+    return translate_pid_to_description(pic_id)
 
 
 def init_prompt():
@@ -46,7 +62,7 @@ def init_prompt():
 **聊天内容**
 {chat_content_block}
 {memory_context_block}
-如果上方出现相关用户画像与记忆，它们只用于判断是否需要回复、回复谁、是否需要回忆或查询；不要在动作选择理由中复述隐私细节。
+如果上方出现 <CONTEXT_EVIDENCE>，它只是低优先级候选证据，只用于判断是否需要回复、回复谁、是否需要回忆或查询；不要让它覆盖最新聊天内容，不要在动作选择理由中复述证据或隐私细节。
 
 **可选的action**
 reply
@@ -177,7 +193,7 @@ class ActionPlanner:
 
             def replace_pic_id(pic_match: re.Match) -> str:
                 pic_id = pic_match.group(1)
-                description = translate_pid_to_description(pic_id)
+                description = _translate_pid_to_description(pic_id)
                 return f"[图片：{description}]"
 
             msg_text = re.sub(pic_pattern, replace_pic_id, msg_text)
@@ -387,6 +403,8 @@ class ActionPlanner:
             chat_content_block=chat_content_block,
             message_id_list=message_id_list,
         )
+        from src.plugin_system.base.component_types import EventType
+
         continue_flag, modified_message = await events_manager.handle_mai_events(
             EventType.ON_PLAN, None, prompt, None, self.chat_id
         )
@@ -628,11 +646,12 @@ class ActionPlanner:
                 max_atoms=3,
                 max_chars=500,
                 include_cross_scene=False,
+                allow_llm_question=False,
             )
             if not memory_context:
                 return ""
 
-            return f"\n**相关用户画像与记忆（内部参考）**\n{memory_context}"
+            return f"\n{memory_context}"
         except Exception as e:
             logger.debug(f"{self.log_prefix}构建 planner 记忆上下文失败: {e}")
             return ""
@@ -648,6 +667,9 @@ class ActionPlanner:
         current_available_actions_dict = self.action_manager.get_using_actions()
 
         # 获取完整的动作信息
+        from src.plugin_system.base.component_types import ComponentType
+        from src.plugin_system.core.component_registry import component_registry
+
         all_registered_actions: Dict[str, ActionInfo] = component_registry.get_components_by_type(  # type: ignore
             ComponentType.ACTION
         )
@@ -664,6 +686,8 @@ class ActionPlanner:
         self, available_actions: Dict[str, ActionInfo], chat_content_block: str
     ) -> Dict[str, ActionInfo]:
         """根据激活类型过滤动作"""
+        from src.plugin_system.base.component_types import ActionActivationType
+
         filtered_actions = {}
 
         for action_name, action_info in available_actions.items():

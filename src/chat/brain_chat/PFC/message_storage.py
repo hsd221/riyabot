@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
-from src.common.database import db
+
+from src.common.data_models.database_data_model import DatabaseMessages
+from src.common.message_repository import count_messages, find_messages
 
 
 class MessageStorage(ABC):
@@ -48,27 +50,61 @@ class MessageStorage(ABC):
 
 
 class MongoDBMessageStorage(MessageStorage):
-    """MongoDB消息存储实现"""
+    """消息存储实现。
+
+    旧版 PFC 使用 MongoDB 风格接口；当前仓库消息存储已迁移到 Peewee。
+    这里保留类名兼容调用点，内部转接 message_repository。
+    """
 
     async def get_messages_after(self, chat_id: str, message_time: float) -> List[Dict[str, Any]]:
-        query = {"chat_id": chat_id, "time": {"$gt": message_time}}
-        # print(f"storage_check_message: {message_time}")
-
-        return list(db.messages.find(query).sort("time", 1))
+        messages = find_messages(
+            {"chat_id": chat_id, "time": {"$gt": message_time}},
+            sort=[("time", 1)],
+        )
+        return [_message_to_pfc_dict(message) for message in messages]
 
     async def get_messages_before(self, chat_id: str, time_point: float, limit: int = 5) -> List[Dict[str, Any]]:
-        query = {"chat_id": chat_id, "time": {"$lt": time_point}}
-
-        messages = list(db.messages.find(query).sort("time", -1).limit(limit))
-
-        # 将消息按时间正序排列
-        messages.reverse()
-        return messages
+        messages = find_messages(
+            {"chat_id": chat_id, "time": {"$lt": time_point}},
+            limit=limit,
+            limit_mode="latest",
+        )
+        return [_message_to_pfc_dict(message) for message in messages]
 
     async def has_new_messages(self, chat_id: str, after_time: float) -> bool:
-        query = {"chat_id": chat_id, "time": {"$gt": after_time}}
+        return count_messages({"chat_id": chat_id, "time": {"$gt": after_time}}) > 0
 
-        return db.messages.find_one(query) is not None
+
+def _message_to_pfc_dict(message: DatabaseMessages) -> Dict[str, Any]:
+    """转换为 PFC 旧逻辑期望的嵌套 dict 形状。"""
+    flat = message.flatten()
+    return {
+        **flat,
+        "user_info": {
+            "platform": message.user_info.platform,
+            "user_id": message.user_info.user_id,
+            "user_nickname": message.user_info.user_nickname,
+            "user_cardname": message.user_info.user_cardname,
+        },
+        "chat_info": {
+            "stream_id": message.chat_info.stream_id,
+            "platform": message.chat_info.platform,
+            "create_time": message.chat_info.create_time,
+            "last_active_time": message.chat_info.last_active_time,
+            "user_info": {
+                "platform": message.chat_info.user_info.platform,
+                "user_id": message.chat_info.user_info.user_id,
+                "user_nickname": message.chat_info.user_info.user_nickname,
+                "user_cardname": message.chat_info.user_info.user_cardname,
+            },
+            "group_info": flat.get("chat_info_group_id")
+            and {
+                "group_id": flat.get("chat_info_group_id"),
+                "group_name": flat.get("chat_info_group_name"),
+                "group_platform": flat.get("chat_info_group_platform"),
+            },
+        },
+    }
 
 
 # # 创建一个内存消息存储实现，用于测试

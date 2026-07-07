@@ -8,7 +8,7 @@ from .chat_observer import ChatObserver
 from .pfc_utils import get_items_from_json
 from .observation_info import ObservationInfo
 from .conversation_info import ConversationInfo
-from src.chat.utils.chat_message_builder import build_readable_messages
+from .pfc_KnowledgeFetcher import format_knowledge_evidence, format_pfc_chat_history
 from src.common.prompt_loader import load_prompt_section
 
 
@@ -154,40 +154,7 @@ class ActionPlanner:
             logger.error(f"[私聊][{self.private_name}]构建对话目标字符串时出错: {e}")
             goals_str = "- 构建对话目标时出错。\n"
 
-        # --- 知识信息字符串构建开始 ---
-        knowledge_info_str = "【已获取的相关知识和记忆】\n"
-        try:
-            # 检查 conversation_info 是否有 knowledge_list 并且不为空
-            if hasattr(conversation_info, "knowledge_list") and conversation_info.knowledge_list:
-                # 最多只显示最近的 5 条知识，防止 Prompt 过长
-                recent_knowledge = conversation_info.knowledge_list[-5:]
-                for i, knowledge_item in enumerate(recent_knowledge):
-                    if isinstance(knowledge_item, dict):
-                        query = knowledge_item.get("query", "未知查询")
-                        knowledge = knowledge_item.get("knowledge", "无知识内容")
-                        source = knowledge_item.get("source", "未知来源")
-                        # 只取知识内容的前 2000 个字，避免太长
-                        knowledge_snippet = knowledge[:2000] + "..." if len(knowledge) > 2000 else knowledge
-                        knowledge_info_str += (
-                            f"{i + 1}. 关于 '{query}' 的知识 (来源: {source}):\n   {knowledge_snippet}\n"
-                        )
-                    else:
-                        # 处理列表里不是字典的异常情况
-                        knowledge_info_str += f"{i + 1}. 发现一条格式不正确的知识记录。\n"
-
-                if not recent_knowledge:  # 如果 knowledge_list 存在但为空
-                    knowledge_info_str += "- 暂无相关知识和记忆。\n"
-
-            else:
-                # 如果 conversation_info 没有 knowledge_list 属性，或者列表为空
-                knowledge_info_str += "- 暂无相关知识记忆。\n"
-        except AttributeError:
-            logger.warning(f"[私聊][{self.private_name}]ConversationInfo 对象可能缺少 knowledge_list 属性。")
-            knowledge_info_str += "- 获取知识列表时出错。\n"
-        except Exception as e:
-            logger.error(f"[私聊][{self.private_name}]构建知识信息字符串时出错: {e}")
-            knowledge_info_str += "- 处理知识列表时出错。\n"
-        # --- 知识信息字符串构建结束 ---
+        knowledge_info_str = format_knowledge_evidence(getattr(conversation_info, "knowledge_list", []))
 
         # 获取聊天历史记录 (chat_history_text)
         try:
@@ -201,13 +168,7 @@ class ActionPlanner:
             if hasattr(observation_info, "new_messages_count") and observation_info.new_messages_count > 0:
                 if hasattr(observation_info, "unprocessed_messages") and observation_info.unprocessed_messages:
                     new_messages_list = observation_info.unprocessed_messages
-                    new_messages_str = await build_readable_messages(
-                        new_messages_list,
-                        replace_bot_name=True,
-                        merge_messages=False,
-                        timestamp_mode="relative",
-                        read_mark=0.0,
-                    )
+                    new_messages_str = format_pfc_chat_history(new_messages_list)
                     chat_history_text += (
                         f"\n--- 以下是 {observation_info.new_messages_count} 条新消息 ---\n{new_messages_str}"
                     )

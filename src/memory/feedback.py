@@ -200,6 +200,17 @@ class ReinforcementTracker:
             duration_ms,
         )
 
+    async def apply_usage_feedback(self, usage: dict[str, str]) -> None:
+        """按使用分析结果批量应用 none/normal/strong 反馈。"""
+        grouped: dict[str, list[str]] = {"none": [], "normal": [], "strong": []}
+        for atom_id, level in usage.items():
+            if level in grouped:
+                grouped[level].append(atom_id)
+
+        for level, atom_ids in grouped.items():
+            if atom_ids:
+                await self.apply_reinforcement(atom_ids, level)
+
     async def apply_reinforcement_async(
         self,
         atom_ids: list[str],

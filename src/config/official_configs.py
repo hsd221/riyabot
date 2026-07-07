@@ -821,13 +821,18 @@ class MaimMessageConfig(ConfigBase):
 
 @dataclass
 class LPMMKnowledgeConfig(ConfigBase):
-    """LPMM知识库配置类（已废弃 — 等待新记忆系统替代）"""
+    """旧 LPMM 知识配置兼容项。
 
-    enable: bool = True
-    """是否启用LPMM知识库"""
+    LPMM 知识库已移除；enable/classic 目前只控制回复器是否额外发起一次保守的按需记忆查询。
+    新记忆系统已有主检索链路，因此兼容桥默认关闭，避免重复查询与重复注入。
+    其余 RAG/QA 参数保留用于兼容旧配置文件。
+    """
 
-    lpmm_mode: Literal["classic", "agent"] = "classic"
-    """LPMM知识库模式，可选：classic经典模式，agent 模式，结合最新的记忆一同使用"""
+    enable: bool = False
+    """是否启用旧知识入口的按需记忆查询兼容桥（默认关闭）"""
+
+    lpmm_mode: Literal["classic", "agent"] = "agent"
+    """旧模式兼容项：classic 启用按需记忆查询桥，agent 跳过该入口"""
 
     rag_synonym_search_top_k: int = 10
     """RAG同义词搜索的Top K数量"""

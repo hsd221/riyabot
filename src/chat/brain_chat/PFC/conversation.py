@@ -2,8 +2,7 @@ import time
 import asyncio
 import datetime
 
-# from .message_storage import MongoDBMessageStorage
-from src.chat.utils.chat_message_builder import build_readable_messages, get_raw_msg_before_timestamp_with_chat
+from src.chat.utils.chat_message_builder import get_raw_msg_before_timestamp_with_chat
 
 # from src.config.config import global_config
 from typing import Dict, Any, Optional
@@ -19,7 +18,7 @@ from .reply_generator import ReplyGenerator
 from src.chat.message_receive.chat_stream import ChatStream
 from maim_message import UserInfo
 from src.chat.message_receive.chat_stream import get_chat_manager
-from .pfc_KnowledgeFetcher import KnowledgeFetcher
+from .pfc_KnowledgeFetcher import KnowledgeFetcher, collect_knowledge_atom_ids, format_pfc_chat_history
 from .waiter import Waiter
 
 import traceback
@@ -28,6 +27,28 @@ from rich.traceback import install
 install(extra_lines=3)
 
 logger = get_logger("pfc")
+
+
+def _message_value(message: Any, key: str, default: Any = None) -> Any:
+    if isinstance(message, dict):
+        return message.get(key, default)
+    return getattr(message, key, default)
+
+
+def _message_user_info_dict(message: Any) -> Dict[str, Any]:
+    if isinstance(message, dict):
+        user_info = message.get("user_info", {})
+        return user_info if isinstance(user_info, dict) else {}
+
+    user_info = getattr(message, "user_info", None)
+    if user_info is None:
+        return {}
+    return {
+        "platform": getattr(user_info, "platform", ""),
+        "user_id": getattr(user_info, "user_id", ""),
+        "user_nickname": getattr(user_info, "user_nickname", ""),
+        "user_cardname": getattr(user_info, "user_cardname", None),
+    }
 
 
 class Conversation:
@@ -55,7 +76,7 @@ class Conversation:
             self.action_planner = ActionPlanner(self.stream_id, self.private_name)
             self.goal_analyzer = GoalAnalyzer(self.stream_id, self.private_name)
             self.reply_generator = ReplyGenerator(self.stream_id, self.private_name)
-            self.knowledge_fetcher = KnowledgeFetcher(self.private_name)
+            self.knowledge_fetcher = KnowledgeFetcher(self.stream_id, self.private_name)
             self.waiter = Waiter(self.stream_id, self.private_name)
             self.direct_sender = DirectMessageSender(self.private_name)
 
@@ -89,13 +110,7 @@ class Conversation:
                 timestamp=time.time(),
                 limit=30,  # 加载最近30条作为初始上下文，可以调整
             )
-            chat_talking_prompt = await build_readable_messages(
-                initial_messages,
-                replace_bot_name=True,
-                merge_messages=False,
-                timestamp_mode="relative",
-                read_mark=0.0,
-            )
+            chat_talking_prompt = format_pfc_chat_history(initial_messages)
             if initial_messages:
                 # 将加载的消息填充到 ObservationInfo 的 chat_history
                 self.observation_info.chat_history = initial_messages
@@ -104,10 +119,10 @@ class Conversation:
 
                 # 更新 ObservationInfo 中的时间戳等信息
                 last_msg = initial_messages[-1]
-                self.observation_info.last_message_time = last_msg.get("time")
-                last_user_info = UserInfo.from_dict(last_msg.get("user_info", {}))
+                self.observation_info.last_message_time = _message_value(last_msg, "time")
+                last_user_info = UserInfo.from_dict(_message_user_info_dict(last_msg))
                 self.observation_info.last_message_sender = last_user_info.user_id
-                self.observation_info.last_message_content = last_msg.get("processed_plain_text", "")
+                self.observation_info.last_message_content = _message_value(last_msg, "processed_plain_text", "")
 
                 logger.info(
                     f"[私聊][{self.private_name}]成功加载 {len(initial_messages)} 条初始聊天记录。最后一条消息时间: {self.observation_info.last_message_time}"
@@ -365,11 +380,16 @@ class Conversation:
                 # 发送合适的回复
                 self.generated_reply = final_reply_to_send
                 # --- 在这里调用 _send_reply ---
-                await self._send_reply()  # <--- 调用恢复后的函数
+                sent = await self._send_reply()  # <--- 调用恢复后的函数
 
                 # 更新状态: 标记上次成功是 send_new_message
-                self.conversation_info.last_successful_reply_action = "send_new_message"
-                action_successful = True  # 标记动作成功
+                if sent:
+                    self.conversation_info.last_successful_reply_action = "send_new_message"
+                    action_successful = True  # 标记动作成功
+                else:
+                    conversation_info.done_action[action_index].update(
+                        {"status": "recall", "final_reason": "追问回复发送失败"}
+                    )
 
             elif need_replan:
                 # 打回动作决策
@@ -469,11 +489,16 @@ class Conversation:
                 # 发送合适的回复
                 self.generated_reply = final_reply_to_send
                 # --- 在这里调用 _send_reply ---
-                await self._send_reply()  # <--- 调用恢复后的函数
+                sent = await self._send_reply()  # <--- 调用恢复后的函数
 
                 # 更新状态: 标记上次成功是 direct_reply
-                self.conversation_info.last_successful_reply_action = "direct_reply"
-                action_successful = True  # 标记动作成功
+                if sent:
+                    self.conversation_info.last_successful_reply_action = "direct_reply"
+                    action_successful = True  # 标记动作成功
+                else:
+                    conversation_info.done_action[action_index].update(
+                        {"status": "recall", "final_reason": "首次回复发送失败"}
+                    )
 
             elif need_replan:
                 # 打回动作决策
@@ -520,11 +545,12 @@ class Conversation:
                 knowledge, source = await self.knowledge_fetcher.fetch(knowledge_query, observation_info.chat_history)
                 logger.info(f"[私聊][{self.private_name}]获取到知识: {knowledge[:100]}..., 来源: {source}")
                 if knowledge:
+                    atom_ids = getattr(self.knowledge_fetcher, "last_retrieved_atom_ids", [])
                     # 确保 knowledge_list 存在
                     if not hasattr(conversation_info, "knowledge_list"):
                         conversation_info.knowledge_list = []
                     conversation_info.knowledge_list.append(
-                        {"query": knowledge_query, "knowledge": knowledge, "source": source}
+                        {"query": knowledge_query, "knowledge": knowledge, "source": source, "atom_ids": atom_ids}
                     )
                 action_successful = True
             except Exception as fetch_err:
@@ -579,10 +605,15 @@ class Conversation:
 
                 # 2. 直接发送告别语 (不经过检查)
                 if self.generated_reply:  # 确保生成了内容
-                    await self._send_reply()  # 调用发送方法
+                    sent = await self._send_reply()  # 调用发送方法
                     # 发送成功后，标记动作成功
-                    action_successful = True
-                    logger.info(f"[私聊][{self.private_name}]告别语已发送。")
+                    action_successful = sent
+                    if sent:
+                        logger.info(f"[私聊][{self.private_name}]告别语已发送。")
+                    else:
+                        conversation_info.done_action[action_index].update(
+                            {"status": "recall", "final_reason": "告别语发送失败"}
+                        )
                 else:
                     logger.warning(f"[私聊][{self.private_name}]未能生成告别语内容，无法发送。")
                     action_successful = False  # 标记动作失败
@@ -652,11 +683,11 @@ class Conversation:
                 logger.debug(f"[私聊][{self.private_name}]动作 {action} 成功完成，重置 last_successful_reply_action")
         # 如果动作是 recall 状态，在各自的处理逻辑中已经更新了 done_action
 
-    async def _send_reply(self):
+    async def _send_reply(self) -> bool:
         """发送回复"""
         if not self.generated_reply:
             logger.warning(f"[私聊][{self.private_name}]没有生成回复内容，无法发送。")
-            return
+            return False
 
         try:
             _current_time = time.time()
@@ -665,12 +696,13 @@ class Conversation:
             # 发送消息 (确保 direct_sender 和 chat_stream 有效)
             if not hasattr(self, "direct_sender") or not self.direct_sender:
                 logger.error(f"[私聊][{self.private_name}]DirectMessageSender 未初始化，无法发送回复。")
-                return
+                return False
             if not self.chat_stream:
                 logger.error(f"[私聊][{self.private_name}]ChatStream 未初始化，无法发送回复。")
-                return
+                return False
 
             await self.direct_sender.send_message(chat_stream=self.chat_stream, content=reply_content)
+            await self._reinforce_retrieved_memories(reply_content)
 
             # 发送成功后，手动触发 observer 更新可能导致重复处理自己发送的消息
             # 更好的做法是依赖 observer 的自动轮询或数据库触发器（如果支持）
@@ -680,11 +712,37 @@ class Conversation:
             #     logger.warning(f"[私聊][{self.private_name}]等待 ChatObserver 更新完成超时")
 
             self.state = ConversationState.ANALYZING  # 更新状态
+            return True
 
         except Exception as e:
             logger.error(f"[私聊][{self.private_name}]发送消息或更新状态时失败: {str(e)}")
             logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
             self.state = ConversationState.ANALYZING
+            return False
+
+    async def _reinforce_retrieved_memories(self, reply_text: str) -> None:
+        """根据 PFC 已注入证据和实际回复内容，对用到的记忆做强化反馈。"""
+        try:
+            knowledge_list = getattr(self.conversation_info, "knowledge_list", [])
+            atom_ids = collect_knowledge_atom_ids(knowledge_list)
+            if not atom_ids or not reply_text:
+                return
+
+            from src.memory.feedback import ReinforcementTracker
+            from src.memory.store import MemoryStore
+
+            store = MemoryStore.get_instance()
+            tracker = ReinforcementTracker(store)
+            atom_data_map = await store.get_atoms_batch(atom_ids)
+            atoms = [ReinforcementTracker._dict_to_atom(data) for data in atom_data_map.values()]
+            if not atoms:
+                return
+
+            usage = tracker.analyze_reply_for_memory_usage(reply_text, atoms)
+            await tracker.apply_usage_feedback(usage)
+            logger.debug(f"[私聊][{self.private_name}]PFC记忆强化反馈: {len(usage)} 个原子已处理")
+        except Exception as e:
+            logger.debug(f"[私聊][{self.private_name}]PFC记忆反馈跳过: {e}")
 
     async def _send_timeout_message(self):
         """发送超时结束消息"""

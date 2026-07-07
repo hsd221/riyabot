@@ -2,7 +2,7 @@
 DreamWeaver — 梦呓编织者 (Phase 3.3)
 
 从 NoisePool 中扫描被过滤的"噪音"片段，使用 LLM 发现其中的有趣关联、
-矛盾或创意火花，生成"梦呓洞见"存入 InsightPool。
+矛盾或创意火花，生成低置信度的"梦呓洞见"存入 InsightPool。
 
 运行频率: 每周一次（作为 DreamTask 每周周期的一部分）
 """
@@ -29,6 +29,11 @@ _MAX_WEAVE_ENTRIES: int = 20
 _MAX_CONTENT_CHARS: int = 80
 # 梦呓洞见默认置信度
 _DEFAULT_INSIGHT_CONFIDENCE: float = 0.4
+
+
+def _escape_prompt_data(text: Any) -> str:
+    """转义放入 XML 风格提示块的数据内容。"""
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class DreamWeaver:
@@ -125,7 +130,7 @@ class DreamWeaver:
                         content=insight["insight"],
                         source_atoms=json.dumps(source_atom_ids, ensure_ascii=False),
                         agent_name="dream_weaver",
-                        confidence=_DEFAULT_INSIGHT_CONFIDENCE,
+                        confidence=insight.get("confidence", _DEFAULT_INSIGHT_CONFIDENCE),
                     )
                 saved_insights.append(insight)
             except Exception as e:
@@ -176,24 +181,38 @@ class DreamWeaver:
         """
         lines: list[str] = []
         for i, entry in enumerate(entries, 1):
-            source = entry.source_scene or "unknown"
-            content = (entry.content or "")[:_MAX_CONTENT_CHARS]
+            source = _escape_prompt_data(entry.source_scene or "unknown")
+            content = _escape_prompt_data(entry.content or "")[:_MAX_CONTENT_CHARS]
             lines.append(f"{i}. {content} (来源: {source})")
 
         entries_text = "\n".join(lines)
 
-        prompt = (
-            "以下是一些被记忆系统过滤掉的噪音片段。"
-            "请从中发现有趣的关联、矛盾或灵感，"
-            "生成1-3条'梦呓洞见'。\n\n"
-            f"噪音片段：\n{entries_text}\n\n"
-            "请以JSON格式输出：\n"
-            '[{"insight": "梦呓内容", "mood": "情绪标签", '
-            '"noise_sources": [1, 3, 5]}]\n\n'
-            "注意：只返回有趣、令人意外或有诗意的关联。"
-            "如果噪音之间没有明显关联，返回空数组[]。"
-            "noise_sources中的数字对应上方噪音片段的编号。"
-        )
+        prompt = f"""你是记忆系统的噪声审阅器。下面是被过滤进 NoisePool 的片段，它们默认不是可靠记忆。
+
+<NOISE_POOL>
+{entries_text}
+</NOISE_POOL>
+
+任务：
+从噪声片段中寻找 1-3 条“弱洞见”。弱洞见只能是低置信度的观察或假设，用于以后人工/系统复核，不能写成确定事实。
+
+必须遵守：
+1. 每条洞见必须由至少两个噪声编号共同支持，noise_sources 至少包含 2 个编号
+2. 不要补全上下文，不要编造人物关系、长期偏好、稳定习惯或事件结论
+3. 如果只是随机词句、寒暄、表情反应、孤立玩笑，返回 []
+4. insight 用一句中文写清楚“可能/似乎/像是”的弱关联，不要写成事实
+5. confidence 只能在 0.2 到 0.6 之间；越像巧合越低
+
+只返回严格 JSON 数组，不要 markdown、注释或额外说明。格式：
+[
+  {{
+    "insight": "可能存在的弱关联",
+    "mood": "情绪标签",
+    "confidence": 0.4,
+    "noise_sources": [1, 3]
+  }}
+]
+如果没有至少两个片段支持的弱关联，返回 []。"""
         return prompt
 
     # ── LLM 调用 ────────────────────────────────────────────────────
@@ -304,7 +323,8 @@ def _validate_insights(insights: list[Any]) -> list[dict[str, Any]]:
 
     保留满足以下条件的条目:
       - 包含 'insight' 键且内容有实际文本（不只标点/空白）
-      - noise_sources（如有）是正整数列表
+      - noise_sources 是至少包含两个正整数的列表
+      - confidence 被约束在 0.2~0.6 的低置信度区间
 
     Args:
         insights: 原始解析结果
@@ -321,7 +341,18 @@ def _validate_insights(insights: list[Any]) -> list[dict[str, Any]]:
             logger.debug(f"洞见语义校验失败: 无有效文本 | insight={insight_text!r}")
             continue
         sources = item.get("noise_sources", [])
-        if not isinstance(sources, list) or not all(isinstance(s, int) and s > 0 for s in sources):
-            item["noise_sources"] = []
+        if not isinstance(sources, list):
+            logger.debug("洞见语义校验失败: noise_sources 不是列表")
+            continue
+        sources = [s for s in sources if isinstance(s, int) and s > 0]
+        if len(sources) < 2:
+            logger.debug("洞见语义校验失败: noise_sources 少于两个")
+            continue
+        item["noise_sources"] = sources
+
+        confidence = item.get("confidence", _DEFAULT_INSIGHT_CONFIDENCE)
+        if not isinstance(confidence, (int, float)):
+            confidence = _DEFAULT_INSIGHT_CONFIDENCE
+        item["confidence"] = max(0.2, min(0.6, float(confidence)))
         valid.append(item)
     return valid

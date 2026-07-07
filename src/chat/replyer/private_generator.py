@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import traceback
 import time
 import asyncio
 import random
 import re
 
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from datetime import datetime
 from src.common.logger import get_logger
 from src.common.data_models.database_data_model import DatabaseMessages
@@ -24,19 +26,26 @@ from src.chat.utils.chat_message_builder import (
     replace_user_references,
 )
 from src.bw_learner.expression_selector import expression_selector
-from src.plugin_system.apis.message_api import translate_pid_to_description
 
 # from src.memory_system.memory_activator import MemoryActivator
 
 from src.common.person_stub import Person, is_person_known
-from src.plugin_system.base.component_types import ActionInfo, EventType
-from src.plugin_system.apis import llm_api
 
 from src.bw_learner.jargon_explainer import explain_jargon_in_context
-from src.memory.prompt_integration import build_memory_retrieval_prompt
+from src.memory.prompt_integration import build_memory_retrieval_prompt, neutralize_prompt_boundaries
+
+if TYPE_CHECKING:
+    from src.plugin_system.base.component_types import ActionInfo
 
 
 logger = get_logger("replyer")
+
+
+def _translate_pid_to_description(pic_id: str) -> str:
+    """延迟导入插件 API，避免 replyer 模块加载时触发循环导入。"""
+    from src.plugin_system.apis.message_api import translate_pid_to_description
+
+    return translate_pid_to_description(pic_id)
 
 
 class PrivateReplyer:
@@ -105,6 +114,7 @@ class PrivateReplyer:
                     reply_message=reply_message,
                     reply_reason=reply_reason,
                     unknown_words=unknown_words,
+                    think_level=think_level,
                 )
             llm_response.prompt = prompt
             llm_response.selected_expressions = selected_expressions
@@ -113,6 +123,7 @@ class PrivateReplyer:
             if not prompt:
                 logger.warning("构建prompt失败，跳过回复生成")
                 return False, llm_response
+            from src.plugin_system.base.component_types import EventType
             from src.plugin_system.core.events_manager import events_manager
 
             if not from_plugin:
@@ -124,6 +135,8 @@ class PrivateReplyer:
                 if modified_message and modified_message._modify_flags.modify_llm_prompt:
                     llm_response.prompt = modified_message.llm_prompt
                     prompt = str(modified_message.llm_prompt)
+                    self._last_retrieved_atom_ids = []
+                    llm_response.retrieved_atom_ids = []
 
             # 4. 调用 LLM 生成回复
             content = None
@@ -363,7 +376,7 @@ class PrivateReplyer:
 
         def replace_pic_id(match: re.Match) -> str:
             pic_id = match.group(1)
-            description = translate_pid_to_description(pic_id)
+            description = _translate_pid_to_description(pic_id)
             return f"[图片：{description}]"
 
         return re.sub(pic_pattern, replace_pic_id, text)
@@ -396,7 +409,7 @@ class PrivateReplyer:
             pic_descriptions = []
             for picid_match in picid_matches:
                 pic_id = picid_match[7:-1]  # 提取picid:xxx中的xxx部分（从第7个字符开始）
-                description = translate_pid_to_description(pic_id)
+                description = _translate_pid_to_description(pic_id)
                 logger.debug(f"图片ID: {pic_id}, 描述: {description}")
                 # 如果description已经是[图片]格式，直接使用；否则包装为[图片:描述]格式
                 if description == "[图片]":
@@ -608,6 +621,7 @@ class PrivateReplyer:
         chosen_actions: Optional[List[ActionPlannerInfo]] = None,
         enable_tool: bool = True,
         unknown_words: Optional[List[str]] = None,
+        think_level: int = 1,
     ) -> Tuple[str, List[int]]:
         """
         构建回复器上下文
@@ -623,6 +637,7 @@ class PrivateReplyer:
         Returns:
             str: 构建好的上下文
         """
+        self._last_retrieved_atom_ids = []
         if available_actions is None:
             available_actions = {}
         chat_stream = self.chat_stream
@@ -735,7 +750,7 @@ class PrivateReplyer:
                     sender,
                     target,
                     self.chat_stream,
-                    think_level=1,
+                    think_level=think_level,
                     unknown_words=unknown_words,
                     question=question,
                     user_id=user_id,
@@ -1036,12 +1051,11 @@ class PrivateReplyer:
         start_time = time.time()
         from src.plugins.built_in.knowledge.lpmm_get_knowledge import SearchKnowledgeFromLPMMTool
 
-        logger.debug(f"获取知识库内容，元消息：{message[:30]}...，消息长度: {len(message)}")
-        # 从LPMM知识库获取知识
+        logger.debug(f"按需获取记忆候选证据，元消息：{message[:30]}...，消息长度: {len(message)}")
+        # 兼容旧 LPMM 开关；实际桥接到新记忆系统。
         try:
-            # 检查LPMM知识库是否启用
             if not global_config.lpmm_knowledge.enable:
-                logger.debug("LPMM知识库未启用，跳过获取知识库内容")
+                logger.debug("旧知识开关未启用，跳过按需记忆查询")
                 return ""
 
             if global_config.lpmm_knowledge.lpmm_mode == "agent":
@@ -1055,35 +1069,43 @@ class PrivateReplyer:
                 "lpmm_get_knowledge_prompt",
                 bot_name=bot_name,
                 time_now=time_now,
-                chat_history=message,
-                sender=sender,
-                target_message=target,
+                chat_history=neutralize_prompt_boundaries(message),
+                sender=neutralize_prompt_boundaries(sender),
+                target_message=neutralize_prompt_boundaries(target),
             )
+            from src.plugin_system.apis import llm_api
+
             _, _, _, _, tool_calls = await llm_api.generate_with_model_with_tools(
                 prompt,
                 model_config=model_config.model_task_config.tool_use,
                 tool_options=[SearchKnowledgeFromLPMMTool.get_tool_definition()],
             )
             if tool_calls:
-                result = await self.tool_executor.execute_tool_call(tool_calls[0], SearchKnowledgeFromLPMMTool())
+                result = await self.tool_executor.execute_tool_call(
+                    tool_calls[0],
+                    SearchKnowledgeFromLPMMTool(
+                        chat_stream=self.chat_stream,
+                        chat_history=message,
+                        sender=sender,
+                        target=target,
+                    ),
+                )
                 end_time = time.time()
                 if not result or not result.get("content"):
-                    logger.debug("从LPMM知识库获取知识失败，返回空知识...")
+                    logger.debug("按需记忆查询无结果")
                     return ""
-                found_knowledge_from_lpmm = result.get("content", "")
-                logger.debug(
-                    f"从LPMM知识库获取知识，相关信息：{found_knowledge_from_lpmm[:100]}...，信息长度: {len(found_knowledge_from_lpmm)}"
-                )
-                related_info += found_knowledge_from_lpmm
-                logger.debug(f"获取知识库内容耗时: {(end_time - start_time):.3f}秒")
-                logger.debug(f"获取知识库内容，相关信息：{related_info[:100]}...，信息长度: {len(related_info)}")
+                memory_evidence = str(result.get("content", "") or "")
+                logger.debug(f"按需记忆查询获得候选证据：{memory_evidence[:100]}...，信息长度: {len(memory_evidence)}")
+                related_info += memory_evidence
+                logger.debug(f"按需记忆查询耗时: {(end_time - start_time):.3f}秒")
+                logger.debug(f"按需记忆查询结果：{related_info[:100]}...，信息长度: {len(related_info)}")
 
-                return f"你有以下这些**知识**：\n{related_info}\n请你**记住上面的知识**，之后可能会用到。\n"
+                return f"\n{related_info.strip()}\n"
             else:
-                logger.debug("模型认为不需要使用LPMM知识库")
+                logger.debug("模型认为不需要按需查询记忆")
                 return ""
         except Exception as e:
-            logger.error(f"获取知识库内容时发生异常: {str(e)}")
+            logger.error(f"按需获取记忆候选证据时发生异常: {str(e)}")
             return ""
 
 

@@ -34,6 +34,8 @@ class AtomDict(TypedDict):
         trace_chain_id: 追踪链 ID
         embedding_id: 向量 ID
         final_score: 综合排序得分（仅 rank_atoms 输出）
+        similarity_score: 向量相似度得分（检索阶段输出）
+        relevance_score: 与当前查询的相关度得分（检索阶段输出）
     """
 
     atom_id: str
@@ -57,6 +59,8 @@ class AtomDict(TypedDict):
     trace_chain_id: NotRequired[str | None]
     embedding_id: NotRequired[str]
     final_score: NotRequired[float]
+    similarity_score: NotRequired[float]
+    relevance_score: NotRequired[float]
 
 
 class InsightItem(TypedDict):
