@@ -62,36 +62,34 @@ class MessageHandler:
         Returns:
             bool: 是否允许聊天
         """
-        logger.debug(f"群聊id: {group_id}, 用户id: {user_id}")
-        logger.debug("开始检查聊天白名单/黑名单")
+        logger.debug(f"检查聊天权限: group_id={group_id}, user_id={user_id}")
         if group_id:
             if global_config.chat.group_list_type == "whitelist" and group_id not in global_config.chat.group_list:
-                logger.warning("群聊不在聊天白名单中，消息被丢弃")
+                logger.debug(f"消息被群聊白名单过滤: group_id={group_id}")
                 return False
             elif global_config.chat.group_list_type == "blacklist" and group_id in global_config.chat.group_list:
-                logger.warning("群聊在聊天黑名单中，消息被丢弃")
+                logger.debug(f"消息被群聊黑名单过滤: group_id={group_id}")
                 return False
         else:
             if global_config.chat.private_list_type == "whitelist" and user_id not in global_config.chat.private_list:
-                logger.warning("私聊不在聊天白名单中，消息被丢弃")
+                logger.debug(f"消息被私聊白名单过滤: user_id={user_id}")
                 return False
             elif global_config.chat.private_list_type == "blacklist" and user_id in global_config.chat.private_list:
-                logger.warning("私聊在聊天黑名单中，消息被丢弃")
+                logger.debug(f"消息被私聊黑名单过滤: user_id={user_id}")
                 return False
         if user_id in global_config.chat.ban_user_id and not ignore_global_list:
-            logger.warning("用户在全局黑名单中，消息被丢弃")
+            logger.debug(f"消息被全局黑名单过滤: user_id={user_id}")
             return False
 
         if global_config.chat.ban_qq_bot and group_id and not ignore_bot:
-            logger.debug("开始判断是否为机器人")
             member_info = await get_member_info(self.server_connection, group_id, user_id)
             if member_info:
                 is_bot = member_info.get("is_robot")
                 if is_bot is None:
-                    logger.warning("无法获取用户是否为机器人，默认为不是但是不进行更新")
+                    logger.debug(f"未获取到用户机器人标记: group_id={group_id}, user_id={user_id}")
                 else:
                     if is_bot:
-                        logger.warning("QQ官方机器人消息拦截已启用，消息被丢弃，新机器人加入拦截名单")
+                        logger.debug(f"消息被 QQ 官方机器人拦截规则过滤: group_id={group_id}, user_id={user_id}")
                         self.bot_id_list[user_id] = True
                         return False
                     else:
@@ -117,7 +115,9 @@ class MessageHandler:
             content_format=["text", "image", "emoji", "voice"],
             accept_format=ACCEPT_FORMAT,
         )  # 格式化信息
-        if message_type == MessageType.private:
+        if message_type == MessageType.input_status:
+            return None
+        elif message_type == MessageType.private:
             sub_type = raw_message.get("sub_type")
             if sub_type == MessageType.Private.friend:
                 sender_info: dict = raw_message.get("sender")
@@ -139,7 +139,7 @@ class MessageHandler:
                 """
                 本部分暂时不做支持，先放着
                 """
-                logger.warning("群临时消息类型不支持")
+                logger.debug("忽略群临时消息")
                 return None
 
                 sender_info: dict = raw_message.get("sender")
@@ -174,7 +174,7 @@ class MessageHandler:
                 )
 
             else:
-                logger.warning(f"私聊消息类型 {sub_type} 不支持")
+                logger.debug(f"忽略不支持的私聊消息类型: sub_type={sub_type}")
                 return None
         elif message_type == MessageType.group:
             sub_type = raw_message.get("sub_type")
@@ -205,12 +205,15 @@ class MessageHandler:
                 )
 
             else:
-                logger.warning(f"群聊消息类型 {sub_type} 不支持")
+                logger.debug(f"忽略不支持的群聊消息类型: sub_type={sub_type}")
                 return None
+        else:
+            logger.debug(f"忽略未知消息大类: message_type={message_type}")
+            return None
 
         # 处理实际信息
         if not raw_message.get("message"):
-            logger.warning("原始消息内容为空")
+            logger.debug("忽略空原始消息")
             return None
 
         # 获取Seg列表
@@ -219,7 +222,7 @@ class MessageHandler:
             additional_config["allow_tts"] = True
 
         if not seg_message:
-            logger.warning("处理后消息内容为空")
+            logger.debug("忽略处理后为空的消息")
             return None
         submit_seg: Seg = Seg(
             type="seglist",
@@ -245,7 +248,7 @@ class MessageHandler:
             raw_message=raw_message.get("raw_message"),
         )
 
-        logger.info("发送到Maibot处理信息")
+        logger.debug("转发消息到 MaiBot")
         await message_send_instance.message_send(message_base)
 
     async def handle_real_message(
@@ -262,7 +265,7 @@ class MessageHandler:
         additional_config: dict = {}
         real_message: list = raw_message.get("message")
         if not real_message:
-            logger.warning("实际消息内容为空")
+            logger.debug("忽略空消息段列表")
             return None, {}
         seg_message: List[Seg] = []
         for sub_message in real_message:
@@ -274,26 +277,26 @@ class MessageHandler:
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("text处理失败")
+                        logger.debug("文本消息段处理失败")
                 case RealMessageType.face:
                     ret_seg = await self.handle_face_message(sub_message)
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("face处理失败或不支持")
+                        logger.debug("表情消息段处理失败或不支持")
                 case RealMessageType.reply:
                     if not in_reply:
                         ret_seg, additional_config = await self.handle_reply_message(sub_message, additional_config)
                         if ret_seg:
                             seg_message += ret_seg
                         else:
-                            logger.warning("reply处理失败")
+                            logger.debug("回复消息段处理失败")
                 case RealMessageType.image:
                     ret_seg = await self.handle_image_message(sub_message)
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("image处理失败")
+                        logger.debug("图片消息段处理失败")
                 case RealMessageType.record:
                     ret_seg = await self.handle_record_message(sub_message)
                     if ret_seg:
@@ -301,25 +304,25 @@ class MessageHandler:
                         seg_message.append(ret_seg)
                         break  # 使得消息只有record消息
                     else:
-                        logger.warning("record处理失败或不支持")
+                        logger.debug("语音消息段处理失败或不支持")
                 case RealMessageType.video:
                     ret_seg = await self.handle_video_message(sub_message)
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("video处理失败")
+                        logger.debug("视频消息段处理失败")
                 case RealMessageType.json:
                     ret_segs = await self.handle_json_message(sub_message)
                     if ret_segs:
                         seg_message.extend(ret_segs)
                     else:
-                        logger.warning("json处理失败")
+                        logger.debug("JSON 消息段处理失败")
                 case RealMessageType.file:
                     ret_seg = await self.handle_file_message(sub_message)
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("file处理失败")
+                        logger.debug("文件消息段处理失败")
                 case RealMessageType.at:
                     ret_seg = await self.handle_at_message(
                         sub_message,
@@ -329,30 +332,30 @@ class MessageHandler:
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("at处理失败")
+                        logger.debug("@ 消息段处理失败")
                 case RealMessageType.rps:
-                    logger.warning("暂时不支持猜拳魔法表情解析")
+                    logger.debug("忽略不支持的猜拳表情消息段")
                 case RealMessageType.dice:
-                    logger.warning("暂时不支持骰子表情解析")
+                    logger.debug("忽略不支持的骰子消息段")
                 case RealMessageType.shake:
                     # 预计等价于戳一戳
-                    logger.warning("暂时不支持窗口抖动解析")
+                    logger.debug("忽略不支持的窗口抖动消息段")
                 case RealMessageType.share:
-                    logger.warning("暂时不支持链接解析")
+                    logger.debug("忽略不支持的链接消息段")
                 case RealMessageType.forward:
                     messages = await self._get_forward_message(sub_message)
                     if not messages:
-                        logger.warning("转发消息内容为空或获取失败")
+                        logger.debug("转发消息内容为空或获取失败")
                         return None, {}
                     ret_seg = await self.handle_forward_message(messages)
                     if ret_seg:
                         seg_message.append(ret_seg)
                     else:
-                        logger.warning("转发消息处理失败")
+                        logger.debug("转发消息段处理失败")
                 case RealMessageType.node:
-                    logger.warning("不支持转发消息节点解析")
+                    logger.debug("忽略不支持的转发消息节点")
                 case _:
-                    logger.warning(f"未知消息类型: {sub_message_type}")
+                    logger.debug(f"忽略未知消息段类型: type={sub_message_type}")
         return seg_message, additional_config
 
     async def handle_text_message(self, raw_message: dict) -> Seg:
@@ -826,17 +829,17 @@ class MessageHandler:
 
         if image_count < image_threshold and image_count > 0:
             # 处理图片数量小于阈值的情况，此时解析图片为base64
-            logger.trace(f"图片数量({image_count})小于{image_threshold}，开始解析图片为base64")
+            logger.debug(f"转发图片数量小于阈值，解析为 base64: count={image_count}, threshold={image_threshold}")
             parsed_message = await self._recursive_parse_image_seg(handled_message, True)
             return Seg(type="seglist", data=[forward_header, parsed_message, forward_footer])
         elif image_count > 0:
-            logger.trace(f"图片数量({image_count})大于等于{image_threshold}，开始解析图片为占位符")
+            logger.debug(f"转发图片数量达到阈值，使用占位符: count={image_count}, threshold={image_threshold}")
             # 处理图片数量大于等于阈值的情况，此时解析图片为占位符
             parsed_message = await self._recursive_parse_image_seg(handled_message, False)
             return Seg(type="seglist", data=[forward_header, parsed_message, forward_footer])
         else:
             # 处理没有图片的情况，此时直接返回
-            logger.trace("没有图片，直接返回")
+            logger.debug("转发消息无图片")
             return Seg(type="seglist", data=[forward_header, handled_message, forward_footer])
 
     async def _recursive_parse_image_seg(self, seg_data: Seg, to_image: bool) -> Seg:
@@ -865,7 +868,7 @@ class MessageHandler:
                     return Seg(type="text", data="[表情包]")
                 return Seg(type="emoji", data=encoded_image)
             else:
-                logger.trace(f"不处理类型: {seg_data.type}")
+                logger.debug(f"跳过消息段类型: type={seg_data.type}")
                 return seg_data
         else:
             if seg_data.type == "seglist":
@@ -879,7 +882,7 @@ class MessageHandler:
             elif seg_data.type == "emoji":
                 return Seg(type="text", data="[动画表情]")
             else:
-                logger.trace(f"不处理类型: {seg_data.type}")
+                logger.debug(f"跳过消息段类型: type={seg_data.type}")
                 return seg_data
 
     async def _handle_forward_message(self, message_list: list, layer: int) -> Tuple[Seg, int] | Tuple[None, int]:

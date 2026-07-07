@@ -130,7 +130,7 @@ class ForgettingManager:
             }
             duration = time.monotonic() - _sweep_start
             logger.info(f"遗忘扫描完成: {decayed} 个衰减, {archived} 个归档, {deleted} 个删除")
-            logger.info("遗忘扫除完成", total_duration_ms=round(duration * 1000))
+            logger.info("遗忘扫描完成", total_duration_ms=round(duration * 1000))
             return result
 
     # ── 衰减 ─────────────────────────────────────────────────────────────

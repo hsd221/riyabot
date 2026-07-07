@@ -21,7 +21,6 @@ from src.chat.message_receive.chat_stream import get_chat_manager
 from .pfc_KnowledgeFetcher import KnowledgeFetcher, collect_knowledge_atom_ids, format_pfc_chat_history
 from .waiter import Waiter
 
-import traceback
 from rich.traceback import install
 
 install(extra_lines=3)
@@ -85,8 +84,7 @@ class Conversation:
 
             self.stop_action_planner = False
         except Exception as e:
-            logger.error(f"[私聊][{self.private_name}]初始化对话实例：注册运行组件失败: {e}")
-            logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
+            logger.exception(f"[私聊][{self.private_name}]初始化对话实例：注册运行组件失败: {e}")
             raise
 
         try:
@@ -100,8 +98,7 @@ class Conversation:
 
             self.conversation_info = ConversationInfo()
         except Exception as e:
-            logger.error(f"[私聊][{self.private_name}]初始化对话实例：注册信息组件失败: {e}")
-            logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
+            logger.exception(f"[私聊][{self.private_name}]初始化对话实例：注册信息组件失败: {e}")
             raise
         try:
             logger.info(f"[私聊][{self.private_name}]为 {self.stream_id} 加载初始聊天记录...")
@@ -228,8 +225,7 @@ class Conversation:
                     logger.info(f"[私聊][{self.private_name}]检测到'结束对话'目标，停止循环。")
 
             except Exception as loop_err:
-                logger.error(f"[私聊][{self.private_name}]PFC主循环出错: {loop_err}")
-                logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
+                logger.exception(f"[私聊][{self.private_name}]PFC主循环出错: {loop_err}")
                 await asyncio.sleep(1)
 
             if self.should_continue:
@@ -623,11 +619,10 @@ class Conversation:
 
                 # 3. 无论是否发送成功，都准备结束对话
                 self.should_continue = False
-                logger.info(f"[私聊][{self.private_name}]发送告别语流程结束，即将停止对话实例。")
+                logger.debug(f"[私聊][{self.private_name}]告别语流程结束")
 
             except Exception as goodbye_err:
-                logger.error(f"[私聊][{self.private_name}]生成或发送告别语时出错: {goodbye_err}")
-                logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
+                logger.exception(f"[私聊][{self.private_name}]生成或发送告别语时出错: {goodbye_err}")
                 # 即使出错，也结束对话
                 self.should_continue = False
                 action_successful = False  # 标记动作失败
@@ -638,11 +633,11 @@ class Conversation:
         elif action == "end_conversation":
             # 这个分支现在只会在 action_planner 最终决定不告别时被调用
             self.should_continue = False
-            logger.info(f"[私聊][{self.private_name}]收到最终结束指令，停止对话...")
+            logger.debug(f"[私聊][{self.private_name}]收到结束对话指令")
             action_successful = True  # 标记这个指令本身是成功的
 
         elif action == "block_and_ignore":
-            logger.info(f"[私聊][{self.private_name}]不想再理你了...")
+            logger.info(f"[私聊][{self.private_name}]对话进入忽略状态")
             ignore_duration_seconds = 10 * 60
             self.ignore_until_timestamp = time.time() + ignore_duration_seconds
             logger.info(
@@ -653,7 +648,7 @@ class Conversation:
 
         else:  # 对应 'wait' 动作
             self.state = ConversationState.WAITING
-            logger.info(f"[私聊][{self.private_name}]等待更多信息...")
+            logger.debug(f"[私聊][{self.private_name}]进入等待动作")
             try:
                 # 检查 waiter 是否存在
                 if not hasattr(self, "waiter"):
@@ -715,8 +710,7 @@ class Conversation:
             return True
 
         except Exception as e:
-            logger.error(f"[私聊][{self.private_name}]发送消息或更新状态时失败: {str(e)}")
-            logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
+            logger.exception(f"[私聊][{self.private_name}]发送消息或更新状态时失败: {str(e)}")
             self.state = ConversationState.ANALYZING
             return False
 

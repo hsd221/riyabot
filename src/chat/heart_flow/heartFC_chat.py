@@ -1,6 +1,5 @@
 import asyncio
 import time
-import traceback
 import random
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from rich.traceback import install
@@ -151,8 +150,7 @@ class HeartFChatting:
         """当 _hfc_loop 任务完成时执行的回调。"""
         try:
             if exception := task.exception():
-                logger.error(f"{self.log_prefix} HeartFChatting: 脱离了聊天(异常): {exception}")
-                logger.error(traceback.format_exc())  # Log full traceback for exceptions
+                logger.error(f"{self.log_prefix} HeartFChatting: 脱离了聊天(异常): {exception}", exc_info=True)
             else:
                 logger.info(f"{self.log_prefix} HeartFChatting: 脱离了聊天 (外部停止)")
         except asyncio.CancelledError:
@@ -181,7 +179,7 @@ class HeartFChatting:
             formatted_time = f"{elapsed:.2f}秒"
             timer_strings.append(f"{name}: {formatted_time}")
 
-        logger.info(
+        logger.debug(
             f"{self.log_prefix} 第{self._current_cycle_detail.cycle_id}次思考,"
             f"耗时: {self._current_cycle_detail.end_time - self._current_cycle_detail.start_time:.1f}秒;"  # type: ignore
             + (f"详情: {'; '.join(timer_strings)}" if timer_strings else "")
@@ -303,7 +301,7 @@ class HeartFChatting:
             resolved = await tracker.trigger_tracker()
             if resolved:
                 reflect_tracker_manager.remove_tracker(self.stream_id)
-                logger.info(f"{self.log_prefix} ReflectTracker resolved and removed.")
+                logger.debug(f"{self.log_prefix} ReflectTracker resolved and removed.")
 
         start_time = time.time()
         async with global_prompt_manager.async_message_scope(self.chat_stream.context.get_template_name()):
@@ -316,7 +314,7 @@ class HeartFChatting:
                 asyncio.create_task(self._archive_recent_messages(recent_messages_list))
 
             cycle_timers, thinking_id = self.start_cycle()
-            logger.info(
+            logger.debug(
                 f"{self.log_prefix} 开始第{self._cycle_counter}次思考(频率: {global_config.chat.get_talk_value(self.stream_id)})"
             )
 
@@ -335,7 +333,7 @@ class HeartFChatting:
                     force_reply_message=force_reply_message,
                 )
 
-            logger.info(
+            logger.debug(
                 f"{self.log_prefix} 决定执行{len(action_to_use_info)}个动作: {' '.join([a.action_type for a in action_to_use_info])}"
             )
 
@@ -514,8 +512,7 @@ class HeartFChatting:
             # 设置了关闭标志位后被取消是正常流程
             logger.info(f"{self.log_prefix} 麦麦已关闭聊天")
         except Exception:
-            logger.error(f"{self.log_prefix} 麦麦聊天意外错误，将于3s后尝试重新启动")
-            print(traceback.format_exc())
+            logger.exception(f"{self.log_prefix} 聊天循环异常，将于3s后尝试重新启动")
             await asyncio.sleep(3)
             self._loop_task = asyncio.create_task(self._main_chat_loop())
         logger.error(f"{self.log_prefix} 结束了当前聊天循环")
@@ -556,8 +553,7 @@ class HeartFChatting:
                     action_message=action_message,
                 )
             except Exception as e:
-                logger.error(f"{self.log_prefix} 创建动作处理器时出错: {e}")
-                traceback.print_exc()
+                logger.error(f"{self.log_prefix} 创建动作处理器时出错: {e}", exc_info=True)
                 return False, ""
 
             # 处理动作并获取结果（固定记录一次动作信息）
@@ -567,8 +563,7 @@ class HeartFChatting:
             return success, action_text
 
         except Exception as e:
-            logger.error(f"{self.log_prefix} 处理{action}时出错: {e}")
-            traceback.print_exc()
+            logger.error(f"{self.log_prefix} 处理{action}时出错: {e}", exc_info=True)
             return False, ""
 
     async def _send_response(
@@ -796,8 +791,7 @@ class HeartFChatting:
                     }
 
         except Exception as e:
-            logger.error(f"{self.log_prefix} 执行动作时出错: {e}")
-            logger.error(f"{self.log_prefix} 错误信息: {traceback.format_exc()}")
+            logger.exception(f"{self.log_prefix} 执行动作时出错: {e}")
             return {
                 "action_type": action_planner_info.action_type,
                 "success": False,

@@ -55,7 +55,7 @@ class RateLimiter:
         expired = [ip for ip, unblock_time in self._blocked.items() if now > unblock_time]
         for ip in expired:
             del self._blocked[ip]
-            logger.info(f"🔓 IP {ip} 封禁已解除")
+            logger.info("IP 封禁已解除", ip=ip)
 
     def is_blocked(self, request: Request) -> Tuple[bool, Optional[int]]:
         """
@@ -117,7 +117,7 @@ class RateLimiter:
         """
         ip = self._get_client_ip(request)
         self._blocked[ip] = time.time() + duration_seconds
-        logger.warning(f"🔒 IP {ip} 已被封禁 {duration_seconds} 秒")
+        logger.warning("IP 已被封禁", ip=ip, duration_seconds=duration_seconds)
 
     def record_failed_attempt(
         self, request: Request, max_failures: int = 5, window_seconds: int = 300, block_duration: int = 600

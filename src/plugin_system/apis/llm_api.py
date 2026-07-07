@@ -108,7 +108,7 @@ async def generate_with_model_with_tools(
     """
     try:
         model_name_list = model_config.model_list
-        logger.info(f"使用模型{model_name_list}生成内容")
+        logger.debug(f"使用模型{model_name_list}生成内容")
         logger.debug(f"完整提示词: {prompt}")
 
         llm_request = LLMRequest(model_set=model_config, request_type=request_type)
@@ -147,7 +147,7 @@ async def generate_with_model_with_tools_by_message_factory(
     """
     try:
         model_name_list = model_config.model_list
-        logger.info(f"使用模型 {model_name_list} 生成内容")
+        logger.debug(f"使用模型 {model_name_list} 生成内容")
 
         llm_request = LLMRequest(model_set=model_config, request_type=request_type)
 

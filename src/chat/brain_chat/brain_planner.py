@@ -1,6 +1,5 @@
 import json
 import time
-import traceback
 import random
 import re
 from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
@@ -423,8 +422,7 @@ class BrainPlanner:
 
             return prompt, message_id_list
         except Exception as e:
-            logger.error(f"构建 Planner 提示词时出错: {e}")
-            logger.error(traceback.format_exc())
+            logger.exception(f"构建 Planner 提示词时出错: {e}")
             return "构建 Planner Prompt 时出错", []
 
     def get_necessary_info(self) -> Tuple[bool, Optional["TargetPersonInfo"], Dict[str, ActionInfo]]:
@@ -589,7 +587,6 @@ class BrainPlanner:
                 logger.warning(f"{self.log_prefix}解析LLM响应JSON失败 {json_e}. LLM原始输出: '{llm_content}'")
                 extracted_reasoning = f"解析LLM响应JSON失败: {json_e}"
                 actions = self._create_complete_talk(extracted_reasoning, available_actions)
-                traceback.print_exc()
         else:
             extracted_reasoning = "规划器没有获得LLM响应"
             actions = self._create_complete_talk(extracted_reasoning, available_actions)

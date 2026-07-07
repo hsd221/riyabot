@@ -86,30 +86,34 @@ class NoticeHandler:
         system_notice: bool = False
 
         match notice_type:
+            case NoticeType.input_status:
+                return None
             case NoticeType.friend_recall:
-                logger.info("好友撤回一条消息")
+                logger.debug("处理好友撤回通知")
                 handled_message, user_info = await self.handle_friend_recall_notify(raw_message)
             case NoticeType.group_recall:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
-                logger.info("群内用户撤回一条消息")
+                logger.debug("处理群消息撤回通知")
                 handled_message, user_info = await self.handle_group_recall_notify(raw_message, group_id, user_id)
                 system_notice = True
             case NoticeType.notify:
                 sub_type = raw_message.get("sub_type")
                 match sub_type:
+                    case NoticeType.Notify.input_status:
+                        return None
                     case NoticeType.Notify.poke:
                         if global_config.chat.enable_poke and await message_handler.check_allow_to_chat(
                             user_id, group_id, False, False
                         ):
-                            logger.info("处理戳一戳消息")
+                            logger.debug("处理戳一戳通知")
                             handled_message, user_info = await self.handle_poke_notify(raw_message, group_id, user_id)
                         else:
-                            logger.warning("戳一戳消息被禁用，取消戳一戳处理")
+                            logger.debug("戳一戳通知被配置过滤")
                     case NoticeType.Notify.group_name:
                         if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                             return None
-                        logger.info("处理群名称变更")
+                        logger.debug("处理群名称变更通知")
                         handled_message, user_info = await self.handle_group_name_notify(raw_message, group_id, user_id)
                         system_notice = True
                     case _:
@@ -120,13 +124,13 @@ class NoticeHandler:
                     case NoticeType.GroupBan.ban:
                         if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                             return None
-                        logger.info("处理群禁言")
+                        logger.debug("处理群禁言通知")
                         handled_message, user_info = await self.handle_ban_notify(raw_message, group_id)
                         system_notice = True
                     case NoticeType.GroupBan.lift_ban:
                         if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                             return None
-                        logger.info("处理解除群禁言")
+                        logger.debug("处理解除群禁言通知")
                         handled_message, user_info = await self.handle_lift_ban_notify(raw_message, group_id)
                         system_notice = True
                     case _:
@@ -134,47 +138,47 @@ class NoticeHandler:
             case NoticeType.group_msg_emoji_like:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
-                logger.info("处理群消息表情回应")
+                logger.debug("处理群消息表情回应通知")
                 handled_message, user_info = await self.handle_emoji_like_notify(raw_message, group_id, user_id)
             case NoticeType.group_upload:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
-                logger.info("处理群文件上传")
+                logger.debug("处理群文件上传通知")
                 handled_message, user_info = await self.handle_group_upload_notify(raw_message, group_id, user_id)
                 system_notice = True
             case NoticeType.group_increase:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
                 sub_type = raw_message.get("sub_type")
-                logger.info(f"处理群成员增加: {sub_type}")
+                logger.debug(f"处理群成员增加通知: sub_type={sub_type}")
                 handled_message, user_info = await self.handle_group_increase_notify(raw_message, group_id, user_id)
                 system_notice = True
             case NoticeType.group_decrease:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
                 sub_type = raw_message.get("sub_type")
-                logger.info(f"处理群成员减少: {sub_type}")
+                logger.debug(f"处理群成员减少通知: sub_type={sub_type}")
                 handled_message, user_info = await self.handle_group_decrease_notify(raw_message, group_id, user_id)
                 system_notice = True
             case NoticeType.group_admin:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
                 sub_type = raw_message.get("sub_type")
-                logger.info(f"处理群管理员变动: {sub_type}")
+                logger.debug(f"处理群管理员变动通知: sub_type={sub_type}")
                 handled_message, user_info = await self.handle_group_admin_notify(raw_message, group_id, user_id)
                 system_notice = True
             case NoticeType.essence:
                 if not await message_handler.check_allow_to_chat(user_id, group_id, True, False):
                     return None
                 sub_type = raw_message.get("sub_type")
-                logger.info(f"处理精华消息: {sub_type}")
+                logger.debug(f"处理精华消息通知: sub_type={sub_type}")
                 handled_message, user_info = await self.handle_essence_notify(raw_message, group_id)
                 system_notice = True
             case _:
                 logger.warning(f"不支持的notice类型: {notice_type}")
                 return None
         if not handled_message or not user_info:
-            logger.warning("notice处理失败或不支持")
+            logger.debug(f"通知处理结果为空: notice_type={notice_type}")
             return None
 
         group_info: GroupInfo = None
@@ -184,7 +188,7 @@ class NoticeHandler:
             if fetched_group_info:
                 group_name = fetched_group_info.get("group_name")
             else:
-                logger.warning("无法获取notice消息所在群的名称")
+                logger.debug(f"无法获取通知所在群名称: group_id={group_id}")
             group_info = GroupInfo(
                 platform=global_config.maibot_server.platform_name,
                 group_id=group_id,
@@ -214,7 +218,7 @@ class NoticeHandler:
         if system_notice:
             await self.put_notice(message_base)
         else:
-            logger.info("发送到Maibot处理通知信息")
+            logger.debug("转发通知到 MaiBot")
             await message_send_instance.message_send(message_base)
 
     async def handle_poke_notify(
@@ -242,7 +246,7 @@ class NoticeHandler:
         else:
             user_name = "QQ用户"
             user_cardname = "QQ用户"
-            logger.info("无法获取戳一戳对方的用户昵称")
+            logger.debug(f"无法获取戳一戳发起者昵称: user_id={user_id}")
 
         # 计算Seg
         if self_id == target_id:
@@ -261,7 +265,7 @@ class NoticeHandler:
                     target_name = fetched_member_info.get("nickname")
                 else:
                     target_name = "QQ用户"
-                    logger.info("无法获取被戳一戳方的用户昵称")
+                    logger.debug(f"无法获取戳一戳目标昵称: target_id={target_id}")
                 display_name = user_name
             else:
                 return None, None
@@ -272,7 +276,7 @@ class NoticeHandler:
             first_txt = raw_info[2].get("txt", "戳了戳")
             second_txt = raw_info[4].get("txt", "")
         except Exception as e:
-            logger.warning(f"解析戳一戳消息失败: {str(e)}，将使用默认文本")
+            logger.debug(f"解析戳一戳消息失败，使用默认文本: {str(e)}")
 
         user_info: UserInfo = UserInfo(
             platform=global_config.maibot_server.platform_name,
@@ -446,7 +450,7 @@ class NoticeHandler:
             operator_nickname = member_info.get("nickname")
             operator_cardname = member_info.get("card")
         else:
-            logger.warning("无法获取禁言执行者的昵称，消息可能会无效")
+            logger.debug(f"无法获取禁言执行者昵称: operator_id={operator_id}")
             operator_nickname = "QQ用户"
 
         operator_info: UserInfo = UserInfo(
@@ -514,7 +518,7 @@ class NoticeHandler:
             operator_nickname = member_info.get("nickname")
             operator_cardname = member_info.get("card")
         else:
-            logger.warning("无法获取解除禁言执行者的昵称，消息可能会无效")
+            logger.debug(f"无法获取解除禁言执行者昵称: operator_id={operator_id}")
             operator_nickname = "QQ用户"
 
         operator_info: UserInfo = UserInfo(
@@ -542,7 +546,7 @@ class NoticeHandler:
                 user_nickname = fetched_member_info.get("nickname")
                 user_cardname = fetched_member_info.get("card")
             else:
-                logger.warning("无法获取解除禁言消息发送者的昵称，消息可能会无效")
+                logger.debug(f"无法获取解除禁言目标昵称: user_id={user_id}")
             lifted_user_info: UserInfo = UserInfo(
                 platform=global_config.maibot_server.platform_name,
                 user_id=user_id,
@@ -585,7 +589,7 @@ class NoticeHandler:
                 if fetched_group_info:
                     group_name = fetched_group_info.get("group_name")
                 else:
-                    logger.warning("无法获取notice消息所在群的名称")
+                    logger.debug(f"无法获取通知所在群名称: group_id={group_id}")
                 group_info = GroupInfo(
                     platform=global_config.maibot_server.platform_name,
                     group_id=group_id,
@@ -668,7 +672,7 @@ class NoticeHandler:
                     continue
                 if ban_record.lift_time <= int(time.time()):
                     # 触发自然解除禁言
-                    logger.info(f"检测到用户 {ban_record.user_id} 在群 {ban_record.group_id} 的禁言已解除")
+                    logger.debug(f"检测到禁言自然解除: group_id={ban_record.group_id}, user_id={ban_record.user_id}")
                     self.lifted_list.append(ban_record)
                     self.banned_list.remove(ban_record)
             await asyncio.sleep(5)

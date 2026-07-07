@@ -35,9 +35,7 @@ export function WebUIFeedbackSurveyPage() {
   )
 
   // 提交成功回调
-  const handleSubmitSuccess = useCallback((submissionId: string) => {
-    console.log('WebUI Survey submitted:', submissionId)
-  }, [])
+  const handleSubmitSuccess = useCallback(() => {}, [])
 
   // 提交错误回调
   const handleSubmitError = useCallback((error: string) => {

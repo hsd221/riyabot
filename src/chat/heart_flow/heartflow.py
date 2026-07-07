@@ -1,4 +1,3 @@
-import traceback
 from typing import Any, Optional, Dict
 
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -35,7 +34,6 @@ class Heartflow:
                 return new_chat
         except Exception as e:
             logger.error(f"创建心流聊天 {chat_id} 失败: {e}", exc_info=True)
-            traceback.print_exc()
             return None
 
 

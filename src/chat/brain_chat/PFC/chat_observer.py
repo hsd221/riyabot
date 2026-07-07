@@ -1,6 +1,5 @@
 import time
 import asyncio
-import traceback
 from typing import Optional, Dict, Any, List
 from src.common.logger import get_logger
 from maim_message import UserInfo
@@ -108,8 +107,7 @@ class ChatObserver:
             # print(self.notification_manager)
             await self.notification_manager.send_notification(notification)
         except Exception as e:
-            logger.error(f"[私聊][{self.private_name}]添加消息到历史记录时出错: {e}")
-            print(traceback.format_exc())
+            logger.error(f"[私聊][{self.private_name}]添加消息到历史记录时出错: {e}", exc_info=True)
 
         # 检查并更新冷场状态
         await self._check_cold_chat()
@@ -266,8 +264,7 @@ class ChatObserver:
                 self._update_complete.set()
 
             except Exception as e:
-                logger.error(f"[私聊][{self.private_name}]更新循环出错: {e}")
-                logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")
+                logger.exception(f"[私聊][{self.private_name}]更新循环出错: {e}")
                 self._update_complete.set()  # 即使出错也要设置完成事件
 
     def trigger_update(self):

@@ -721,7 +721,7 @@ class EmojiManager:
             # 先从内存中查找
             emoji = await self.get_emoji_from_manager(emoji_hash)
             if emoji and emoji.emotion:
-                logger.info(f"[缓存命中] 从内存获取表情包情感标签: {emoji.emotion}...")
+                logger.debug(f"表情包情感标签内存缓存命中: hash={emoji_hash[:8]}")
                 return emoji.emotion
 
             # 如果内存中没有，从数据库查找
@@ -729,7 +729,7 @@ class EmojiManager:
             try:
                 emoji_record = Emoji.get_or_none(Emoji.emoji_hash == emoji_hash)
                 if emoji_record and emoji_record.emotion:
-                    logger.info(f"[缓存命中] 从数据库获取表情包情感标签: {emoji_record.emotion[:50]}...")
+                    logger.debug(f"表情包情感标签数据库缓存命中: hash={emoji_hash[:8]}")
                     return emoji_record.emotion.replace("，", ",").split(",")
             except Exception as e:
                 logger.error(f"从数据库查询表情包情感标签时出错: {e}")
@@ -753,7 +753,7 @@ class EmojiManager:
             # 先从内存中查找
             emoji = await self.get_emoji_from_manager(emoji_hash)
             if emoji and emoji.description:
-                logger.info(f"[缓存命中] 从内存获取表情包描述: {emoji.description[:50]}...")
+                logger.debug(f"表情包描述内存缓存命中: hash={emoji_hash[:8]}")
                 return emoji.description
 
             # 如果内存中没有，从数据库查找
@@ -761,7 +761,7 @@ class EmojiManager:
             try:
                 emoji_record = Emoji.get_or_none(Emoji.emoji_hash == emoji_hash)
                 if emoji_record and emoji_record.description:
-                    logger.info(f"[缓存命中] 从数据库获取表情包描述: {emoji_record.description[:50]}...")
+                    logger.debug(f"表情包描述数据库缓存命中: hash={emoji_hash[:8]}")
                     return emoji_record.description
             except Exception as e:
                 logger.error(f"从数据库查询表情包描述时出错: {e}")
@@ -923,7 +923,7 @@ class EmojiManager:
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
                 if cache_record and cache_record.description:
                     existing_description = cache_record.description
-                    logger.info(f"[复用描述] 表情描述缓存命中: {existing_description[:50]}...")
+                    logger.debug(f"表情描述缓存命中: hash={image_hash[:8]}")
             except Exception as e:
                 logger.debug(f"查询表情描述缓存时出错: {e}")
 

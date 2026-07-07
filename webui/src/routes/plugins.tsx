@@ -298,8 +298,7 @@ export function PluginsPage() {
       try {
         const stats = await getPluginStats(plugin.id)
         return { id: plugin.id, stats }
-      } catch (error) {
-        console.warn(`Failed to load stats for ${plugin.id}:`, error)
+      } catch {
         return { id: plugin.id, stats: null }
       }
     })
@@ -362,10 +361,8 @@ export function PluginsPage() {
 
         const checkConnection = () => {
           if (ws && ws.readyState === WebSocket.OPEN) {
-            console.log('WebSocket connected, starting to load plugins')
             resolve()
           } else if (ws && ws.readyState === WebSocket.CLOSED) {
-            console.warn('WebSocket closed before loading plugins')
             resolve()
           } else {
             setTimeout(checkConnection, 100)
@@ -506,13 +503,6 @@ export function PluginsPage() {
       const marketVer = plugin.manifest.version?.trim()
 
       if (installedVer !== marketVer) {
-        // console.log(`[Plugin ${plugin.id}] 版本不一致:`, {
-        //   installed: installedVer,
-        //   market: marketVer,
-        //   installedType: typeof plugin.installed_version,
-        //   marketType: typeof plugin.manifest.version
-        // })
-
         // 简单的版本比较：只有当市场版本比已安装版本新时才显示"可更新"
         // 如果本地版本更新（比如手动更新或市场数据过期），则显示"已安装"
         const installedParts = installedVer?.split('.').map(Number) || [0, 0, 0]
@@ -692,9 +682,7 @@ export function PluginsPage() {
       await installPlugin(plugin.id, plugin.manifest.repository_url || '', 'main')
 
       // 记录下载统计
-      recordPluginDownload(plugin.id).catch((err) => {
-        console.warn('Failed to record download:', err)
-      })
+      recordPluginDownload(plugin.id).catch(() => {})
 
       toast({
         title: '安装成功',

@@ -1,6 +1,5 @@
 import asyncio
 import time
-import traceback
 import random
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from rich.traceback import install
@@ -140,8 +139,7 @@ class BrainChatting:
         """当 _hfc_loop 任务完成时执行的回调。"""
         try:
             if exception := task.exception():
-                logger.error(f"{self.log_prefix} BrainChatting: 脱离了聊天(异常): {exception}")
-                logger.error(traceback.format_exc())  # Log full traceback for exceptions
+                logger.error(f"{self.log_prefix} BrainChatting: 脱离了聊天(异常): {exception}", exc_info=True)
             else:
                 logger.info(f"{self.log_prefix} BrainChatting: 脱离了聊天 (外部停止)")
         except asyncio.CancelledError:
@@ -167,7 +165,7 @@ class BrainChatting:
             formatted_time = f"{elapsed * 1000:.2f}毫秒" if elapsed < 1 else f"{elapsed:.2f}秒"
             timer_strings.append(f"{name}: {formatted_time}")
 
-        logger.info(
+        logger.debug(
             f"{self.log_prefix} 第{self._current_cycle_detail.cycle_id}次思考,"
             f"耗时: {self._current_cycle_detail.end_time - self._current_cycle_detail.start_time:.1f}秒"  # type: ignore
             + (f"\n详情: {'; '.join(timer_strings)}" if timer_strings else "")
@@ -309,7 +307,7 @@ class BrainChatting:
                 asyncio.create_task(self._archive_recent_messages(recent_messages_list))
 
             cycle_timers, thinking_id = self.start_cycle()
-            logger.info(f"{self.log_prefix} 开始第{self._cycle_counter}次思考")
+            logger.debug(f"{self.log_prefix} 开始第{self._cycle_counter}次思考")
 
             # 第一步：动作检查
             available_actions: Dict[str, ActionInfo] = {}
@@ -365,7 +363,7 @@ class BrainChatting:
 
             # 如果选择了 complete_talk，标记为完成，不再继续迭代
             if has_complete_talk:
-                logger.info(f"{self.log_prefix} 检测到 complete_talk 动作，本次思考完成")
+                logger.debug(f"{self.log_prefix} 检测到 complete_talk 动作，本次思考完成")
 
             # 构建循环信息
             if reply_loop_info:
@@ -518,7 +516,7 @@ class BrainChatting:
                 success = await self._loopbody()
                 if not success:
                     # 选择了 complete，等待新消息
-                    logger.info(f"{self.log_prefix} 选择了 complete，等待新消息...")
+                    logger.debug(f"{self.log_prefix} 选择了 complete，等待新消息")
                     await self._wait_for_new_message()
                     # 有新消息后继续循环
                     continue
@@ -527,8 +525,7 @@ class BrainChatting:
             # 设置了关闭标志位后被取消是正常流程
             logger.info(f"{self.log_prefix} 麦麦已关闭聊天")
         except Exception:
-            logger.error(f"{self.log_prefix} 麦麦聊天意外错误，将于3s后尝试重新启动")
-            print(traceback.format_exc())
+            logger.exception(f"{self.log_prefix} 聊天循环异常，将于3s后尝试重新启动")
             await asyncio.sleep(3)
             self._loop_task = asyncio.create_task(self._main_chat_loop())
         logger.error(f"{self.log_prefix} 结束了当前聊天循环")
@@ -606,8 +603,7 @@ class BrainChatting:
                     action_message=action_message,
                 )
             except Exception as e:
-                logger.error(f"{self.log_prefix} 创建动作处理器时出错: {e}")
-                traceback.print_exc()
+                logger.error(f"{self.log_prefix} 创建动作处理器时出错: {e}", exc_info=True)
                 return False, "", ""
 
             if not action_handler:
@@ -624,8 +620,7 @@ class BrainChatting:
             return success, action_text, command
 
         except Exception as e:
-            logger.error(f"{self.log_prefix} 处理{action}时出错: {e}")
-            traceback.print_exc()
+            logger.error(f"{self.log_prefix} 处理{action}时出错: {e}", exc_info=True)
             return False, "", ""
 
     async def _send_response(
@@ -908,8 +903,7 @@ class BrainChatting:
                     }
 
         except Exception as e:
-            logger.error(f"{self.log_prefix} 执行动作时出错: {e}")
-            logger.error(f"{self.log_prefix} 错误信息: {traceback.format_exc()}")
+            logger.exception(f"{self.log_prefix} 执行动作时出错: {e}")
             return {
                 "action_type": action_planner_info.action_type,
                 "success": False,

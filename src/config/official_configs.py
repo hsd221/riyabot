@@ -677,10 +677,10 @@ class LogConfig(ConfigBase):
     date_style: str = "m-d H:i:s"
     """日期格式"""
 
-    log_level_style: Literal["FULL", "full", "compact", "lite"] = "lite"
+    log_level_style: Literal["FULL", "full", "compact", "lite"] = "compact"
     """日志级别样式"""
 
-    color_text: Literal["none", "title", "full"] = "full"
+    color_text: Literal["none", "title", "full"] = "title"
     """日志文本颜色"""
 
     log_level: str = "INFO"

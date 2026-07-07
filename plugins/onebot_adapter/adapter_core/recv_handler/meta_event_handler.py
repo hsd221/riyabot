@@ -22,7 +22,7 @@ class MetaEventHandler:
             if sub_type == MetaEventType.Lifecycle.connect:
                 self_id = message.get("self_id")
                 self.last_heart_beat = time.time()
-                logger.success(f"Bot {self_id} 连接成功")
+                logger.info(f"Bot 连接成功: self_id={self_id}")
                 asyncio.create_task(self.check_heartbeat(self_id))
         elif event_type == MetaEventType.heartbeat:
             self_id = message.get("self_id")
@@ -37,24 +37,22 @@ class MetaEventHandler:
                 self.last_heart_beat = time.time()
                 self.interval = message.get("interval", 30000) / 1000
             else:
-                # Bot 离线或状态异常
                 if not is_online:
-                    logger.error(f"🔴 Bot {self_id} 已下线 (online=false)")
-                    logger.warning("Bot 可能被踢下线、网络断开或主动退出登录")
+                    logger.error(f"Bot 离线: self_id={self_id}, online=false")
                 elif not is_good:
-                    logger.warning(f"⚠️ Bot {self_id} 状态异常 (good=false)")
+                    logger.warning(f"Bot 状态异常: self_id={self_id}, good=false")
                 else:
-                    logger.warning(f"Bot {self_id} Napcat 端异常！")
+                    logger.warning(f"NapCat 心跳状态异常: self_id={self_id}")
 
     async def check_heartbeat(self, id: int) -> None:
         self._interval_checking = True
         while True:
             now_time = time.time()
             if now_time - self.last_heart_beat > self.interval * 2:
-                logger.error(f"Bot {id} 可能发生了连接断开，被下线，或者Napcat卡死！")
+                logger.error(f"Bot 心跳超时: self_id={id}, timeout_seconds={self.interval * 2:.1f}")
                 break
             else:
-                logger.debug("心跳正常")
+                logger.debug(f"Bot 心跳正常: self_id={id}")
             await asyncio.sleep(self.interval)
 
 

@@ -5,7 +5,7 @@ WebUI 认证模块
 
 from typing import Optional
 from fastapi import HTTPException, Cookie, Header, Response, Request
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.config.config import global_config
 from .token_manager import get_token_manager
 
@@ -103,12 +103,11 @@ def set_auth_cookie(response: Response, token: str, request: Optional[Request] =
 
         # 如果是 HTTP 连接，强制禁用 secure 标志
         if not is_https and is_secure:
-            logger.warning("=" * 80)
-            logger.warning("检测到 HTTP 连接但环境配置要求 HTTPS (secure cookie)")
-            logger.warning("已自动禁用 secure 标志以允许登录，但建议修改配置：")
-            logger.warning("1. 在配置文件中设置: webui.secure_cookie = false")
-            logger.warning("2. 如果使用反向代理，请确保正确配置 X-Forwarded-Proto 头")
-            logger.warning("=" * 80)
+            logger.warning(
+                "HTTP 连接下禁用 secure cookie",
+                configured_secure_cookie=True,
+                scheme=request.url.scheme,
+            )
             is_secure = False
 
     # 设置 Cookie
@@ -123,9 +122,14 @@ def set_auth_cookie(response: Response, token: str, request: Optional[Request] =
     )
 
     logger.info(
-        f"已设置认证 Cookie: {token[:8]}... (secure={is_secure}, samesite=lax, httponly=True, path=/, max_age={COOKIE_MAX_AGE})"
+        "已设置认证 Cookie",
+        token_hash=hash_id(token),
+        secure=is_secure,
+        samesite="lax",
+        httponly=True,
+        path="/",
+        max_age=COOKIE_MAX_AGE,
     )
-    logger.debug(f"完整 token 前缀: {token[:20]}...")
 
 
 def clear_auth_cookie(response: Response) -> None:

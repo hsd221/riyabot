@@ -1,15 +1,37 @@
-from loguru import logger
-from .config import global_config
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
+
+from loguru import logger
+
+from .config import global_config
 
 # 日志目录配置
 LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
-# 日志等级映射(用于显示单字母)
-LEVEL_ABBR = {"TRACE": "T", "DEBUG": "D", "INFO": "I", "SUCCESS": "S", "WARNING": "W", "ERROR": "E", "CRITICAL": "C"}
+# 日志等级映射。适配器只展示主程序同一套级别字母。
+LEVEL_ABBR = {"TRACE": "D", "DEBUG": "D", "SUCCESS": "I", "INFO": "I", "WARNING": "W", "ERROR": "E", "CRITICAL": "C"}
+LEVEL_COLORS = {
+    "TRACE": "<blue>",
+    "DEBUG": "<blue>",
+    "SUCCESS": "<green>",
+    "INFO": "<green>",
+    "WARNING": "<yellow>",
+    "ERROR": "<red>",
+    "CRITICAL": "<magenta>",
+}
+CONSOLE_FORMAT = "{time:MM-DD HH:mm:ss} | <level>[{extra[level_abbr]}]</level> | <cyan>[{extra[module_name]}]</cyan> | {message}"
+FILE_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | [{extra[level_abbr]}] | [{extra[module_name]}] | {message}"
+
+
+def configure_level_colors() -> None:
+    """统一 loguru 级别颜色。"""
+    for level_name, color in LEVEL_COLORS.items():
+        try:
+            logger.level(level_name, color=color)
+        except ValueError:
+            continue
 
 
 def get_level_abbr(record):
@@ -26,11 +48,10 @@ def clean_old_logs(days: int = 30):
                 file_time = datetime.fromtimestamp(log_file.stat().st_mtime)
                 if file_time < cutoff_date:
                     log_file.unlink()
-                    print(f"已清理过期日志: {log_file.name}")
-            except Exception as e:
-                print(f"清理日志文件 {log_file.name} 失败: {e}")
-    except Exception as e:
-        print(f"清理日志目录失败: {e}")
+            except Exception:
+                continue
+    except Exception:
+        return
 
 
 # 清理过期日志
@@ -38,6 +59,7 @@ clean_old_logs(30)
 
 # 移除默认处理器
 logger.remove()
+configure_level_colors()
 
 
 # 自定义格式化函数
@@ -53,7 +75,7 @@ def format_log(record):
 logger.add(
     sys.stderr,
     level=global_config.debug.level,
-    format="<blue>{time:MM-DD HH:mm:ss}</blue> | <level>[{extra[level_abbr]}]</level> | <cyan>{extra[module_name]}</cyan> | <level>{message}</level>",
+    format=CONSOLE_FORMAT,
     filter=lambda record: format_log(record) and record["extra"].get("module_name") != "maim_message",
 )
 
@@ -61,16 +83,16 @@ logger.add(
 logger.add(
     sys.stderr,
     level="INFO",
-    format="<red>{time:MM-DD HH:mm:ss}</red> | <level>[{extra[level_abbr]}]</level> | <cyan>{extra[module_name]}</cyan> | <level>{message}</level>",
+    format=CONSOLE_FORMAT,
     filter=lambda record: format_log(record) and record["extra"].get("module_name") == "maim_message",
 )
 
-# 文件输出处理器 - 详细格式,记录所有TRACE级别
+# 文件输出处理器 - 使用与主程序控制台一致的视觉格式
 log_file = LOG_DIR / f"adapter_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logger.add(
     log_file,
-    level="TRACE",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | [{level}] | {extra[module_name]} | {name}:{function}:{line} - {message}",
+    level="DEBUG",
+    format=FILE_FORMAT,
     rotation="100 MB",  # 单个日志文件最大100MB
     retention="30 days",  # 保留30天
     encoding="utf-8",

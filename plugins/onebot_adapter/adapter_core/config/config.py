@@ -102,13 +102,13 @@ def update_config():
                         target[key] = value
 
     # 将旧配置的值更新到新配置中
-    logger.info("开始合并新旧配置...")
+    logger.debug("合并适配器配置")
     update_dict(new_config, old_config)
 
     # 保存更新后的配置（保留注释和格式）
     with open(new_config_path, "w", encoding="utf-8") as f:
         f.write(tomlkit.dumps(new_config))
-    logger.info("配置文件更新完成，建议检查新配置文件中的内容")
+    logger.info("适配器配置文件已更新")
 
 
 @dataclass
@@ -145,7 +145,7 @@ def load_config(config_path: str) -> Config:
 # 更新配置
 update_config()
 
-logger.info("正在品鉴配置文件...")
+logger.debug("加载适配器配置文件")
 
 # 创建配置管理器
 from .config_manager import ConfigManager  # noqa: E402
@@ -157,4 +157,4 @@ _config_manager.load(config_path=str(CONFIG_PATH))
 # 所有现有代码可以继续使用 global_config.chat.xxx 访问配置
 global_config = _config_manager
 
-logger.info("非常的新鲜，非常的美味！")
+logger.info("适配器配置已加载")

@@ -260,7 +260,7 @@ def initialize_ws_handler(loop):
     root_logger = logging.getLogger()
     if handler not in root_logger.handlers:
         root_logger.addHandler(handler)
-        print("[日志系统] WebSocket 日志推送已启用")
+        logging.getLogger("logger").debug("WebSocket 日志推送已启用")
 
 
 class TimestampedFileHandler(logging.Handler):
@@ -316,12 +316,11 @@ class TimestampedFileHandler(logging.Handler):
             for old_file in log_files[self.backup_count :]:
                 try:
                     old_file.unlink()
-                    print(f"[日志清理] 删除旧文件: {old_file.name}")
-                except Exception as e:
-                    print(f"[日志清理] 删除失败 {old_file}: {e}")
+                except Exception:
+                    continue
 
-        except Exception as e:
-            print(f"[日志清理] 清理过程出错: {e}")
+        except Exception:
+            return
 
     def emit(self, record):
         """发出日志记录"""
@@ -445,9 +444,7 @@ def remove_duplicate_handlers():  # sourcery skip: for-append-to-extend, list-co
 
     # 如果有多个文件handler，保留第一个，关闭其他的
     if len(file_handlers) > 1:
-        print(f"[日志系统] 检测到 {len(file_handlers)} 个重复的文件handler，正在清理...")
-        for i, handler in enumerate(file_handlers[1:], 1):
-            print(f"[日志系统] 关闭重复的文件handler {i}")
+        for handler in file_handlers[1:]:
             root_logger.removeHandler(handler)
             handler.close()
 
@@ -462,8 +459,8 @@ def load_log_config():  # sourcery skip: use-contextlib-suppress
     config_path = Path("config/bot_config.toml")
     default_config = {
         "date_style": "m-d H:i:s",
-        "log_level_style": "lite",
-        "color_text": "full",
+        "log_level_style": "compact",
+        "color_text": "title",
         "log_level": "INFO",  # 全局日志级别（向下兼容）
         "console_log_level": "INFO",  # 控制台日志级别
         "file_log_level": "DEBUG",  # 文件日志级别
@@ -491,8 +488,8 @@ def load_log_config():  # sourcery skip: use-contextlib-suppress
             with open(config_path, "r", encoding="utf-8") as f:
                 config = tomlkit.load(f)
                 return config.get("log", default_config)
-    except Exception as e:
-        print(f"[日志系统] 加载日志配置失败: {e}")
+    except Exception:
+        return default_config
     return default_config
 
 
@@ -772,17 +769,35 @@ MODULE_ALIASES = {
     "memory.profile": "记忆画像",
     "memory.feedback": "记忆强化",
     "memory.graph": "记忆图谱",
-    "memory.dream": "梦境维护",
+    "memory.dream": "记忆维护",
     "memory.trace": "记忆追溯",
     "memory.conflict": "冲突仲裁",
     "memory.association": "记忆关联",
-    "memory.weaver": "梦呓编织",
+    "memory.weaver": "洞见编织",
     "memory.expression": "表达学习",
-    "memory.insight": "恍然大悟",
+    "memory.insight": "洞察",
     "memory.inspiration": "噪声回收",
 }
 
 RESET_COLOR = "\033[0m"
+LEVEL_ABBR = {
+    "trace": "T",
+    "debug": "D",
+    "info": "I",
+    "success": "S",
+    "warning": "W",
+    "error": "E",
+    "critical": "C",
+}
+LEVEL_COLORS = {
+    "trace": "\033[38;5;242m",
+    "debug": "\033[38;5;39m",
+    "info": "\033[38;5;34m",
+    "success": "\033[32m",
+    "warning": "\033[33m",
+    "error": "\033[31m",
+    "critical": "\033[35m",
+}
 
 
 def convert_pathname_to_module(logger, method_name, event_dict):
@@ -823,19 +838,8 @@ class ModuleColoredConsoleRenderer:
     """自定义控制台渲染器，为不同模块提供不同颜色"""
 
     def __init__(self, colors=True):
-        # sourcery skip: merge-duplicate-blocks, remove-redundant-if
         self._colors = colors
         self._config = LOG_CONFIG
-
-        # 日志级别颜色
-        self._level_colors = {
-            "debug": "\033[38;5;208m",  # 橙色
-            "info": "\033[38;5;117m",  # 天蓝色
-            "success": "\033[32m",  # 绿色
-            "warning": "\033[33m",  # 黄色
-            "error": "\033[31m",  # 红色
-            "critical": "\033[35m",  # 紫色
-        }
 
         # 根据配置决定是否启用颜色
         color_text = self._config.get("color_text", "title")
@@ -855,49 +859,26 @@ class ModuleColoredConsoleRenderer:
             self._enable_full_content_colors = False
 
     def __call__(self, logger, method_name, event_dict):
-        # sourcery skip: merge-duplicate-blocks
         """渲染日志消息"""
         # 获取基本信息
         timestamp = event_dict.get("timestamp", "")
-        level = event_dict.get("level", "info")
+        level = str(event_dict.get("level", "info")).lower()
         logger_name = event_dict.get("logger_name", "")
         event = event_dict.get("event", "")
 
         # 构建输出
         parts = []
 
-        # 日志级别样式配置
-        log_level_style = self._config.get("log_level_style", "lite")
-        level_color = self._level_colors.get(level.lower(), "") if self._colors else ""
+        level_color = LEVEL_COLORS.get(level, "") if self._colors else ""
 
-        # 时间戳（lite模式下按级别着色）
         if timestamp:
-            if log_level_style == "lite" and level_color:
-                timestamp_part = f"{level_color}{timestamp}{RESET_COLOR}"
-            else:
-                timestamp_part = timestamp
-            parts.append(timestamp_part)
+            parts.append(timestamp)
 
-        # 日志级别显示（根据配置样式）
-        if log_level_style == "full":
-            # 显示完整级别名并着色
-            level_text = level.upper()
-            if level_color:
-                level_part = f"{level_color}[{level_text:>8}]{RESET_COLOR}"
-            else:
-                level_part = f"[{level_text:>8}]"
-            parts.append(level_part)
-
-        elif log_level_style == "compact":
-            # 只显示首字母并着色
-            level_text = level.upper()[0]
-            if level_color:
-                level_part = f"{level_color}[{level_text:>8}]{RESET_COLOR}"
-            else:
-                level_part = f"[{level_text:>8}]"
-            parts.append(level_part)
-
-        # lite模式不显示级别，只给时间戳着色
+        level_text = LEVEL_ABBR.get(level, level[:1].upper())
+        level_part = f"[{level_text}]"
+        if level_color:
+            level_part = f"{level_color}{level_part}{RESET_COLOR}"
+        parts.append(level_part)
 
         # 获取模块颜色，用于full模式下的整体着色
         module_color = ""
@@ -932,10 +913,6 @@ class ModuleColoredConsoleRenderer:
             # 其他类型直接转换为字符串
             event_content = str(event)
 
-        # 在full模式下为消息内容着色
-        if self._colors and self._enable_full_content_colors and module_color:
-            event_content = f"{module_color}{event_content}{RESET_COLOR}"
-
         parts.append(event_content)
 
         # 处理其他字段
@@ -951,17 +928,14 @@ class ModuleColoredConsoleRenderer:
                 else:
                     value_str = str(value)
 
-                # 在full模式下为额外字段着色
                 extra_field = f"{key}={value_str}"
-                if self._colors and self._enable_full_content_colors and module_color:
-                    extra_field = f"{module_color}{extra_field}{RESET_COLOR}"
 
                 extras.append(extra_field)
 
         if extras:
             parts.append(" ".join(extras))
 
-        return " ".join(parts)
+        return " | ".join(parts)
 
 
 # 配置标准logging以支持文件输出和压缩
@@ -1195,9 +1169,6 @@ def start_log_cleanup_task(verbose: bool = True):
 
 def shutdown_logging():
     """优雅关闭日志系统，释放所有文件句柄"""
-    # 先输出到控制台，避免日志系统关闭后无法输出
-    print("[logger] 正在关闭日志系统...")
-
     # 关闭所有handler
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
@@ -1216,6 +1187,3 @@ def shutdown_logging():
                 if hasattr(handler, "close"):
                     handler.close()
                 logger_obj.removeHandler(handler)
-
-    # 使用 print 而不是 logger，因为 logger 已经关闭
-    print("[logger] 日志系统已关闭")

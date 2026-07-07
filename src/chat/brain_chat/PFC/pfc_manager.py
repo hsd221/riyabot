@@ -2,7 +2,6 @@ import time
 from typing import Dict, Optional
 from src.common.logger import get_logger
 from .conversation import Conversation
-import traceback
 
 logger = get_logger("pfc_manager")
 
@@ -99,8 +98,7 @@ class PFCManager:
             logger.info(f"[私聊][{private_name}]会话实例 {stream_id} 初始化完成")
 
         except Exception as e:
-            logger.error(f"[私聊][{private_name}]管理器初始化会话实例失败: {stream_id}, 错误: {e}")
-            logger.error(f"[私聊][{private_name}]{traceback.format_exc()}")
+            logger.exception(f"[私聊][{private_name}]管理器初始化会话实例失败: {stream_id}, 错误: {e}")
             # 清理失败的初始化
 
     async def get_conversation(self, stream_id: str) -> Optional[Conversation]:

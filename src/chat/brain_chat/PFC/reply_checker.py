@@ -81,10 +81,7 @@ class ReplyChecker:
                     )
 
         except Exception as e:
-            import traceback
-
-            logger.error(f"[私聊][{self.private_name}]检查回复时出错: 类型={type(e)}, 值={e}")
-            logger.error(f"[私聊][{self.private_name}]{traceback.format_exc()}")  # 打印详细的回溯信息
+            logger.exception(f"[私聊][{self.private_name}]检查回复时出错: 类型={type(e)}, 值={e}")
 
         prompt = load_prompt("pfc_reply_check", goal=goal, chat_history_text=chat_history_text, reply=reply)
 

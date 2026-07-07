@@ -179,7 +179,7 @@ class WriteOpLogger:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         except (ImportError, OSError):
             # fcntl 不可用时（如 Windows），退化到无锁模式
-            logger.debug("获取文件锁异常(可忽略)", exc_info=True)
+            logger.debug("获取文件锁失败，继续使用无锁模式", exc_info=True)
 
     def _release_lock(self, f) -> None:
         """释放文件锁"""
@@ -188,7 +188,7 @@ class WriteOpLogger:
 
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except (ImportError, OSError):
-            logger.debug("释放文件锁异常(可忽略)", exc_info=True)
+            logger.debug("释放文件锁失败，继续使用无锁模式", exc_info=True)
 
     # ── 日志轮转 ──────────────────────────────────────────────
 

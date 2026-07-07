@@ -45,14 +45,14 @@ class OneBotAdapterRuntime:
             self._create_task(mmc_start_com(), "onebot_adapter.mmc")
             self._create_task(self._message_process(), "onebot_adapter.message_process")
             self._create_task(check_timeout_response(), "onebot_adapter.response_timeout")
-            logger.success("OneBot/NapCat 适配器插件运行时已启动")
+            logger.info("OneBot/NapCat 适配器插件运行时已启动")
 
     async def stop(self) -> None:
         async with self._start_lock:
             if not self._started and not self._tasks:
                 return
 
-            logger.info("正在停止 OneBot/NapCat 适配器插件运行时...")
+            logger.info("OneBot/NapCat 适配器运行时开始停止")
             self._started = False
 
             await self._close_websocket_server()
@@ -199,11 +199,11 @@ class OneBotAdapterRuntime:
             if not self._restart_event.is_set():
                 break
 
-            logger.info("正在重启 OneBot/NapCat WebSocket 服务器...")
+            logger.info("OneBot/NapCat WebSocket 服务器开始重启")
             await asyncio.sleep(1)
 
     async def _napcat_server(self) -> None:
-        logger.info("正在启动 RiyaBot-NapCat-Adapter...")
+        logger.info("OneBot/NapCat WebSocket 服务器开始启动")
         logger.debug(f"日志等级: {global_config.debug.level}")
         logger.debug("日志文件: plugins/onebot_adapter/logs/adapter_*.log")
 
@@ -215,16 +215,14 @@ class OneBotAdapterRuntime:
             process_request=self._check_napcat_server_token,
         ) as server:
             self._websocket_server = server
-            logger.success(
+            logger.info(
                 f"Adapter 启动成功，监听: ws://{global_config.napcat_server.host}:{global_config.napcat_server.port}"
             )
             await server.serve_forever()
 
     def _log_network_error(self, exc: OSError) -> None:
         if exc.errno == 10048 or "address already in use" in str(exc).lower():
-            logger.error(f"端口 {global_config.napcat_server.port} 已被占用，请检查:")
-            logger.error("1. 是否有其他 RiyaBot-NapCat-Adapter 实例正在运行")
-            logger.error("2. 修改 plugins/onebot_adapter/config.toml 中的 port 配置")
+            logger.error(f"端口已被占用: port={global_config.napcat_server.port}")
         else:
             logger.error(f"网络错误: {exc}")
 

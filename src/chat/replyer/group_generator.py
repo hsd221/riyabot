@@ -189,14 +189,21 @@ class DefaultReplyer:
                         if timing_logs or almost_zero_str
                         else "回复准备: 无计时信息"
                     )
-                    logger.info(timing_log_str)
+                    logger.debug(timing_log_str)
                     # 2. 输出Prompt日志
                     if global_config.debug.show_replyer_prompt:
                         logger.info(f"\n{prompt}\n")
                     else:
                         logger.debug(f"\nreplyer_Prompt:{prompt}\n")
                     # 3. 输出模型生成内容和推理日志
-                    logger.info(f"模型: [{model_name}][思考等级:{think_level}]生成内容: {content}")
+                    logger.debug(
+                        "回复生成完成",
+                        model=model_name,
+                        think_level=think_level,
+                        content_chars=len(content or ""),
+                        reasoning_chars=len(reasoning_content or ""),
+                        tool_call=bool(tool_call),
+                    )
                     if global_config.debug.show_replyer_reasoning and reasoning_content:
                         logger.info(f"模型: [{model_name}][思考等级:{think_level}]生成推理:\n{reasoning_content}")
                 except Exception as e:
@@ -332,7 +339,13 @@ class DefaultReplyer:
 
             try:
                 content, reasoning_content, model_name, _ = await self.llm_generate_content(prompt)
-                logger.info(f"想要表达：{raw_reply}||理由：{reason}||生成回复: {content}\n")
+                logger.debug(
+                    "回复重写完成",
+                    raw_reply_chars=len(raw_reply or ""),
+                    reason_chars=len(reason or ""),
+                    content_chars=len(content or ""),
+                    model=model_name,
+                )
                 llm_response.content = content
                 llm_response.reasoning = reasoning_content
                 llm_response.model = model_name
@@ -1242,7 +1255,7 @@ class DefaultReplyer:
                     logger.debug("按需记忆查询无结果")
                     return ""
                 memory_evidence = str(result.get("content", "") or "")
-                logger.info(f"按需记忆查询获得候选证据：{memory_evidence[:100]}...，信息长度: {len(memory_evidence)}")
+                logger.debug("按需记忆查询获得候选证据", evidence_chars=len(memory_evidence))
                 related_info += memory_evidence
                 logger.debug(f"按需记忆查询耗时: {(end_time - start_time):.3f}秒")
                 logger.debug(f"按需记忆查询结果：{related_info[:100]}...，信息长度: {len(related_info)}")

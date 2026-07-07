@@ -84,12 +84,12 @@ class DreamWeaver:
         # 1. 查询噪声池
         entries = self._query_noise_entries()
         if not entries:
-            logger.debug("梦呓编织: 无可用噪声素材，跳过")
+            logger.debug("洞见编织: 无可用噪声素材，跳过")
             return []
 
         if len(entries) < _MIN_WEAVE_ENTRIES:
             logger.info(
-                "梦呓编织: 噪声素材不足 (%d < %d)，跳过",
+                "洞见编织: 噪声素材不足 (%d < %d)，跳过",
                 len(entries),
                 _MIN_WEAVE_ENTRIES,
             )
@@ -98,7 +98,7 @@ class DreamWeaver:
         # 2. 取子集用于 LLM 提示词
         weave_entries = entries[:_MAX_WEAVE_ENTRIES]
         logger.info(
-            "梦呓编织: 加载 %d 条噪声素材 (窗口 %d 小时，共 %d 条可用)",
+            "洞见编织: 加载 %d 条噪声素材 (窗口 %d 小时，共 %d 条可用)",
             len(weave_entries),
             self._noise_retention_hours,
             len(entries),
@@ -110,13 +110,13 @@ class DreamWeaver:
         # 4. 调用 LLM
         insights_raw = await self._call_llm(prompt)
         if not insights_raw:
-            logger.info("梦呓编织: LLM 未产生洞见")
+            logger.debug("洞见编织: LLM 未产生洞见")
             return []
 
         # 5. 解析 LLM 响应
         insights = self._parse_weave_response(insights_raw)
         if not insights:
-            logger.info("梦呓编织: 解析 LLM 响应后无有效洞见")
+            logger.debug("洞见编织: 解析 LLM 响应后无有效洞见")
             return []
 
         # 6. 写入 InsightPool
@@ -134,9 +134,9 @@ class DreamWeaver:
                     )
                 saved_insights.append(insight)
             except Exception as e:
-                logger.warning("梦呓编织: 写入 InsightPool 失败: %s", e)
+                logger.warning("洞见编织: 写入 InsightPool 失败: %s", e)
 
-        logger.info("梦呓编织: 生成 %d 条洞见", len(saved_insights))
+        logger.info("洞见编织: 生成 %d 条洞见", len(saved_insights))
         return saved_insights
 
     # ── 噪声查询 ─────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ class DreamWeaver:
             )
             return content.strip()
         except Exception as e:
-            logger.warning("梦呓编织 LLM 调用失败（降级处理）: %s", e)
+            logger.warning("洞见编织 LLM 调用失败: %s", e)
             return ""
 
     # ── 响应解析 ────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ class DreamWeaver:
             pass
 
         logger.warning(
-            "梦呓编织: 解析 LLM 响应失败, 响应前200字符: %s",
+            "洞见编织: 解析 LLM 响应失败, 响应前200字符: %s",
             text[:200],
         )
         return []

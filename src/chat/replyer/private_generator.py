@@ -216,7 +216,13 @@ class PrivateReplyer:
 
             try:
                 content, reasoning_content, model_name, _ = await self.llm_generate_content(prompt)
-                logger.info(f"想要表达：{raw_reply}||理由：{reason}||生成回复: {content}\n")
+                logger.debug(
+                    "回复重写完成",
+                    raw_reply_chars=len(raw_reply or ""),
+                    reason_chars=len(reason or ""),
+                    content_chars=len(content or ""),
+                    model=model_name,
+                )
                 llm_response.content = content
                 llm_response.reasoning = reasoning_content
                 llm_response.model = model_name

@@ -11,6 +11,7 @@ class MetaEventType:
 
 
 class MessageType:  # 接受消息大类
+    input_status = "input_status"  # 输入状态
     private = "private"  # 私聊消息
 
     class Private:
@@ -28,6 +29,7 @@ class MessageType:  # 接受消息大类
 
 
 class NoticeType:  # 通知事件
+    input_status = "input_status"  # 输入状态
     friend_recall = "friend_recall"  # 私聊消息撤回
     group_recall = "group_recall"  # 群聊消息撤回
     notify = "notify"
@@ -40,6 +42,7 @@ class NoticeType:  # 通知事件
     essence = "essence"  # 精华消息
 
     class Notify:
+        input_status = "input_status"  # 输入状态
         poke = "poke"  # 戳一戳
         group_name = "group_name"  # 群名称变更
 

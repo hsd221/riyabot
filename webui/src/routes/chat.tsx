@@ -311,12 +311,10 @@ export function ChatPage() {
     setIsLoadingPlatforms(true)
     try {
       const response = await fetchWithAuth('/api/chat/platforms')
-      console.log('[Chat] 平台列表响应:', response.status, response.headers.get('content-type'))
       if (response.ok) {
         const contentType = response.headers.get('content-type')
         if (contentType && contentType.includes('application/json')) {
           const data = await response.json()
-          console.log('[Chat] 平台列表数据:', data)
           setPlatforms(data.platforms || [])
         } else {
           const text = await response.text()
@@ -392,7 +390,6 @@ export function ChatPage() {
           params.append('group_id', groupId)
         }
         const url = `/api/chat/history?${params.toString()}`
-        console.log('[Chat] 正在加载历史消息:', url)
 
         const response = await fetchWithAuth(url)
 
@@ -463,7 +460,6 @@ export function ChatPage() {
         existingWs?.readyState === WebSocket.OPEN ||
         existingWs?.readyState === WebSocket.CONNECTING
       ) {
-        console.log(`[Tab ${tabId}] WebSocket 已存在，跳过连接`)
         return
       }
 
@@ -488,7 +484,6 @@ export function ChatPage() {
       }
 
       const wsUrl = `${protocol}//${window.location.host}/api/chat/ws?${params.toString()}`
-      console.log(`[Tab ${tabId}] 正在连接 WebSocket:`, wsUrl)
 
       try {
         const ws = new WebSocket(wsUrl)
@@ -497,7 +492,6 @@ export function ChatPage() {
         ws.onopen = () => {
           updateTab(tabId, { isConnected: true })
           setIsConnecting(false)
-          console.log(`[Tab ${tabId}] WebSocket 已连接`)
         }
 
         ws.onmessage = (event) => {
@@ -664,13 +658,12 @@ export function ChatPage() {
                   processedMessagesMapRef.current.set(tabId, processedSet)
                   // 替换当前标签页的所有消息
                   updateTab(tabId, { messages: formattedMessages })
-                  console.log(`[Tab ${tabId}] 已加载 ${formattedMessages.length} 条历史消息`)
                 }
                 break
               }
 
               default:
-                console.log('未知消息类型:', data.type)
+                break
             }
           } catch (e) {
             console.error('解析消息失败:', e)
@@ -681,7 +674,6 @@ export function ChatPage() {
           updateTab(tabId, { isConnected: false })
           setIsConnecting(false)
           wsMapRef.current.delete(tabId)
-          console.log(`[Tab ${tabId}] WebSocket 已断开`)
 
           // 清除旧的重连定时器
           const oldTimeout = reconnectTimeoutMapRef.current.get(tabId)

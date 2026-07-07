@@ -227,7 +227,7 @@ class ExpressionAutoCheckTask(AsyncTask):
             failed_count = 0
 
             for i, expression in enumerate(expressions, 1):
-                logger.info(f"正在评估 [{i}/{len(expressions)}]: ID={expression.id}")
+                logger.debug(f"评估表达方式 [{i}/{len(expressions)}]: ID={expression.id}")
 
                 if await self._evaluate_expression(expression):
                     passed_count += 1

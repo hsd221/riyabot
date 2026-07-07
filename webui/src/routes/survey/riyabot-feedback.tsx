@@ -49,9 +49,7 @@ export function RiyaBotFeedbackSurveyPage() {
   )
 
   // 提交成功回调
-  const handleSubmitSuccess = useCallback((submissionId: string) => {
-    console.log('RiyaBot Survey submitted:', submissionId)
-  }, [])
+  const handleSubmitSuccess = useCallback(() => {}, [])
 
   // 提交错误回调
   const handleSubmitError = useCallback((error: string) => {

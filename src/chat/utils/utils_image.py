@@ -222,7 +222,7 @@ class ImageManager:
                 tags = await emoji_manager.get_emoji_tag_by_hash(image_hash)
                 if tags:
                     tag_str = ",".join(tags)
-                    logger.info(f"[缓存命中] 使用已注册表情包描述: {tag_str}...")
+                    logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
                     return f"[表情包：{tag_str}]"
             except Exception as e:
                 logger.debug(f"查询EmojiManager时出错: {e}")
@@ -234,14 +234,10 @@ class ImageManager:
                     # 优先使用情感标签，如果没有则使用详细描述
                     result_text = ""
                     if cache_record.emotion_tags:
-                        logger.info(
-                            f"[缓存命中] 使用EmojiDescriptionCache表中的情感标签: {cache_record.emotion_tags[:50]}..."
-                        )
+                        logger.debug(f"表情包情感标签缓存命中: hash={image_hash[:8]}")
                         result_text = f"[表情包：{cache_record.emotion_tags}]"
                     elif cache_record.description:
-                        logger.info(
-                            f"[缓存命中] 使用EmojiDescriptionCache表中的描述: {cache_record.description[:50]}..."
-                        )
+                        logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
                         result_text = f"[表情包：{cache_record.description}]"
 
                     # 即使缓存命中，如果启用了steal_emoji，也检查是否需要保存文件

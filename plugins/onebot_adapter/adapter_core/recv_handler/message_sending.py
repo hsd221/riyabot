@@ -51,16 +51,15 @@ class MessageSending:
                 return False
 
             if msg_size_kb > 1024:  # 超过 1MB 时警告
-                logger.warning(f"发送的消息较大 ({msg_size_mb:.2f} MB)，可能导致传输延迟")
+                logger.info(f"发送消息较大: size_mb={msg_size_mb:.2f}")
 
             send_status = await self.maibot_router.send_message(message_base)
             if not send_status:
-                raise RuntimeError("可能是路由未正确配置或连接异常")
+                raise RuntimeError("maibot_router.send_message returned false")
             logger.debug("消息发送成功")
             return send_status
         except Exception as e:
             logger.error(f"发送消息失败: {str(e)}")
-            logger.error("请检查与RiyaBot之间的连接")
             return False
 
     async def send_custom_message(self, custom_message: Dict, platform: str, message_type: str) -> bool:
@@ -74,7 +73,6 @@ class MessageSending:
             return True
         except Exception as e:
             logger.error(f"发送自定义消息失败: {str(e)}")
-            logger.error("请检查与RiyaBot之间的连接")
             return False
 
 

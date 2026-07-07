@@ -747,8 +747,11 @@ class AntiCrawlerMiddleware(BaseHTTPMiddleware):
             is_scanner, scanner_name = self._detect_asset_scanner(request)
             if is_scanner:
                 logger.warning(
-                    f"🚫 检测到资产测绘工具请求 - IP: {client_ip}, 工具: {scanner_name}, "
-                    f"User-Agent: {user_agent}, Path: {request.url.path}"
+                    "检测到资产测绘工具请求",
+                    ip=client_ip,
+                    scanner=scanner_name,
+                    user_agent=user_agent,
+                    path=request.url.path,
                 )
                 # 根据配置决定是否阻止
                 if self.block_on_detect:
@@ -759,7 +762,7 @@ class AntiCrawlerMiddleware(BaseHTTPMiddleware):
 
         # 检测爬虫 User-Agent
         if self.check_user_agent and self._is_crawler_user_agent(user_agent):
-            logger.warning(f"🚫 检测到爬虫请求 - IP: {client_ip}, User-Agent: {user_agent}, Path: {request.url.path}")
+            logger.warning("检测到爬虫请求", ip=client_ip, user_agent=user_agent, path=request.url.path)
             # 根据配置决定是否阻止
             if self.block_on_detect:
                 return PlainTextResponse(
@@ -769,7 +772,7 @@ class AntiCrawlerMiddleware(BaseHTTPMiddleware):
 
         # 检查请求频率限制
         if self.check_rate_limit and self._check_rate_limit(client_ip):
-            logger.warning(f"🚫 请求频率过高 - IP: {client_ip}, User-Agent: {user_agent}, Path: {request.url.path}")
+            logger.warning("请求频率过高", ip=client_ip, user_agent=user_agent, path=request.url.path)
             return PlainTextResponse(
                 "Too Many Requests: Rate limit exceeded",
                 status_code=429,

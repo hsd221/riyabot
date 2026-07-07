@@ -5,7 +5,6 @@ from src.common.logger import get_logger
 from .chat_observer import ChatObserver
 from .chat_states import NotificationHandler, NotificationType, Notification
 from .pfc_KnowledgeFetcher import format_pfc_chat_history
-import traceback  # 导入 traceback 用于调试
 
 logger = get_logger("observation_info")
 
@@ -116,8 +115,7 @@ class ObservationInfoHandler(NotificationHandler):
                 logger.error(f"[私聊][{self.private_name}]收到错误通知: {error_msg}")
 
         except Exception as e:
-            logger.error(f"[私聊][{self.private_name}]处理通知时发生错误: {e}")
-            logger.error(traceback.format_exc())  # 打印详细堆栈信息
+            logger.exception(f"[私聊][{self.private_name}]处理通知时发生错误: {e}")
 
 
 # @dataclass <-- 这个，不需要了（递黄瓜）
@@ -197,7 +195,7 @@ class ObservationInfo:
         self.chat_observer = chat_observer
         try:
             if not self.handler:  # 确保 handler 已经被创建
-                logger.error(f"[私聊][{self.private_name}] 尝试绑定时 handler 未初始化！")
+                logger.error(f"[私聊][{self.private_name}] 尝试绑定时 handler 未初始化")
                 self.chat_observer = None  # 重置，防止后续错误
                 return
 

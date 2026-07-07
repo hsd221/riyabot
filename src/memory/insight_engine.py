@@ -108,7 +108,7 @@ class InsightEngine:
             except Exception as e:
                 logger.warning("写入洞察失败: %s", e)
 
-        logger.info("月度恍然大悟: %d 条洞察已保存", saved_count)
+        logger.info("月度洞察: %d 条洞察已保存", saved_count)
         return all_insights
 
     # ── Scan 1: 原子模式发现 ────────────────────────────────────────────

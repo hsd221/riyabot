@@ -1,5 +1,4 @@
 import re
-import traceback
 
 from typing import TYPE_CHECKING
 
@@ -105,5 +104,4 @@ class HeartFCMessageReceiver:
             )
 
         except Exception as e:
-            logger.error(f"消息处理失败: {e}")
-            print(traceback.format_exc())
+            logger.error(f"消息处理失败: {e}", exc_info=True)

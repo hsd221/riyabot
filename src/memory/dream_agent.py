@@ -146,22 +146,22 @@ class DreamTask(AsyncTask):
         # 1. 检查梦境时间段
         dream_cfg = global_config.dream
         if not dream_cfg.is_in_dream_time():
-            logger.debug("不在做梦时间段内，跳过本轮梦境")
+            logger.debug("不在维护时间段内，跳过本轮记忆维护")
             return
 
         # 2. 检查空闲状态
         if not await self._check_idle():
-            logger.debug("聊天流活跃中，跳过本轮梦境")
+            logger.debug("聊天流活跃中，跳过本轮记忆维护")
             return
 
         # 3. 判定周期类型
         cycle_type = self._determine_cycle_type()
         if cycle_type is None:
-            logger.debug("所有周期均未到期，跳过本轮梦境")
+            logger.debug("所有周期均未到期，跳过本轮记忆维护")
             return
 
         # 4. 分发到对应的周期处理器
-        logger.info(f"开始 {cycle_type.value} 梦境周期")
+        logger.info(f"开始记忆维护周期: type={cycle_type.value}")
         try:
             if cycle_type == DreamCycleType.DAILY:
                 await self._run_daily_cycle()
@@ -170,7 +170,7 @@ class DreamTask(AsyncTask):
             elif cycle_type == DreamCycleType.MONTHLY:
                 await self._run_monthly_cycle()
         except Exception as e:
-            logger.exception(f"{cycle_type.value} 梦境周期执行异常: {e}")
+            logger.exception(f"记忆维护周期执行异常: type={cycle_type.value}, error={e}")
 
     # ── 周期判定 ────────────────────────────────────────────────────────
 
@@ -568,7 +568,7 @@ class DreamTask(AsyncTask):
                     insights = await self._dream_weaver.weave()
                     weaver_insights = len(insights)
                 except Exception as we:
-                    logger.warning("梦呓编织阶段异常（降级处理）: %s", we)
+                    logger.warning("洞见编织阶段异常: %s", we)
 
             # Phase 6: 噪声回收（可选，依赖 InspirationEngine）
             try:
@@ -587,7 +587,7 @@ class DreamTask(AsyncTask):
             except ImportError:
                 logger.debug("InspirationEngine 不可用，跳过噪声回收")
             except Exception as ie:
-                logger.warning("噪声回收阶段异常（降级处理）: %s", ie)
+                logger.warning("噪声回收阶段异常: %s", ie)
 
         except Exception as e:
             logger.exception(f"每周梦境周期异常: {e}")
@@ -597,7 +597,7 @@ class DreamTask(AsyncTask):
         if patterns_found > 0:
             logger.info(f"跨日模式检测: 发现 {patterns_found} 个模式")
         if weaver_insights > 0:
-            logger.info(f"梦呓编织: 生成 {weaver_insights} 条洞见")
+            logger.info(f"洞见编织: 生成 {weaver_insights} 条洞见")
         if recycled_promoted > 0:
             logger.info(f"噪声回收: 晋升 {recycled_promoted} 条，丢弃 {recycled_discarded} 条")
 
@@ -726,11 +726,11 @@ class DreamTask(AsyncTask):
                 insights = await engine.generate_monthly_insights()
                 insight_count = len(insights)
                 if insight_count > 0:
-                    logger.info(f"月度恍然大悟: 发现 {insight_count} 条跨域洞察")
+                    logger.info(f"月度洞察: 发现 {insight_count} 条跨域洞察")
             except ImportError:
-                logger.debug("InsightEngine 不可用，跳过月度恍然大悟")
+                logger.debug("InsightEngine 不可用，跳过月度洞察")
             except Exception as ie:
-                logger.warning("月度恍然大悟阶段异常（降级处理）: %s", ie)
+                logger.warning("月度洞察阶段异常: %s", ie)
 
             # Phase 6: 噪声回收（30天窗口）
             recycled_promoted = 0
@@ -754,7 +754,7 @@ class DreamTask(AsyncTask):
             except ImportError:
                 logger.debug("InspirationEngine 不可用，跳过月度噪声回收")
             except Exception as ie:
-                logger.warning("月度噪声回收阶段异常（降级处理）: %s", ie)
+                logger.warning("月度噪声回收阶段异常: %s", ie)
 
             # Phase 7: 生成月度报告
             report = self._build_monthly_report(audit_stats, health_issues)

@@ -249,14 +249,12 @@ class ConfigManager:
         try:
             modified_time = datetime.fromtimestamp(os.path.getmtime(self._config_path)).strftime("%Y-%m-%d %H:%M:%S")
 
-            logger.info(f"配置文件已更新 (修改时间: {modified_time})，正在重载...")
+            logger.info(f"配置文件已更新，开始重载: modified_time={modified_time}")
 
             success = await self.reload()
 
             if not success:
-                logger.error(
-                    "配置文件重载失败！请检查配置文件格式是否正确。\n当前仍使用旧配置运行，修复配置文件后将自动重试。"
-                )
+                logger.error("配置文件重载失败，继续使用旧配置")
         finally:
             self._is_reloading = False
 

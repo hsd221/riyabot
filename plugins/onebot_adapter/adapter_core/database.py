@@ -59,9 +59,9 @@ class DatabaseManager:
         """
         确保数据库和表已创建。
         """
-        logger.info("确保数据库文件和表已创建...")
+        logger.debug("检查适配器数据库文件和表")
         SQLModel.metadata.create_all(self.engine)
-        logger.success("数据库和表已创建或已存在")
+        logger.info("适配器数据库已就绪")
 
     def update_ban_record(self, ban_list: List[BanUser]) -> None:
         # sourcery skip: class-extract-method
