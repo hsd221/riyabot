@@ -30,7 +30,7 @@ interface AgreementFormProps {
 }
 
 const agreementMarkdownClass =
-  'max-w-none overflow-hidden break-words text-[14px] leading-[1.55] text-foreground dark:prose-invert sm:text-sm [&_*]:max-w-full [&_h1]:!mb-3 [&_h1]:!mt-0 [&_h1]:!break-words [&_h1]:!text-lg [&_h1]:!font-semibold [&_h1]:!leading-tight sm:[&_h1]:!text-xl [&_h2]:!mb-2 [&_h2]:!mt-5 [&_h2]:!break-words [&_h2]:!text-base [&_h3]:!break-words [&_h3]:!text-sm [&_h3]:!font-semibold [&_p]:!my-2.5 [&_p]:!break-words [&_p]:!leading-[1.55] [&_strong]:font-semibold'
+  'max-w-none overflow-hidden break-words text-[15px] leading-6 text-foreground/90 dark:prose-invert [&_*]:max-w-full [&_h1]:!mb-4 [&_h1]:!mt-0 [&_h1]:!break-words [&_h1]:!text-[20px] [&_h1]:!font-semibold [&_h1]:!leading-[1.22] [&_h1]:!tracking-normal sm:[&_h1]:!text-[22px] [&_h2]:!mb-2.5 [&_h2]:!mt-5 [&_h2]:!break-words [&_h2]:!text-[17px] [&_h2]:!font-semibold [&_h2]:!leading-[1.3] [&_h3]:!mb-2 [&_h3]:!mt-4 [&_h3]:!break-words [&_h3]:!text-[15px] [&_h3]:!font-semibold [&_h3]:!leading-[1.38] [&_li]:!my-1.5 [&_li]:!leading-6 [&_ol]:!my-3 [&_p]:!my-3 [&_p]:!break-words [&_p]:!leading-6 [&_strong]:!font-medium [&_strong]:!text-foreground'
 
 export function AgreementForm({
   status,
@@ -96,7 +96,7 @@ export function AgreementForm({
             data-setup-panel="agreement-document"
             className="ios-group min-w-0 overflow-hidden"
           >
-            <ScrollArea className="h-[clamp(108px,18svh,420px)] min-w-0 p-4 sm:h-[clamp(172px,31svh,420px)] sm:p-6">
+            <ScrollArea className="h-[clamp(128px,16svh,320px)] min-w-0 p-4 sm:h-[clamp(240px,31svh,460px)] sm:p-6">
               <Markdown className={agreementMarkdownClass}>
                 {status.eula.content}
               </Markdown>
@@ -108,7 +108,7 @@ export function AgreementForm({
             data-setup-panel="agreement-document"
             className="ios-group min-w-0 overflow-hidden"
           >
-            <ScrollArea className="h-[clamp(108px,18svh,420px)] min-w-0 p-4 sm:h-[clamp(172px,31svh,420px)] sm:p-6">
+            <ScrollArea className="h-[clamp(128px,16svh,320px)] min-w-0 p-4 sm:h-[clamp(240px,31svh,460px)] sm:p-6">
               <Markdown className={agreementMarkdownClass}>
                 {status.privacy.content}
               </Markdown>

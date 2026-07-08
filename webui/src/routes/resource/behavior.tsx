@@ -14,9 +14,11 @@ import {
   Eye,
   Hash,
   MessageSquare,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Trash2,
   Users,
 } from 'lucide-react'
@@ -44,6 +46,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -91,6 +94,14 @@ const LEARNING_OPTIONS: Array<{ value: BehaviorLearningType; label: string }> = 
 type EnabledFilter = 'all' | 'enabled' | 'disabled'
 type ActorFilter = 'all' | BehaviorActorType
 type LearningFilter = 'all' | BehaviorLearningType
+
+const behaviorSelectTriggerClass =
+  'h-auto min-h-11 w-full justify-between gap-2 rounded-[14px] border-0 bg-secondary/60 px-3 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-secondary/70 focus:ring-0 sm:w-auto sm:justify-end sm:gap-1 sm:bg-transparent sm:px-0 sm:hover:bg-transparent [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4'
+
+const behaviorActionClass =
+  'ios-touch flex min-h-[50px] w-full items-center gap-3 border-b border-border/45 px-3.5 py-2.5 text-left text-[15px] font-medium leading-5 last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0'
+
+const behaviorActionIconClass = 'ios-symbol ios-symbol-sm'
 
 interface BehaviorFormState {
   chat_id: string
@@ -207,6 +218,7 @@ export function BehaviorManagementPage() {
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null)
   const [editingBehavior, setEditingBehavior] = useState<BehaviorPattern | null>(null)
   const [form, setForm] = useState<BehaviorFormState>(createEmptyForm())
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false)
   const [deleteConfirmBehavior, setDeleteConfirmBehavior] = useState<BehaviorPattern | null>(null)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [jumpToPage, setJumpToPage] = useState('')
@@ -507,6 +519,14 @@ export function BehaviorManagementPage() {
   const currentActorFilterLabel = actorFilter === 'all' ? '全部主体' : actorLabel(actorFilter)
   const currentLearningFilterLabel =
     learningFilter === 'all' ? '全部来源' : learningLabel(learningFilter)
+  const activeFilterCount = [
+    chatFilter !== 'all',
+    enabledFilter !== 'all',
+    actorFilter !== 'all',
+    learningFilter !== 'all',
+  ].filter(Boolean).length
+  const mobileFilterSummary =
+    activeFilterCount > 0 ? `${activeFilterCount} 个筛选已启用` : `全部行为 · 每页 ${pageSize} 条`
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
@@ -530,7 +550,7 @@ export function BehaviorManagementPage() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+        <div className="w-[calc(100vw-2.5rem)] max-w-full space-y-4 overflow-x-hidden sm:w-auto sm:space-y-6 sm:pr-4">
           <button
             type="button"
             onClick={openCreateDialog}
@@ -547,27 +567,52 @@ export function BehaviorManagementPage() {
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
           </button>
 
-          <div className="ios-stat-grid">
-            {behaviorStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
-              <div key={label} className="ios-stat-card">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+          <div className="ios-group max-w-full overflow-hidden sm:hidden">
+            <div className="grid max-w-full grid-cols-2 gap-2 p-2">
+              {behaviorStatItems.map(({ label, value, symbolClassName, Icon }) => (
+                <div
+                  key={label}
+                  className="flex min-w-0 items-center gap-2 rounded-[15px] bg-muted/45 px-3 py-2.5"
+                >
+                  <span className={`ios-symbol ${symbolClassName} h-7 w-7 rounded-[8px]`}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12px] font-medium leading-4 text-muted-foreground">
                       {label}
-                    </p>
-                    <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
-                      {detail}
-                    </p>
-                  </div>
-                  <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
-                    <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="block truncate text-[18px] font-semibold leading-6 tabular-nums text-foreground">
+                      {value}
+                    </span>
                   </span>
                 </div>
-                <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
-                  {value}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          <div className="hidden sm:block">
+            <div className="ios-stat-grid">
+              {behaviorStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
+                <div key={label} className="ios-stat-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                        {label}
+                      </p>
+                      <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                        {detail}
+                      </p>
+                    </div>
+                    <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                  </div>
+                  <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="ios-search-field">
@@ -579,8 +624,208 @@ export function BehaviorManagementPage() {
               className="ios-search-input"
             />
           </div>
-          <div className="ios-group overflow-hidden">
-            <div className="ios-row min-h-[64px]">
+
+          <Dialog open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
+            <button
+              type="button"
+              onClick={() => setFilterDialogOpen(true)}
+              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">筛选与显示</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {mobileFilterSummary}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+            <DialogContent className="max-h-[86vh] overflow-hidden p-0 sm:max-w-md">
+              <DialogHeader className="px-5 pt-5">
+                <DialogTitle>筛选与显示</DialogTitle>
+                <DialogDescription>调整聊天范围、状态筛选和每页数量</DialogDescription>
+              </DialogHeader>
+              <ScrollArea className="max-h-[calc(82vh-9rem)] px-5">
+                <div className="ios-group mb-5 overflow-hidden">
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                        <MessageSquare className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">聊天筛选</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {currentChatFilterLabel}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={chatFilter}
+                      onValueChange={(value) => {
+                        setChatFilter(value)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[12rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue placeholder="全部聊天" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部聊天</SelectItem>
+                        {chatList.map((chat) => (
+                          <SelectItem key={chat.chat_id} value={chat.chat_id}>
+                            {chat.chat_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                        <CheckCircle2 className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">启用状态</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {currentEnabledFilterLabel}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={enabledFilter}
+                      onValueChange={(value) => {
+                        setEnabledFilter(value as EnabledFilter)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部状态</SelectItem>
+                        <SelectItem value="enabled">启用</SelectItem>
+                        <SelectItem value="disabled">停用</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                        <Users className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">行为主体</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {currentActorFilterLabel}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={actorFilter}
+                      onValueChange={(value) => {
+                        setActorFilter(value as ActorFilter)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部主体</SelectItem>
+                        {ACTOR_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
+                        <BrainCircuit className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">学习来源</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {currentLearningFilterLabel}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={learningFilter}
+                      onValueChange={(value) => {
+                        setLearningFilter(value as LearningFilter)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部来源</SelectItem>
+                        {LEARNING_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="ios-group overflow-hidden">
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
+                        <Hash className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">每页数量</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          已选 {selectedCount}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(value) => {
+                        setPageSize(Number(value))
+                        setPage(1)
+                        setSelectedIds(new Set())
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[7rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[10, 20, 50, 100].map((size) => (
+                          <SelectItem key={size} value={String(size)}>
+                            {size} 条
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </ScrollArea>
+              <DialogFooter className="px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+                <Button onClick={() => setFilterDialogOpen(false)} className="w-full">
+                  完成
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <div className="ios-group hidden overflow-hidden sm:block">
+            <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
                   <MessageSquare className="h-4 w-4" />
@@ -599,7 +844,7 @@ export function BehaviorManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[11rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className={cn(behaviorSelectTriggerClass, 'sm:max-w-[11rem]')}>
                   <SelectValue placeholder="全部聊天" />
                 </SelectTrigger>
                 <SelectContent>
@@ -613,7 +858,7 @@ export function BehaviorManagementPage() {
               </Select>
             </div>
 
-            <div className="ios-row min-h-[64px]">
+            <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-green">
                   <CheckCircle2 className="h-4 w-4" />
@@ -632,7 +877,7 @@ export function BehaviorManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className={cn(behaviorSelectTriggerClass, 'sm:max-w-[8rem]')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -643,7 +888,7 @@ export function BehaviorManagementPage() {
               </Select>
             </div>
 
-            <div className="ios-row min-h-[64px]">
+            <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
                   <Users className="h-4 w-4" />
@@ -662,7 +907,7 @@ export function BehaviorManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className={cn(behaviorSelectTriggerClass, 'sm:max-w-[9rem]')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -676,7 +921,7 @@ export function BehaviorManagementPage() {
               </Select>
             </div>
 
-            <div className="ios-row min-h-[64px]">
+            <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
                   <BrainCircuit className="h-4 w-4" />
@@ -695,7 +940,7 @@ export function BehaviorManagementPage() {
                   setPage(1)
                 }}
               >
-                <SelectTrigger className="h-auto min-h-11 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                <SelectTrigger className={cn(behaviorSelectTriggerClass, 'sm:max-w-[9rem]')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -711,9 +956,7 @@ export function BehaviorManagementPage() {
 
             <div
               className={cn(
-                'ios-row min-h-[68px]',
-                selectedCount > 0 &&
-                  'flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between'
+                'ios-row min-h-[68px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between'
               )}
             >
               <span className="flex min-w-0 items-center gap-3">
@@ -727,7 +970,7 @@ export function BehaviorManagementPage() {
                   </span>
                 </span>
               </span>
-              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 <Select
                   value={String(pageSize)}
                   onValueChange={(value) => {
@@ -736,7 +979,7 @@ export function BehaviorManagementPage() {
                     setSelectedIds(new Set())
                   }}
                 >
-                  <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4">
+                  <SelectTrigger className={cn(behaviorSelectTriggerClass, 'sm:max-w-[8rem]')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -752,7 +995,7 @@ export function BehaviorManagementPage() {
                   size="icon"
                   onClick={refreshAll}
                   disabled={loading}
-                  className="h-9 w-9 rounded-full"
+                  className="h-11 w-11 rounded-full"
                   title="刷新"
                 >
                   <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
@@ -763,7 +1006,7 @@ export function BehaviorManagementPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => setSelectedIds(new Set())}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       取消选择
                     </Button>
@@ -771,7 +1014,7 @@ export function BehaviorManagementPage() {
                       variant="destructive"
                       size="sm"
                       onClick={() => setBatchDeleteOpen(true)}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <Trash2 className="mr-1 h-4 w-4" />
                       批量删除
@@ -791,7 +1034,7 @@ export function BehaviorManagementPage() {
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                  className="ios-touch min-h-11 rounded-full px-3.5 py-2 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
                 >
                   {selectedCount === behaviors.length ? '取消全选' : '全选'}
                 </button>
@@ -813,7 +1056,7 @@ export function BehaviorManagementPage() {
                       学习或新增行为后，可以在这里管理引用范围、启用状态和来源片段。
                     </p>
                   </div>
-                  <Button onClick={openCreateDialog} size="sm" className="h-9 px-4">
+                  <Button onClick={openCreateDialog} size="sm" className="h-11 px-5">
                     <Plus className="mr-1 h-4 w-4" />
                     新增行为
                   </Button>
@@ -889,39 +1132,58 @@ export function BehaviorManagementPage() {
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 flex-wrap items-center gap-2 pl-14 sm:pl-0">
+                      <div className="flex shrink-0 items-center justify-end gap-2 pl-14 sm:pl-0">
                         <Switch
                           checked={behavior.enabled}
                           onCheckedChange={(checked) => handleToggleEnabled(behavior, checked)}
                           aria-label="启用行为模式"
                         />
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => openEditDialog(behavior)}
-                          className="h-9 rounded-full px-4"
-                        >
-                          <Edit className="mr-1 h-4 w-4" />
-                          编辑
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="h-9 w-9 rounded-full"
-                          onClick={() => openDetailDialog(behavior)}
-                          title="查看详情"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDeleteConfirmBehavior(behavior)}
-                          className="text-destructive hover:text-destructive h-9 rounded-full px-4"
-                        >
-                          <Trash2 className="mr-1 h-4 w-4" />
-                          删除
-                        </Button>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-11 w-11 rounded-[14px]"
+                              title="更多操作"
+                            >
+                              <MoreHorizontal className="h-5 w-5" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent align="end" className="w-52 p-1.5">
+                            <div className="overflow-hidden rounded-[14px]">
+                              <button
+                                type="button"
+                                className={behaviorActionClass}
+                                onClick={() => openEditDialog(behavior)}
+                              >
+                                <span className={cn(behaviorActionIconClass, 'ios-symbol-purple')}>
+                                  <Edit className="h-[18px] w-[18px]" />
+                                </span>
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                className={behaviorActionClass}
+                                onClick={() => openDetailDialog(behavior)}
+                              >
+                                <span className={cn(behaviorActionIconClass, 'ios-symbol-blue')}>
+                                  <Eye className="h-[18px] w-[18px]" />
+                                </span>
+                                详情
+                              </button>
+                              <button
+                                type="button"
+                                className={cn(behaviorActionClass, 'text-destructive')}
+                                onClick={() => setDeleteConfirmBehavior(behavior)}
+                              >
+                                <span className={cn(behaviorActionIconClass, 'ios-symbol-red')}>
+                                  <Trash2 className="h-[18px] w-[18px]" />
+                                </span>
+                                删除
+                              </button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </div>
                   )
@@ -939,7 +1201,7 @@ export function BehaviorManagementPage() {
                       size="icon"
                       onClick={() => setPage(1)}
                       disabled={page === 1}
-                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      className="hidden h-11 w-11 rounded-full sm:inline-flex"
                       title="第一页"
                     >
                       <ChevronsLeft className="h-4 w-4" />
@@ -949,7 +1211,7 @@ export function BehaviorManagementPage() {
                       size="sm"
                       onClick={() => setPage((current) => Math.max(1, current - 1))}
                       disabled={page === 1}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <ChevronLeft className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">上一页</span>
@@ -961,7 +1223,7 @@ export function BehaviorManagementPage() {
                         onChange={(event) => setJumpToPage(event.target.value)}
                         onKeyDown={(event) => event.key === 'Enter' && handleJumpToPage()}
                         placeholder={page.toString()}
-                        className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                        className="h-11 w-20 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
                         min={1}
                         max={totalPages}
                       />
@@ -970,7 +1232,7 @@ export function BehaviorManagementPage() {
                         size="sm"
                         onClick={handleJumpToPage}
                         disabled={!jumpToPage}
-                        className="h-9 rounded-full px-3"
+                        className="h-11 rounded-full px-4"
                       >
                         跳转
                       </Button>
@@ -980,7 +1242,7 @@ export function BehaviorManagementPage() {
                       size="sm"
                       onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                       disabled={page >= totalPages}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <span className="hidden sm:inline">下一页</span>
                       <ChevronRight className="h-4 w-4 sm:ml-1" />
@@ -990,7 +1252,7 @@ export function BehaviorManagementPage() {
                       size="icon"
                       onClick={() => setPage(totalPages)}
                       disabled={page >= totalPages}
-                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      className="hidden h-11 w-11 rounded-full sm:inline-flex"
                       title="最后一页"
                     >
                       <ChevronsRight className="h-4 w-4" />
@@ -1012,7 +1274,7 @@ export function BehaviorManagementPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[92vh] max-w-3xl overflow-hidden p-0">
+        <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="px-6 pb-3 pt-6">
             <DialogTitle>{formMode === 'create' ? '新增行为模式' : '编辑行为模式'}</DialogTitle>
             <DialogDescription>调整行为模式的匹配范围、行为描述和启用状态</DialogDescription>
@@ -1050,7 +1312,7 @@ export function BehaviorManagementPage() {
                 </div>
                 <div className="grid gap-2">
                   <Label>启用状态</Label>
-                  <div className="flex h-10 items-center justify-between rounded-[14px] bg-muted/60 px-3">
+                  <div className="flex min-h-11 items-center justify-between rounded-[14px] bg-muted/60 px-3">
                     <span className="text-sm text-muted-foreground">
                       {form.enabled ? '启用' : '停用'}
                     </span>
@@ -1198,7 +1460,7 @@ export function BehaviorManagementPage() {
       </Dialog>
 
       <Dialog open={detailBehavior !== null} onOpenChange={(open) => !open && setDetailBehavior(null)}>
-        <DialogContent className="max-h-[92vh] max-w-3xl overflow-hidden p-0">
+        <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="px-6 pb-3 pt-6">
             <DialogTitle>行为模式详情</DialogTitle>
             <DialogDescription>ID {detailBehavior?.id}</DialogDescription>

@@ -3,6 +3,7 @@ import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 // Card 组件已移除，改用更简洁的全屏布局
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -273,6 +274,7 @@ export function ChatPage() {
   // 每个标签页的 WebSocket 连接
   const wsMapRef = useRef<Map<string, WebSocket>>(new Map())
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const reconnectTimeoutMapRef = useRef<Map<string, number>>(new Map())
   const messageIdCounterRef = useRef(0)
   const processedMessagesMapRef = useRef<Map<string, Set<string>>>(new Map())
@@ -305,6 +307,14 @@ export function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [activeTab?.messages, scrollToBottom])
+
+  useEffect(() => {
+    const composer = composerRef.current
+    if (!composer) return
+
+    composer.style.height = 'auto'
+    composer.style.height = `${Math.min(composer.scrollHeight, 112)}px`
+  }, [inputValue])
 
   // 获取平台列表
   const fetchPlatforms = useCallback(async () => {
@@ -903,7 +913,7 @@ export function ChatPage() {
             src={dataText}
             alt="图片"
             loading="lazy"
-            className="max-h-64 max-w-full rounded-md object-contain"
+            className="max-h-64 max-w-full rounded-[16px] object-contain shadow-[0_8px_22px_rgba(0,0,0,0.08)]"
           />
         ) : null
       case 'emoji':
@@ -913,7 +923,7 @@ export function ChatPage() {
             src={dataText}
             alt="表情包"
             loading="lazy"
-            className="max-h-40 max-w-full rounded-md object-contain"
+            className="max-h-40 max-w-full rounded-[16px] object-contain shadow-[0_8px_22px_rgba(0,0,0,0.08)]"
           />
         ) : null
       case 'voice':
@@ -922,7 +932,7 @@ export function ChatPage() {
         ) : null
       case 'video':
         return dataText ? (
-          <video key={index} src={dataText} controls className="max-h-64 max-w-full rounded-md" />
+          <video key={index} src={dataText} controls className="max-h-64 max-w-full rounded-[16px]" />
         ) : null
       case 'at':
         return <span key={index}>@{dataText}</span>
@@ -961,7 +971,10 @@ export function ChatPage() {
       case 'forward': {
         const nodes = Array.isArray(segment.data) ? segment.data : []
         return (
-          <div key={index} className="space-y-2 rounded-md border border-border/70 p-2">
+          <div
+            key={index}
+            className="space-y-2 rounded-[16px] border border-black/[0.035] bg-white/[0.72] p-3 shadow-[0_1px_0_rgba(255,255,255,0.68)_inset,0_8px_22px_rgba(31,41,55,0.045)] dark:border-white/10 dark:bg-white/[0.08]"
+          >
             {nodes.map((node, nodeIndex) => (
               <div key={nodeIndex} className="border-l-2 border-muted-foreground/30 pl-2">
                 {node.content?.map((child, childIndex) => renderRichSegment(child, childIndex))}
@@ -1208,8 +1221,8 @@ export function ChatPage() {
                     className="pl-9"
                   />
                 </div>
-                <ScrollArea className="h-[250px] rounded-md border">
-                  <div className="p-2">
+                <ScrollArea className="h-[250px] rounded-[18px] border border-black/[0.035] bg-white/[0.72] shadow-[0_1px_0_rgba(255,255,255,0.68)_inset] dark:border-white/10 dark:bg-white/[0.08]">
+                  <div className="p-1.5">
                     {isLoadingPersons ? (
                       <div className="flex items-center justify-center py-8">
                         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1220,22 +1233,22 @@ export function ChatPage() {
                         <p className="text-sm">没有找到用户</p>
                       </div>
                     ) : (
-                      <div className="space-y-1">
+                      <div className="ios-group overflow-hidden !rounded-[15px] !border-0 !bg-transparent !shadow-none">
                         {persons.map((person) => (
                           <button
                             key={person.person_id}
                             onClick={() => selectPerson(person)}
                             className={cn(
-                              'flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors',
+                              'ios-row ios-touch min-h-[58px] w-full gap-3 text-left transition-colors',
                               tempVirtualConfig.personId === person.person_id
-                                ? 'bg-primary text-primary-foreground'
-                                : 'hover:bg-muted'
+                                ? 'bg-primary text-primary-foreground hover:bg-primary'
+                                : 'hover:bg-muted/70'
                             )}
                           >
-                            <Avatar className="h-8 w-8 shrink-0">
+                            <Avatar className="h-9 w-9 shrink-0 rounded-[12px]">
                               <AvatarFallback
                                 className={cn(
-                                  'text-xs',
+                                  'rounded-[12px] text-xs',
                                   tempVirtualConfig.personId === person.person_id
                                     ? 'bg-primary-foreground/20'
                                     : 'bg-muted'
@@ -1305,7 +1318,7 @@ export function ChatPage() {
       </Dialog>
 
       {/* 会话摘要 */}
-      <div className="bg-background/72 shrink-0 border-b border-border/35 px-5 py-3 backdrop-blur-2xl sm:px-4">
+      <div className="shrink-0 border-b border-black/[0.035] bg-white/[0.58] px-5 py-3 backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.04] sm:px-4">
         <div className="ios-group mx-auto max-w-4xl overflow-hidden">
           <div className="ios-row min-h-[68px] py-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -1350,7 +1363,7 @@ export function ChatPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9"
+                className="h-11 w-11"
                 onClick={handleReconnect}
                 disabled={isConnecting}
                 title="重新连接"
@@ -1367,7 +1380,7 @@ export function ChatPage() {
                   key={tab.id}
                   onClick={() => switchTab(tab.id)}
                   className={cn(
-                    'ios-touch flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition-colors',
+                    'ios-touch flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm transition-colors',
                     activeTabId === tab.id
                       ? 'bg-muted/80 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]'
                       : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground'
@@ -1395,19 +1408,19 @@ export function ChatPage() {
                           closeTab(tab.id, e)
                         }
                       }}
-                      className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"
+                      className="ios-touch -mr-2 ml-0.5 grid h-11 w-11 place-items-center rounded-full hover:bg-muted-foreground/20"
                     >
-                      <X className="h-3 w-3" />
+                      <X className="h-3.5 w-3.5" />
                     </span>
                   )}
                 </button>
               ))}
               <button
                 onClick={openVirtualConfig}
-                className="ios-touch flex min-h-9 items-center gap-1 rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
+                className="ios-touch flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-full px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
                 title="新建虚拟身份对话"
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="h-4 w-4" strokeWidth={2.6} />
               </button>
             </div>
           </div>
@@ -1439,17 +1452,16 @@ export function ChatPage() {
                         if (e.key === 'Enter') saveEditedName()
                         if (e.key === 'Escape') cancelEditingName()
                       }}
-                      className="h-7 w-32"
+                      className="h-11 w-40"
                       placeholder="输入昵称"
                       autoFocus
                     />
-                    <Button size="sm" variant="ghost" className="h-7 px-2" onClick={saveEditedName}>
+                    <Button size="sm" variant="ghost" onClick={saveEditedName}>
                       保存
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-7 px-2"
                       onClick={cancelEditingName}
                     >
                       取消
@@ -1461,11 +1473,11 @@ export function ChatPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-6 w-6 p-0"
+                      className="h-11 w-11 p-0"
                       onClick={startEditingName}
                       title="修改昵称"
                     >
-                      <Edit2 className="h-3 w-3" />
+                      <Edit2 className="h-4 w-4" strokeWidth={2.5} />
                     </Button>
                   </div>
                 )}
@@ -1476,14 +1488,19 @@ export function ChatPage() {
       </div>
 
       {/* 消息列表区域 */}
-      <div className="flex-1 overflow-hidden bg-background">
+      <div className="flex-1 overflow-hidden bg-transparent">
         <ScrollArea className="h-full">
-          <div className="mx-auto max-w-4xl space-y-3 px-5 py-4 sm:space-y-4 sm:p-5">
+          <div className="mx-auto max-w-4xl space-y-3 px-5 pb-28 pt-4 sm:space-y-4 sm:px-5 sm:pb-32 sm:pt-5">
             {activeTab?.messages.length === 0 && !isLoadingHistory && (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <Bot className="mb-4 h-12 w-12 opacity-50" />
-                <p className="text-sm">
-                  开始与 {activeTab?.sessionInfo.bot_name || '当前 Bot'} 对话吧！
+              <div className="mx-auto flex max-w-[18rem] flex-col items-center justify-center py-16 text-center text-muted-foreground sm:py-20">
+                <span className="mb-4 grid h-14 w-14 place-items-center rounded-[18px] bg-primary/10 text-primary shadow-[0_1px_0_rgba(255,255,255,0.58)_inset] dark:bg-primary/16 dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset]">
+                  <Bot className="h-7 w-7" strokeWidth={2.4} />
+                </span>
+                <p className="text-[15px] font-medium leading-6 text-foreground">
+                  可以开始对话了
+                </p>
+                <p className="mt-1 text-[13px] leading-5">
+                  消息会像 iOS 对话一样按时间顺序显示在这里
                 </p>
               </div>
             )}
@@ -1492,7 +1509,7 @@ export function ChatPage() {
               <div
                 key={message.id}
                 className={cn(
-                  'flex gap-2 sm:gap-3',
+                  'flex items-end gap-2 sm:gap-3',
                   message.type === 'user' && 'flex-row-reverse',
                   message.type === 'system' && 'justify-center',
                   message.type === 'error' && 'justify-center'
@@ -1500,14 +1517,14 @@ export function ChatPage() {
               >
                 {/* 系统消息 */}
                 {message.type === 'system' && (
-                  <div className="max-w-[90%] rounded-full bg-secondary/80 px-4 py-1.5 text-[13px] leading-5 text-muted-foreground shadow-[inset_0_1px_1px_rgba(255,255,255,0.56)]">
+                  <div className="max-w-[88%] rounded-full bg-[rgb(120_120_128_/_0.14)] px-4 py-1.5 text-[13px] leading-5 text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.58)] dark:bg-white/[0.09] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]">
                     {message.content}
                   </div>
                 )}
 
                 {/* 错误消息 */}
                 {message.type === 'error' && (
-                  <div className="max-w-[90%] rounded-full bg-[rgb(255_59_48_/_0.1)] px-4 py-1.5 text-[13px] leading-5 text-[rgb(174_37_31)] shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:text-[rgb(255_105_97)]">
+                  <div className="max-w-[88%] rounded-full bg-[rgb(255_59_48_/_0.1)] px-4 py-1.5 text-[13px] leading-5 text-[rgb(174_37_31)] shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:text-[rgb(255_105_97)]">
                     {message.content}
                   </div>
                 )}
@@ -1515,18 +1532,18 @@ export function ChatPage() {
                 {/* 思考中占位消息 */}
                 {message.type === 'thinking' && (
                   <>
-                    <Avatar className="h-7 w-7 shrink-0 sm:h-8 sm:w-8">
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    <Avatar className="h-7 w-7 shrink-0 rounded-[10px] sm:h-8 sm:w-8 sm:rounded-[11px]">
+                      <AvatarFallback className="rounded-[10px] bg-primary/10 text-primary sm:rounded-[11px]">
+                        <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2.5} />
                       </AvatarFallback>
                     </Avatar>
-                    <div className="flex max-w-[75%] flex-col gap-1 sm:max-w-[70%]">
+                    <div className="flex max-w-[78%] flex-col gap-1 sm:max-w-[68%]">
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground sm:text-xs">
                         <span className="hidden sm:inline">
                           {message.sender?.name || activeTab?.sessionInfo.bot_name}
                         </span>
                       </div>
-                      <div className="rounded-[18px] rounded-tl-md bg-card px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+                      <div className="rounded-[21px] rounded-bl-[7px] bg-white/[0.94] px-4 py-3 shadow-[0_1px_0_rgba(255,255,255,0.76)_inset,0_7px_18px_rgba(31,41,55,0.055)] dark:bg-white/[0.11] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset,0_8px_20px_rgba(0,0,0,0.22)]">
                         <div className="flex items-center gap-2">
                           <div className="flex gap-1">
                             <span
@@ -1552,25 +1569,25 @@ export function ChatPage() {
                 {/* 用户/机器人消息 */}
                 {(message.type === 'user' || message.type === 'bot') && (
                   <>
-                    <Avatar className="h-7 w-7 shrink-0 sm:h-8 sm:w-8">
+                    <Avatar className="h-7 w-7 shrink-0 rounded-[10px] sm:h-8 sm:w-8 sm:rounded-[11px]">
                       <AvatarFallback
                         className={cn(
-                          'text-xs',
+                          'rounded-[10px] text-xs sm:rounded-[11px]',
                           message.type === 'bot'
                             ? 'bg-primary/10 text-primary'
                             : 'bg-secondary text-secondary-foreground'
                         )}
                       >
                         {message.type === 'bot' ? (
-                          <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2.5} />
                         ) : (
-                          <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                          <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={2.5} />
                         )}
                       </AvatarFallback>
                     </Avatar>
                     <div
                       className={cn(
-                        'flex max-w-[75%] flex-col gap-1 sm:max-w-[70%]',
+                        'flex max-w-[78%] flex-col gap-1 sm:max-w-[68%]',
                         message.type === 'user' && 'items-end'
                       )}
                     >
@@ -1579,14 +1596,16 @@ export function ChatPage() {
                           {message.sender?.name ||
                             (message.type === 'bot' ? activeTab?.sessionInfo.bot_name : userName)}
                         </span>
-                        <span>{formatTime(message.timestamp)}</span>
+                        <span className={message.type === 'user' ? 'pr-1' : 'pl-1'}>
+                          {formatTime(message.timestamp)}
+                        </span>
                       </div>
                       <div
                         className={cn(
-                          'whitespace-pre-wrap break-words rounded-[18px] px-3.5 py-2.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
+                          'whitespace-pre-wrap break-words rounded-[21px] px-4 py-[9px] text-[15px] leading-[1.45]',
                           message.type === 'bot'
-                            ? 'rounded-tl-md bg-card'
-                            : 'rounded-tr-md bg-primary text-primary-foreground'
+                            ? 'rounded-bl-[7px] bg-white/[0.94] text-foreground shadow-[0_1px_0_rgba(255,255,255,0.76)_inset,0_7px_18px_rgba(31,41,55,0.055)] dark:bg-white/[0.11] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset,0_8px_20px_rgba(0,0,0,0.22)]'
+                            : 'rounded-br-[7px] bg-[#007AFF] text-white shadow-[0_7px_18px_rgba(0,122,255,0.18),0_1px_1px_rgba(0,0,0,0.08)] dark:bg-[rgb(10_132_255)] dark:shadow-[0_7px_20px_rgba(10,132,255,0.18),0_1px_1px_rgba(0,0,0,0.2)]'
                         )}
                       >
                         {renderMessageContent(message)}
@@ -1604,9 +1623,10 @@ export function ChatPage() {
 
       {/* 输入区域 - 固定在底部 */}
       <div className="ios-bottom-bar shrink-0">
-        <div className="mx-auto max-w-4xl px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-4 sm:pt-3">
-          <div className="flex gap-2">
-            <Input
+        <div className="mx-auto max-w-4xl px-5 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-2.5 sm:px-4 sm:pb-4 sm:pt-3">
+          <div className="flex min-h-[52px] items-end gap-2 rounded-[27px] border border-black/[0.035] bg-white/[0.9] p-1.5 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_26px_rgba(31,41,55,0.07)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.095] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_12px_28px_rgba(0,0,0,0.25)]">
+            <Textarea
+              ref={composerRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -1618,18 +1638,20 @@ export function ChatPage() {
                     : '等待连接...'
               }
               disabled={!activeTab?.isConnected || isWaitingResponse}
-              className="h-10 flex-1 rounded-full border-black/5 bg-secondary/90 px-4 shadow-[inset_0_1px_1px_rgba(0,0,0,0.035)]"
+              rows={1}
+              className="max-h-28 min-h-10 flex-1 resize-none overflow-y-auto rounded-[22px] border-0 bg-transparent px-4 py-2.5 text-[16px] leading-5 shadow-none outline-none placeholder:text-muted-foreground/78 hover:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:hover:bg-transparent dark:focus-visible:bg-transparent"
             />
             <Button
               onClick={sendMessage}
               disabled={!activeTab?.isConnected || !inputValue.trim() || isWaitingResponse}
               size="icon"
-              className="h-10 w-10 shrink-0 shadow-[0_8px_18px_hsl(var(--primary)_/_0.18),0_1px_2px_rgba(0,0,0,0.08)]"
+              aria-label={isWaitingResponse ? '等待响应' : '发送消息'}
+              className="mb-0.5 h-10 w-10 shrink-0 bg-[#007AFF] text-white shadow-[0_6px_16px_rgba(0,122,255,0.18),0_1px_2px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.22)] hover:brightness-[0.98] active:brightness-[0.94] disabled:bg-[rgb(120_120_128_/_0.24)] disabled:text-muted-foreground disabled:shadow-none dark:bg-[rgb(10_132_255)] dark:disabled:bg-white/[0.12]"
             >
               {isWaitingResponse ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.7} />
               ) : (
-                <Send className="h-4 w-4" />
+                <Send className="h-4 w-4 translate-x-[1px]" strokeWidth={2.8} />
               )}
             </Button>
           </div>

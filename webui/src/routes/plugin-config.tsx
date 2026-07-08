@@ -441,9 +441,9 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
         <button
           type="button"
           onClick={onBack}
-          className="ios-touch inline-flex h-9 items-center gap-1 rounded-full px-2 text-[15px] font-medium text-primary hover:bg-accent/70 focus-visible:bg-accent/70 focus-visible:ring-0"
+          className="ios-touch inline-flex h-11 items-center gap-1.5 rounded-full px-3 text-[15px] font-medium text-primary hover:bg-accent/70 focus-visible:bg-accent/70 focus-visible:ring-0"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
           插件配置
         </button>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

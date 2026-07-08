@@ -221,9 +221,9 @@ function getFriendlyPluginError(message?: string | null) {
 
 function PluginLoadingState({ progress }: { progress: PluginLoadProgress | null }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       <div className="ios-group overflow-hidden">
-        <div className="ios-row">
+        <div className="ios-row min-h-[68px]">
           <span className="flex min-w-0 items-center gap-3">
             <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -257,7 +257,10 @@ function PluginLoadingState({ progress }: { progress: PluginLoadProgress | null 
 
       <div className="ios-group overflow-hidden">
         {PLUGIN_LOADING_ROWS.map((label, index) => (
-          <div key={label} className="ios-row min-h-[82px] justify-start gap-3 md:min-h-[92px]">
+          <div
+            key={label}
+            className="ios-row min-h-[68px] justify-start gap-3 sm:min-h-[82px] md:min-h-[92px]"
+          >
             <span className="h-9 w-9 shrink-0 animate-pulse rounded-[10px] bg-muted" />
             <span className="min-w-0 flex-1 space-y-2">
               <span className="block h-4 w-28 animate-pulse rounded-full bg-muted md:w-40" />
@@ -279,7 +282,6 @@ export function PluginsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [activeTab, setActiveTab] = useState<PluginViewTab>('all')
-  const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
   const [showCompatibleOnly, setShowCompatibleOnly] = useState(true) // 默认只显示兼容的
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
@@ -612,8 +614,6 @@ export function PluginsPage() {
       return true
     }).length
 
-  const activePluginView =
-    PLUGIN_VIEW_OPTIONS.find((item) => item.value === activeTab) ?? PLUGIN_VIEW_OPTIONS[0]
   const activeCategory =
     CATEGORY_OPTIONS.find((item) => item.value === categoryFilter) ?? CATEGORY_OPTIONS[0]
 
@@ -891,7 +891,7 @@ export function PluginsPage() {
                 />
               </div>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="h-11 w-full max-w-[220px] rounded-[13px] border-0 bg-muted/80 shadow-[0_1px_0_rgba(255,255,255,0.56)_inset] focus:ring-ring/35">
+                <SelectTrigger className="h-12 w-full max-w-[220px]">
                   <SelectValue placeholder="选择分类" />
                 </SelectTrigger>
                 <SelectContent>
@@ -923,18 +923,18 @@ export function PluginsPage() {
           </div>
 
           <div className="ios-group overflow-hidden sm:hidden">
-            <div className="flex min-h-[58px] items-center gap-3 border-b border-border/70 px-4 py-3">
+            <div className="flex min-h-[54px] items-center gap-3 border-b border-border/70 px-4 py-2.5">
               <Search className="h-5 w-5 shrink-0 text-muted-foreground" />
               <Input
                 placeholder="搜索插件..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9 border-0 bg-transparent px-0 text-[15px] shadow-none focus-visible:ring-0"
+                className="h-11 border-0 bg-transparent px-0 text-[15px] shadow-none focus-visible:ring-0"
               />
             </div>
             <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
               <DialogTrigger asChild>
-                <button className="ios-touch flex min-h-[58px] w-full items-center justify-between gap-4 border-b border-border/70 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0">
+                <button className="ios-touch flex min-h-[54px] w-full items-center justify-between gap-4 border-b border-border/70 px-4 py-2.5 text-left focus-visible:bg-accent/70 focus-visible:ring-0">
                   <span className="min-w-0">
                     <span className="block text-[15px] font-medium leading-5 text-foreground">
                       分类
@@ -992,7 +992,7 @@ export function PluginsPage() {
                 </div>
               </DialogContent>
             </Dialog>
-            <label className="ios-touch flex min-h-[58px] items-center justify-between gap-4 px-4 py-3">
+            <label className="ios-touch flex min-h-[54px] items-center justify-between gap-4 px-4 py-2.5">
               <span className="min-w-0">
                 <span className="block text-[15px] font-medium leading-5 text-foreground">
                   兼容版本
@@ -1009,86 +1009,18 @@ export function PluginsPage() {
           </div>
 
           {/* 标签页 */}
-          <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-            <DialogTrigger asChild>
-              <button className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className={`ios-symbol ios-symbol-sm ${activePluginView.color}`}>
-                    <activePluginView.Icon className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium leading-5 text-muted-foreground">
-                      当前视图
-                    </span>
-                    <span className="block truncate text-[16px] font-medium leading-6">
-                      {activePluginView.label}
-                    </span>
-                  </span>
-                </span>
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <span className="text-[14px] leading-5">
-                    {getPluginViewCount(activePluginView.value)}
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0" />
-                </span>
-              </button>
-            </DialogTrigger>
-            <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-              <DialogHeader className="px-5 pt-5">
-                <DialogTitle>插件视图</DialogTitle>
-                <DialogDescription>选择要浏览的插件范围</DialogDescription>
-              </DialogHeader>
-              <div className="px-5">
-                <div className="ios-group overflow-hidden">
-                  {PLUGIN_VIEW_OPTIONS.map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
-                      onClick={() => {
-                        setActiveTab(item.value)
-                        setViewDialogOpen(false)
-                      }}
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className={`ios-symbol ios-symbol-sm ${item.color}`}>
-                          <item.Icon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-[16px] font-medium leading-6">
-                            {item.label}
-                          </span>
-                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                            {item.description}
-                          </span>
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
-                        <span className="text-[14px] leading-5">
-                          {getPluginViewCount(item.value)}
-                        </span>
-                        {activeTab === item.value ? (
-                          <Check className="h-4 w-4 text-primary" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
-                        )}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as PluginViewTab)}
-            className="hidden w-full sm:block"
+            className="w-full"
           >
             <TabsList className="grid w-full grid-cols-3">
               {PLUGIN_VIEW_OPTIONS.map((item) => (
                 <TabsTrigger key={item.value} value={item.value}>
-                  {item.label} ({getPluginViewCount(item.value)})
+                  <span className="sm:hidden">{item.label}</span>
+                  <span className="hidden sm:inline">
+                    {item.label} ({getPluginViewCount(item.value)})
+                  </span>
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -1245,11 +1177,11 @@ export function PluginsPage() {
                     </span>
                   </button>
 
-                  <div className="flex w-[4.25rem] shrink-0 items-start justify-end gap-2 pt-1.5 md:w-[13rem] md:items-center md:pt-0">
+                  <div className="flex w-[5.75rem] shrink-0 items-start justify-end gap-2 pt-2 md:w-[14rem] md:items-center md:pt-0">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="hidden h-9 rounded-full px-4 text-xs font-semibold md:inline-flex"
+                      className="hidden rounded-full px-4 text-xs font-semibold md:inline-flex"
                       onClick={() => setSelectedPlugin(plugin)}
                     >
                       详情
@@ -1258,7 +1190,7 @@ export function PluginsPage() {
                       needsUpdate(plugin) ? (
                         <Button
                           size="sm"
-                          className="h-8 rounded-full px-3 text-xs font-semibold md:h-9 md:px-4"
+                          className="min-w-[4.75rem] rounded-full px-4 text-[14px] font-semibold leading-5 shadow-[0_4px_10px_hsl(var(--primary)_/_0.16)] md:min-w-0 md:px-4 md:text-xs"
                           disabled={!gitStatus?.installed}
                           title={!gitStatus?.installed ? 'Git 未安装' : undefined}
                           onClick={() => handleUpdate(plugin)}
@@ -1270,7 +1202,7 @@ export function PluginsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10 hover:text-destructive h-8 rounded-full px-3 text-xs font-semibold md:h-9 md:px-4"
+                          className="min-w-[4.75rem] rounded-full border-destructive/20 bg-destructive/5 px-4 text-[14px] font-semibold leading-5 text-destructive hover:bg-destructive/10 hover:text-destructive md:min-w-0 md:px-4 md:text-xs"
                           disabled={!gitStatus?.installed}
                           title={!gitStatus?.installed ? 'Git 未安装' : undefined}
                           onClick={() => handleUninstall(plugin)}
@@ -1280,8 +1212,9 @@ export function PluginsPage() {
                       )
                     ) : (
                       <Button
+                        variant="ghost"
                         size="sm"
-                        className="h-8 rounded-full px-3 text-xs font-semibold shadow-[0_6px_14px_hsl(var(--primary)_/_0.18)] md:h-9 md:px-4"
+                        className="min-w-[4.75rem] rounded-full bg-primary/12 px-4 text-[14px] font-semibold leading-5 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)_/_0.08)] hover:bg-primary/16 hover:text-primary active:bg-primary/20 dark:bg-primary/18 dark:text-[rgb(100_210_255)] dark:hover:bg-primary/22 md:min-w-0 md:px-4 md:text-xs"
                         disabled={
                           !gitStatus?.installed ||
                           loadProgress?.operation === 'install' ||

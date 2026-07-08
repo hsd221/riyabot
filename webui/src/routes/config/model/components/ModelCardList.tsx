@@ -67,14 +67,14 @@ export const ModelCardList = React.memo(function ModelCardList({
         return (
           <div
             key={displayIndex}
-            className="relative grid min-h-[96px] w-full grid-cols-[36px_minmax(0,1fr)_36px] items-center gap-3 px-4 py-3 after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden"
+            className="relative grid min-h-[104px] w-full grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-3 px-4 py-3 after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden"
           >
             <button
               type="button"
               onClick={() => actualIndex >= 0 && onToggleSelection(actualIndex)}
               disabled={actualIndex < 0}
               className={cn(
-                'ios-touch grid h-9 w-9 place-items-center rounded-full focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-50',
+                'ios-touch grid h-11 w-11 place-items-center rounded-full focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-50',
                 selected && 'bg-primary/12 text-primary'
               )}
               aria-label={selected ? `取消选择 ${model.name}` : `选择 ${model.name}`}
@@ -133,7 +133,7 @@ export const ModelCardList = React.memo(function ModelCardList({
               type="button"
               onClick={() => actualIndex >= 0 && onDelete(actualIndex)}
               disabled={actualIndex < 0}
-              className="ios-touch text-destructive focus-visible:bg-destructive/10 grid h-9 w-9 place-items-center rounded-full focus-visible:ring-0 disabled:opacity-50"
+              className="ios-touch text-destructive focus-visible:bg-destructive/10 grid h-11 w-11 place-items-center rounded-full focus-visible:ring-0 disabled:opacity-50"
               aria-label={`删除 ${model.name}`}
               title="删除模型"
             >

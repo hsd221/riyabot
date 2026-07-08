@@ -754,7 +754,6 @@ export function ModelProviderConfigPage() {
       : hasUnsavedChanges
         ? '保存配置'
         : '已保存'
-  const restartLabel = restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启主程序'
   const saveDescription = hasUnsavedChanges ? '有更改等待写入配置' : '当前配置已写入'
   const renderProviderMeta = (provider: APIProvider) => (
     <span className="mt-1.5 flex flex-wrap gap-1.5">
@@ -785,7 +784,7 @@ export function ModelProviderConfigPage() {
               onClick={openBatchDeleteDialog}
               size="sm"
               variant="destructive"
-              className="col-span-4 h-11 w-full sm:h-9 sm:w-auto"
+              className="col-span-4 h-11 w-full sm:w-auto"
             >
               <Trash2 className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
               批量删除 ({selectedProviders.size})
@@ -795,7 +794,7 @@ export function ModelProviderConfigPage() {
             onClick={handleTestAllConnections}
             size="sm"
             variant="outline"
-            className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:px-4"
+            className="h-11 w-11 px-0 sm:w-auto sm:px-4"
             disabled={providers.length === 0 || testingProviders.size > 0}
             aria-label={
               testingProviders.size > 0
@@ -812,7 +811,7 @@ export function ModelProviderConfigPage() {
           <Button
             onClick={() => openEditDialog(null, null)}
             size="sm"
-            className="h-11 min-w-0 px-4 sm:h-9 sm:w-auto"
+            className="h-11 min-w-0 px-4 sm:w-auto"
             data-tour="add-provider-button"
           >
             <Plus className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
@@ -823,7 +822,7 @@ export function ModelProviderConfigPage() {
             disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
             size="sm"
             variant="outline"
-            className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[120px] sm:px-4"
+            className="h-11 w-11 px-0 sm:w-auto sm:min-w-[120px] sm:px-4"
             aria-label={
               saving
                 ? '保存中'
@@ -851,7 +850,7 @@ export function ModelProviderConfigPage() {
               <Button
                 disabled={saving || autoSaving || restarting}
                 size="sm"
-                className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[120px] sm:px-4"
+                className="h-11 w-11 px-0 sm:w-auto sm:min-w-[120px] sm:px-4"
                 aria-label={restarting ? '重启中' : hasUnsavedChanges ? '保存并重启' : '重启主程序'}
                 title={restarting ? '重启中...' : hasUnsavedChanges ? '保存并重启' : '重启主程序'}
               >
@@ -891,7 +890,7 @@ export function ModelProviderConfigPage() {
         <button
           type="button"
           onClick={() => openEditDialog(null, null)}
-          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+          className="ios-row ios-touch min-h-[54px] w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
           data-tour="add-provider-button"
         >
           <span className="flex min-w-0 items-center gap-3">
@@ -906,7 +905,7 @@ export function ModelProviderConfigPage() {
           type="button"
           onClick={handleTestAllConnections}
           disabled={providers.length === 0 || testingProviders.size > 0}
-          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+          className="ios-row ios-touch min-h-[54px] w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
         >
           <span className="flex min-w-0 items-center gap-3">
             <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
@@ -927,11 +926,8 @@ export function ModelProviderConfigPage() {
           </span>
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
         </button>
-        <button
-          type="button"
-          onClick={saveConfig}
-          disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
-          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+        <div
+          className="ios-row min-h-[58px] w-full text-left"
         >
           <span className="flex min-w-0 items-center gap-3">
             <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
@@ -944,47 +940,40 @@ export function ModelProviderConfigPage() {
               </span>
             </span>
           </span>
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-        </button>
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <button
-              type="button"
-              disabled={saving || autoSaving || restarting}
-              className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className="ios-symbol ios-symbol-sm ios-symbol-green">
-                  <Power className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[15px] font-medium leading-5">{restartLabel}</span>
-                </span>
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-            </button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <div>
-                  <p>
-                    {hasUnsavedChanges
-                      ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
-                      : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
-                  </p>
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}>
-                {hasUnsavedChanges ? '保存并重启' : '确认重启'}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                disabled={saving || autoSaving || restarting}
+                className="ios-touch ml-3 inline-flex h-11 min-w-[4.75rem] shrink-0 items-center justify-center rounded-full bg-[rgb(120_120_128_/_0.12)] px-4 text-[14px] font-semibold leading-5 text-foreground/82 shadow-[inset_0_0_0_1px_rgba(60,60,67,0.08)] hover:bg-[rgb(120_120_128_/_0.16)] active:bg-[rgb(120_120_128_/_0.2)] disabled:opacity-60 dark:bg-white/[0.12] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] dark:hover:bg-white/[0.16]"
+              >
+                {hasUnsavedChanges ? '保存并重启' : '重启'}
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div>
+                    <p>
+                      {hasUnsavedChanges
+                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
+                        : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
+                    </p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}
+                >
+                  {hasUnsavedChanges ? '保存并重启' : '确认重启'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
         {selectedProviders.size > 0 && (
           <button
             type="button"
@@ -1003,7 +992,7 @@ export function ModelProviderConfigPage() {
           </button>
         )}
       </div>
-      <ScrollArea className="ios-scrollbar-none h-[calc(100vh-318px)]">
+      <ScrollArea className="ios-scrollbar-none h-[calc(100vh-252px)]">
         <div className="space-y-5 pr-1">
           {/* 搜索框 */}
           <div className="ios-group overflow-hidden px-4 py-3 sm:hidden">
@@ -1024,7 +1013,7 @@ export function ModelProviderConfigPage() {
                 placeholder="搜索提供商名称、URL 或类型..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-10 rounded-[12px] border-0 bg-muted/75 pl-9 shadow-none focus-visible:ring-0"
+                className="h-11 rounded-[12px] border-0 bg-muted/75 pl-9 shadow-none focus-visible:ring-0"
               />
             </div>
             {searchQuery && (
@@ -1057,12 +1046,12 @@ export function ModelProviderConfigPage() {
                 return (
                   <div
                     key={displayIndex}
-                    className="relative grid min-h-[92px] grid-cols-[minmax(0,1fr)_80px] items-center after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden"
+                    className="relative grid min-h-[98px] grid-cols-[minmax(0,1fr)_112px] items-center after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden"
                   >
                     <button
                       type="button"
                       onClick={() => openEditDialog(provider, actualIndex)}
-                      className="ios-touch grid min-h-[92px] w-full grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 pr-1 text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+                      className="ios-touch grid min-h-[98px] w-full grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 pr-1 text-left focus-visible:bg-accent/70 focus-visible:ring-0"
                     >
                       <span className="ios-symbol ios-symbol-md ios-symbol-purple">
                         <Server className="h-4 w-4" />
@@ -1084,12 +1073,12 @@ export function ModelProviderConfigPage() {
                       </span>
                       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
                     </button>
-                    <span className="mr-2 flex shrink-0 items-center justify-end gap-1">
+                    <span className="mr-2 flex shrink-0 items-center justify-end gap-1.5">
                       <button
                         type="button"
                         onClick={() => handleTestConnection(provider.name)}
                         disabled={testingProviders.has(provider.name)}
-                        className="ios-touch grid h-9 w-9 place-items-center rounded-full text-foreground hover:bg-accent/70 focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
+                        className="ios-touch grid h-11 w-12 place-items-center rounded-full text-foreground hover:bg-accent/70 focus-visible:bg-accent/70 focus-visible:ring-0 disabled:opacity-60"
                         aria-label={`测试提供商 ${provider.name}`}
                         title="测试连接"
                       >
@@ -1102,7 +1091,7 @@ export function ModelProviderConfigPage() {
                       <button
                         type="button"
                         onClick={() => openDeleteDialog(actualIndex)}
-                        className="ios-touch grid h-9 w-9 place-items-center rounded-full text-muted-foreground/55 hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(215_0_21)] focus-visible:bg-[rgb(255_59_48_/_0.08)] focus-visible:text-[rgb(215_0_21)] focus-visible:ring-0 dark:hover:bg-[rgb(255_69_58_/_0.12)] dark:hover:text-[rgb(255_105_97)]"
+                        className="ios-touch grid h-11 w-12 place-items-center rounded-full text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(174_37_31)] focus-visible:bg-[rgb(255_59_48_/_0.08)] focus-visible:text-[rgb(174_37_31)] focus-visible:ring-0 dark:text-[rgb(255_105_97)] dark:hover:bg-[rgb(255_69_58_/_0.12)]"
                         aria-label={`删除提供商 ${provider.name}`}
                         title="删除"
                       >
@@ -1154,7 +1143,7 @@ export function ModelProviderConfigPage() {
                 return (
                   <div
                     key={displayIndex}
-                    className="ios-touch flex min-h-[76px] items-center gap-4 border-b border-border/45 px-5 py-3 last:border-b-0 hover:bg-[rgb(120_120_128_/_0.06)]"
+                    className="ios-touch flex min-h-[84px] items-center gap-4 border-b border-border/45 px-5 py-3 last:border-b-0 hover:bg-[rgb(120_120_128_/_0.06)]"
                   >
                     <div className="w-11 shrink-0">
                       <Checkbox
@@ -1192,13 +1181,13 @@ export function ModelProviderConfigPage() {
                         </Badge>
                       )}
                     </div>
-                    <div className="flex w-32 shrink-0 justify-end gap-2 lg:w-36">
+                    <div className="flex w-40 shrink-0 justify-end gap-2">
                       <Button
                         variant="outline"
                         size="icon"
                         onClick={() => handleTestConnection(provider.name)}
                         disabled={testingProviders.has(provider.name)}
-                        className="h-9 w-9 rounded-full"
+                        className="h-11 w-11 rounded-full"
                         aria-label={`测试提供商 ${provider.name}`}
                         title="测试连接"
                       >
@@ -1212,7 +1201,7 @@ export function ModelProviderConfigPage() {
                         variant="outline"
                         size="icon"
                         onClick={() => openEditDialog(provider, actualIndex)}
-                        className="h-9 w-9 rounded-full"
+                        className="h-11 w-11 rounded-full"
                         aria-label={`编辑提供商 ${provider.name}`}
                         title="编辑"
                       >
@@ -1222,7 +1211,7 @@ export function ModelProviderConfigPage() {
                         variant="ghost"
                         size="icon"
                         onClick={() => openDeleteDialog(actualIndex)}
-                        className="h-9 w-9 rounded-full text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)] dark:hover:bg-[rgb(255_69_58_/_0.12)]"
+                        className="h-11 w-11 rounded-full text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)] dark:hover:bg-[rgb(255_69_58_/_0.12)]"
                         aria-label={`删除提供商 ${provider.name}`}
                         title="删除"
                       >
@@ -1256,7 +1245,7 @@ export function ModelProviderConfigPage() {
                       size="icon"
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                       disabled={page === 1}
-                      className="h-9 w-9 rounded-full"
+                      className="h-11 w-11 rounded-full"
                       aria-label="上一页"
                     >
                       <ChevronLeft className="h-4 w-4" />
@@ -1266,7 +1255,7 @@ export function ModelProviderConfigPage() {
                       size="icon"
                       onClick={() => setPage((p) => p + 1)}
                       disabled={page >= totalPages}
-                      className="h-9 w-9 rounded-full"
+                      className="h-11 w-11 rounded-full"
                       aria-label="下一页"
                     >
                       <ChevronRight className="h-4 w-4" />
@@ -1329,7 +1318,7 @@ export function ModelProviderConfigPage() {
                       onChange={(e) => setJumpToPage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
                       placeholder={page.toString()}
-                      className="h-8 w-16 text-center"
+                      className="h-11 w-20 text-center"
                       min={1}
                       max={totalPages}
                     />
@@ -1338,7 +1327,7 @@ export function ModelProviderConfigPage() {
                       size="sm"
                       onClick={handleJumpToPage}
                       disabled={!jumpToPage}
-                      className="h-8"
+                      className="h-11"
                     >
                       跳转
                     </Button>

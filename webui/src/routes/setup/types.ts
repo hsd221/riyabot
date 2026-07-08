@@ -1,10 +1,11 @@
 // 设置向导相关类型定义
+import type { LucideIcon } from 'lucide-react'
 
 export interface SetupStep {
   id: string
   title: string
   description: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: LucideIcon
 }
 
 export interface AgreementDocument {

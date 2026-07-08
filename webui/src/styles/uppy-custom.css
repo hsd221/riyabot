@@ -10,40 +10,70 @@
 }
 
 .uppy-Dashboard-innerWrap {
-  border-radius: 0.5rem;
+  border-radius: 18px;
   overflow: hidden;
 }
 
 /* 拖放区域样式 */
 .uppy-Dashboard-AddFiles {
-  border: 2px dashed hsl(var(--border)) !important;
-  border-radius: 0.5rem !important;
-  background: hsl(var(--muted) / 0.3) !important;
-  transition: all 0.2s ease;
+  border: 1.5px dashed hsl(var(--border) / 0.86) !important;
+  border-radius: 18px !important;
+  background: hsl(var(--secondary) / 0.55) !important;
+  transition:
+    background-color 260ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 260ms cubic-bezier(0.2, 0, 0, 1),
+    transform 260ms cubic-bezier(0.2, 0, 0, 1) !important;
 }
 
 .uppy-Dashboard-AddFiles:hover {
   border-color: hsl(var(--primary)) !important;
-  background: hsl(var(--muted) / 0.5) !important;
+  background: hsl(var(--accent) / 0.66) !important;
+}
+
+.uppy-Dashboard-AddFiles:active {
+  transform: scale(0.992);
 }
 
 .uppy-Dashboard-AddFiles-title {
   color: hsl(var(--foreground)) !important;
-  font-weight: 500 !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.45 !important;
 }
 
 .uppy-Dashboard-AddFiles-info {
   color: hsl(var(--muted-foreground)) !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
 }
 
 /* 按钮样式 */
 .uppy-Dashboard-browse {
+  display: inline-flex !important;
+  min-height: 44px !important;
+  align-items: center !important;
+  border-radius: 999px !important;
+  margin-inline: 0.25rem !important;
+  padding: 0 0.95rem !important;
+  background: hsl(var(--primary) / 0.1) !important;
   color: hsl(var(--primary)) !important;
-  font-weight: 500 !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  transition:
+    background-color 220ms cubic-bezier(0.2, 0, 0, 1),
+    color 220ms cubic-bezier(0.2, 0, 0, 1),
+    transform 220ms cubic-bezier(0.2, 0, 0, 1) !important;
 }
 
 .uppy-Dashboard-browse:hover {
-  text-decoration: underline !important;
+  background: hsl(var(--primary) / 0.14) !important;
+  color: hsl(var(--primary) / 0.88) !important;
+  text-decoration: none !important;
+}
+
+.uppy-Dashboard-browse:active {
+  transform: scale(0.98) !important;
 }
 
 /* 文件列表样式 */
@@ -52,11 +82,14 @@
 }
 
 .uppy-Dashboard-Item {
-  border-bottom-color: hsl(var(--border)) !important;
+  min-height: 64px !important;
+  border-bottom-color: hsl(var(--border) / 0.55) !important;
+  color: hsl(var(--foreground)) !important;
 }
 
 .uppy-Dashboard-Item-name {
   color: hsl(var(--foreground)) !important;
+  font-weight: 500 !important;
 }
 
 .uppy-Dashboard-Item-status {
@@ -65,8 +98,8 @@
 
 /* 进度条样式 */
 .uppy-StatusBar {
-  background: hsl(var(--muted)) !important;
-  border-top: 1px solid hsl(var(--border)) !important;
+  background: hsl(var(--secondary) / 0.72) !important;
+  border-top: 1px solid hsl(var(--border) / 0.55) !important;
 }
 
 .uppy-StatusBar-progress {
@@ -80,25 +113,36 @@
 .uppy-StatusBar-actionBtn--upload {
   background: hsl(var(--primary)) !important;
   color: hsl(var(--primary-foreground)) !important;
-  border-radius: 0.375rem !important;
-  font-weight: 500 !important;
-  padding: 0.5rem 1rem !important;
+  min-height: 44px !important;
+  border-radius: 999px !important;
+  font-weight: 600 !important;
+  padding: 0.625rem 1.15rem !important;
+  box-shadow: 0 10px 24px hsl(var(--primary) / 0.22) !important;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0, 0, 1),
+    filter 220ms cubic-bezier(0.2, 0, 0, 1) !important;
 }
 
 .uppy-StatusBar-actionBtn--upload:hover {
-  background: hsl(var(--primary) / 0.9) !important;
+  filter: brightness(0.96) !important;
+}
+
+.uppy-StatusBar-actionBtn--upload:active {
+  transform: scale(0.98) !important;
 }
 
 /* Note 提示文字样式 */
 .uppy-Dashboard-note {
   color: hsl(var(--muted-foreground)) !important;
-  font-size: 0.75rem !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
 }
 
 /* 暗色主题适配 */
 [data-uppy-theme="dark"] .uppy-Dashboard-AddFiles,
 .dark .uppy-Dashboard-AddFiles {
-  background: hsl(var(--muted) / 0.2) !important;
+  background: hsl(var(--secondary) / 0.64) !important;
+  border-color: hsl(var(--border) / 0.76) !important;
 }
 
 [data-uppy-theme="dark"] .uppy-Dashboard-AddFiles-title,
@@ -108,18 +152,25 @@
 
 [data-uppy-theme="dark"] .uppy-StatusBar,
 .dark .uppy-StatusBar {
-  background: hsl(var(--muted) / 0.5) !important;
+  background: hsl(var(--secondary) / 0.76) !important;
 }
 
 /* 移除 Uppy 自带的边框和阴影 */
 .uppy-Dashboard {
   font-family: inherit !important;
+  color: hsl(var(--foreground)) !important;
 }
 
 /* 文件预览图片样式 */
 .uppy-Dashboard-Item-preview {
-  border-radius: 0.375rem !important;
+  border-radius: 14px !important;
   overflow: hidden;
+}
+
+.uppy-Dashboard-Item-action {
+  min-height: 44px !important;
+  min-width: 44px !important;
+  border-radius: 14px !important;
 }
 
 /* 删除按钮样式 */
@@ -129,6 +180,23 @@
 
 .uppy-Dashboard-Item-action--remove:hover {
   opacity: 0.8;
+}
+
+.uppy-DashboardContent-bar {
+  background: hsl(var(--card)) !important;
+  border-bottom-color: hsl(var(--border) / 0.55) !important;
+}
+
+.uppy-DashboardContent-title {
+  color: hsl(var(--foreground)) !important;
+  font-weight: 600 !important;
+}
+
+.uppy-DashboardContent-back,
+.uppy-DashboardContent-save {
+  min-height: 44px !important;
+  border-radius: 999px !important;
+  color: hsl(var(--primary)) !important;
 }
 
 /* 成功/错误状态 */
@@ -142,7 +210,7 @@
 
 /* 滚动条样式 */
 .uppy-Dashboard-files::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 
 .uppy-Dashboard-files::-webkit-scrollbar-track {
@@ -150,8 +218,8 @@
 }
 
 .uppy-Dashboard-files::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.3);
-  border-radius: 3px;
+  background: hsl(var(--muted-foreground) / 0.28);
+  border-radius: 999px;
 }
 
 .uppy-Dashboard-files::-webkit-scrollbar-thumb:hover {

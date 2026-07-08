@@ -226,13 +226,13 @@ export function MultiSelect({
                   >
                     <div
                       className={cn(
-                        'mr-2 grid h-5 w-5 place-content-center rounded-[7px] border border-black/[0.12] bg-white/[0.72] text-white shadow-[0_1px_0_rgba(255,255,255,0.7)_inset,0_1px_2px_rgba(0,0,0,0.06)] backdrop-blur-xl transition-colors dark:border-white/15 dark:bg-white/[0.08]',
+                        'mr-2 grid h-6 w-6 place-content-center rounded-[8px] border border-black/[0.14] bg-white/[0.92] text-white shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_1px_2px_rgba(0,0,0,0.06)] transition-colors dark:border-white/18 dark:bg-white/[0.1]',
                         isSelected
                           ? 'border-transparent bg-[linear-gradient(180deg,hsl(var(--primary)_/_0.92),hsl(var(--primary)))]'
                           : 'opacity-50 [&_svg]:invisible'
                       )}
                     >
-                      <Check className="h-3 w-3" strokeWidth={2} fill="none" />
+                      <Check className="h-[17px] w-[17px]" strokeWidth={3.2} fill="none" />
                     </div>
                     <span>{option.label}</span>
                   </CommandItem>

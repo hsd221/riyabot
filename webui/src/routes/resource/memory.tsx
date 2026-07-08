@@ -133,15 +133,15 @@ const PAGE_SIZE_OPTIONS = [
 
 const TYPE_COLORS: Record<string, string> = {
   episodic:
-    'bg-[rgb(0_122_255_/_0.12)] text-[rgb(0_84_166)] hover:bg-[rgb(0_122_255_/_0.16)] dark:text-[rgb(100_210_255)]',
+    'bg-[rgb(0_122_255_/_0.12)] text-[rgb(0_84_166)] hover:bg-[rgb(0_122_255_/_0.16)] dark:bg-[rgb(10_132_255_/_0.18)] dark:text-[rgb(100_210_255)] dark:hover:bg-[rgb(10_132_255_/_0.22)]',
   factual:
-    'bg-[rgb(52_199_89_/_0.12)] text-[rgb(36_138_61)] hover:bg-[rgb(52_199_89_/_0.16)] dark:text-[rgb(48_209_88)]',
+    'bg-[rgb(52_199_89_/_0.12)] text-[rgb(36_138_61)] hover:bg-[rgb(52_199_89_/_0.16)] dark:bg-[rgb(48_209_88_/_0.18)] dark:text-[rgb(48_209_88)] dark:hover:bg-[rgb(48_209_88_/_0.22)]',
   relational:
-    'bg-[rgb(88_86_214_/_0.12)] text-[rgb(54_52_163)] hover:bg-[rgb(88_86_214_/_0.16)] dark:text-[rgb(191_90_242)]',
+    'bg-[rgb(88_86_214_/_0.12)] text-[rgb(54_52_163)] hover:bg-[rgb(88_86_214_/_0.16)] dark:bg-[rgb(191_90_242_/_0.18)] dark:text-[rgb(191_90_242)] dark:hover:bg-[rgb(191_90_242_/_0.22)]',
   preference:
-    'bg-[rgb(255_149_0_/_0.14)] text-[rgb(172_96_0)] hover:bg-[rgb(255_149_0_/_0.18)] dark:text-[rgb(255_159_10)]',
+    'bg-[rgb(255_149_0_/_0.14)] text-[rgb(172_96_0)] hover:bg-[rgb(255_149_0_/_0.18)] dark:bg-[rgb(255_159_10_/_0.2)] dark:text-[rgb(255_159_10)] dark:hover:bg-[rgb(255_159_10_/_0.24)]',
   planned:
-    'bg-[rgb(255_45_85_/_0.12)] text-[rgb(184_31_58)] hover:bg-[rgb(255_45_85_/_0.16)] dark:text-[rgb(255_55_95)]',
+    'bg-[rgb(255_45_85_/_0.12)] text-[rgb(184_31_58)] hover:bg-[rgb(255_45_85_/_0.16)] dark:bg-[rgb(255_55_95_/_0.18)] dark:text-[rgb(255_55_95)] dark:hover:bg-[rgb(255_55_95_/_0.22)]',
 }
 
 const CHART_COLORS = [
@@ -151,6 +151,9 @@ const CHART_COLORS = [
   'hsl(var(--chart-4))',
   'hsl(var(--chart-5))',
 ]
+
+const memorySelectTriggerClass =
+  'h-auto min-h-11 w-full min-w-11 justify-between gap-2 rounded-[14px] border-0 bg-secondary/60 px-3 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-secondary/70 focus:ring-0 sm:w-auto sm:justify-end sm:gap-1 sm:bg-transparent sm:px-0 sm:hover:bg-transparent [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4'
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '-'
@@ -174,7 +177,7 @@ function getAtomTypeLabel(type: string): string {
 function getAtomTypeBadgeClass(type: string): string {
   return (
     TYPE_COLORS[type] ||
-    'bg-[rgb(142_142_147_/_0.14)] text-[rgb(99_99_102)] hover:bg-[rgb(142_142_147_/_0.18)] dark:text-[rgb(174_174_178)]'
+    'bg-[rgb(142_142_147_/_0.14)] text-[rgb(99_99_102)] hover:bg-[rgb(142_142_147_/_0.18)] dark:bg-[rgb(142_142_147_/_0.2)] dark:text-[rgb(174_174_178)] dark:hover:bg-[rgb(142_142_147_/_0.24)]'
   )
 }
 
@@ -493,7 +496,7 @@ export function MemoryPage() {
         <div className="text-sm text-muted-foreground">
           显示 {start} 到 {end} 条，共 {total} 条
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
           <Select
             value={limit.toString()}
             onValueChange={(value) => {
@@ -501,7 +504,7 @@ export function MemoryPage() {
               onOffsetChange(0)
             }}
           >
-            <SelectTrigger className="h-auto min-h-0 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+            <SelectTrigger className={cn(memorySelectTriggerClass, 'sm:max-w-[6rem]')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -517,7 +520,7 @@ export function MemoryPage() {
             size="icon"
             onClick={() => onOffsetChange(0)}
             disabled={currentPage === 1}
-            className="hidden h-9 w-9 rounded-full sm:inline-flex"
+            className="hidden h-11 w-11 rounded-full sm:inline-flex"
           >
             <ChevronsLeft className="h-4 w-4" />
           </Button>
@@ -526,7 +529,7 @@ export function MemoryPage() {
             size="icon"
             onClick={() => onOffsetChange(Math.max(0, offset - limit))}
             disabled={currentPage === 1}
-            className="h-9 w-9 rounded-full"
+            className="h-11 w-11 rounded-full"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -538,7 +541,7 @@ export function MemoryPage() {
             size="icon"
             onClick={() => onOffsetChange(offset + limit)}
             disabled={currentPage === totalPages}
-            className="h-9 w-9 rounded-full"
+            className="h-11 w-11 rounded-full"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -547,7 +550,7 @@ export function MemoryPage() {
             size="icon"
             onClick={() => onOffsetChange((totalPages - 1) * limit)}
             disabled={currentPage === totalPages}
-            className="hidden h-9 w-9 rounded-full sm:inline-flex"
+            className="hidden h-11 w-11 rounded-full sm:inline-flex"
           >
             <ChevronsRight className="h-4 w-4" />
           </Button>
@@ -987,7 +990,10 @@ export function MemoryPage() {
                               >
                                 <div className="mb-1 flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-2">
-                                    <Badge className={getDreamRunTypeBadgeClass(dream.run_type)}>
+                                    <Badge
+                                      variant="secondary"
+                                      className={getDreamRunTypeBadgeClass(dream.run_type)}
+                                    >
                                       {getDreamRunTypeLabel(dream.run_type)}
                                     </Badge>
                                     <Badge variant={getStatusBadgeVariant(dream.status)}>
@@ -1019,7 +1025,7 @@ export function MemoryPage() {
             {/* 记忆原子 */}
             <TabsContent value="atoms" className="space-y-4">
               <div className="ios-group overflow-hidden">
-                <div className="ios-row min-h-[64px]">
+                <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
                       <Filter className="h-4 w-4" />
@@ -1033,7 +1039,7 @@ export function MemoryPage() {
                       setAtomOffset(0)
                     }}
                   >
-                    <SelectTrigger className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                    <SelectTrigger className={cn(memorySelectTriggerClass, 'sm:max-w-[8rem]')}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1046,7 +1052,7 @@ export function MemoryPage() {
                   </Select>
                 </div>
 
-                <div className="ios-row min-h-[64px]">
+                <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="ios-symbol ios-symbol-sm ios-symbol-green">
                       <Check className="h-4 w-4" />
@@ -1060,7 +1066,7 @@ export function MemoryPage() {
                       setAtomOffset(0)
                     }}
                   >
-                    <SelectTrigger className="h-auto min-h-0 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                    <SelectTrigger className={cn(memorySelectTriggerClass, 'sm:max-w-[8rem]')}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1073,7 +1079,7 @@ export function MemoryPage() {
                   </Select>
                 </div>
 
-                <div className="ios-row min-h-[64px]">
+                <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
                       <Database className="h-4 w-4" />
@@ -1087,7 +1093,7 @@ export function MemoryPage() {
                       setAtomOffset(0)
                     }}
                   >
-                    <SelectTrigger className="h-auto min-h-0 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                    <SelectTrigger className={cn(memorySelectTriggerClass, 'sm:max-w-[6rem]')}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1149,7 +1155,10 @@ export function MemoryPage() {
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="flex min-w-0 flex-wrap items-center gap-2">
-                                  <Badge className={getAtomTypeBadgeClass(atom.atom_type)}>
+                                  <Badge
+                                    variant="secondary"
+                                    className={getAtomTypeBadgeClass(atom.atom_type)}
+                                  >
                                     {getAtomTypeLabel(atom.atom_type)}
                                   </Badge>
                                   <Badge variant={getStatusBadgeVariant(atom.status)}>
@@ -1311,7 +1320,10 @@ export function MemoryPage() {
                             </span>
                             <div className="min-w-0 flex-1">
                               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                <Badge className={getDreamRunTypeBadgeClass(dream.run_type)}>
+                                <Badge
+                                  variant="secondary"
+                                  className={getDreamRunTypeBadgeClass(dream.run_type)}
+                                >
                                   {getDreamRunTypeLabel(dream.run_type)}
                                 </Badge>
                                 <Badge variant={getStatusBadgeVariant(dream.status)}>

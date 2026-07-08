@@ -6,13 +6,17 @@ import {
   FileText,
   HelpCircle,
   Key,
+  LoaderCircle,
   Lock,
+  Monitor,
   Moon,
   Sun,
   Terminal,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Dialog,
   DialogContent,
@@ -21,11 +25,45 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { useTheme } from '@/components/use-theme'
+import { toggleThemeWithTransition, useTheme } from '@/components/use-theme'
 import { checkAuthStatus } from '@/lib/fetch-with-auth'
 import { checkFirstSetup } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
 import { APP_FULL_NAME, APP_NAME } from '@/lib/version'
+import type { ComponentType } from 'react'
+import type { LucideProps } from 'lucide-react'
+
+type ThemeMode = 'light' | 'dark' | 'system'
+
+const authThemeOptions: Array<{
+  value: ThemeMode
+  label: string
+  description: string
+  icon: ComponentType<LucideProps>
+  symbolClass: string
+}> = [
+  {
+    value: 'system',
+    label: '跟随系统',
+    description: '根据设备外观自动切换',
+    icon: Monitor,
+    symbolClass: 'ios-symbol-blue',
+  },
+  {
+    value: 'light',
+    label: '浅色模式',
+    description: '始终使用浅色外观',
+    icon: Sun,
+    symbolClass: 'ios-symbol-yellow',
+  },
+  {
+    value: 'dark',
+    label: '深色模式',
+    description: '始终使用深色外观',
+    icon: Moon,
+    symbolClass: 'ios-symbol-purple',
+  },
+]
 
 export function AuthPage() {
   const [token, setToken] = useState('')
@@ -33,7 +71,7 @@ export function AuthPage() {
   const [error, setError] = useState('')
   const [checkingAuth, setCheckingAuth] = useState(true)
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
 
   // 如果已经认证，直接跳转到首页
   useEffect(() => {
@@ -53,21 +91,9 @@ export function AuthPage() {
     verifyAuth()
   }, [navigate])
 
-  // 获取实际应用的主题（处理 system 情况）
-  const getActualTheme = () => {
-    if (theme === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-    }
-    return theme
-  }
-
-  const actualTheme = getActualTheme()
-
-  // 主题切换（无动画）
-  const toggleTheme = () => {
-    const newTheme = actualTheme === 'dark' ? 'light' : 'dark'
-    setTheme(newTheme)
-  }
+  const CurrentThemeIcon = theme === 'system' ? Monitor : resolvedTheme === 'dark' ? Moon : Sun
+  const themeLabel =
+    theme === 'system' ? '跟随系统' : resolvedTheme === 'dark' ? '深色模式' : '浅色模式'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -118,8 +144,16 @@ export function AuthPage() {
   if (checkingAuth) {
     return (
       <div className="ios-page flex min-h-screen items-center justify-center overflow-hidden">
-        <div className="ios-group px-5 py-3 text-sm leading-relaxed text-muted-foreground">
-          正在检查登录状态...
+        <div className="ios-status-panel">
+          <span className="ios-symbol ios-symbol-md ios-symbol-blue">
+            <LoaderCircle className="ios-spin-slow h-5 w-5" strokeWidth={2.5} />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[16px] font-semibold leading-6 text-foreground">
+              {APP_NAME}
+            </p>
+            <p className="text-[14px] leading-5 text-muted-foreground">正在检查登录状态...</p>
+          </div>
         </div>
       </div>
     )
@@ -127,17 +161,47 @@ export function AuthPage() {
 
   return (
     <div className="ios-page flex min-h-screen flex-col overflow-x-hidden">
-      <button
-        onClick={toggleTheme}
-        className="ios-touch absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center rounded-full text-foreground hover:bg-muted/70"
-        title={actualTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
-      >
-        {actualTheme === 'dark' ? (
-          <Sun className="h-5 w-5" strokeWidth={2.5} fill="none" />
-        ) : (
-          <Moon className="h-5 w-5" strokeWidth={2.5} fill="none" />
-        )}
-      </button>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            className="ios-touch absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-10 grid h-11 w-11 place-items-center rounded-full text-foreground hover:bg-muted/70"
+            title={`外观：${themeLabel}`}
+            aria-label={`外观：${themeLabel}`}
+          >
+            <CurrentThemeIcon className="h-5 w-5" strokeWidth={2.5} fill="none" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-60 p-1.5">
+          <div className="overflow-hidden rounded-[14px]">
+            {authThemeOptions.map((option) => {
+              const OptionIcon = option.icon
+              const selected = theme === option.value
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0"
+                  onClick={(event) => toggleThemeWithTransition(option.value, setTheme, event)}
+                >
+                  <span className={cn('ios-symbol ios-symbol-sm', option.symbolClass)}>
+                    <OptionIcon className="h-[18px] w-[18px]" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-medium leading-5 text-foreground">
+                      {option.label}
+                    </span>
+                    <span className="block truncate text-[12px] leading-4 text-muted-foreground">
+                      {option.description}
+                    </span>
+                  </span>
+                  {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                </button>
+              )
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <main className="mx-auto flex w-full max-w-[27.5rem] flex-1 flex-col justify-center gap-7 py-10">
         <header className="space-y-4 text-left sm:text-center">

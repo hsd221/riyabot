@@ -47,9 +47,9 @@ const fontSizeConfig: Record<
   FontSize,
   { label: string; desktopRowHeight: number; mobileRowHeight: number; class: string }
 > = {
-  xs: { label: '小', desktopRowHeight: 34, mobileRowHeight: 88, class: 'text-[10px] sm:text-xs' },
-  sm: { label: '中', desktopRowHeight: 42, mobileRowHeight: 96, class: 'text-xs sm:text-sm' },
-  base: { label: '大', desktopRowHeight: 52, mobileRowHeight: 106, class: 'text-sm sm:text-base' },
+  xs: { label: '小', desktopRowHeight: 34, mobileRowHeight: 78, class: 'text-[10px] sm:text-xs' },
+  sm: { label: '中', desktopRowHeight: 42, mobileRowHeight: 88, class: 'text-xs sm:text-sm' },
+  base: { label: '大', desktopRowHeight: 52, mobileRowHeight: 100, class: 'text-sm sm:text-base' },
 }
 
 const LOG_LEVEL_OPTIONS = [
@@ -313,10 +313,21 @@ export function LogViewerPage() {
 
     if (autoScroll && filteredLogs.length > 0 && logCountIncreased) {
       isAutoScrollingRef.current = true
-      rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
-        align: 'end',
-        behavior: 'auto',
-      })
+      if (isMobileViewport) {
+        const visibleRows = Math.max(
+          1,
+          Math.floor((parentRef.current?.clientHeight ?? estimatedRowHeight) / estimatedRowHeight)
+        )
+        rowVirtualizer.scrollToIndex(Math.max(filteredLogs.length - visibleRows, 0), {
+          align: 'start',
+          behavior: 'auto',
+        })
+      } else {
+        rowVirtualizer.scrollToIndex(filteredLogs.length - 1, {
+          align: 'end',
+          behavior: 'auto',
+        })
+      }
       // 稍后重置标志，给滚动事件处理一些时间
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -324,7 +335,7 @@ export function LogViewerPage() {
         })
       })
     }
-  }, [filteredLogs.length, autoScroll, rowVirtualizer])
+  }, [filteredLogs.length, autoScroll, estimatedRowHeight, isMobileViewport, rowVirtualizer])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -367,29 +378,22 @@ export function LogViewerPage() {
                 placeholder="搜索日志..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9 border-0 bg-transparent px-0 text-[15px] shadow-none focus-visible:ring-0"
+                className="h-11 border-0 bg-transparent px-0 text-[15px] shadow-none focus-visible:ring-0"
               />
             </div>
 
+            <div className="grid grid-cols-2 gap-2 px-3 py-2.5">
             <Dialog open={levelDialogOpen} onOpenChange={setLevelDialogOpen}>
               <DialogTrigger asChild>
-                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-medium leading-5">日志级别</span>
-                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                      按严重程度筛选
-                    </span>
-                  </span>
-                  <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
-                    <span className="truncate text-[15px] leading-5 text-foreground">
-                      {activeLevelLabel}
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0" />
-                  </span>
+                <button className="ios-touch inline-flex h-11 min-w-0 items-center gap-2 rounded-full bg-secondary/80 px-3 text-left text-[14px] font-medium leading-none text-foreground hover:bg-secondary focus-visible:bg-accent/70 focus-visible:ring-0">
+                  <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0">级别</span>
+                  <span className="min-w-0 truncate text-muted-foreground">{activeLevelLabel}</span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
               </DialogTrigger>
-              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-                <DialogHeader className="px-5 pt-5">
+              <DialogContent className="ios-sheet bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-7">
                   <DialogTitle>日志级别</DialogTitle>
                   <DialogDescription>选择要显示的日志级别</DialogDescription>
                 </DialogHeader>
@@ -427,23 +431,15 @@ export function LogViewerPage() {
 
             <Dialog open={moduleDialogOpen} onOpenChange={setModuleDialogOpen}>
               <DialogTrigger asChild>
-                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-medium leading-5">模块</span>
-                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                      按日志来源筛选
-                    </span>
-                  </span>
-                  <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
-                    <span className="max-w-[9rem] truncate text-[15px] leading-5 text-foreground">
-                      {activeModuleLabel}
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0" />
-                  </span>
+                <button className="ios-touch inline-flex h-11 min-w-0 items-center gap-2 rounded-full bg-secondary/80 px-3 text-left text-[14px] font-medium leading-none text-foreground hover:bg-secondary focus-visible:bg-accent/70 focus-visible:ring-0">
+                  <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0">模块</span>
+                  <span className="min-w-0 truncate text-muted-foreground">{activeModuleLabel}</span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
               </DialogTrigger>
-              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-                <DialogHeader className="px-5 pt-5">
+              <DialogContent className="ios-sheet bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-7">
                   <DialogTitle>日志模块</DialogTitle>
                   <DialogDescription>选择要显示的日志来源</DialogDescription>
                 </DialogHeader>
@@ -481,19 +477,21 @@ export function LogViewerPage() {
 
             <Dialog open={controlsDialogOpen} onOpenChange={setControlsDialogOpen}>
               <DialogTrigger asChild>
-                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-medium leading-5">日志控制</span>
-                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                      {dateRangeLabel} · {autoScroll ? '自动滚动' : '已暂停'} ·{' '}
-                      {filteredLogs.length}/{logs.length}
-                    </span>
+                <button className="ios-touch col-span-2 inline-flex h-11 min-w-0 items-center justify-center gap-2 rounded-full bg-secondary/80 px-3 text-left text-[14px] font-medium leading-none text-foreground hover:bg-secondary focus-visible:bg-accent/70 focus-visible:ring-0">
+                  {autoScroll ? (
+                    <Pause className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <Play className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="shrink-0">{autoScroll ? '自动滚动' : '已暂停'}</span>
+                  <span className="font-mono text-muted-foreground">
+                    {filteredLogs.length}/{logs.length}
                   </span>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
               </DialogTrigger>
-              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-                <DialogHeader className="px-5 pt-5">
+              <DialogContent className="ios-sheet bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-7">
                   <DialogTitle>日志控制</DialogTitle>
                   <DialogDescription>调整时间范围、操作和显示方式</DialogDescription>
                 </DialogHeader>
@@ -512,7 +510,7 @@ export function LogViewerPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-9 rounded-full px-3 focus-visible:bg-accent/70 focus-visible:ring-0"
+                              className="h-11 rounded-full px-4 focus-visible:bg-accent/70 focus-visible:ring-0"
                             >
                               开始
                             </Button>
@@ -532,7 +530,7 @@ export function LogViewerPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-9 rounded-full px-3 focus-visible:bg-accent/70 focus-visible:ring-0"
+                              className="h-11 rounded-full px-4 focus-visible:bg-accent/70 focus-visible:ring-0"
                             >
                               结束
                             </Button>
@@ -552,7 +550,7 @@ export function LogViewerPage() {
                             variant="ghost"
                             size="icon"
                             onClick={clearDateFilter}
-                            className="h-9 w-9 rounded-full"
+                            className="h-11 w-11 rounded-full"
                           >
                             <X className="h-4 w-4" />
                           </Button>
@@ -575,7 +573,7 @@ export function LogViewerPage() {
                           variant="ghost"
                           size="icon"
                           onClick={handleRefresh}
-                          className="h-9 w-9 rounded-full"
+                          className="h-11 w-11 rounded-full"
                         >
                           <RefreshCw className="h-4 w-4" />
                         </Button>
@@ -583,7 +581,7 @@ export function LogViewerPage() {
                           variant="ghost"
                           size="icon"
                           onClick={handleClear}
-                          className="h-9 w-9 rounded-full"
+                          className="h-11 w-11 rounded-full"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -591,7 +589,7 @@ export function LogViewerPage() {
                           variant="ghost"
                           size="icon"
                           onClick={handleExport}
-                          className="h-9 w-9 rounded-full"
+                          className="h-11 w-11 rounded-full"
                         >
                           <Download className="h-4 w-4" />
                         </Button>
@@ -618,7 +616,7 @@ export function LogViewerPage() {
                             variant={fontSize === size ? 'default' : 'ghost'}
                             size="sm"
                             onClick={() => setFontSize(size)}
-                            className="h-8 rounded-full px-3 text-xs"
+                            className="h-11 rounded-full px-4 text-xs"
                           >
                             {fontSizeConfig[size].label}
                           </Button>
@@ -647,6 +645,7 @@ export function LogViewerPage() {
             </Dialog>
           </div>
         </div>
+        </div>
 
         {/* 控制栏 */}
         <div className="ios-group hidden overflow-hidden p-4 sm:block">
@@ -660,13 +659,13 @@ export function LogViewerPage() {
                   placeholder="搜索日志..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 rounded-[12px] border-0 bg-muted/75 pl-9 text-sm shadow-none focus-visible:ring-0"
+                  className="h-11 rounded-[14px] border-0 bg-muted/75 pl-10 text-sm shadow-none focus-visible:ring-0"
                 />
               </div>
 
               {/* 日志级别筛选 */}
               <Select value={levelFilter} onValueChange={setLevelFilter}>
-                <SelectTrigger className="h-10 w-full rounded-[12px] border-0 bg-muted/75 text-sm shadow-none sm:w-[140px] lg:w-[180px]">
+                <SelectTrigger className="h-11 w-full rounded-[14px] border-0 bg-muted/75 text-sm shadow-none sm:w-[140px] lg:w-[180px]">
                   <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="级别" />
                 </SelectTrigger>
@@ -682,7 +681,7 @@ export function LogViewerPage() {
 
               {/* 模块筛选 */}
               <Select value={moduleFilter} onValueChange={setModuleFilter}>
-                <SelectTrigger className="h-10 w-full rounded-[12px] border-0 bg-muted/75 text-sm shadow-none sm:w-[160px] lg:w-[200px]">
+                <SelectTrigger className="h-11 w-full rounded-[14px] border-0 bg-muted/75 text-sm shadow-none sm:w-[160px] lg:w-[200px]">
                   <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="模块" />
                 </SelectTrigger>
@@ -706,7 +705,7 @@ export function LogViewerPage() {
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-10 w-full justify-start rounded-full text-left font-normal sm:w-[200px] lg:w-[240px]',
+                      'h-11 w-full justify-start rounded-full text-left font-normal sm:w-[200px] lg:w-[240px]',
                       !dateFrom && 'text-muted-foreground'
                     )}
                   >
@@ -734,7 +733,7 @@ export function LogViewerPage() {
                     variant="outline"
                     size="sm"
                     className={cn(
-                      'h-10 w-full justify-start rounded-full text-left font-normal sm:w-[200px] lg:w-[240px]',
+                      'h-11 w-full justify-start rounded-full text-left font-normal sm:w-[200px] lg:w-[240px]',
                       !dateTo && 'text-muted-foreground'
                     )}
                   >
@@ -761,7 +760,7 @@ export function LogViewerPage() {
                   variant="outline"
                   size="sm"
                   onClick={clearDateFilter}
-                  className="h-10 w-full rounded-full sm:w-auto"
+                  className="h-11 w-full rounded-full sm:w-auto"
                 >
                   <X className="h-4 w-4 sm:mr-2" />
                   <span className="hidden text-sm sm:inline">清除时间筛选</span>
@@ -777,7 +776,7 @@ export function LogViewerPage() {
                   variant={autoScroll ? 'default' : 'outline'}
                   size="sm"
                   onClick={toggleAutoScroll}
-                  className="h-10 flex-1 rounded-full sm:flex-none"
+                  className="h-11 flex-1 rounded-full sm:flex-none"
                 >
                   {autoScroll ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   <span className="ml-2 text-sm">{autoScroll ? '自动滚动' : '已暂停'}</span>
@@ -786,7 +785,7 @@ export function LogViewerPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleRefresh}
-                  className="h-10 flex-1 rounded-full sm:flex-none"
+                  className="h-11 flex-1 rounded-full sm:flex-none"
                 >
                   <RefreshCw className="h-4 w-4" />
                   <span className="ml-2 text-sm">刷新</span>
@@ -795,7 +794,7 @@ export function LogViewerPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleClear}
-                  className="h-10 flex-1 rounded-full sm:flex-none"
+                  className="h-11 flex-1 rounded-full sm:flex-none"
                 >
                   <Trash2 className="h-4 w-4" />
                   <span className="ml-2 text-sm">清空</span>
@@ -804,7 +803,7 @@ export function LogViewerPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleExport}
-                  className="h-10 flex-1 rounded-full sm:flex-none"
+                  className="h-11 flex-1 rounded-full sm:flex-none"
                 >
                   <Download className="h-4 w-4" />
                   <span className="ml-2 text-sm">导出</span>
@@ -834,7 +833,7 @@ export function LogViewerPage() {
                       variant={fontSize === size ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => setFontSize(size)}
-                      className="h-8 rounded-full px-3 text-xs"
+                      className="h-11 rounded-full px-4 text-xs"
                     >
                       {fontSizeConfig[size].label}
                     </Button>
@@ -896,7 +895,7 @@ export function LogViewerPage() {
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
                       className={cn(
-                        'absolute left-0 top-0 w-full px-4 transition-colors after:absolute after:bottom-0 after:left-16 after:right-0 after:h-px after:bg-border/55 last:after:hidden hover:bg-accent/45 sm:border-b sm:border-border/45 sm:px-5 sm:after:hidden',
+                        'absolute left-0 top-0 w-full px-5 transition-colors after:absolute after:bottom-0 after:left-5 after:right-0 after:h-px after:bg-border/45 last:after:hidden hover:bg-accent/45 sm:border-b sm:border-border/45 sm:px-5 sm:after:hidden',
                         getLevelBgColor(log.level)
                       )}
                       style={{
@@ -907,11 +906,11 @@ export function LogViewerPage() {
                       }}
                     >
                       {/* 移动端：列表布局 */}
-                      <div className="flex flex-col gap-1.5 py-2 sm:hidden">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="min-w-0 truncate font-mono text-[12px] leading-4 text-muted-foreground">
-                            {log.timestamp}
-                          </span>
+                      <div className="flex flex-col gap-2 py-2.5 sm:hidden">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[15px] font-medium leading-[1.38] text-foreground">
+                            {log.message}
+                          </div>
                           <span
                             className={cn(
                               'shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-4',
@@ -921,11 +920,10 @@ export function LogViewerPage() {
                             {log.level}
                           </span>
                         </div>
-                        <div className="truncate text-[13px] font-medium leading-5 text-muted-foreground">
-                          {log.module || 'system'}
-                        </div>
-                        <div className="whitespace-pre-wrap break-words text-[15px] leading-6 text-foreground">
-                          {log.message}
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[12px] leading-4 text-muted-foreground">
+                          <span className="min-w-0 max-w-full truncate">{log.module || 'system'}</span>
+                          <span className="text-muted-foreground/45">·</span>
+                          <span className="min-w-0 truncate">{log.timestamp}</span>
                         </div>
                       </div>
 
