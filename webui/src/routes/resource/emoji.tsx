@@ -18,6 +18,7 @@ import {
   X,
   ImageIcon,
   SlidersHorizontal,
+  MoreHorizontal,
 } from 'lucide-react'
 import Uppy from '@uppy/core'
 import Dashboard from '@uppy/react/dashboard'
@@ -49,6 +50,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { IosGridSkeleton } from '@/components/ui/skeleton'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,12 +115,12 @@ const softGreenBadgeClass =
   'border-0 bg-[rgb(52_199_89_/_0.13)] text-[rgb(36_138_61)] shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:text-[rgb(48_209_88)]'
 const softRedBadgeClass =
   'border-0 bg-[rgb(255_59_48_/_0.12)] text-[rgb(174_37_31)] shadow-[0_1px_0_rgba(255,255,255,0.42)_inset] dark:text-[rgb(255_105_97)]'
-const softGreenIconClass =
-  'text-[rgb(36_138_61)] hover:bg-[rgb(52_199_89_/_0.1)] hover:text-[rgb(30_126_52)] dark:text-[rgb(48_209_88)]'
-const softOrangeIconClass =
-  'text-[rgb(178_93_0)] hover:bg-[rgb(255_149_0_/_0.1)] hover:text-[rgb(148_78_0)] dark:text-[rgb(255_159_10)]'
-const softRedIconClass =
-  'text-[rgb(174_37_31)] hover:bg-[rgb(255_59_48_/_0.1)] hover:text-[rgb(150_32_27)] dark:text-[rgb(255_105_97)]'
+
+const emojiCardActionClass =
+  'ios-touch flex min-h-[50px] w-full items-center gap-3 border-b border-border/45 px-3.5 py-2.5 text-left text-[15px] font-medium leading-5 last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0'
+
+const emojiCardActionIconClass =
+  'ios-symbol ios-symbol-sm'
 
 export function EmojiManagementPage() {
   const [emojiList, setEmojiList] = useState<Emoji[]>([])
@@ -142,6 +144,7 @@ export function EmojiManagementPage() {
   const [jumpToPage, setJumpToPage] = useState('')
   const [cardSize, setCardSize] = useState<'small' | 'medium' | 'large'>('medium')
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false)
 
   const { toast } = useToast()
 
@@ -356,6 +359,11 @@ export function EmojiManagementPage() {
     SORT_OPTIONS.find((option) => option.value === currentSortValue)?.label ?? '使用次数'
   const currentCardSizeLabel =
     CARD_SIZE_OPTIONS.find((option) => option.value === cardSize)?.label ?? '中'
+  const currentRegisteredLabel =
+    REGISTER_OPTIONS.find((option) => option.value === registeredFilter)?.label ?? '全部'
+  const currentBannedLabel = BAN_OPTIONS.find((option) => option.value === bannedFilter)?.label ?? '全部'
+  const currentFormatLabel = formatFilter === 'all' ? '全部格式' : formatFilter.toUpperCase()
+  const activeFilterCount = [registeredFilter !== 'all', bannedFilter !== 'all', formatFilter !== 'all'].filter(Boolean).length
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const emojiStatItems = stats
     ? [
@@ -391,7 +399,7 @@ export function EmojiManagementPage() {
     : []
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] min-w-0 flex-col overflow-hidden px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -404,8 +412,8 @@ export function EmojiManagementPage() {
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+      <ScrollArea className="min-w-0 flex-1">
+        <div className="w-[calc(100vw-2.5rem)] max-w-full space-y-4 overflow-x-hidden sm:w-auto sm:space-y-6 sm:pr-4">
           <button
             type="button"
             onClick={() => setUploadDialogOpen(true)}
@@ -424,9 +432,33 @@ export function EmojiManagementPage() {
 
           {/* 统计 */}
           {stats && (
-            <div className="ios-stat-grid">
-              {emojiStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
-                <div key={label} className="ios-stat-card">
+            <>
+              <div className="ios-group max-w-full overflow-hidden sm:hidden">
+                <div className="ios-scrollbar-none flex max-w-full gap-2 overflow-x-auto p-2">
+                  {emojiStatItems.map(({ label, value, Icon, symbolClassName }) => (
+                    <div
+                      key={label}
+                      className="flex min-w-[7.2rem] items-center gap-2 rounded-[16px] bg-[rgb(120_120_128_/_0.12)] px-3 py-2.5 shadow-[0_1px_0_rgba(255,255,255,0.54)_inset] dark:bg-white/[0.07] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]"
+                    >
+                      <span className={`ios-symbol ${symbolClassName} h-7 w-7 rounded-[8px]`}>
+                        <Icon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[18px] font-semibold tabular-nums leading-5 text-foreground">
+                          {value}
+                        </span>
+                        <span className="block truncate text-[12px] leading-4 text-muted-foreground">
+                          {label}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="hidden sm:grid sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
+                {emojiStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
+                  <div key={label} className="ios-stat-card">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium leading-5 text-muted-foreground">
@@ -444,11 +476,12 @@ export function EmojiManagementPage() {
                     {value}
                   </p>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           )}
 
-          <div className="ios-search-field">
+          <div className="ios-search-field max-w-full">
             <Search className="pointer-events-none absolute left-3.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="搜索描述或哈希"
@@ -462,7 +495,214 @@ export function EmojiManagementPage() {
           </div>
 
           {/* 筛选和显示 */}
-          <div className="ios-group overflow-hidden">
+          <Dialog open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
+            <button
+              type="button"
+              onClick={() => setFilterDialogOpen(true)}
+              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">筛选与显示</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {currentSortLabel} · {currentRegisteredLabel} · {currentBannedLabel} · {currentFormatLabel}
+                    {activeFilterCount > 0 ? ` · ${activeFilterCount} 个筛选` : ''}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+
+            <DialogContent className="max-h-[82vh] overflow-hidden sm:hidden">
+              <DialogHeader>
+                <DialogTitle>筛选与显示</DialogTitle>
+                <DialogDescription>调整排序、状态筛选和网格密度</DialogDescription>
+              </DialogHeader>
+              <ScrollArea className="max-h-[calc(82vh-9rem)]">
+                <div className="ios-group mb-5 overflow-hidden">
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                        <Filter className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">排序</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {currentSortLabel}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={currentSortValue}
+                      onValueChange={(value) => {
+                        const [newSortBy, newSortOrder] = value.split('-')
+                        setSortBy(newSortBy)
+                        setSortOrder(newSortOrder as 'desc' | 'asc')
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[12rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SORT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label} · {option.description}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                        <CheckCircle2 className="h-4 w-4" />
+                      </span>
+                      <span className="text-[16px] font-normal leading-6">注册状态</span>
+                    </span>
+                    <Select
+                      value={registeredFilter}
+                      onValueChange={(value) => {
+                        setRegisteredFilter(value)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REGISTER_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-red">
+                        <Ban className="h-4 w-4" />
+                      </span>
+                      <span className="text-[16px] font-normal leading-6">封禁状态</span>
+                    </span>
+                    <Select
+                      value={bannedFilter}
+                      onValueChange={(value) => {
+                        setBannedFilter(value)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BAN_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-orange">
+                        <ImageIcon className="h-4 w-4" />
+                      </span>
+                      <span className="text-[16px] font-normal leading-6">格式</span>
+                    </span>
+                    <Select
+                      value={formatFilter}
+                      onValueChange={(value) => {
+                        setFormatFilter(value)
+                        setPage(1)
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部格式</SelectItem>
+                        {formatOptions.map((format) => (
+                          <SelectItem key={format} value={format}>
+                            {format.toUpperCase()} ({stats?.formats[format] ?? 0})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="ios-group overflow-hidden">
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                        <SlidersHorizontal className="h-4 w-4" />
+                      </span>
+                      <span className="text-[16px] font-normal leading-6">卡片大小</span>
+                    </span>
+                    <Select
+                      value={cardSize}
+                      onValueChange={(value: 'small' | 'medium' | 'large') => setCardSize(value)}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CARD_SIZE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}卡片
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </span>
+                      <span className="text-[16px] font-normal leading-6">每页数量</span>
+                    </span>
+                    <Select
+                      value={pageSize.toString()}
+                      onValueChange={(value) => {
+                        setPageSize(parseInt(value))
+                        setPage(1)
+                        setSelectedIds(new Set())
+                      }}
+                    >
+                      <SelectTrigger className="h-auto min-h-11 w-auto max-w-[6rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                          <SelectItem key={size} value={size.toString()}>
+                            {size} 条
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </ScrollArea>
+              <DialogFooter>
+                <Button onClick={() => setFilterDialogOpen(false)} className="w-full">
+                  完成
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <div className="ios-group hidden overflow-hidden sm:block">
             <div className="ios-row min-h-[64px]">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
@@ -631,7 +871,7 @@ export function EmojiManagementPage() {
                   size="icon"
                   onClick={loadEmojiList}
                   disabled={loading}
-                  className="h-9 w-9 rounded-full"
+                  className="h-11 w-11 rounded-full"
                   title="刷新"
                 >
                   <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -642,7 +882,7 @@ export function EmojiManagementPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => setSelectedIds(new Set())}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       取消选择
                     </Button>
@@ -650,7 +890,7 @@ export function EmojiManagementPage() {
                       variant="destructive"
                       size="sm"
                       onClick={() => setBatchDeleteDialogOpen(true)}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <Trash2 className="mr-1 h-4 w-4" />
                       批量删除
@@ -669,7 +909,7 @@ export function EmojiManagementPage() {
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                  className="ios-touch min-h-11 rounded-full px-3.5 py-2 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
                 >
                   {selectedIds.size === emojiList.length ? '取消全选' : '全选'}
                 </button>
@@ -696,7 +936,7 @@ export function EmojiManagementPage() {
                     <Button
                       onClick={() => setUploadDialogOpen(true)}
                       size="sm"
-                      className="h-9 px-4"
+                      className="h-11 px-5"
                     >
                       <Upload className="mr-1 h-4 w-4" />
                       上传表情包
@@ -705,19 +945,19 @@ export function EmojiManagementPage() {
                 ) : (
                   <div
                     className={cn(
-                      'grid gap-3 p-3 sm:p-4',
+                      'grid min-w-0 gap-3 p-3 sm:p-4',
                       cardSize === 'small'
-                        ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10'
+                        ? 'grid-cols-[repeat(3,minmax(0,1fr))] sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10'
                         : cardSize === 'medium'
-                          ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
-                          : 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
+                          ? 'grid-cols-[repeat(2,minmax(0,1fr))] sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
+                          : 'grid-cols-[repeat(2,minmax(0,1fr))] sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
                     )}
                   >
                     {emojiList.map((emoji) => (
                       <div
                         key={emoji.id}
                         className={cn(
-                          'ios-touch group relative cursor-pointer overflow-hidden rounded-[16px] border border-black/[0.035] bg-white/[0.78] shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_6px_18px_rgba(31,41,55,0.035),0_1px_2px_rgba(0,0,0,0.024)] backdrop-blur-xl hover:ring-2 hover:ring-primary/70 active:scale-[0.98] active:shadow-[0_1px_0_rgba(255,255,255,0.55)_inset,0_2px_8px_rgba(31,41,55,0.045)] dark:border-white/10 dark:bg-white/[0.09]',
+                          'ios-touch group relative min-w-0 cursor-pointer overflow-hidden rounded-[18px] border border-black/[0.035] bg-card shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_26px_rgba(31,41,55,0.055),0_2px_6px_rgba(0,0,0,0.024)] hover:ring-2 hover:ring-primary/60 active:scale-[0.98] active:shadow-[0_1px_0_rgba(255,255,255,0.5)_inset,0_4px_14px_rgba(31,41,55,0.06)] dark:border-white/10 dark:bg-card',
                           selectedIds.has(emoji.id) && 'bg-primary/5 ring-2 ring-primary'
                         )}
                         onClick={() => toggleSelect(emoji.id)}
@@ -731,13 +971,13 @@ export function EmojiManagementPage() {
                           }`}
                         >
                           <div
-                            className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${
+                            className={`flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-[0_4px_12px_rgba(0,0,0,0.12)] ${
                               selectedIds.has(emoji.id)
                                 ? 'border-primary bg-primary text-primary-foreground'
-                                : 'border-muted-foreground/50 bg-background/80'
+                                : 'border-muted-foreground/40 bg-background/90'
                             }`}
                           >
-                            {selectedIds.has(emoji.id) && <CheckCircle2 className="h-3 w-3" />}
+                            {selectedIds.has(emoji.id) && <CheckCircle2 className="h-4 w-4" />}
                           </div>
                         </div>
 
@@ -772,88 +1012,104 @@ export function EmojiManagementPage() {
 
                         {/* 底部信息和操作 */}
                         <div
-                          className={`border-t border-border/55 bg-white/[0.72] backdrop-blur-xl dark:bg-white/[0.08] ${
-                            cardSize === 'small' ? 'p-1' : 'p-2'
+                          className={`border-t border-border/55 bg-secondary/45 ${
+                            cardSize === 'small' ? 'p-2' : 'p-2.5'
                           }`}
                         >
-                          {/* 使用次数和格式 */}
-                          <div className="mb-1 flex items-center justify-between gap-1 text-xs text-muted-foreground">
-                            <Badge variant="outline" className="px-1 py-0 text-[10px]">
-                              {emoji.format.toUpperCase()}
-                            </Badge>
-                            <span className="font-mono">{emoji.usage_count}次</span>
-                          </div>
+                          <div className="flex min-h-11 items-center justify-between gap-2">
+                            <div className="min-w-0 text-xs text-muted-foreground">
+                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                {emoji.format.toUpperCase()}
+                              </Badge>
+                              <p className="mt-1 truncate font-mono">{emoji.usage_count} 次</p>
+                            </div>
 
-                          {/* 操作按钮 - 悬停时显示 */}
-                          <div
-                            className={`flex justify-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 ${
-                              cardSize === 'small' ? 'flex-wrap' : ''
-                            }`}
-                          >
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleEdit(emoji)
-                              }}
-                              title="编辑"
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleViewDetail(emoji)
-                              }}
-                              title="详情"
-                            >
-                              <Info className="h-3 w-3" />
-                            </Button>
-                            {!emoji.is_registered && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={cn('h-6 w-6', softGreenIconClass)}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleRegister(emoji)
-                                }}
-                                title="注册"
-                              >
-                                <CheckCircle2 className="h-3 w-3" />
-                              </Button>
-                            )}
-                            {!emoji.is_banned && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={cn('h-6 w-6', softOrangeIconClass)}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleBan(emoji)
-                                }}
-                                title="封禁"
-                              >
-                                <Ban className="h-3 w-3" />
-                              </Button>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className={cn('h-6 w-6', softRedIconClass)}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDelete(emoji)
-                              }}
-                              title="删除"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-11 w-11 shrink-0 rounded-[14px]"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="更多操作"
+                                >
+                                  <MoreHorizontal className="h-5 w-5" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent align="end" side="top" className="w-52 p-1.5">
+                                <div className="overflow-hidden rounded-[14px]">
+                                  <button
+                                    type="button"
+                                    className={emojiCardActionClass}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleEdit(emoji)
+                                    }}
+                                  >
+                                    <span className={cn(emojiCardActionIconClass, 'ios-symbol-blue')}>
+                                      <Edit className="h-[18px] w-[18px]" />
+                                    </span>
+                                    编辑
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={emojiCardActionClass}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleViewDetail(emoji)
+                                    }}
+                                  >
+                                    <span className={cn(emojiCardActionIconClass, 'ios-symbol-gray')}>
+                                      <Info className="h-[18px] w-[18px]" />
+                                    </span>
+                                    详情
+                                  </button>
+                                  {!emoji.is_registered && (
+                                    <button
+                                      type="button"
+                                      className={emojiCardActionClass}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleRegister(emoji)
+                                      }}
+                                    >
+                                      <span className={cn(emojiCardActionIconClass, 'ios-symbol-green')}>
+                                        <CheckCircle2 className="h-[18px] w-[18px]" />
+                                      </span>
+                                      注册
+                                    </button>
+                                  )}
+                                  {!emoji.is_banned && (
+                                    <button
+                                      type="button"
+                                      className={emojiCardActionClass}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleBan(emoji)
+                                      }}
+                                    >
+                                      <span className={cn(emojiCardActionIconClass, 'ios-symbol-orange')}>
+                                        <Ban className="h-[18px] w-[18px]" />
+                                      </span>
+                                      封禁
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className={cn(emojiCardActionClass, 'text-destructive')}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDelete(emoji)
+                                    }}
+                                  >
+                                    <span className={cn(emojiCardActionIconClass, 'ios-symbol-red')}>
+                                      <Trash2 className="h-[18px] w-[18px]" />
+                                    </span>
+                                    删除
+                                  </button>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
                           </div>
                         </div>
                       </div>
@@ -873,7 +1129,7 @@ export function EmojiManagementPage() {
                         size="icon"
                         onClick={() => setPage(1)}
                         disabled={page === 1}
-                        className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                        className="hidden h-11 w-11 rounded-full sm:inline-flex"
                       >
                         <ChevronsLeft className="h-4 w-4" />
                       </Button>
@@ -883,7 +1139,7 @@ export function EmojiManagementPage() {
                         size="sm"
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
                         disabled={page === 1}
-                        className="h-9 rounded-full px-3"
+                        className="h-11 rounded-full px-4"
                       >
                         <ChevronLeft className="h-4 w-4 sm:mr-1" />
                         <span className="hidden sm:inline">上一页</span>
@@ -896,7 +1152,7 @@ export function EmojiManagementPage() {
                           onChange={(e) => setJumpToPage(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
                           placeholder={page.toString()}
-                          className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                          className="h-11 w-20 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
                           min={1}
                           max={totalPages}
                         />
@@ -905,7 +1161,7 @@ export function EmojiManagementPage() {
                           size="sm"
                           onClick={handleJumpToPage}
                           disabled={!jumpToPage}
-                          className="h-9 rounded-full px-3"
+                          className="h-11 rounded-full px-4"
                         >
                           跳转
                         </Button>
@@ -916,7 +1172,7 @@ export function EmojiManagementPage() {
                         size="sm"
                         onClick={() => setPage((p) => p + 1)}
                         disabled={page >= totalPages}
-                        className="h-9 rounded-full px-3"
+                        className="h-11 rounded-full px-4"
                       >
                         <span className="hidden sm:inline">下一页</span>
                         <ChevronRight className="h-4 w-4 sm:ml-1" />
@@ -927,7 +1183,7 @@ export function EmojiManagementPage() {
                         size="icon"
                         onClick={() => setPage(totalPages)}
                         disabled={page >= totalPages}
-                        className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                        className="hidden h-11 w-11 rounded-full sm:inline-flex"
                       >
                         <ChevronsRight className="h-4 w-4" />
                       </Button>
@@ -1024,7 +1280,7 @@ function EmojiDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-2xl">
+      <DialogContent className="max-h-[90vh] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>表情包详情</DialogTitle>
         </DialogHeader>
@@ -1213,7 +1469,7 @@ function EmojiEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>编辑表情包</DialogTitle>
           <DialogDescription>修改表情包的情绪和状态信息</DialogDescription>
@@ -1608,8 +1864,8 @@ function EmojiUploadDialog({
     if (!file) return null
 
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-4">
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-3">
           <Button variant="ghost" size="sm" onClick={handleBack}>
             <ArrowLeft className="mr-1 h-4 w-4" />
             返回
@@ -1617,17 +1873,17 @@ function EmojiUploadDialog({
           <span className="text-sm text-muted-foreground">编辑表情包信息</span>
         </div>
 
-        <div className="flex gap-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:gap-6">
           {/* 预览图 */}
-          <div className="flex-shrink-0">
-            <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-[18px] border border-black/[0.035] bg-muted/35 dark:border-white/10">
+          <div className="flex-shrink-0 sm:w-36">
+            <div className="mx-auto flex h-36 w-36 items-center justify-center overflow-hidden rounded-[22px] border border-black/[0.035] bg-secondary/55 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_26px_rgba(31,41,55,0.055)] dark:border-white/10">
               <img
                 src={file.previewUrl}
                 alt={file.name}
                 className="max-h-full max-w-full object-contain"
               />
             </div>
-            <p className="mt-2 max-w-32 truncate text-center text-xs text-muted-foreground">
+            <p className="mx-auto mt-2 max-w-36 truncate text-center text-xs text-muted-foreground">
               {file.name}
             </p>
           </div>
@@ -1658,7 +1914,10 @@ function EmojiUploadDialog({
               />
             </div>
 
-            <div className="flex items-center space-x-2">
+            <label
+              htmlFor="single-is-registered"
+              className="ios-touch flex min-h-[52px] cursor-pointer items-center gap-3 rounded-[16px] bg-secondary/50 px-3 py-2"
+            >
               <Checkbox
                 id="single-is-registered"
                 checked={file.isRegistered}
@@ -1666,10 +1925,10 @@ function EmojiUploadDialog({
                   updateFileInfo(file.id, { isRegistered: checked === true })
                 }
               />
-              <Label htmlFor="single-is-registered" className="cursor-pointer">
+              <span className="text-[15px] leading-5 text-foreground">
                 上传后立即注册（可被当前实例使用）
-              </Label>
-            </div>
+              </span>
+            </label>
           </div>
         </div>
 
@@ -1688,9 +1947,9 @@ function EmojiUploadDialog({
     const totalCount = uploadedFiles.length
 
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             <Button variant="ghost" size="sm" onClick={handleBack}>
               <ArrowLeft className="mr-1 h-4 w-4" />
               返回
@@ -1714,9 +1973,9 @@ function EmojiUploadDialog({
           </Badge>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
           {/* 左侧：文件卡片列表 */}
-          <ScrollArea className="h-[350px] pr-2">
+          <ScrollArea className="h-[320px] pr-2 sm:h-[350px]">
             <div className="space-y-2">
               {uploadedFiles.map((file) => {
                 const complete = isFileComplete(file)
@@ -1726,14 +1985,14 @@ function EmojiUploadDialog({
                     key={file.id}
                     onClick={() => setSelectedFileId(file.id)}
                     className={cn(
-                      'ios-touch flex cursor-pointer items-center gap-3 rounded-[16px] border border-black/[0.035] bg-white/[0.76] p-3 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset] transition-all dark:border-white/10 dark:bg-white/[0.08]',
+                      'ios-touch flex min-h-[72px] cursor-pointer items-center gap-3 rounded-[17px] border border-black/[0.035] bg-card p-3 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_6px_18px_rgba(31,41,55,0.04)] transition-all dark:border-white/10 dark:bg-card',
                       isSelected && 'ring-2 ring-primary/70',
                       complete
                         ? 'border-[rgb(52_199_89_/_0.22)] bg-[rgb(52_199_89_/_0.08)] dark:bg-[rgb(48_209_88_/_0.1)]'
                         : 'hover:bg-muted/35'
                     )}
                   >
-                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-black/[0.035] bg-muted/35 dark:border-white/10">
+                    <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-[15px] border border-black/[0.035] bg-secondary/55 dark:border-white/10">
                       <img
                         src={file.previewUrl}
                         alt={file.name}
@@ -1758,11 +2017,11 @@ function EmojiUploadDialog({
           </ScrollArea>
 
           {/* 右侧：选中文件的编辑表单 */}
-          <div className="rounded-[18px] border border-black/[0.035] bg-muted/20 p-4 dark:border-white/10">
+          <div className="rounded-[20px] border border-black/[0.035] bg-card p-4 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_26px_rgba(31,41,55,0.045)] dark:border-white/10 dark:bg-card">
             {selectedFile ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[16px] border border-black/[0.035] bg-muted/35 dark:border-white/10">
+                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[17px] border border-black/[0.035] bg-secondary/55 dark:border-white/10">
                     <img
                       src={selectedFile.previewUrl}
                       alt={selectedFile.name}
@@ -1805,7 +2064,10 @@ function EmojiUploadDialog({
                   />
                 </div>
 
-                <div className="flex items-center space-x-2">
+                <label
+                  htmlFor="multi-is-registered"
+                  className="ios-touch flex min-h-[52px] cursor-pointer items-center gap-3 rounded-[16px] bg-secondary/50 px-3 py-2"
+                >
                   <Checkbox
                     id="multi-is-registered"
                     checked={selectedFile.isRegistered}
@@ -1813,10 +2075,10 @@ function EmojiUploadDialog({
                       updateFileInfo(selectedFile.id, { isRegistered: checked === true })
                     }
                   />
-                  <Label htmlFor="multi-is-registered" className="cursor-pointer text-sm">
+                  <span className="text-[15px] leading-5 text-foreground">
                     上传后立即注册
-                  </Label>
-                </div>
+                  </span>
+                </label>
               </div>
             ) : (
               <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -1840,7 +2102,7 @@ function EmojiUploadDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden">
+      <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
@@ -1856,7 +2118,7 @@ function EmojiUploadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="overflow-y-auto pr-1">
+        <div className="max-h-[calc(90vh-8rem)] overflow-y-auto pr-1">
           {step === 'select' && renderSelectStep()}
           {step === 'edit-single' && renderEditSingleStep()}
           {step === 'edit-multiple' && renderEditMultipleStep()}

@@ -3,7 +3,6 @@ import axios from 'axios'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -135,6 +134,10 @@ const timeRangeOptions = [
   { value: 720, label: '30天', description: '查看最近一个月的统计数据' },
 ]
 
+const chartGridStroke = 'hsl(var(--muted-foreground) / 0.13)'
+const chartAxisStroke = 'hsl(var(--muted-foreground) / 0.42)'
+const chartAxisTick = { fill: 'hsl(var(--muted-foreground) / 0.72)', fontSize: 12 }
+
 function ChartEmptyState({
   title = '暂无足够数据',
   description = '有新的统计记录后这里会显示变化趋势',
@@ -167,31 +170,9 @@ export function IndexPage() {
   const [timeRange, setTimeRange] = useState(24) // 默认24小时
   const [timeRangeDialogOpen, setTimeRangeDialogOpen] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [hitokoto, setHitokoto] = useState<{ hitokoto: string; from: string } | null>(null)
-  const [hitokotoLoading, setHitokotoLoading] = useState(true)
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null)
   const [restarting, setRestarting] = useState(false)
   const { toast } = useToast()
-
-  // 获取一言
-  const fetchHitokoto = useCallback(async () => {
-    try {
-      setHitokotoLoading(true)
-      const response = await axios.get('https://v1.hitokoto.cn/?c=a&c=b&c=c&c=d&c=h&c=i&c=k')
-      setHitokoto({
-        hitokoto: response.data.hitokoto,
-        from: response.data.from || response.data.from_who || '未知',
-      })
-    } catch (error) {
-      console.error('获取一言失败:', error)
-      setHitokoto({
-        hitokoto: '人生就像一盒巧克力，你永远不知道下一颗是什么味道。',
-        from: '阿甘正传',
-      })
-    } finally {
-      setHitokotoLoading(false)
-    }
-  }, [])
 
   // 获取机器人状态
   const fetchBotStatus = useCallback(async () => {
@@ -291,9 +272,8 @@ export function IndexPage() {
 
   useEffect(() => {
     fetchDashboardData()
-    fetchHitokoto()
     fetchBotStatus()
-  }, [fetchDashboardData, fetchHitokoto, fetchBotStatus])
+  }, [fetchDashboardData, fetchBotStatus])
 
   // 自动刷新
   useEffect(() => {
@@ -521,7 +501,7 @@ export function IndexPage() {
                 </TabsList>
               </Tabs>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
-                <div className="ios-group flex h-11 min-w-0 items-center justify-between gap-4 px-4 sm:h-9 sm:min-w-[174px] sm:px-3">
+                <div className="ios-group flex min-h-11 min-w-0 items-center justify-between gap-4 px-4 sm:min-w-[190px]">
                   <div className="flex min-w-0 items-center gap-2">
                     <RefreshCw className="h-4 w-4 shrink-0 text-primary" />
                     <span className="truncate text-sm font-medium">自动刷新</span>
@@ -530,13 +510,12 @@ export function IndexPage() {
                     checked={autoRefresh}
                     onCheckedChange={setAutoRefresh}
                     aria-label="自动刷新"
-                    className="scale-[0.82] sm:scale-75"
                   />
                 </div>
                 <Button
                   variant="outline"
                   size="icon"
-                  className="h-11 w-11 rounded-full sm:h-9 sm:w-9"
+                  className="h-11 w-11 rounded-full"
                   onClick={fetchDashboardData}
                   aria-label="手动刷新"
                 >
@@ -549,28 +528,28 @@ export function IndexPage() {
           <div className="ios-group overflow-hidden sm:hidden">
             <Dialog open={timeRangeDialogOpen} onOpenChange={setTimeRangeDialogOpen}>
               <DialogTrigger asChild>
-                <button className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0">
+                <button className="ios-row ios-touch min-h-[66px] w-full gap-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0">
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
                       <Clock className="h-4 w-4" />
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-[15px] font-medium leading-5">统计范围</span>
+                      <span className="block text-[16px] font-medium leading-6">首页数据</span>
                       <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                        选择首页数据时间窗口
+                        {timeRangeLabel} · {autoRefresh ? '自动刷新' : '手动刷新'}
                       </span>
                     </span>
                   </span>
-                  <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
-                    <span className="text-[15px] font-medium leading-5 text-foreground">
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="inline-flex h-9 items-center rounded-full bg-secondary/80 px-3 text-[14px] font-semibold leading-none text-foreground">
                       {timeRangeLabel}
                     </span>
-                    <ChevronRight className="h-4 w-4" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </span>
                 </button>
               </DialogTrigger>
-              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-                <DialogHeader className="px-5 pt-5">
+              <DialogContent className="ios-sheet bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                <DialogHeader className="px-5 pt-7">
                   <DialogTitle>统计范围</DialogTitle>
                   <DialogDescription>选择首页统计数据的时间窗口</DialogDescription>
                 </DialogHeader>
@@ -606,7 +585,7 @@ export function IndexPage() {
               </DialogContent>
             </Dialog>
 
-            <div className="ios-row min-h-[58px] py-3">
+            <div className="ios-row min-h-[58px] py-2.5">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-green">
                   <RefreshCw className="h-4 w-4" />
@@ -618,47 +597,22 @@ export function IndexPage() {
                   </span>
                 </span>
               </span>
-              <Switch
-                checked={autoRefresh}
-                onCheckedChange={setAutoRefresh}
-                aria-label="自动刷新"
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={fetchDashboardData}
-              className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
+              <span className="flex shrink-0 items-center gap-2">
+                <Switch
+                  checked={autoRefresh}
+                  onCheckedChange={setAutoRefresh}
+                  aria-label="自动刷新"
+                />
+                <button
+                  type="button"
+                  onClick={fetchDashboardData}
+                  className="ios-touch inline-flex h-11 w-11 items-center justify-center rounded-full bg-secondary/85 text-foreground hover:bg-secondary focus-visible:bg-accent/70 focus-visible:ring-0"
+                  aria-label="立即刷新"
+                >
                   <RefreshCw className="h-4 w-4" />
-                </span>
-                <span className="text-[15px] font-medium leading-5">立即刷新</span>
+                </button>
               </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-            </button>
-          </div>
-
-          {/* 一言 */}
-          <div className="ios-group relative hidden min-h-[72px] items-center px-5 py-4 pr-14 sm:flex sm:px-6">
-            {hitokotoLoading ? (
-              <Skeleton className="h-5 flex-1" />
-            ) : hitokoto ? (
-              <p className="line-clamp-2 flex-1 text-[15px] italic leading-6 text-muted-foreground">
-                "{hitokoto.hitokoto}" —— {hitokoto.from}
-              </p>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute bottom-3 right-3 h-8 w-8 shrink-0"
-              onClick={fetchHitokoto}
-              disabled={hitokotoLoading}
-              aria-label="刷新一言"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${hitokotoLoading ? 'ios-spin-slow' : ''}`} />
-            </Button>
+            </div>
           </div>
 
           {/* 移动端概览分组 */}
@@ -977,22 +931,23 @@ export function IndexPage() {
                       className="aspect-auto h-[300px] w-full sm:h-[400px]"
                     >
                       <LineChart data={hourly_data}>
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          stroke="hsl(var(--muted-foreground) / 0.2)"
-                        />
+                        <CartesianGrid vertical={false} stroke={chartGridStroke} />
                         <XAxis
                           dataKey="timestamp"
                           tickFormatter={(value) => formatDateTime(value)}
                           angle={-45}
                           textAnchor="end"
                           height={60}
-                          stroke="hsl(var(--muted-foreground))"
-                          tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                          stroke={chartAxisStroke}
+                          tick={chartAxisTick}
+                          tickLine={false}
+                          axisLine={false}
                         />
                         <YAxis
-                          stroke="hsl(var(--muted-foreground))"
-                          tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                          stroke={chartAxisStroke}
+                          tick={chartAxisTick}
+                          tickLine={false}
+                          axisLine={false}
                         />
                         <ChartTooltip
                           content={
@@ -1005,7 +960,7 @@ export function IndexPage() {
                           type="monotone"
                           dataKey="requests"
                           stroke="var(--color-requests)"
-                          strokeWidth={2}
+                          strokeWidth={2.5}
                         />
                       </LineChart>
                     </ChartContainer>
@@ -1028,22 +983,23 @@ export function IndexPage() {
                         className="aspect-auto h-[250px] w-full sm:h-[300px]"
                       >
                         <BarChart data={hourly_data}>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            stroke="hsl(var(--muted-foreground) / 0.2)"
-                          />
+                          <CartesianGrid vertical={false} stroke={chartGridStroke} />
                           <XAxis
                             dataKey="timestamp"
                             tickFormatter={(value) => formatDateTime(value)}
                             angle={-45}
                             textAnchor="end"
                             height={60}
-                            stroke="hsl(var(--muted-foreground))"
-                            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
                           />
                           <YAxis
-                            stroke="hsl(var(--muted-foreground))"
-                            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
                           />
                           <ChartTooltip
                             content={
@@ -1052,7 +1008,7 @@ export function IndexPage() {
                               />
                             }
                           />
-                          <Bar dataKey="cost" fill="var(--color-cost)" />
+                          <Bar dataKey="cost" fill="var(--color-cost)" radius={[6, 6, 0, 0]} />
                         </BarChart>
                       </ChartContainer>
                     ) : (
@@ -1073,22 +1029,23 @@ export function IndexPage() {
                         className="aspect-auto h-[250px] w-full sm:h-[300px]"
                       >
                         <BarChart data={hourly_data}>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            stroke="hsl(var(--muted-foreground) / 0.2)"
-                          />
+                          <CartesianGrid vertical={false} stroke={chartGridStroke} />
                           <XAxis
                             dataKey="timestamp"
                             tickFormatter={(value) => formatDateTime(value)}
                             angle={-45}
                             textAnchor="end"
                             height={60}
-                            stroke="hsl(var(--muted-foreground))"
-                            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
                           />
                           <YAxis
-                            stroke="hsl(var(--muted-foreground))"
-                            tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
                           />
                           <ChartTooltip
                             content={
@@ -1097,7 +1054,7 @@ export function IndexPage() {
                               />
                             }
                           />
-                          <Bar dataKey="tokens" fill="var(--color-tokens)" />
+                          <Bar dataKey="tokens" fill="var(--color-tokens)" radius={[6, 6, 0, 0]} />
                         </BarChart>
                       </ChartContainer>
                     ) : (
@@ -1281,29 +1238,32 @@ export function IndexPage() {
                       className="aspect-auto h-[400px] w-full sm:h-[500px]"
                     >
                       <BarChart data={daily_data}>
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          stroke="hsl(var(--muted-foreground) / 0.2)"
-                        />
+                        <CartesianGrid vertical={false} stroke={chartGridStroke} />
                         <XAxis
                           dataKey="timestamp"
                           tickFormatter={(value) => {
                             const date = new Date(value)
                             return `${date.getMonth() + 1}/${date.getDate()}`
                           }}
-                          stroke="hsl(var(--muted-foreground))"
-                          tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                          stroke={chartAxisStroke}
+                          tick={chartAxisTick}
+                          tickLine={false}
+                          axisLine={false}
                         />
                         <YAxis
                           yAxisId="left"
-                          stroke="hsl(var(--muted-foreground))"
-                          tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                          stroke={chartAxisStroke}
+                          tick={chartAxisTick}
+                          tickLine={false}
+                          axisLine={false}
                         />
                         <YAxis
                           yAxisId="right"
                           orientation="right"
-                          stroke="hsl(var(--muted-foreground))"
-                          tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                          stroke={chartAxisStroke}
+                          tick={chartAxisTick}
+                          tickLine={false}
+                          axisLine={false}
                         />
                         <ChartTooltip
                           content={
@@ -1316,8 +1276,18 @@ export function IndexPage() {
                           }
                         />
                         <ChartLegend content={<ChartLegendContent />} />
-                        <Bar yAxisId="left" dataKey="requests" fill="var(--color-requests)" />
-                        <Bar yAxisId="right" dataKey="cost" fill="var(--color-cost)" />
+                        <Bar
+                          yAxisId="left"
+                          dataKey="requests"
+                          fill="var(--color-requests)"
+                          radius={[6, 6, 0, 0]}
+                        />
+                        <Bar
+                          yAxisId="right"
+                          dataKey="cost"
+                          fill="var(--color-cost)"
+                          radius={[6, 6, 0, 0]}
+                        />
                       </BarChart>
                     </ChartContainer>
                   ) : (

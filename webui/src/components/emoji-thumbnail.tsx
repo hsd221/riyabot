@@ -95,16 +95,19 @@ export function EmojiThumbnail({
 
   // 加载中或生成中显示 Skeleton
   if (state === 'loading' || state === 'generating') {
-    return (
-      <Skeleton className={cn('w-full h-full', className)} />
-    )
+    return <Skeleton className={cn('h-full w-full rounded-[14px]', className)} />
   }
 
   // 加载失败显示占位图标
   if (state === 'error' || !imageSrc) {
     return (
-      <div className={cn('w-full h-full flex items-center justify-center bg-muted', className)}>
-        <ImageIcon className="h-8 w-8 text-muted-foreground" />
+      <div
+        className={cn(
+          'flex h-full w-full items-center justify-center rounded-[14px] bg-secondary/70 text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.7)_inset]',
+          className
+        )}
+      >
+        <ImageIcon className="h-8 w-8" strokeWidth={2.35} />
       </div>
     )
   }
@@ -114,7 +117,7 @@ export function EmojiThumbnail({
     <img
       src={imageSrc}
       alt={alt}
-      className={cn('w-full h-full object-contain', className)}
+      className={cn('h-full w-full object-contain', className)}
     />
   )
 }

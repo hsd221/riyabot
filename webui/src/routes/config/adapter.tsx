@@ -1557,7 +1557,7 @@ export function AdapterConfigPage() {
 }
 
 const MOBILE_SETTING_INPUT_CLASS =
-  'h-10 min-w-[8rem] max-w-[13rem] flex-1 border-0 bg-transparent px-0 py-0 text-right text-[16px] shadow-none focus-visible:bg-transparent focus-visible:ring-0'
+  'h-11 min-w-[8rem] max-w-[13rem] flex-1 border-0 bg-transparent px-0 py-0 text-right text-[16px] shadow-none focus-visible:bg-transparent focus-visible:ring-0'
 
 function MobileSettingsSection({
   title,

@@ -13,6 +13,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   SlidersHorizontal,
+  MoreHorizontal,
 } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { cn } from '@/lib/utils'
@@ -48,6 +49,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import type { PersonInfo, PersonUpdateRequest } from '@/types/person'
@@ -90,6 +92,11 @@ const PERSON_STATUS_OPTIONS = [
   { value: 'true', label: '可用于回复', description: '只看参与回复参考的画像' },
   { value: 'false', label: '隐藏画像', description: '只看不参与回复的画像' },
 ] as const
+
+const personActionClass =
+  'ios-touch flex min-h-[50px] w-full items-center gap-3 border-b border-border/45 px-3.5 py-2.5 text-left text-[15px] font-medium leading-5 last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0'
+
+const personActionIconClass = 'ios-symbol ios-symbol-sm'
 
 export function PersonManagementPage() {
   const [persons, setPersons] = useState<PersonInfo[]>([])
@@ -345,7 +352,7 @@ export function PersonManagementPage() {
 
           {/* 筛选和显示 */}
           <div className="ios-group overflow-hidden">
-            <div className="ios-row min-h-[64px]">
+            <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
                   <SlidersHorizontal className="h-4 w-4" />
@@ -361,7 +368,7 @@ export function PersonManagementPage() {
               >
                 <SelectTrigger
                   id="filter-known"
-                  className="h-auto min-h-11 w-auto max-w-[9rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
+                  className="h-auto min-h-11 w-full justify-between gap-2 rounded-[14px] border-0 bg-secondary/60 px-3 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-secondary/70 focus:ring-0 sm:w-auto sm:max-w-[9rem] sm:justify-end sm:gap-1 sm:bg-transparent sm:px-0 sm:hover:bg-transparent [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -375,7 +382,7 @@ export function PersonManagementPage() {
               </Select>
             </div>
 
-            <div className="ios-row min-h-[64px]">
+            <div className="ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
                   <MessageSquare className="h-4 w-4" />
@@ -391,7 +398,7 @@ export function PersonManagementPage() {
               >
                 <SelectTrigger
                   id="filter-platform"
-                  className="h-auto min-h-11 w-auto max-w-[11rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
+                  className="h-auto min-h-11 w-full justify-between gap-2 rounded-[14px] border-0 bg-secondary/60 px-3 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-secondary/70 focus:ring-0 sm:w-auto sm:max-w-[11rem] sm:justify-end sm:gap-1 sm:bg-transparent sm:px-0 sm:hover:bg-transparent [&>span]:truncate [&>svg]:h-4 [&>svg]:w-4"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -408,9 +415,7 @@ export function PersonManagementPage() {
 
             <div
               className={cn(
-                'ios-row min-h-[64px]',
-                selectedPersons.size > 0 &&
-                  'flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between'
+                'ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between'
               )}
             >
               <span className="flex min-w-0 items-center gap-3">
@@ -424,7 +429,7 @@ export function PersonManagementPage() {
                   </span>
                 </span>
               </span>
-              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 <Select
                   value={pageSize.toString()}
                   onValueChange={(value) => {
@@ -435,7 +440,7 @@ export function PersonManagementPage() {
                 >
                   <SelectTrigger
                     id="page-size"
-                    className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                    className="h-auto min-h-11 w-full justify-between gap-2 rounded-[14px] border-0 bg-secondary/60 px-3 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-secondary/70 focus:ring-0 sm:w-auto sm:max-w-[8rem] sm:justify-end sm:gap-1 sm:bg-transparent sm:px-0 sm:hover:bg-transparent [&>svg]:h-4 [&>svg]:w-4"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -452,7 +457,7 @@ export function PersonManagementPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => setSelectedPersons(new Set())}
-                      className="h-9 rounded-full px-4"
+                      className="h-11 rounded-full px-4"
                     >
                       取消选择
                     </Button>
@@ -460,7 +465,7 @@ export function PersonManagementPage() {
                       variant="destructive"
                       size="sm"
                       onClick={openBatchDeleteDialog}
-                      className="h-9 rounded-full px-4"
+                      className="h-11 rounded-full px-4"
                     >
                       <Trash2 className="mr-1 h-4 w-4" />
                       批量删除
@@ -479,7 +484,7 @@ export function PersonManagementPage() {
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                  className="ios-touch min-h-11 rounded-full px-3.5 py-2 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
                 >
                   {selectedPersons.size === persons.length ? '取消全选' : '全选'}
                 </button>
@@ -560,34 +565,53 @@ export function PersonManagementPage() {
                       </button>
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap gap-2 pl-14 sm:pl-0">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => handleViewDetail(person)}
-                        className="h-9 rounded-full px-4"
-                      >
-                        <Eye className="mr-1 h-4 w-4" />
-                        详情
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(person)}
-                        className="h-9 rounded-full px-4"
-                      >
-                        <Edit className="mr-1 h-4 w-4" />
-                        备注
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDeleteConfirmPerson(person)}
-                        className="text-destructive hover:text-destructive h-9 rounded-full px-4"
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        删除
-                      </Button>
+                    <div className="flex shrink-0 justify-end pl-14 sm:pl-0">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-11 w-11 rounded-[14px]"
+                            title="更多操作"
+                          >
+                            <MoreHorizontal className="h-5 w-5" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-52 p-1.5">
+                          <div className="overflow-hidden rounded-[14px]">
+                            <button
+                              type="button"
+                              className={personActionClass}
+                              onClick={() => handleViewDetail(person)}
+                            >
+                              <span className={cn(personActionIconClass, 'ios-symbol-blue')}>
+                                <Eye className="h-[18px] w-[18px]" />
+                              </span>
+                              详情
+                            </button>
+                            <button
+                              type="button"
+                              className={personActionClass}
+                              onClick={() => handleEdit(person)}
+                            >
+                              <span className={cn(personActionIconClass, 'ios-symbol-purple')}>
+                                <Edit className="h-[18px] w-[18px]" />
+                              </span>
+                              备注
+                            </button>
+                            <button
+                              type="button"
+                              className={cn(personActionClass, 'text-destructive')}
+                              onClick={() => setDeleteConfirmPerson(person)}
+                            >
+                              <span className={cn(personActionIconClass, 'ios-symbol-red')}>
+                                <Trash2 className="h-[18px] w-[18px]" />
+                              </span>
+                              删除
+                            </button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                   </div>
                 ))
@@ -604,7 +628,7 @@ export function PersonManagementPage() {
                       size="icon"
                       onClick={() => setPage(1)}
                       disabled={page === 1}
-                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      className="hidden h-11 w-11 rounded-full sm:inline-flex"
                     >
                       <ChevronsLeft className="h-4 w-4" />
                     </Button>
@@ -614,7 +638,7 @@ export function PersonManagementPage() {
                       size="sm"
                       onClick={() => setPage(page - 1)}
                       disabled={page === 1}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <ChevronLeft className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">上一页</span>
@@ -627,7 +651,7 @@ export function PersonManagementPage() {
                         onChange={(e) => setJumpToPage(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
                         placeholder={page.toString()}
-                        className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                        className="h-11 w-20 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
                         min={1}
                         max={Math.ceil(total / pageSize)}
                       />
@@ -636,7 +660,7 @@ export function PersonManagementPage() {
                         size="sm"
                         onClick={handleJumpToPage}
                         disabled={!jumpToPage}
-                        className="h-9 rounded-full px-3"
+                        className="h-11 rounded-full px-4"
                       >
                         跳转
                       </Button>
@@ -647,7 +671,7 @@ export function PersonManagementPage() {
                       size="sm"
                       onClick={() => setPage(page + 1)}
                       disabled={page >= Math.ceil(total / pageSize)}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <span className="hidden sm:inline">下一页</span>
                       <ChevronRight className="h-4 w-4 sm:ml-1" />
@@ -658,7 +682,7 @@ export function PersonManagementPage() {
                       size="icon"
                       onClick={() => setPage(Math.ceil(total / pageSize))}
                       disabled={page >= Math.ceil(total / pageSize)}
-                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      className="hidden h-11 w-11 rounded-full sm:inline-flex"
                     >
                       <ChevronsRight className="h-4 w-4" />
                     </Button>
@@ -755,7 +779,7 @@ function PersonDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>用户画像详情</DialogTitle>
           <DialogDescription>查看 {getProfileDisplayName(person)} 的结构化画像</DialogDescription>
@@ -763,7 +787,7 @@ function PersonDetailDialog({
 
         <div className="space-y-4">
           {/* 基本信息 */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <InfoItem icon={User} label="显示名称" value={getProfileDisplayName(person)} />
             <InfoItem icon={MessageSquare} label="昵称" value={person.nickname} />
             <InfoItem icon={Hash} label="用户ID" value={person.user_id} mono />
@@ -795,7 +819,7 @@ function PersonDetailDialog({
           <ProfileMapSection title="表达模式" data={person.profile_expression_patterns} />
 
           {/* 时间信息 */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <InfoItem icon={Clock} label="画像创建" value={formatTime(person.know_times)} />
             <InfoItem icon={Clock} label="首次记录" value={formatTime(person.know_since)} />
             <InfoItem icon={Clock} label="最后更新" value={formatTime(person.last_know)} />
@@ -961,7 +985,7 @@ function PersonEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>编辑显示备注</DialogTitle>
           <DialogDescription>
@@ -971,7 +995,7 @@ function PersonEditDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="person_name">显示名称</Label>
               <Input
@@ -1014,7 +1038,7 @@ function PersonEditDialog({
             />
           </div>
 
-          <div className="ios-group flex items-center justify-between gap-4 p-4">
+          <div className="ios-group flex min-h-[72px] items-center justify-between gap-4 p-4">
             <div>
               <Label htmlFor="is_known" className="text-base font-medium">
                 可用于回复

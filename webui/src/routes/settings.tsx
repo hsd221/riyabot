@@ -9,17 +9,20 @@ import {
   EyeOff,
   HardDrive,
   Info,
+  Monitor,
+  Moon,
   Palette,
   RefreshCw,
   RotateCcw,
   Settings,
   Shield,
+  Sun,
   Trash2,
   Upload,
   XCircle,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useTheme } from '@/components/use-theme'
+import { toggleThemeWithTransition, useTheme } from '@/components/use-theme'
 import { useAnimation } from '@/hooks/use-animation'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react'
@@ -407,25 +410,31 @@ function AppearanceTab() {
 
   const themeOptions: ThemeOptionProps[] = [
     {
+      value: 'system',
+      current: theme,
+      onChange: setTheme,
+      label: '跟随系统',
+      description: '根据设备外观自动切换',
+      Icon: Monitor,
+      symbolClass: 'ios-symbol-blue',
+    },
+    {
       value: 'light',
       current: theme,
       onChange: setTheme,
-      label: '浅色',
-      description: '始终使用浅色主题',
+      label: '浅色模式',
+      description: '始终使用浅色外观',
+      Icon: Sun,
+      symbolClass: 'ios-symbol-yellow',
     },
     {
       value: 'dark',
       current: theme,
       onChange: setTheme,
-      label: '深色',
-      description: '始终使用深色主题',
-    },
-    {
-      value: 'system',
-      current: theme,
-      onChange: setTheme,
-      label: '跟随系统',
-      description: '根据系统设置自动切换',
+      label: '深色模式',
+      description: '始终使用深色外观',
+      Icon: Moon,
+      symbolClass: 'ios-symbol-purple',
     },
   ]
 
@@ -643,9 +652,9 @@ function AppearanceTab() {
                         {accentColor.startsWith('#') ? accentColor.toUpperCase() : '#007AFF'}
                       </span>
                     </span>
-                    <label className="ios-touch relative h-9 w-9 shrink-0 overflow-hidden rounded-[10px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
+                    <label className="ios-touch relative h-11 w-11 shrink-0 overflow-hidden rounded-[13px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
                       <span
-                        className="absolute inset-0 rounded-[10px]"
+                        className="absolute inset-0 rounded-[13px]"
                         style={{
                           background: accentColor.startsWith('#')
                             ? accentColor
@@ -668,7 +677,7 @@ function AppearanceTab() {
                       value={accentColor}
                       onChange={(e) => handleAccentColorChange(e.target.value)}
                       placeholder="#007AFF"
-                      className="h-9 max-w-[9.5rem] rounded-[10px] border-0 bg-muted px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
+                      className="h-11 max-w-[9.5rem] rounded-[13px] border-0 px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
                     />
                   </div>
                 </div>
@@ -713,9 +722,9 @@ function AppearanceTab() {
                     {accentColor.startsWith('#') ? accentColor.toUpperCase() : '#007AFF'}
                   </span>
                 </span>
-                <label className="ios-touch relative h-9 w-9 shrink-0 overflow-hidden rounded-[10px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
+                <label className="ios-touch relative h-11 w-11 shrink-0 overflow-hidden rounded-[13px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
                   <span
-                    className="absolute inset-0 rounded-[10px]"
+                    className="absolute inset-0 rounded-[13px]"
                     style={{
                       background: accentColor.startsWith('#')
                         ? accentColor
@@ -738,7 +747,7 @@ function AppearanceTab() {
                   value={accentColor}
                   onChange={(e) => handleAccentColorChange(e.target.value)}
                   placeholder="#007AFF"
-                  className="h-9 max-w-[11rem] rounded-[10px] border-0 bg-muted px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
+                  className="h-11 max-w-[11rem] rounded-[13px] border-0 px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
                 />
               </div>
             </div>
@@ -753,11 +762,11 @@ function AppearanceTab() {
         </h3>
         <div className="ios-group overflow-hidden">
           {/* 全局动画开关 */}
-          <div className="ios-row">
+          <label htmlFor="animations" className="ios-row ios-touch cursor-pointer">
             <div className="min-w-0 flex-1 space-y-0.5">
-              <Label htmlFor="animations" className="cursor-pointer text-base font-medium">
+              <span className="block text-base font-medium">
                 启用动画效果
-              </Label>
+              </span>
               <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
                 关闭后将禁用所有过渡动画和特效，提升性能
               </p>
@@ -767,14 +776,14 @@ function AppearanceTab() {
               checked={enableAnimations}
               onCheckedChange={setEnableAnimations}
             />
-          </div>
+          </label>
 
           {/* 波浪背景开关 */}
-          <div className="ios-row">
+          <label htmlFor="waves-background" className="ios-row ios-touch cursor-pointer">
             <div className="min-w-0 flex-1 space-y-0.5">
-              <Label htmlFor="waves-background" className="cursor-pointer text-base font-medium">
+              <span className="block text-base font-medium">
                 登录页波浪背景
-              </Label>
+              </span>
               <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
                 关闭后登录页将使用纯色背景，适合低性能设备
               </p>
@@ -784,7 +793,7 @@ function AppearanceTab() {
               checked={enableWavesBackground}
               onCheckedChange={setEnableWavesBackground}
             />
-          </div>
+          </label>
         </div>
       </div>
     </div>
@@ -1264,6 +1273,7 @@ function SecurityTab() {
 function OtherTab() {
   const navigate = useNavigate()
   const { toast } = useToast()
+  const { setTheme } = useTheme()
   const [isResetting, setIsResetting] = useState(false)
   const [shouldThrowError, setShouldThrowError] = useState(false)
 
@@ -1390,6 +1400,12 @@ function OtherTab() {
           setWsReconnectInterval(getSetting('wsReconnectInterval'))
           setWsMaxReconnectAttempts(getSetting('wsMaxReconnectAttempts'))
           setDataSyncInterval(getSetting('dataSyncInterval'))
+          if (result.imported.includes('theme')) {
+            setTheme(getSetting('theme'))
+          }
+          if (result.imported.includes('accentColor')) {
+            applyAccentColor(getSetting('accentColor'))
+          }
           refreshStorageUsage()
 
           toast({
@@ -1397,11 +1413,10 @@ function OtherTab() {
             description: `成功导入 ${result.imported.length} 项设置${result.skipped.length > 0 ? `，跳过 ${result.skipped.length} 项` : ''}`,
           })
 
-          // 提示用户刷新页面以应用所有更改
           if (result.imported.includes('theme') || result.imported.includes('accentColor')) {
             toast({
-              title: '提示',
-              description: '部分设置需要刷新页面才能完全生效',
+              title: '外观已应用',
+              description: '主题与强调色偏好已立即生效',
             })
           }
         } else {
@@ -1437,10 +1452,12 @@ function OtherTab() {
     setWsReconnectInterval(DEFAULT_SETTINGS.wsReconnectInterval)
     setWsMaxReconnectAttempts(DEFAULT_SETTINGS.wsMaxReconnectAttempts)
     setDataSyncInterval(DEFAULT_SETTINGS.dataSyncInterval)
+    setTheme(DEFAULT_SETTINGS.theme)
+    applyAccentColor(DEFAULT_SETTINGS.accentColor)
     refreshStorageUsage()
     toast({
       title: '已重置',
-      description: '所有设置已恢复为默认值，刷新页面以应用更改',
+      description: '所有设置已恢复为默认值，外观将跟随系统自动切换',
     })
   }
 
@@ -2111,62 +2128,44 @@ type ThemeOptionProps = {
   onChange: (theme: 'light' | 'dark' | 'system') => void
   label: string
   description: string
+  Icon: LucideIcon
+  symbolClass: string
 }
 
-function ThemePreviewDots({ value }: { value: 'light' | 'dark' | 'system' }) {
-  return (
-    <div className="flex gap-1">
-      {value === 'light' && (
-        <>
-          <div className="h-2 w-2 rounded-full bg-slate-200" />
-          <div className="h-2 w-2 rounded-full bg-slate-300" />
-          <div className="h-2 w-2 rounded-full bg-slate-400" />
-        </>
-      )}
-      {value === 'dark' && (
-        <>
-          <div className="h-2 w-2 rounded-full bg-slate-700" />
-          <div className="h-2 w-2 rounded-full bg-slate-800" />
-          <div className="h-2 w-2 rounded-full bg-slate-900" />
-        </>
-      )}
-      {value === 'system' && (
-        <>
-          <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-200 to-slate-700" />
-          <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-300 to-slate-800" />
-          <div className="h-2 w-2 rounded-full bg-gradient-to-r from-slate-400 to-slate-900" />
-        </>
-      )}
-    </div>
-  )
-}
-
-function ThemeListOption({ value, current, onChange, label, description }: ThemeOptionProps) {
+function ThemeListOption({
+  value,
+  current,
+  onChange,
+  label,
+  description,
+  Icon,
+  symbolClass,
+}: ThemeOptionProps) {
   const isSelected = current === value
 
   return (
     <button
       type="button"
-      onClick={() => onChange(value)}
+      onClick={(event) => toggleThemeWithTransition(value, onChange, event)}
       className={cn(
-        'ios-touch flex min-h-[52px] w-full items-center gap-3 border-b border-border/70 px-4 py-2.5 text-left last:border-b-0 sm:min-h-[58px] sm:py-3',
+        'ios-touch flex min-h-[62px] w-full items-center gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 sm:min-h-[64px] sm:px-5',
         'bg-card hover:bg-accent/60'
       )}
     >
+      <span className={cn('ios-symbol ios-symbol-sm', symbolClass)}>
+        <Icon className="h-[18px] w-[18px]" />
+      </span>
       <div className="min-w-0 flex-1">
         <div className="text-[16px] font-medium leading-6">{label}</div>
-        <div className="hidden truncate text-[13px] leading-5 text-muted-foreground sm:block">
+        <div className="truncate text-[13px] leading-5 text-muted-foreground">
           {description}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <ThemePreviewDots value={value} />
-        {isSelected ? (
-          <Check className="h-4 w-4 text-primary" strokeWidth={2.6} />
-        ) : (
-          <span className="h-4 w-4" aria-hidden="true" />
-        )}
-      </div>
+      {isSelected ? (
+        <Check className="h-4 w-4 shrink-0 text-primary" strokeWidth={2.6} />
+      ) : (
+        <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+      )}
     </button>
   )
 }

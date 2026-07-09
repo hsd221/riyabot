@@ -691,7 +691,7 @@ export function ModelConfigPage() {
               disabled={tourIsRunning}
               size="sm"
               variant="outline"
-              className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[112px] sm:px-4"
+              className="h-11 w-11 px-0 sm:w-auto sm:min-w-[112px] sm:px-4"
               aria-label="启动配置引导"
               title="启动配置引导"
             >
@@ -703,7 +703,7 @@ export function ModelConfigPage() {
               disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
               size="sm"
               variant="outline"
-              className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-[120px] sm:px-4"
+              className="h-11 w-11 px-0 sm:w-auto sm:min-w-[120px] sm:px-4"
               aria-label={
                 saving
                   ? '保存中'
@@ -731,7 +731,7 @@ export function ModelConfigPage() {
                 <Button
                   disabled={saving || autoSaving || restarting}
                   size="sm"
-                  className="h-11 min-w-0 px-4 sm:h-9 sm:w-auto sm:min-w-[120px]"
+                  className="h-11 min-w-0 px-4 sm:w-auto sm:min-w-[120px]"
                   aria-label={restartLabel}
                   title={restartLabel}
                 >
@@ -941,7 +941,7 @@ export function ModelConfigPage() {
                     onClick={openBatchDeleteDialog}
                     size="sm"
                     variant="destructive"
-                    className="h-11 w-full sm:h-9 sm:w-auto"
+                    className="h-11 w-full sm:w-auto"
                   >
                     <Trash2 className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
                     批量删除 ({selectedModels.size})
@@ -951,7 +951,7 @@ export function ModelConfigPage() {
                   onClick={() => openEditDialog(null, null)}
                   size="sm"
                   variant="outline"
-                  className="h-11 w-full sm:h-9 sm:w-auto"
+                  className="h-11 w-full sm:w-auto"
                   data-tour="add-model-button"
                 >
                   <Plus className="mr-2 h-4 w-4" strokeWidth={2} fill="none" />
@@ -1026,7 +1026,7 @@ export function ModelConfigPage() {
                   placeholder="搜索模型名称、标识符或提供商..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 rounded-[12px] border-0 bg-muted/75 pl-9 shadow-none focus-visible:ring-0"
+                  className="h-11 rounded-[14px] border-0 bg-muted/75 pl-10 shadow-none focus-visible:ring-0"
                 />
               </div>
               {searchQuery && (
@@ -1600,7 +1600,7 @@ export function ModelConfigPage() {
                             setEditingModel((prev) => (prev ? { ...prev, max_tokens: val } : null))
                           }
                         }}
-                        className="h-8 w-28 text-sm"
+                        className="h-11 w-32 text-sm"
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">

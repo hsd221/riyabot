@@ -18,7 +18,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'ios-touch flex h-11 w-full items-center justify-between whitespace-nowrap rounded-[13px] border border-transparent bg-muted/80 px-4 py-2 text-sm shadow-[0_1px_0_rgba(255,255,255,0.56)_inset] focus:outline-none focus:ring-2 focus:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:line-clamp-1',
+      'ios-touch flex h-12 w-full items-center justify-between whitespace-nowrap rounded-[14px] border border-transparent bg-[rgb(120_120_128_/_0.13)] px-4 py-2 text-[15px] leading-5 shadow-[0_1px_0_rgba(255,255,255,0.58)_inset] hover:bg-[rgb(120_120_128_/_0.16)] focus:outline-none focus:ring-2 focus:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.08] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset] dark:hover:bg-white/[0.11] data-[placeholder]:text-muted-foreground/82 [&>span]:line-clamp-1',
       className
     )}
     {...props}
@@ -38,7 +38,7 @@ const SelectScrollUpButton = React.forwardRef<
   <SelectPrimitive.ScrollUpButton
     ref={ref}
     className={cn(
-      'flex cursor-default items-center justify-center py-1 text-muted-foreground',
+      'flex min-h-9 cursor-default items-center justify-center py-1 text-muted-foreground',
       className
     )}
     {...props}
@@ -55,7 +55,7 @@ const SelectScrollDownButton = React.forwardRef<
   <SelectPrimitive.ScrollDownButton
     ref={ref}
     className={cn(
-      'flex cursor-default items-center justify-center py-1 text-muted-foreground',
+      'flex min-h-9 cursor-default items-center justify-center py-1 text-muted-foreground',
       className
     )}
     {...props}
@@ -73,7 +73,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-[100] max-h-[--radix-select-content-available-height] min-w-[8rem] origin-[--radix-select-content-transform-origin] overflow-hidden rounded-[16px] border border-black/[0.035] bg-white/[0.88] text-card-foreground shadow-[0_1px_0_rgba(255,255,255,0.75)_inset,0_18px_48px_rgba(31,41,55,0.16),0_4px_14px_rgba(0,0,0,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.86]',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-[100] max-h-[--radix-select-content-available-height] min-w-[8rem] origin-[--radix-select-content-transform-origin] overflow-hidden rounded-[18px] border border-black/[0.035] bg-white/[0.92] text-card-foreground shadow-[0_1px_0_rgba(255,255,255,0.75)_inset,0_18px_48px_rgba(31,41,55,0.16),0_4px_14px_rgba(0,0,0,0.06)] backdrop-blur-2xl dark:border-white/10 dark:bg-[rgb(44_44_46_/_0.94)]',
         position === 'popper' &&
           'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
         className
@@ -103,7 +103,7 @@ const SelectLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn('px-3 py-2 text-xs font-semibold text-muted-foreground', className)}
+    className={cn('px-3 py-2 text-[12px] font-semibold leading-5 text-muted-foreground', className)}
     {...props}
   />
 ))
@@ -116,7 +116,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex min-h-10 w-full cursor-default select-none items-center rounded-[10px] py-2 pl-3 pr-9 text-sm outline-none transition-colors hover:bg-accent/70 focus:bg-accent/70 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      'relative flex min-h-11 w-full cursor-default select-none items-center rounded-[12px] py-2.5 pl-3.5 pr-10 text-[15px] leading-5 outline-none transition-[background-color,transform] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] active:scale-[0.99] hover:bg-accent/70 focus:bg-accent/70 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className
     )}
     {...props}

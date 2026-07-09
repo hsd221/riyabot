@@ -130,6 +130,26 @@
 }
 
 @layer utilities {
+  .ios-app-shell {
+    background: linear-gradient(
+        180deg,
+        hsl(240 18% 97%) 0%,
+        hsl(240 12% 95%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+  }
+
+  .dark .ios-app-shell {
+    background: linear-gradient(
+        180deg,
+        hsl(240 6% 8%) 0%,
+        hsl(240 5% 10%) 14rem,
+        hsl(var(--background)) 100%
+      )
+      fixed;
+  }
+
   .ios-page {
     @apply min-h-full px-5 py-5 sm:px-7 sm:py-7;
     background: linear-gradient(
@@ -173,11 +193,11 @@
   }
 
   .ios-card {
-    @apply rounded-[20px] border border-black/[0.024] bg-white/[0.86] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset,0_18px_44px_rgba(31,41,55,0.072),0_5px_14px_rgba(31,41,55,0.04),0_1px_2px_rgba(0,0,0,0.026)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_44px_rgba(0,0,0,0.32),0_5px_14px_rgba(0,0,0,0.24)];
+    @apply rounded-[20px] border border-black/[0.024] bg-white/[0.92] shadow-[0_1px_0_rgba(255,255,255,0.84)_inset,0_18px_44px_rgba(31,41,55,0.07),0_5px_14px_rgba(31,41,55,0.038),0_1px_2px_rgba(0,0,0,0.024)] dark:border-white/10 dark:bg-white/[0.095] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_44px_rgba(0,0,0,0.32),0_5px_14px_rgba(0,0,0,0.24)];
   }
 
   .ios-group {
-    @apply rounded-[19px] border border-black/[0.022] bg-white/[0.86] shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_13px_34px_rgba(31,41,55,0.058),0_3px_9px_rgba(31,41,55,0.035),0_1px_2px_rgba(0,0,0,0.022)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_14px_36px_rgba(0,0,0,0.28),0_3px_10px_rgba(0,0,0,0.2)];
+    @apply rounded-[19px] border border-black/[0.022] bg-white/[0.92] shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_13px_34px_rgba(31,41,55,0.056),0_3px_9px_rgba(31,41,55,0.032),0_1px_2px_rgba(0,0,0,0.02)] dark:border-white/10 dark:bg-white/[0.095] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_14px_36px_rgba(0,0,0,0.28),0_3px_10px_rgba(0,0,0,0.2)];
   }
 
   .ios-row {
@@ -222,6 +242,7 @@
   .ios-symbol > svg {
     stroke: currentColor;
     stroke-width: 2.75;
+    color: rgb(255 255 255 / 0.98);
     filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.18));
   }
 
@@ -274,11 +295,11 @@
   }
 
   .ios-stat-card {
-    @apply min-h-[116px] rounded-[19px] border border-black/[0.022] bg-white/[0.86] p-4 shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_13px_34px_rgba(31,41,55,0.058),0_3px_9px_rgba(31,41,55,0.035),0_1px_2px_rgba(0,0,0,0.022)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_14px_36px_rgba(0,0,0,0.28),0_3px_10px_rgba(0,0,0,0.2)] sm:min-h-[126px] sm:p-5;
+    @apply min-h-[116px] rounded-[19px] border border-black/[0.022] bg-white/[0.92] p-4 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_13px_34px_rgba(31,41,55,0.056),0_3px_9px_rgba(31,41,55,0.032),0_1px_2px_rgba(0,0,0,0.02)] dark:border-white/10 dark:bg-white/[0.095] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_14px_36px_rgba(0,0,0,0.28),0_3px_10px_rgba(0,0,0,0.2)] sm:min-h-[126px] sm:p-5;
   }
 
   .ios-metric-card {
-    @apply rounded-[22px] border border-black/[0.022] bg-white/[0.86] p-5 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_16px_38px_rgba(31,41,55,0.062),0_4px_12px_rgba(31,41,55,0.036)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.1] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_16px_40px_rgba(0,0,0,0.3)];
+    @apply rounded-[22px] border border-black/[0.022] bg-white/[0.92] p-5 shadow-[0_1px_0_rgba(255,255,255,0.82)_inset,0_16px_38px_rgba(31,41,55,0.06),0_4px_12px_rgba(31,41,55,0.034)] dark:border-white/10 dark:bg-white/[0.095] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_16px_40px_rgba(0,0,0,0.3)];
   }
 
   .ios-search-field {
@@ -290,7 +311,7 @@
   }
 
   .ios-bottom-bar {
-    @apply border-t border-border/55 bg-white/[0.8] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.74];
+    @apply border-t border-black/[0.035] bg-white/[0.82] shadow-[0_-1px_0_rgba(255,255,255,0.65)_inset,0_-10px_28px_rgba(31,41,55,0.055)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.085] dark:shadow-[0_-1px_0_rgba(255,255,255,0.08)_inset,0_-12px_30px_rgba(0,0,0,0.22)];
   }
 
   .ios-touch {
@@ -321,6 +342,23 @@
     @apply border border-black/[0.035] bg-white/[0.84] shadow-[0_-10px_40px_rgba(31,41,55,0.12),0_1px_1px_rgba(255,255,255,0.72)_inset] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.84] dark:shadow-[0_-14px_44px_rgba(0,0,0,0.42),0_1px_0_rgba(255,255,255,0.08)_inset];
   }
 
+  .ios-sheet::before {
+    content: '';
+    display: none;
+    position: absolute;
+    top: 0.55rem;
+    left: 50%;
+    width: 2.25rem;
+    height: 0.3125rem;
+    border-radius: 999px;
+    background: rgb(120 120 128 / 0.32);
+    transform: translateX(-50%);
+  }
+
+  .ios-status-panel {
+    @apply flex max-w-[min(22rem,calc(100vw-2rem))] items-center gap-3 rounded-[22px] border border-black/[0.035] bg-white/[0.88] px-4 py-3 shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_18px_48px_rgba(31,41,55,0.11),0_5px_16px_rgba(0,0,0,0.045)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.82] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_52px_rgba(0,0,0,0.42)];
+  }
+
   .ios-scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -341,7 +379,7 @@
   }
 
   .ios-table-surface {
-    @apply rounded-[14px] border border-black/[0.04] bg-white/[0.84] shadow-[0_1px_1px_rgba(255,255,255,0.72)_inset,0_10px_28px_rgba(31,41,55,0.052),0_2px_6px_rgba(0,0,0,0.028)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.09] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_12px_30px_rgba(0,0,0,0.24)];
+    @apply rounded-[14px] border border-black/[0.04] bg-white/[0.92] shadow-[0_1px_1px_rgba(255,255,255,0.74)_inset,0_10px_28px_rgba(31,41,55,0.05),0_2px_6px_rgba(0,0,0,0.026)] dark:border-white/10 dark:bg-white/[0.09] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_12px_30px_rgba(0,0,0,0.24)];
   }
 
   .ios-empty-state {
@@ -377,18 +415,21 @@
   }
 
   .rounded-lg.border.bg-card {
+    border-radius: 20px;
     border-color: rgb(0 0 0 / 0.032);
-    background-color: rgb(255 255 255 / 0.86);
+    background-color: rgb(255 255 255 / 0.92);
     box-shadow:
       inset 0 1px 1px rgb(255 255 255 / 0.8),
       0 13px 34px rgb(31 41 55 / 0.056),
       0 3px 9px rgb(31 41 55 / 0.034),
       0 1px 3px rgb(0 0 0 / 0.024);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
   }
 
   @media (max-width: 640px) {
+    .ios-sheet::before {
+      display: block;
+    }
+
     .ios-page {
       padding-top: max(1rem, calc(env(safe-area-inset-top) + 1rem));
       padding-left: max(1.25rem, env(safe-area-inset-left));
@@ -424,7 +465,7 @@
 
   .dark .rounded-lg.border.bg-card {
     border-color: rgb(255 255 255 / 0.1);
-    background-color: rgb(255 255 255 / 0.08);
+    background-color: rgb(44 44 46 / 0.96);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.08),
       0 14px 34px rgb(0 0 0 / 0.24);

@@ -2,6 +2,8 @@ import {
   Menu,
   Moon,
   Sun,
+  Monitor,
+  Check,
   ChevronLeft,
   Home,
   Settings,
@@ -20,6 +22,7 @@ import {
   Hash,
   BrainCircuit,
   Activity,
+  LoaderCircle,
   MoreHorizontal,
   X,
   ChevronRight,
@@ -34,6 +37,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { SearchDialog } from '@/components/search-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/version'
@@ -55,6 +59,34 @@ interface MenuSection {
   title: string
   items: MenuItem[]
 }
+
+type ThemeMode = 'light' | 'dark' | 'system'
+
+const themeOptions: Array<{
+  value: ThemeMode
+  label: string
+  description: string
+  icon: ComponentType<LucideProps>
+}> = [
+  {
+    value: 'system',
+    label: '跟随系统',
+    description: '根据设备外观自动切换',
+    icon: Monitor,
+  },
+  {
+    value: 'light',
+    label: '浅色模式',
+    description: '始终使用浅色外观',
+    icon: Sun,
+  },
+  {
+    value: 'dark',
+    label: '深色模式',
+    description: '始终使用深色外观',
+    icon: Moon,
+  },
+]
 
 const menuIconTileClasses: Record<string, string> = {
   '/': 'ios-symbol-blue',
@@ -82,7 +114,7 @@ export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const { theme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
   const matchRoute = useMatchRoute()
 
   // 搜索快捷键监听（Cmd/Ctrl + K）
@@ -101,8 +133,18 @@ export function Layout({ children }: LayoutProps) {
   // 认证检查中，显示加载状态
   if (checking) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="text-muted-foreground">正在验证登录状态...</div>
+      <div className="ios-page flex h-screen items-center justify-center overflow-hidden">
+        <div className="ios-status-panel">
+          <span className="ios-symbol ios-symbol-md ios-symbol-blue">
+            <LoaderCircle className="ios-spin-slow h-5 w-5" strokeWidth={2.5} />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[16px] font-semibold leading-6 text-foreground">
+              {APP_NAME}
+            </p>
+            <p className="text-[14px] leading-5 text-muted-foreground">正在验证登录状态...</p>
+          </div>
+        </div>
       </div>
     )
   }
@@ -158,15 +200,9 @@ export function Layout({ children }: LayoutProps) {
     },
   ]
 
-  // 获取实际应用的主题（处理 system 情况）
-  const getActualTheme = () => {
-    if (theme === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-    }
-    return theme
-  }
-
-  const actualTheme = getActualTheme()
+  const CurrentThemeIcon = theme === 'system' ? Monitor : resolvedTheme === 'dark' ? Moon : Sun
+  const themeLabel =
+    theme === 'system' ? '跟随系统' : resolvedTheme === 'dark' ? '深色模式' : '浅色模式'
 
   // 登出处理
   const handleLogout = async () => {
@@ -175,20 +211,20 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen overflow-hidden bg-background">
+      <div className="ios-app-shell flex h-screen overflow-hidden">
         {/* Sidebar */}
         <aside
           className={cn(
-            'lg:bg-background/72 fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] max-w-[22rem] flex-col overflow-hidden rounded-r-[28px] border-r border-white/70 bg-white/[0.86] shadow-[18px_0_48px_rgba(31,41,55,0.14)] backdrop-blur-2xl transition-all duration-[520ms] ease-[cubic-bezier(0.2,0,0,1)] dark:border-white/10 dark:bg-zinc-950/[0.86] dark:shadow-[18px_0_54px_rgba(0,0,0,0.38)] lg:relative lg:z-0 lg:w-auto lg:max-w-none lg:rounded-none lg:border-border/45 lg:shadow-none lg:backdrop-blur-2xl',
+            'fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] max-w-[22rem] flex-col overflow-hidden rounded-r-[28px] border-r border-white/70 bg-white/[0.9] shadow-[18px_0_48px_rgba(31,41,55,0.14)] backdrop-blur-2xl transition-all duration-[520ms] ease-[cubic-bezier(0.2,0,0,1)] dark:border-white/10 dark:bg-zinc-900/[0.78] dark:shadow-[18px_0_54px_rgba(0,0,0,0.38)] lg:relative lg:z-0 lg:w-auto lg:max-w-none lg:rounded-none lg:border-black/[0.035] lg:bg-white/[0.58] lg:shadow-none lg:backdrop-blur-2xl dark:lg:border-white/10 dark:lg:bg-white/[0.055]',
             sidebarOpen ? 'lg:w-64' : 'lg:w-16',
             mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
           )}
         >
           {/* Logo 区域 */}
-          <div className="flex h-[4.25rem] items-center justify-between border-b border-border/35 bg-white/[0.42] px-5 dark:bg-white/[0.04] lg:h-16 lg:border-border/45 lg:bg-transparent lg:px-4">
+          <div className="flex min-h-[5rem] items-center justify-between border-b border-black/[0.035] bg-white/[0.48] px-6 pb-3 pt-[max(1rem,env(safe-area-inset-top))] dark:border-white/10 dark:bg-white/[0.035] lg:h-16 lg:min-h-0 lg:bg-transparent lg:px-4 lg:py-0">
             <div
               className={cn(
-                'relative flex min-w-0 flex-1 items-center justify-center overflow-hidden transition-all duration-[420ms] ease-[cubic-bezier(0.2,0,0,1)] lg:justify-center',
+                'relative flex min-w-0 flex-1 items-center justify-start overflow-hidden pr-4 transition-all duration-[420ms] ease-[cubic-bezier(0.2,0,0,1)] lg:justify-center lg:pr-0',
                 // 移动端始终完整显示,桌面端根据 sidebarOpen 切换
                 'lg:flex-1',
                 !sidebarOpen && 'lg:w-8 lg:flex-none'
@@ -197,7 +233,7 @@ export function Layout({ children }: LayoutProps) {
               {/* 移动端始终显示完整 Logo，桌面端根据 sidebarOpen 切换 */}
               <div className={cn('flex min-w-0 flex-1 items-center', !sidebarOpen && 'lg:hidden')}>
                 <span
-                  className="lg:text-primary-gradient min-w-0 truncate text-[21px] font-semibold leading-tight text-foreground lg:text-xl"
+                  className="lg:text-primary-gradient min-w-0 truncate text-[20px] font-semibold leading-tight text-foreground sm:text-[21px] lg:text-xl"
                   title={APP_NAME}
                 >
                   {APP_NAME}
@@ -213,20 +249,20 @@ export function Layout({ children }: LayoutProps) {
             <button
               type="button"
               onClick={() => setMobileMenuOpen(false)}
-              className="ios-touch ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground hover:bg-muted lg:hidden"
+              className="ios-touch flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.56)_inset] hover:bg-muted dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset] lg:hidden"
               aria-label="关闭菜单"
               title="关闭菜单"
             >
-              <X className="h-[17px] w-[17px]" />
+              <X className="h-5 w-5" />
             </button>
           </div>
 
           <ScrollArea className={cn('flex-1 overflow-x-hidden', !sidebarOpen && 'lg:w-16')}>
-            <nav className={cn('px-5 py-4 lg:p-3', !sidebarOpen && 'lg:w-16 lg:p-2')}>
+            <nav className={cn('px-5 py-5 lg:p-3', !sidebarOpen && 'lg:w-16 lg:p-2')}>
               <ul
                 className={cn(
                   // 移动端始终使用正常间距,桌面端根据 sidebarOpen 切换
-                  'space-y-5 lg:space-y-5',
+                  'space-y-4 lg:space-y-5',
                   !sidebarOpen && 'lg:w-full lg:space-y-3'
                 )}
               >
@@ -235,12 +271,12 @@ export function Layout({ children }: LayoutProps) {
                     {/* 块标题 - 移动端始终可见，桌面端根据 sidebarOpen 切换 */}
                     <div
                       className={cn(
-                        'mb-2 h-[1.25rem] px-1.5 lg:px-3',
+                        'mb-1.5 h-[1.25rem] px-2 lg:mb-2 lg:px-3',
                         // 移动端始终显示，桌面端根据状态切换
                         !sidebarOpen && 'lg:invisible lg:mb-1'
                       )}
                     >
-                      <h3 className="whitespace-nowrap text-[12px] font-medium leading-5 text-muted-foreground/80 lg:text-xs lg:font-semibold lg:uppercase lg:text-muted-foreground/70">
+                      <h3 className="whitespace-nowrap text-[12px] font-medium leading-5 text-muted-foreground/72 lg:text-xs lg:font-semibold lg:uppercase lg:text-muted-foreground/70">
                         {section.title}
                       </h3>
                     </div>
@@ -347,15 +383,15 @@ export function Layout({ children }: LayoutProps) {
         {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Topbar */}
-          <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border/25 bg-white/[0.76] px-4 backdrop-blur-2xl dark:bg-zinc-950/[0.72] sm:h-16 sm:px-4">
+          <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-black/[0.035] bg-white/[0.72] px-4 shadow-[0_1px_0_rgba(255,255,255,0.55)_inset] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset] sm:h-16 sm:px-4">
             <div className="z-10 flex min-w-0 items-center gap-2 sm:gap-4">
               {/* 移动端菜单按钮 */}
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="ios-touch flex h-8 w-8 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted lg:hidden"
+                className="ios-touch flex h-11 w-11 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted lg:hidden"
                 aria-label={mobileMenuOpen ? '关闭菜单' : '打开菜单'}
               >
-                <Menu className="h-[17px] w-[17px]" />
+                <Menu className="h-5 w-5" />
               </button>
 
               {/* 桌面端侧边栏收起/展开按钮 */}
@@ -380,7 +416,7 @@ export function Layout({ children }: LayoutProps) {
               {/* 搜索框 */}
               <button
                 onClick={() => setSearchOpen(true)}
-                className="ios-touch relative hidden h-10 w-64 items-center rounded-full border border-black/[0.025] bg-muted/65 pl-10 pr-16 text-left shadow-[inset_0_1px_1px_rgba(0,0,0,0.025)] hover:bg-muted/80 md:flex"
+                className="ios-touch relative hidden h-11 w-64 items-center rounded-full border border-black/[0.025] bg-muted/65 pl-10 pr-16 text-left shadow-[inset_0_1px_1px_rgba(0,0,0,0.025)] hover:bg-muted/80 md:flex"
               >
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">搜索...</span>
@@ -394,11 +430,11 @@ export function Layout({ children }: LayoutProps) {
 
               <button
                 onClick={() => setSearchOpen(true)}
-                className="ios-touch flex h-8 w-8 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted md:hidden"
+                className="ios-touch flex h-11 w-11 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted md:hidden"
                 aria-label="搜索"
                 title="搜索"
               >
-                <Search className="h-[17px] w-[17px]" />
+                <Search className="h-5 w-5" />
               </button>
 
               {/* 项目文档链接 */}
@@ -414,20 +450,47 @@ export function Layout({ children }: LayoutProps) {
               </Button>
 
               {/* 主题切换按钮 */}
-              <button
-                onClick={(e) => {
-                  const newTheme = actualTheme === 'dark' ? 'light' : 'dark'
-                  toggleThemeWithTransition(newTheme, setTheme, e)
-                }}
-                className="ios-touch hidden h-10 w-10 items-center justify-center rounded-full hover:bg-accent sm:flex sm:h-11 sm:w-11"
-                title={actualTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
-              >
-                {actualTheme === 'dark' ? (
-                  <Sun className="h-5 w-5" />
-                ) : (
-                  <Moon className="h-5 w-5" />
-                )}
-              </button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    className="ios-touch hidden h-10 w-10 items-center justify-center rounded-full hover:bg-accent sm:flex sm:h-11 sm:w-11"
+                    title={`外观：${themeLabel}`}
+                    aria-label={`外观：${themeLabel}`}
+                  >
+                    <CurrentThemeIcon className="h-5 w-5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-60 p-1.5">
+                  <div className="overflow-hidden rounded-[14px]">
+                    {themeOptions.map((option) => {
+                      const OptionIcon = option.icon
+                      const selected = theme === option.value
+
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0"
+                          onClick={(event) => toggleThemeWithTransition(option.value, setTheme, event)}
+                        >
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-secondary text-muted-foreground">
+                            <OptionIcon className="h-[18px] w-[18px]" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[15px] font-medium leading-5 text-foreground">
+                              {option.label}
+                            </span>
+                            <span className="block truncate text-[12px] leading-4 text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                          {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
 
               {/* 分隔线 */}
               <div className="hidden h-6 w-px bg-border/70 sm:block" />
@@ -445,12 +508,12 @@ export function Layout({ children }: LayoutProps) {
               </Button>
 
               <button
-                className="ios-touch flex h-8 w-8 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted sm:hidden"
+                className="ios-touch flex h-11 w-11 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted sm:hidden"
                 aria-label="更多操作"
                 title="更多操作"
                 onClick={() => setMobileActionsOpen(true)}
               >
-                <MoreHorizontal className="h-[18px] w-[18px]" />
+                <MoreHorizontal className="h-5 w-5" />
               </button>
 
               <Dialog open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
@@ -475,28 +538,32 @@ export function Layout({ children }: LayoutProps) {
                           <span className="text-[17px] font-medium leading-6">项目文档</span>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        className="ios-row ios-touch min-h-[58px] w-full text-left focus-visible:bg-accent/60 focus-visible:ring-0"
-                        onClick={(e) => {
-                          setMobileActionsOpen(false)
-                          const newTheme = actualTheme === 'dark' ? 'light' : 'dark'
-                          toggleThemeWithTransition(newTheme, setTheme, e)
-                        }}
-                      >
-                        <span className="flex items-center gap-3">
-                          <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
-                            {actualTheme === 'dark' ? (
-                              <Sun className="h-[18px] w-[18px]" />
-                            ) : (
-                              <Moon className="h-[18px] w-[18px]" />
-                            )}
-                          </span>
-                          <span className="text-[17px] font-medium leading-6">
-                            {actualTheme === 'dark' ? '浅色模式' : '深色模式'}
-                          </span>
-                        </span>
-                      </button>
+                      {themeOptions.map((option) => {
+                        const OptionIcon = option.icon
+                        const selected = theme === option.value
+
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className="ios-row ios-touch min-h-[58px] w-full text-left focus-visible:bg-accent/60 focus-visible:ring-0"
+                            onClick={(event) => {
+                              toggleThemeWithTransition(option.value, setTheme, event)
+                              setMobileActionsOpen(false)
+                            }}
+                          >
+                            <span className="flex items-center gap-3">
+                              <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                                <OptionIcon className="h-[18px] w-[18px]" />
+                              </span>
+                              <span className="text-[17px] font-medium leading-6">
+                                {option.label}
+                              </span>
+                            </span>
+                            {selected && <Check className="h-4 w-4 text-primary" />}
+                          </button>
+                        )
+                      })}
                       <button
                         type="button"
                         className="ios-row ios-touch text-destructive min-h-[58px] w-full text-left focus-visible:bg-accent/60 focus-visible:ring-0"

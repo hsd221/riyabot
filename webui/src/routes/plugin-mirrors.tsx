@@ -363,7 +363,7 @@ export function PluginMirrorsPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="ios-touch mt-0.5 h-10 w-10 shrink-0 rounded-full sm:mt-0"
+                className="ios-touch mt-0.5 h-11 w-11 shrink-0 rounded-full sm:mt-0"
                 onClick={() => navigate({ to: '/plugins' })}
               >
                 <ArrowLeft className="h-5 w-5" />
@@ -501,7 +501,7 @@ export function PluginMirrorsPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 rounded-full"
+                                className="h-11 w-11 rounded-full"
                                 onClick={() => adjustPriority(mirror, 'up')}
                                 disabled={mirror.priority === 1}
                                 title="提高优先级"
@@ -511,7 +511,7 @@ export function PluginMirrorsPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-8 w-8 rounded-full"
+                                className="h-11 w-11 rounded-full"
                                 onClick={() => adjustPriority(mirror, 'down')}
                                 title="降低优先级"
                               >
@@ -531,7 +531,7 @@ export function PluginMirrorsPage() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                className="h-9 w-9 rounded-full"
+                                className="h-11 w-11 rounded-full"
                                 onClick={() => openEditDialog(mirror)}
                                 title="编辑"
                               >
@@ -540,7 +540,7 @@ export function PluginMirrorsPage() {
                               <Button
                                 variant="outline"
                                 size="icon"
-                                className="text-destructive hover:text-destructive h-9 w-9 rounded-full"
+                                className="text-destructive hover:text-destructive h-11 w-11 rounded-full"
                                 onClick={() => handleDeleteMirror(mirror.id)}
                                 title="删除"
                               >
@@ -602,7 +602,7 @@ export function PluginMirrorsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 rounded-full"
+                            className="h-11 w-11 rounded-full"
                             onClick={() => adjustPriority(selectedMirror, 'up')}
                             disabled={selectedMirror.priority === 1}
                           >
@@ -614,7 +614,7 @@ export function PluginMirrorsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 rounded-full"
+                            className="h-11 w-11 rounded-full"
                             onClick={() => adjustPriority(selectedMirror, 'down')}
                           >
                             <ChevronDown className="h-4 w-4" />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ThemeProviderContext } from '@/lib/theme-context'
+import { getSetting, setSetting, STORAGE_KEYS } from '@/lib/settings-manager'
 
 type Theme = 'dark' | 'light' | 'system'
 
@@ -10,32 +11,77 @@ type ThemeProviderProps = {
   storageKey?: string
 }
 
+const isTheme = (value: string | null): value is Theme =>
+  value === 'dark' || value === 'light' || value === 'system'
+
+const getSystemTheme = (): 'dark' | 'light' => {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'light'
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+const getStoredTheme = (storageKey: string, defaultTheme: Theme): Theme => {
+  const storedTheme =
+    localStorage.getItem(storageKey) ??
+    (storageKey === 'ui-theme' ? localStorage.getItem('riyabot-ui-theme') : null)
+  if (isTheme(storedTheme) && storageKey === 'ui-theme') {
+    localStorage.setItem(storageKey, storedTheme)
+    localStorage.removeItem('riyabot-ui-theme')
+  }
+  return isTheme(storedTheme) ? storedTheme : defaultTheme
+}
+
+const applyTheme = (theme: Theme, systemTheme: 'dark' | 'light') => {
+  const root = window.document.documentElement
+  const resolvedTheme = theme === 'system' ? systemTheme : theme
+
+  root.classList.remove('light', 'dark')
+  root.classList.add(resolvedTheme)
+  root.style.colorScheme = resolvedTheme
+}
+
 export function ThemeProvider({
   children,
   defaultTheme = 'system',
-  storageKey = 'ui-theme',
+  storageKey = STORAGE_KEYS.THEME,
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
+  const [theme, setThemeState] = useState<Theme>(
+    () => (storageKey === STORAGE_KEYS.THEME ? getSetting('theme') : getStoredTheme(storageKey, defaultTheme))
   )
+  const [systemTheme, setSystemTheme] = useState<'dark' | 'light'>(() => getSystemTheme())
 
   useEffect(() => {
-    const root = window.document.documentElement
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleSystemThemeChange = () => setSystemTheme(mediaQuery.matches ? 'dark' : 'light')
 
-    root.classList.remove('light', 'dark')
+    handleSystemThemeChange()
+    mediaQuery.addEventListener('change', handleSystemThemeChange)
+    return () => mediaQuery.removeEventListener('change', handleSystemThemeChange)
+  }, [])
 
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light'
+  useEffect(() => {
+    applyTheme(theme, systemTheme)
+  }, [theme, systemTheme])
 
-      root.classList.add(systemTheme)
-      return
+  useEffect(() => {
+    if (storageKey !== STORAGE_KEYS.THEME) return
+
+    const handleSettingsChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; value?: unknown }>).detail
+      if (detail?.key === 'theme' && isTheme(String(detail.value))) {
+        setThemeState(detail.value as Theme)
+      }
     }
 
-    root.classList.add(theme)
-  }, [theme])
+    const handleSettingsReset = () => setThemeState(getSetting('theme'))
+
+    window.addEventListener('riyabot-settings-change', handleSettingsChange)
+    window.addEventListener('riyabot-settings-reset', handleSettingsReset)
+    return () => {
+      window.removeEventListener('riyabot-settings-change', handleSettingsChange)
+      window.removeEventListener('riyabot-settings-reset', handleSettingsReset)
+    }
+  }, [storageKey])
 
   // 应用保存的主题色
   useEffect(() => {
@@ -122,13 +168,18 @@ export function ThemeProvider({
         }
       }
     }
-  }, [theme])
+  }, [theme, systemTheme])
 
   const value = {
     theme,
+    resolvedTheme: theme === 'system' ? systemTheme : theme,
     setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme)
-      setTheme(theme)
+      if (storageKey === STORAGE_KEYS.THEME) {
+        setSetting('theme', theme)
+      } else {
+        localStorage.setItem(storageKey, theme)
+      }
+      setThemeState(theme)
     },
   }
 

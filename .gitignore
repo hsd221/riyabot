@@ -73,6 +73,7 @@ lib/
 !webui/src/lib/
 webui/src/lib/*
 !webui/src/lib/behavior-api.ts
+!webui/src/lib/settings-manager.ts
 lib64/
 parts/
 sdist/

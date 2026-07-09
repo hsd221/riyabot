@@ -17,7 +17,7 @@ import { AtSign, Bot, Plus, Smartphone, Trash2, UserRound } from 'lucide-react'
 import type { BotConfig } from '../types'
 
 const destructiveIconButtonClass =
-  'h-9 w-9 shrink-0 rounded-full border-[rgb(255_59_48_/_0.18)] bg-[rgb(255_59_48_/_0.08)] text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.12)] hover:text-[rgb(174_37_31)] dark:border-[rgb(255_69_58_/_0.18)] dark:bg-[rgb(255_69_58_/_0.1)] dark:text-[rgb(255_105_97)]'
+  'h-11 w-11 shrink-0 rounded-full border-[rgb(255_59_48_/_0.18)] bg-[rgb(255_59_48_/_0.08)] text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.12)] hover:text-[rgb(174_37_31)] dark:border-[rgb(255_69_58_/_0.18)] dark:bg-[rgb(255_69_58_/_0.1)] dark:text-[rgb(255_105_97)]'
 
 interface BotInfoSectionProps {
   config: BotConfig
@@ -66,7 +66,7 @@ export const BotInfoSection = React.memo(function BotInfoSection({
     <>
       <div className="space-y-5 sm:max-w-3xl">
         <div className="ios-group overflow-hidden">
-          <div className="ios-row min-h-[60px]">
+          <div className="ios-row min-h-[68px]">
             <span className="flex min-w-0 items-center gap-3">
               <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
                 <Smartphone className="h-4 w-4" />
@@ -77,10 +77,10 @@ export const BotInfoSection = React.memo(function BotInfoSection({
               value={config.platform}
               onChange={(e) => onChange({ ...config, platform: e.target.value })}
               placeholder="qq"
-              className="h-9 min-w-0 max-w-[52%] border-0 bg-transparent px-0 text-right shadow-none focus-visible:ring-0"
+              className="h-11 min-w-0 max-w-[56%] text-right"
             />
           </div>
-          <div className="ios-row min-h-[60px]">
+          <div className="ios-row min-h-[68px]">
             <span className="flex min-w-0 items-center gap-3">
               <span className="ios-symbol ios-symbol-sm ios-symbol-green">
                 <AtSign className="h-4 w-4" />
@@ -91,10 +91,10 @@ export const BotInfoSection = React.memo(function BotInfoSection({
               value={config.qq_account}
               onChange={(e) => onChange({ ...config, qq_account: e.target.value })}
               placeholder="123456789"
-              className="h-9 min-w-0 max-w-[52%] border-0 bg-transparent px-0 text-right shadow-none focus-visible:ring-0"
+              className="h-11 min-w-0 max-w-[56%] text-right"
             />
           </div>
-          <div className="ios-row min-h-[60px]">
+          <div className="ios-row min-h-[68px]">
             <span className="flex min-w-0 items-center gap-3">
               <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
                 <Bot className="h-4 w-4" />
@@ -105,7 +105,7 @@ export const BotInfoSection = React.memo(function BotInfoSection({
               value={config.nickname}
               onChange={(e) => onChange({ ...config, nickname: e.target.value })}
               placeholder="当前实例"
-              className="h-9 min-w-0 max-w-[52%] border-0 bg-transparent px-0 text-right shadow-none focus-visible:ring-0"
+              className="h-11 min-w-0 max-w-[56%] text-right"
             />
           </div>
         </div>
@@ -117,7 +117,7 @@ export const BotInfoSection = React.memo(function BotInfoSection({
               onClick={addPlatform}
               size="icon"
               variant="outline"
-              className="h-9 w-9 rounded-full"
+              className="h-11 w-11 rounded-full"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -128,12 +128,12 @@ export const BotInfoSection = React.memo(function BotInfoSection({
             </div>
           ) : (
             config.platforms.map((platform, index) => (
-              <div key={index} className="ios-row min-h-[60px] py-3">
+              <div key={index} className="ios-row min-h-[68px] py-3">
                 <Input
                   value={platform}
                   onChange={(e) => updatePlatform(index, e.target.value)}
                   placeholder="wx:114514"
-                  className="h-9 min-w-0 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                  className="h-11 min-w-0"
                 />
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -173,7 +173,7 @@ export const BotInfoSection = React.memo(function BotInfoSection({
               onClick={addAlias}
               size="icon"
               variant="outline"
-              className="h-9 w-9 rounded-full"
+              className="h-11 w-11 rounded-full"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -182,12 +182,12 @@ export const BotInfoSection = React.memo(function BotInfoSection({
             <div className="ios-row min-h-12 py-3 text-[14px] text-muted-foreground">暂无别名</div>
           ) : (
             config.alias_names.map((alias, index) => (
-              <div key={index} className="ios-row min-h-[60px] py-3">
+              <div key={index} className="ios-row min-h-[68px] py-3">
                 <Input
                   value={alias}
                   onChange={(e) => updateAlias(index, e.target.value)}
                   placeholder="小助手"
-                  className="h-9 min-w-0 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                  className="h-11 min-w-0"
                 />
                 <AlertDialog>
                   <AlertDialogTrigger asChild>

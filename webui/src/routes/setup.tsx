@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   Sparkles,
+  Check,
   ArrowRight,
   ChevronRight,
   CheckCircle2,
@@ -531,18 +532,18 @@ export function SetupPage() {
                         )}
                         <div
                           className={cn(
-                            'grid h-9 w-9 shrink-0 place-items-center rounded-full',
+                            'grid h-9 w-9 shrink-0 place-items-center rounded-[10px] transition-all duration-[280ms] ease-[cubic-bezier(0.2,0,0,1)]',
                             isActive
-                              ? 'bg-primary text-primary-foreground'
+                              ? 'bg-primary text-primary-foreground shadow-[0_5px_12px_hsl(var(--primary)_/_0.24)]'
                               : isDone
-                                ? 'bg-primary/10 text-primary'
-                                : 'bg-muted text-muted-foreground'
+                                ? 'bg-[rgb(52_199_89)] text-white shadow-[0_5px_12px_rgba(52,199,89,0.24)]'
+                                : 'bg-secondary text-muted-foreground/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:bg-white/[0.08] dark:text-foreground/65 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                           )}
                         >
                           {isDone ? (
-                            <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} fill="none" />
+                            <Check className="h-[18px] w-[18px]" strokeWidth={3} fill="none" />
                           ) : (
-                            <Icon className="h-4 w-4" />
+                            <Icon className="h-[18px] w-[18px]" strokeWidth={2.75} fill="none" />
                           )}
                         </div>
                         <div className="min-w-0">
@@ -578,8 +579,12 @@ export function SetupPage() {
                           className="ios-row ios-touch min-h-[66px] w-full text-left"
                         >
                           <span className="flex min-w-0 items-center gap-3">
-                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-primary text-primary-foreground shadow-[0_4px_10px_hsl(var(--primary)_/_0.22)]">
-                              <currentStepInfo.icon className="h-4 w-4" />
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-primary text-primary-foreground shadow-[0_5px_12px_hsl(var(--primary)_/_0.24)]">
+                              <currentStepInfo.icon
+                                className="h-[18px] w-[18px]"
+                                strokeWidth={2.75}
+                                fill="none"
+                              />
                             </span>
                             <span className="min-w-0">
                               <span className="block text-[16px] font-medium leading-6">
@@ -622,20 +627,24 @@ export function SetupPage() {
                                       className={cn(
                                         'grid h-8 w-8 shrink-0 place-items-center rounded-[9px]',
                                         isActive
-                                          ? 'bg-primary text-primary-foreground'
+                                          ? 'bg-primary text-primary-foreground shadow-[0_4px_10px_hsl(var(--primary)_/_0.22)]'
                                           : isDone
-                                            ? 'bg-primary/10 text-primary'
-                                            : 'bg-muted text-muted-foreground'
+                                            ? 'bg-[rgb(52_199_89)] text-white shadow-[0_4px_10px_rgba(52,199,89,0.22)]'
+                                            : 'bg-secondary text-muted-foreground/90 dark:bg-white/[0.08] dark:text-foreground/65'
                                       )}
                                     >
                                       {isDone ? (
-                                        <CheckCircle2
-                                          className="h-4 w-4"
-                                          strokeWidth={2.5}
+                                        <Check
+                                          className="h-[17px] w-[17px]"
+                                          strokeWidth={3}
                                           fill="none"
                                         />
                                       ) : (
-                                        <Icon className="h-4 w-4" />
+                                        <Icon
+                                          className="h-[17px] w-[17px]"
+                                          strokeWidth={2.75}
+                                          fill="none"
+                                        />
                                       )}
                                     </span>
                                     <span className="min-w-0">
@@ -686,7 +695,7 @@ export function SetupPage() {
                     </div>
 
                     {/* 操作按钮 */}
-                    <div className="ios-bottom-bar flex shrink-0 items-center justify-between gap-2 p-3">
+                    <div className="ios-bottom-bar flex shrink-0 items-center justify-between gap-2 rounded-b-[22px] p-3">
                       <Button
                         variant="outline"
                         onClick={handlePrevious}

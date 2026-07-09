@@ -72,7 +72,7 @@ export const Pagination = React.memo(function Pagination({
             size="icon"
             onClick={() => onPageChange(Math.max(1, page - 1))}
             disabled={page === 1}
-            className="h-9 w-9 rounded-full"
+            className="h-11 w-11 rounded-full"
             aria-label="上一页"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -82,7 +82,7 @@ export const Pagination = React.memo(function Pagination({
             size="icon"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
-            className="h-9 w-9 rounded-full"
+            className="h-11 w-11 rounded-full"
             aria-label="下一页"
           >
             <ChevronRight className="h-4 w-4" />
@@ -90,12 +90,12 @@ export const Pagination = React.memo(function Pagination({
         </div>
       </div>
       <div className="ios-group hidden items-center justify-between gap-4 px-5 py-3 sm:flex">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Label htmlFor="page-size-model" className="whitespace-nowrap text-sm">
             每页显示
           </Label>
           <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
-            <SelectTrigger id="page-size-model" className="w-20">
+            <SelectTrigger id="page-size-model" className="h-11 w-20">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -117,7 +117,7 @@ export const Pagination = React.memo(function Pagination({
             size="sm"
             onClick={() => onPageChange(1)}
             disabled={page === 1}
-            className="hidden sm:flex"
+            className="hidden h-11 w-11 rounded-full px-0 sm:flex"
           >
             <ChevronsLeft className="h-4 w-4" />
           </Button>
@@ -137,7 +137,7 @@ export const Pagination = React.memo(function Pagination({
               onChange={(e) => onJumpToPageChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={page.toString()}
-              className="h-8 w-16 text-center"
+              className="h-11 w-20 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
               min={1}
               max={totalPages}
             />
@@ -146,7 +146,7 @@ export const Pagination = React.memo(function Pagination({
               size="sm"
               onClick={onJumpToPage}
               disabled={!jumpToPage}
-              className="h-8"
+              className="h-11 rounded-full px-4"
             >
               跳转
             </Button>
@@ -165,7 +165,7 @@ export const Pagination = React.memo(function Pagination({
             size="sm"
             onClick={() => onPageChange(totalPages)}
             disabled={page >= totalPages}
-            className="hidden sm:flex"
+            className="hidden h-11 w-11 rounded-full px-0 sm:flex"
           >
             <ChevronsRight className="h-4 w-4" />
           </Button>

@@ -38,7 +38,7 @@ export const toggleThemeWithTransition = (
         clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endRadius}px at ${x}px ${y}px)`],
       },
       {
-        duration: 680,
+        duration: 420,
         easing: 'cubic-bezier(0.2, 0, 0, 1)',
         pseudoElement: '::view-transition-new(root)',
       }

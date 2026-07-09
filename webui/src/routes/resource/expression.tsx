@@ -13,6 +13,7 @@ import {
   ChevronsRight,
   CalendarDays,
   SlidersHorizontal,
+  MoreHorizontal,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
@@ -48,6 +49,7 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { IosListSkeleton } from '@/components/ui/skeleton'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type {
   Expression,
   ExpressionCreateRequest,
@@ -65,6 +67,14 @@ import {
   getChatList,
 } from '@/lib/expression-api'
 
+const expressionActionClass =
+  'ios-touch flex min-h-[50px] w-full items-center gap-3 border-b border-border/45 px-3.5 py-2.5 text-left text-[15px] font-medium leading-5 last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0'
+
+const expressionActionIconClass = 'ios-symbol ios-symbol-sm'
+
+const expressionSelectTriggerClass =
+  'h-auto min-h-11 w-full justify-between gap-2 rounded-[14px] border-0 bg-secondary/60 px-3 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-secondary/70 focus:ring-0 sm:w-auto sm:max-w-[8rem] sm:justify-end sm:gap-1 sm:bg-transparent sm:px-0 sm:hover:bg-transparent [&>svg]:h-4 [&>svg]:w-4'
+
 export function ExpressionManagementPage() {
   const [expressions, setExpressions] = useState<Expression[]>([])
   const [loading, setLoading] = useState(true)
@@ -79,6 +89,7 @@ export function ExpressionManagementPage() {
   const [deleteConfirmExpression, setDeleteConfirmExpression] = useState<Expression | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
+  const [displayDialogOpen, setDisplayDialogOpen] = useState(false)
   const [jumpToPage, setJumpToPage] = useState('')
   const [stats, setStats] = useState({
     total: 0,
@@ -275,6 +286,8 @@ export function ExpressionManagementPage() {
       symbolClassName: 'ios-symbol-purple',
     },
   ]
+  const selectedCount = selectedIds.size
+  const displaySummary = `每页 ${pageSize} 条 · 已选 ${selectedCount}`
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
@@ -296,7 +309,7 @@ export function ExpressionManagementPage() {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+        <div className="w-[calc(100vw-2.5rem)] max-w-full space-y-4 overflow-x-hidden sm:w-auto sm:space-y-6 sm:pr-4">
           <button
             type="button"
             onClick={() => setIsCreateDialogOpen(true)}
@@ -313,28 +326,53 @@ export function ExpressionManagementPage() {
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
           </button>
 
-          {/* 统计 */}
-          <div className="ios-stat-grid sm:grid-cols-3">
-            {expressionStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
-              <div key={label} className="ios-stat-card">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+          <div className="ios-group max-w-full overflow-hidden sm:hidden">
+            <div className="grid max-w-full grid-cols-3 gap-2 p-2">
+              {expressionStatItems.map(({ label, value, Icon, symbolClassName }) => (
+                <div
+                  key={label}
+                  className="flex min-w-0 flex-col items-start gap-2 rounded-[15px] bg-muted/45 px-3 py-2.5"
+                >
+                  <span className={`ios-symbol ${symbolClassName} h-7 w-7 rounded-[8px]`}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12px] font-medium leading-4 text-muted-foreground">
                       {label}
-                    </p>
-                    <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
-                      {detail}
-                    </p>
-                  </div>
-                  <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
-                    <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="block truncate text-[18px] font-semibold leading-6 tabular-nums text-foreground">
+                      {value}
+                    </span>
                   </span>
                 </div>
-                <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
-                  {value}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          {/* 统计 */}
+          <div className="hidden sm:block">
+            <div className="ios-stat-grid sm:grid-cols-3">
+              {expressionStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
+                <div key={label} className="ios-stat-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                        {label}
+                      </p>
+                      <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                        {detail}
+                      </p>
+                    </div>
+                    <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                  </div>
+                  <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="ios-search-field">
@@ -351,13 +389,109 @@ export function ExpressionManagementPage() {
             />
           </div>
 
+          <Dialog open={displayDialogOpen} onOpenChange={setDisplayDialogOpen}>
+            <button
+              type="button"
+              onClick={() => setDisplayDialogOpen(true)}
+              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0 sm:hidden"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[16px] font-normal leading-6">显示设置</span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {displaySummary}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+            <DialogContent className="max-h-[82vh] overflow-hidden p-0 sm:max-w-md">
+              <DialogHeader className="px-5 pt-5">
+                <DialogTitle>显示设置</DialogTitle>
+                <DialogDescription>调整每页数量和批量选择操作</DialogDescription>
+              </DialogHeader>
+              <ScrollArea className="max-h-[calc(78vh-9rem)] px-5">
+                <div className="ios-group overflow-hidden">
+                  <div className="ios-row min-h-[64px]">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                        <SlidersHorizontal className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-normal leading-6">每页数量</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          已选 {selectedCount}
+                        </span>
+                      </span>
+                    </span>
+                    <Select
+                      value={pageSize.toString()}
+                      onValueChange={(value) => {
+                        setPageSize(parseInt(value))
+                        setPage(1)
+                        setSelectedIds(new Set())
+                      }}
+                    >
+                      <SelectTrigger
+                        id="mobile-page-size"
+                        className="h-auto min-h-11 w-auto max-w-[7rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10 条</SelectItem>
+                        <SelectItem value="20">20 条</SelectItem>
+                        <SelectItem value="50">50 条</SelectItem>
+                        <SelectItem value="100">100 条</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {selectedCount > 0 && (
+                  <div className="ios-group mt-5 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedIds(new Set())}
+                      className={expressionActionClass}
+                    >
+                      <span className={cn(expressionActionIconClass, 'ios-symbol-gray')}>
+                        <SlidersHorizontal className="h-[18px] w-[18px]" />
+                      </span>
+                      取消选择
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDisplayDialogOpen(false)
+                        setIsBatchDeleteDialogOpen(true)
+                      }}
+                      className={cn(expressionActionClass, 'text-destructive')}
+                    >
+                      <span className={cn(expressionActionIconClass, 'ios-symbol-red')}>
+                        <Trash2 className="h-[18px] w-[18px]" />
+                      </span>
+                      批量删除
+                    </button>
+                  </div>
+                )}
+              </ScrollArea>
+              <DialogFooter className="px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+                <Button onClick={() => setDisplayDialogOpen(false)} className="w-full">
+                  完成
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* 显示和批量操作 */}
-          <div className="ios-group overflow-hidden">
+          <div className="ios-group hidden overflow-hidden sm:block">
             <div
               className={cn(
-                'ios-row min-h-[64px]',
-                selectedIds.size > 0 &&
-                  'flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between'
+                'ios-row min-h-[64px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between'
               )}
             >
               <span className="flex min-w-0 items-center gap-3">
@@ -367,11 +501,11 @@ export function ExpressionManagementPage() {
                 <span className="min-w-0">
                   <span className="block text-[16px] font-normal leading-6">显示设置</span>
                   <span className="block text-[13px] leading-5 text-muted-foreground">
-                    已选 {selectedIds.size}
+                    {displaySummary}
                   </span>
                 </span>
               </span>
-              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 <Select
                   value={pageSize.toString()}
                   onValueChange={(value) => {
@@ -382,7 +516,7 @@ export function ExpressionManagementPage() {
                 >
                   <SelectTrigger
                     id="page-size"
-                    className="h-auto min-h-11 w-auto max-w-[8rem] justify-end gap-1 border-0 bg-transparent px-0 py-0 text-[16px] font-normal leading-5 text-muted-foreground shadow-none hover:bg-transparent focus:ring-0 [&>svg]:h-4 [&>svg]:w-4"
+                    className={expressionSelectTriggerClass}
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -399,7 +533,7 @@ export function ExpressionManagementPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => setSelectedIds(new Set())}
-                      className="h-10 rounded-full px-4"
+                      className="h-11 rounded-full px-4"
                     >
                       取消选择
                     </Button>
@@ -407,7 +541,7 @@ export function ExpressionManagementPage() {
                       variant="destructive"
                       size="sm"
                       onClick={() => setIsBatchDeleteDialogOpen(true)}
-                      className="h-10 rounded-full px-4"
+                      className="h-11 rounded-full px-4"
                     >
                       <Trash2 className="mr-1 h-4 w-4" />
                       批量删除
@@ -428,7 +562,7 @@ export function ExpressionManagementPage() {
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="ios-touch rounded-full px-2.5 py-1 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
+                  className="ios-touch min-h-11 rounded-full px-3.5 py-2 text-[13px] font-medium leading-5 text-primary hover:bg-accent/60"
                 >
                   {selectedIds.size === expressions.length ? '取消全选' : '全选'}
                 </button>
@@ -453,7 +587,7 @@ export function ExpressionManagementPage() {
                   <Button
                     onClick={() => setIsCreateDialogOpen(true)}
                     size="sm"
-                    className="h-9 px-4"
+                    className="h-11 px-5"
                   >
                     <Plus className="mr-1 h-4 w-4" />
                     新增表达方式
@@ -497,34 +631,53 @@ export function ExpressionManagementPage() {
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap gap-2 pl-14 sm:pl-0">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => handleEdit(expression)}
-                        className="h-9 rounded-full px-4"
-                      >
-                        <Edit className="mr-1 h-4 w-4" />
-                        编辑
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 rounded-full"
-                        onClick={() => handleViewDetail(expression)}
-                        title="查看详情"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDeleteConfirmExpression(expression)}
-                        className="text-destructive hover:text-destructive h-9 rounded-full px-4"
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        删除
-                      </Button>
+                    <div className="flex shrink-0 justify-end pl-14 sm:pl-0">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-11 w-11 rounded-[14px]"
+                            title="更多操作"
+                          >
+                            <MoreHorizontal className="h-5 w-5" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-52 p-1.5">
+                          <div className="overflow-hidden rounded-[14px]">
+                            <button
+                              type="button"
+                              className={expressionActionClass}
+                              onClick={() => handleEdit(expression)}
+                            >
+                              <span className={cn(expressionActionIconClass, 'ios-symbol-purple')}>
+                                <Edit className="h-[18px] w-[18px]" />
+                              </span>
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className={expressionActionClass}
+                              onClick={() => handleViewDetail(expression)}
+                            >
+                              <span className={cn(expressionActionIconClass, 'ios-symbol-blue')}>
+                                <Eye className="h-[18px] w-[18px]" />
+                              </span>
+                              详情
+                            </button>
+                            <button
+                              type="button"
+                              className={cn(expressionActionClass, 'text-destructive')}
+                              onClick={() => setDeleteConfirmExpression(expression)}
+                            >
+                              <span className={cn(expressionActionIconClass, 'ios-symbol-red')}>
+                                <Trash2 className="h-[18px] w-[18px]" />
+                              </span>
+                              删除
+                            </button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                   </div>
                 ))
@@ -542,7 +695,7 @@ export function ExpressionManagementPage() {
                       size="icon"
                       onClick={() => setPage(1)}
                       disabled={page === 1}
-                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      className="hidden h-11 w-11 rounded-full sm:inline-flex"
                     >
                       <ChevronsLeft className="h-4 w-4" />
                     </Button>
@@ -552,7 +705,7 @@ export function ExpressionManagementPage() {
                       size="sm"
                       onClick={() => setPage(page - 1)}
                       disabled={page === 1}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <ChevronLeft className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">上一页</span>
@@ -565,7 +718,7 @@ export function ExpressionManagementPage() {
                         onChange={(e) => setJumpToPage(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
                         placeholder={page.toString()}
-                        className="h-9 w-16 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
+                        className="h-11 w-20 rounded-full border-0 bg-muted/70 text-center shadow-none focus-visible:ring-0"
                         min={1}
                         max={Math.ceil(total / pageSize)}
                       />
@@ -574,7 +727,7 @@ export function ExpressionManagementPage() {
                         size="sm"
                         onClick={handleJumpToPage}
                         disabled={!jumpToPage}
-                        className="h-9 rounded-full px-3"
+                        className="h-11 rounded-full px-4"
                       >
                         跳转
                       </Button>
@@ -585,7 +738,7 @@ export function ExpressionManagementPage() {
                       size="sm"
                       onClick={() => setPage(page + 1)}
                       disabled={page >= Math.ceil(total / pageSize)}
-                      className="h-9 rounded-full px-3"
+                      className="h-11 rounded-full px-4"
                     >
                       <span className="hidden sm:inline">下一页</span>
                       <ChevronRight className="h-4 w-4 sm:ml-1" />
@@ -596,7 +749,7 @@ export function ExpressionManagementPage() {
                       size="icon"
                       onClick={() => setPage(Math.ceil(total / pageSize))}
                       disabled={page >= Math.ceil(total / pageSize)}
-                      className="hidden h-9 w-9 rounded-full sm:inline-flex"
+                      className="hidden h-11 w-11 rounded-full sm:inline-flex"
                     >
                       <ChevronsRight className="h-4 w-4" />
                     </Button>
@@ -701,21 +854,21 @@ function ExpressionDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>表达方式详情</DialogTitle>
           <DialogDescription>查看表达方式的完整信息</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <InfoItem label="情境" value={expression.situation} />
             <InfoItem label="风格" value={expression.style} />
             <InfoItem label="聊天" value={getChatName(expression.chat_id)} />
             <InfoItem icon={Hash} label="记录ID" value={expression.id.toString()} mono />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <InfoItem icon={Clock} label="创建时间" value={formatTime(expression.create_date)} />
           </div>
         </div>
@@ -810,14 +963,14 @@ function ExpressionCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>新增表达方式</DialogTitle>
           <DialogDescription>创建新的表达方式记录</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="situation">
                 情境 <span className="text-destructive">*</span>
@@ -934,14 +1087,14 @@ function ExpressionEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>编辑表达方式</DialogTitle>
           <DialogDescription>修改表达方式的信息</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="edit_situation">情境</Label>
               <Input

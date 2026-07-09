@@ -4,8 +4,8 @@
 import React from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Cpu, Pencil, Trash2 } from 'lucide-react'
+import { Check, Cpu, Pencil, Trash2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { ModelInfo } from '../types'
 
 interface ModelTableProps {
@@ -43,19 +43,29 @@ export const ModelTable = React.memo(function ModelTable({
   isModelUsed,
   searchQuery,
 }: ModelTableProps) {
+  const allSelected = selectedModels.size === filteredModels.length && filteredModels.length > 0
+
   return (
     <div className="ios-group hidden overflow-hidden md:block">
       {filteredModels.length > 0 && (
         <div className="flex min-h-12 items-center justify-between gap-4 border-b border-border/45 px-5 text-[13px] leading-5 text-muted-foreground">
-          <label className="ios-touch flex items-center gap-2 rounded-full pr-2">
-            <span className="sr-only">选择全部模型</span>
-            <Checkbox
-              checked={selectedModels.size === filteredModels.length && filteredModels.length > 0}
-              onCheckedChange={onToggleSelectAll}
-              aria-label="选择全部模型"
-            />
+          <button
+            type="button"
+            className="ios-touch flex min-h-11 items-center gap-2 rounded-full pr-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+            onClick={onToggleSelectAll}
+            aria-label="选择全部模型"
+            aria-pressed={allSelected}
+          >
+            <span
+              className={cn(
+                'grid h-6 w-6 place-items-center rounded-[8px] border border-muted-foreground/35',
+                allSelected && 'border-primary bg-primary text-primary-foreground'
+              )}
+            >
+              {allSelected && <Check className="h-4 w-4" strokeWidth={3} />}
+            </span>
             <span>选择全部</span>
-          </label>
+          </button>
           <span>{filteredModels.length} 个模型</span>
         </div>
       )}
@@ -82,13 +92,23 @@ export const ModelTable = React.memo(function ModelTable({
               key={displayIndex}
               className="ios-touch flex min-h-[78px] items-center gap-4 border-b border-border/45 px-5 py-3 last:border-b-0 hover:bg-[rgb(120_120_128_/_0.06)]"
             >
-              <div className="w-11 shrink-0">
-                <Checkbox
-                  checked={selectedModels.has(actualIndex)}
-                  onCheckedChange={() => onToggleSelection(actualIndex)}
-                  aria-label={`选择模型 ${model.name}`}
-                />
-              </div>
+              <button
+                type="button"
+                className="ios-touch grid h-11 w-11 shrink-0 place-items-center rounded-full focus-visible:bg-accent/70 focus-visible:ring-0"
+                onClick={() => onToggleSelection(actualIndex)}
+                aria-label={`选择模型 ${model.name}`}
+                aria-pressed={selectedModels.has(actualIndex)}
+              >
+                <span
+                  className={cn(
+                    'grid h-6 w-6 place-items-center rounded-[8px] border border-muted-foreground/35',
+                    selectedModels.has(actualIndex) &&
+                      'border-primary bg-primary text-primary-foreground'
+                  )}
+                >
+                  {selectedModels.has(actualIndex) && <Check className="h-4 w-4" strokeWidth={3} />}
+                </span>
+              </button>
               <span className="ios-symbol ios-symbol-md ios-symbol-blue">
                 <Cpu className="h-4 w-4" />
               </span>
@@ -124,12 +144,12 @@ export const ModelTable = React.memo(function ModelTable({
                   {used ? '已使用' : '未使用'}
                 </Badge>
               </div>
-              <div className="flex w-24 shrink-0 justify-end gap-2 lg:w-28">
+              <div className="flex w-28 shrink-0 justify-end gap-2 lg:w-32">
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={() => onEdit(model, actualIndex)}
-                  className="h-9 w-9 rounded-full"
+                  className="h-11 w-11 rounded-full"
                   aria-label={`编辑模型 ${model.name}`}
                   title="编辑"
                 >
@@ -139,7 +159,7 @@ export const ModelTable = React.memo(function ModelTable({
                   variant="ghost"
                   size="icon"
                   onClick={() => onDelete(actualIndex)}
-                  className="h-9 w-9 rounded-full text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)] dark:hover:bg-[rgb(255_69_58_/_0.12)]"
+                  className="h-11 w-11 rounded-full text-[rgb(215_0_21)] hover:bg-[rgb(255_59_48_/_0.08)] hover:text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)] dark:hover:bg-[rgb(255_69_58_/_0.12)]"
                   aria-label={`删除模型 ${model.name}`}
                   title="删除"
                 >

@@ -43,14 +43,12 @@ import {
   Check,
   ChevronRight,
   CloudMoon,
-  Code2,
   Filter,
   FlaskConical,
   Layers3,
   MessageCircle,
   Mic2,
   Power,
-  RefreshCw,
   Save,
   Server,
   Settings2,
@@ -59,17 +57,11 @@ import {
   UserRound,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import {
-  getBotConfig,
-  getBotConfigRaw,
-  updateBotConfig,
-  updateBotConfigRaw,
-} from '@/lib/config-api'
+import { getBotConfig, updateBotConfig } from '@/lib/config-api'
 import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
-import { CodeEditor } from '@/components/CodeEditor'
 
 // 导入模块化的类型定义
 import type {
@@ -229,24 +221,18 @@ const CONFIG_TABS: ConfigTabItem[] = [
   },
 ]
 
-type ConfigEditMode = 'visual' | 'toml'
-
 export function BotConfigPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [visualUnsavedChanges, setVisualUnsavedChanges] = useState(false)
-  const [rawUnsavedChanges, setRawUnsavedChanges] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [showRestartOverlay, setShowRestartOverlay] = useState(false)
-  const [configMode, setConfigMode] = useState<ConfigEditMode>('visual')
   const [activeTab, setActiveTab] = useState<BotConfigTab>('bot')
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
-  const [rawConfig, setRawConfig] = useState('')
-  const [rawLoading, setRawLoading] = useState(false)
   const { toast } = useToast()
   const activeTabItem = CONFIG_TABS.find((item) => item.value === activeTab) ?? CONFIG_TABS[0]
-  const hasUnsavedChanges = configMode === 'toml' ? rawUnsavedChanges : visualUnsavedChanges
+  const hasUnsavedChanges = visualUnsavedChanges
 
   // 配置状态
   const [botConfig, setBotConfig] = useState<BotConfig | null>(null)
@@ -279,15 +265,13 @@ export function BotConfigPage() {
 
   // 用于标记初始加载和配置缓存
   const initialLoadRef = useRef(true)
-  const suppressAutoSaveRef = useRef(false)
   const configRef = useRef<Record<string, unknown>>({})
-  const rawConfigSnapshotRef = useRef('')
 
   // ==================== 辅助函数 ====================
 
   /**
    * 解析并设置所有配置状态
-   * 抽取自 loadConfig 和 handleModeChange 中的重复逻辑
+   * 抽取自 loadConfig 中的重复逻辑
    */
   const parseAndSetConfig = useCallback((config: Record<string, unknown>) => {
     configRef.current = config
@@ -519,58 +503,6 @@ export function BotConfigPage() {
     loadConfig()
   }, [loadConfig])
 
-  const loadRawConfig = useCallback(async () => {
-    try {
-      setRawLoading(true)
-      const content = await getBotConfigRaw()
-      setRawConfig(content)
-      rawConfigSnapshotRef.current = content
-      setRawUnsavedChanges(false)
-    } catch (error) {
-      console.error('加载 TOML 配置失败:', error)
-      toast({
-        title: '加载失败',
-        description: '无法加载 TOML 源码',
-        variant: 'destructive',
-      })
-    } finally {
-      setRawLoading(false)
-    }
-  }, [toast])
-
-  const handleModeChange = useCallback(
-    async (mode: ConfigEditMode) => {
-      if (mode === configMode) return
-
-      setConfigMode(mode)
-      if (mode === 'toml') {
-        if (!rawConfig) {
-          await loadRawConfig()
-        }
-        return
-      }
-
-      suppressAutoSaveRef.current = true
-      try {
-        const config = await getBotConfig()
-        parseAndSetConfig(config)
-        setVisualUnsavedChanges(false)
-      } catch (error) {
-        console.error('刷新视觉配置失败:', error)
-        toast({
-          title: '刷新失败',
-          description: '无法同步最新配置',
-          variant: 'destructive',
-        })
-      } finally {
-        window.setTimeout(() => {
-          suppressAutoSaveRef.current = false
-        }, 0)
-      }
-    },
-    [configMode, loadRawConfig, parseAndSetConfig, rawConfig, toast]
-  )
-
   // 使用模块化的 useAutoSave hook
   const { triggerAutoSave, cancelPendingAutoSave } = useAutoSave(
     initialLoadRef.current,
@@ -580,10 +512,9 @@ export function BotConfigPage() {
 
   const triggerVisualAutoSave = useCallback(
     (sectionName: ConfigSectionName, sectionData: unknown) => {
-      if (configMode !== 'visual' || suppressAutoSaveRef.current) return
       triggerAutoSave(sectionName, sectionData)
     },
-    [configMode, triggerAutoSave]
+    [triggerAutoSave]
   )
 
   // 使用 useConfigAutoSave hook 简化配置变化监听
@@ -653,17 +584,6 @@ export function BotConfigPage() {
       // 取消待处理的自动保存
       cancelPendingAutoSave()
 
-      if (configMode === 'toml') {
-        await updateBotConfigRaw(rawConfig)
-        rawConfigSnapshotRef.current = rawConfig
-        setRawUnsavedChanges(false)
-        toast({
-          title: '保存成功',
-          description: 'TOML 源码已保存',
-        })
-        return
-      }
-
       await updateBotConfig(buildFullConfig())
       setVisualUnsavedChanges(false)
       toast({
@@ -711,14 +631,8 @@ export function BotConfigPage() {
       // 取消待处理的自动保存
       cancelPendingAutoSave()
 
-      if (configMode === 'toml') {
-        await updateBotConfigRaw(rawConfig)
-        rawConfigSnapshotRef.current = rawConfig
-        setRawUnsavedChanges(false)
-      } else {
-        await updateBotConfig(buildFullConfig())
-        setVisualUnsavedChanges(false)
-      }
+      await updateBotConfig(buildFullConfig())
+      setVisualUnsavedChanges(false)
       toast({
         title: '保存成功',
         description: '配置已保存，即将重启主程序...',
@@ -785,7 +699,7 @@ export function BotConfigPage() {
                 disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
                 size="sm"
                 variant="outline"
-                className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-24 sm:px-4"
+                className="h-11 w-11 px-0 sm:w-auto sm:min-w-24 sm:px-4"
                 aria-label={
                   saving
                     ? '保存中'
@@ -815,7 +729,7 @@ export function BotConfigPage() {
                   <Button
                     disabled={saving || autoSaving || restarting}
                     size="sm"
-                    className="h-11 w-11 px-0 sm:h-9 sm:w-auto sm:min-w-28 sm:px-4"
+                    className="h-11 w-11 px-0 sm:w-auto sm:min-w-28 sm:px-4"
                     aria-label={
                       restarting ? '重启中' : hasUnsavedChanges ? '保存并重启' : '重启主程序'
                     }
@@ -857,18 +771,13 @@ export function BotConfigPage() {
         </div>
 
         <div className="ios-group overflow-hidden sm:hidden">
-          <button
-            type="button"
-            onClick={saveConfig}
-            disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
-            className="ios-row ios-touch min-h-[62px] w-full text-left disabled:opacity-50 disabled:active:scale-100"
-          >
+          <div className="ios-row min-h-[66px] gap-3 py-3">
             <span className="flex min-w-0 items-center gap-3">
               <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
                 <Save className="h-4 w-4" />
               </span>
               <span className="min-w-0">
-                <span className="block text-[16px] font-medium leading-6">保存配置</span>
+                <span className="block text-[16px] font-medium leading-6">配置状态</span>
                 <span className="block truncate text-[13px] leading-5 text-muted-foreground">
                   {saving
                     ? '正在写入配置'
@@ -880,93 +789,65 @@ export function BotConfigPage() {
                 </span>
               </span>
             </span>
-            <span className="shrink-0 text-[15px] leading-6 text-muted-foreground">
-              {hasUnsavedChanges ? '待保存' : '已保存'}
-            </span>
-          </button>
-
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <button
-                type="button"
-                disabled={saving || autoSaving || restarting}
-                className="ios-row ios-touch min-h-[62px] w-full text-left disabled:opacity-50 disabled:active:scale-100"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-green">
-                    <Power className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[16px] font-medium leading-6">
-                      {hasUnsavedChanges ? '保存并重启' : '重启主程序'}
-                    </span>
-                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                      重启后新配置才会完整生效
-                    </span>
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
-                <AlertDialogDescription asChild>
-                  <div>
-                    <p>
-                      {hasUnsavedChanges
-                        ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
-                        : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
-                    </p>
-                  </div>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>取消</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}
+            <span className="flex shrink-0 items-center gap-2">
+              {hasUnsavedChanges || saving || autoSaving ? (
+                <button
+                  type="button"
+                  onClick={saveConfig}
+                  disabled={saving || autoSaving || !hasUnsavedChanges || restarting}
+                  className="ios-touch inline-flex h-11 min-w-[64px] items-center justify-center rounded-full bg-primary px-4 text-[15px] font-semibold leading-none text-primary-foreground shadow-[0_8px_18px_hsl(var(--primary)_/_0.22)] disabled:bg-secondary disabled:text-muted-foreground disabled:shadow-none disabled:active:scale-100"
                 >
-                  {hasUnsavedChanges ? '保存并重启' : '确认重启'}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                  {saving ? '保存中' : autoSaving ? '自动' : '保存'}
+                </button>
+              ) : (
+                <span className="inline-flex h-11 min-w-[72px] items-center justify-center gap-1.5 rounded-full bg-secondary/80 px-3 text-[15px] font-medium leading-none text-muted-foreground">
+                  <Check className="h-4 w-4" strokeWidth={2.5} />
+                  已保存
+                </span>
+              )}
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={saving || autoSaving || restarting}
+                    className="ios-touch inline-flex h-11 min-w-[70px] items-center justify-center gap-1.5 rounded-full bg-secondary/85 px-3 text-[15px] font-semibold leading-none text-foreground hover:bg-secondary disabled:opacity-50 disabled:active:scale-100"
+                    aria-label={
+                      restarting ? '重启中' : hasUnsavedChanges ? '保存并重启' : '重启主程序'
+                    }
+                  >
+                    <Power className="h-4 w-4" strokeWidth={2.4} />
+                    <span>{restarting ? '重启中' : '重启'}</span>
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认重启主程序？</AlertDialogTitle>
+                    <AlertDialogDescription asChild>
+                      <div>
+                        <p>
+                          {hasUnsavedChanges
+                            ? '当前有未保存的配置更改。点击确认将先保存配置,然后重启主程序使新配置生效。重启过程中服务将暂时离线。'
+                            : '即将重启主程序。重启过程中服务将暂时离线,配置将在重启后生效。'}
+                        </p>
+                      </div>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={hasUnsavedChanges ? handleSaveAndRestart : handleRestart}
+                    >
+                      {hasUnsavedChanges ? '保存并重启' : '确认重启'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </span>
+          </div>
         </div>
 
-        <div className="ios-group grid grid-cols-2 gap-1 p-1 sm:w-fit sm:min-w-[21rem]">
-          <button
-            type="button"
-            onClick={() => void handleModeChange('visual')}
-            className={cn(
-              'ios-touch flex h-10 items-center justify-center gap-2 rounded-[14px] px-3 text-[15px] font-medium leading-5',
-              configMode === 'visual'
-                ? 'bg-background text-foreground shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_6px_16px_rgba(31,41,55,0.07)] dark:bg-white/10'
-                : 'text-muted-foreground'
-            )}
-            aria-pressed={configMode === 'visual'}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            视觉表单
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleModeChange('toml')}
-            className={cn(
-              'ios-touch flex h-10 items-center justify-center gap-2 rounded-[14px] px-3 text-[15px] font-medium leading-5',
-              configMode === 'toml'
-                ? 'bg-background text-foreground shadow-[0_1px_0_rgba(255,255,255,0.78)_inset,0_6px_16px_rgba(31,41,55,0.07)] dark:bg-white/10'
-                : 'text-muted-foreground'
-            )}
-            aria-pressed={configMode === 'toml'}
-          >
-            <Code2 className="h-4 w-4" />
-            TOML 源码
-          </button>
-        </div>
-
-        {configMode === 'visual' ? (
-          <>
-            <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
               <DialogTrigger asChild>
                 <button
                   type="button"
@@ -1191,59 +1072,7 @@ export function BotConfigPage() {
                 {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
                 {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
               </TabsContent>
-            </Tabs>
-          </>
-        ) : (
-          <div className="space-y-4">
-            <div className="ios-group overflow-hidden">
-              <div className="ios-row min-h-[68px]">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
-                    <Code2 className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[16px] font-semibold leading-6">TOML 源码</span>
-                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                      编辑未出现在视觉表单中的完整配置字段
-                    </span>
-                  </span>
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={loadRawConfig}
-                  disabled={rawLoading || saving || restarting}
-                  className="h-9 w-9 shrink-0 rounded-full px-0"
-                  aria-label="重新载入 TOML"
-                  title="重新载入 TOML"
-                >
-                  <RefreshCw className={cn('h-4 w-4', rawLoading && 'animate-spin')} />
-                </Button>
-              </div>
-              <div className="p-2 sm:p-3">
-                {rawLoading ? (
-                  <div className="flex h-[clamp(360px,58vh,680px)] items-center justify-center rounded-[16px] bg-muted/55 text-sm text-muted-foreground">
-                    正在加载 TOML...
-                  </div>
-                ) : (
-                  <CodeEditor
-                    value={rawConfig}
-                    onChange={(value) => {
-                      setRawConfig(value)
-                      setRawUnsavedChanges(value !== rawConfigSnapshotRef.current)
-                    }}
-                    language="toml"
-                    height="clamp(360px,58vh,680px)"
-                    theme="dark"
-                    className="rounded-[16px] border-black/[0.04] dark:border-white/10"
-                    placeholder="正在等待配置内容..."
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        </Tabs>
 
         {/* 重启遮罩层 */}
         {showRestartOverlay && (

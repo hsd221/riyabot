@@ -16,7 +16,7 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Overlay
     className={cn(
-      'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/20 backdrop-blur-lg',
+      'fixed inset-0 z-50 bg-black/[0.18] backdrop-blur-md data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out dark:bg-black/[0.34]',
       className
     )}
     {...props}
@@ -34,7 +34,7 @@ const AlertDialogContent = React.forwardRef<
     <AlertDialogPrimitive.Content
       ref={ref}
       className={cn(
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] max-w-[25rem] translate-x-[-50%] translate-y-[-50%] gap-5 rounded-[24px] border border-black/[0.035] bg-white/[0.88] p-5 text-card-foreground shadow-[0_1px_1px_rgba(255,255,255,0.75)_inset,0_24px_70px_rgba(31,41,55,0.16),0_6px_18px_rgba(0,0,0,0.07)] backdrop-blur-2xl duration-300 ease-[cubic-bezier(0.2,0,0,1)] dark:border-white/10 dark:bg-zinc-950/[0.88] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_24px_70px_rgba(0,0,0,0.48)] sm:p-6',
+        'fixed bottom-0 left-0 top-auto z-50 grid w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 border-t border-black/[0.035] bg-white/[0.9] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-card-foreground shadow-[0_1px_1px_rgba(255,255,255,0.75)_inset,0_-18px_58px_rgba(31,41,55,0.15),0_6px_18px_rgba(0,0,0,0.06)] backdrop-blur-2xl duration-[360ms] ease-[cubic-bezier(0.2,0,0,1)] data-[state=open]:animate-slide-in-from-bottom data-[state=closed]:animate-slide-out-to-bottom dark:border-white/10 dark:bg-zinc-950/[0.88] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_-18px_58px_rgba(0,0,0,0.46)] sm:bottom-auto sm:left-[50%] sm:top-[50%] sm:w-[calc(100%-2rem)] sm:max-w-[25rem] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-[24px] sm:border sm:p-6 sm:shadow-[0_1px_1px_rgba(255,255,255,0.75)_inset,0_24px_70px_rgba(31,41,55,0.16),0_6px_18px_rgba(0,0,0,0.07)] sm:data-[state=open]:animate-fade-in sm:data-[state=closed]:animate-fade-out dark:sm:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_24px_70px_rgba(0,0,0,0.48)]',
         className
       )}
       {...props}
