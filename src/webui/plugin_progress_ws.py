@@ -170,10 +170,19 @@ async def websocket_plugin_progress(websocket: WebSocket, token: Optional[str] =
                 if data == "ping":
                     await websocket.send_text("pong")
 
+            except WebSocketDisconnect:
+                active_connections.discard(websocket)
+                logger.info(
+                    "插件进度 WebSocket 客户端已断开",
+                    event_code="webui.plugin_progress_ws.disconnected",
+                    connection_count=len(active_connections),
+                )
+                break
             except Exception:
                 logger.exception(
                     "插件进度 WebSocket 客户端消息处理失败", event_code="webui.plugin_progress_ws.message_failed"
                 )
+                active_connections.discard(websocket)
                 break
 
     except WebSocketDisconnect:

@@ -657,6 +657,8 @@ async def clone_repository(
 
         return CloneRepositoryResponse(**result)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"克隆仓库失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
@@ -1475,7 +1477,7 @@ async def get_local_plugin_readme(
 class UpdatePluginConfigRequest(BaseModel):
     """更新插件配置请求"""
 
-    config: Dict[str, Any] = Field(..., description="配置数据")
+    config: Dict[str, Any] | str = Field(..., description="配置数据或原始 TOML 字符串")
 
 
 @router.get("/config/{plugin_id}/schema")
@@ -1867,10 +1869,13 @@ async def update_plugin_config(
     logger.info(f"更新插件配置: {plugin_id}")
 
     try:
+        if not isinstance(request.config, dict):
+            raise HTTPException(status_code=400, detail="配置必须是对象格式")
+
         plugin_instance = find_plugin_instance(plugin_id)
 
         # 纠正 WebUI 提交的数据结构（扁平键与字符串列表）
-        if plugin_instance and isinstance(request.config, dict):
+        if plugin_instance:
             request.config = normalize_dotted_keys(request.config)
             if isinstance(plugin_instance.config_schema, dict):
                 coerce_types(plugin_instance.config_schema, request.config)

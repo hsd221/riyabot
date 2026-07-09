@@ -139,11 +139,19 @@ async def db_query(
                 raise ValueError("更新记录需要提供data参数")
 
             # 更新记录
-            return query.update(**data).execute()
+            update_query = model_class.update(**data)
+            if filters:
+                for field, value in filters.items():
+                    update_query = update_query.where(getattr(model_class, field) == value)
+            return update_query.execute()
 
         elif query_type == "delete":
             # 删除记录
-            return query.delete().execute()
+            delete_query = model_class.delete()
+            if filters:
+                for field, value in filters.items():
+                    delete_query = delete_query.where(getattr(model_class, field) == value)
+            return delete_query.execute()
 
         elif query_type == "count":
             # 计数

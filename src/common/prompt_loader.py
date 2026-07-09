@@ -77,7 +77,7 @@ def load_prompt_template(name: str) -> str:
     return _read_prompt_file(filepath, _PROMPT_CACHE_REVISION)
 
 
-def load_prompt(name: str, **kwargs) -> str:
+def load_prompt(name: str, /, **kwargs) -> str:
     """加载并格式化提示词（便捷入口）
 
     等价于 load_prompt_template(name).format(**kwargs)
@@ -163,7 +163,7 @@ def parse_prompt_sections(template: str) -> dict[str, str]:
     return sections
 
 
-def load_prompt_section(name: str, section: str, **kwargs) -> str:
+def load_prompt_section(name: str, section: str, /, **kwargs) -> str:
     """加载多段模板中的指定段并格式化
 
     等价于 parse_prompt_sections(load_prompt_template(name))[section].format(**kwargs)

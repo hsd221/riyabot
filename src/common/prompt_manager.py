@@ -39,7 +39,7 @@ class PromptManager:
         self._loaded = True
         logger.debug(f"已加载 {len(self._prompts)} 个提示词模板")
 
-    def get_prompt(self, name: str) -> str:
+    def get_prompt(self, name: str, /) -> str:
         """获取指定名称的提示词模板字符串
 
         在获取前会自动检测缓存修订号，如有变化则触发重载。
@@ -58,7 +58,7 @@ class PromptManager:
             raise KeyError(f"提示词 '{name}' 未找到，可用提示词: {list(self._prompts.keys())}")
         return self._prompts[name]
 
-    def format_prompt(self, name: str, **kwargs) -> str:
+    def format_prompt(self, name: str, /, **kwargs) -> str:
         """加载模板并使用 kwargs 格式化
 
         Args:
@@ -83,7 +83,7 @@ class PromptManager:
 prompt_manager = PromptManager()
 
 
-def safe_get_prompt(name: str, default: str = "", **kwargs) -> str:
+def safe_get_prompt(name: str, /, default: str = "", **kwargs) -> str:
     """安全获取格式化后的提示词，失败时返回默认值
 
     降级兜底函数，当提示词文件缺失或未加载时不会抛出异常，

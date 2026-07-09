@@ -563,9 +563,9 @@ async def get_review_stats(maibot_session: Optional[str] = Cookie(None), authori
         verify_auth_token(maibot_session, authorization)
 
         total = Expression.select().count()
-        unchecked = Expression.select().where(not Expression.checked).count()
-        passed = Expression.select().where((Expression.checked) & (not Expression.rejected)).count()
-        rejected = Expression.select().where((Expression.checked) & (Expression.rejected)).count()
+        unchecked = Expression.select().where(Expression.checked.in_([False])).count()
+        passed = Expression.select().where(Expression.checked.in_([True]) & Expression.rejected.in_([False])).count()
+        rejected = Expression.select().where(Expression.checked.in_([True]) & Expression.rejected.in_([True])).count()
         ai_checked = Expression.select().where(Expression.modified_by == "ai").count()
         user_checked = Expression.select().where(Expression.modified_by == "user").count()
 
@@ -625,11 +625,11 @@ async def get_review_list(
 
         # 根据筛选类型过滤
         if filter_type == "unchecked":
-            query = query.where(not Expression.checked)
+            query = query.where(Expression.checked.in_([False]))
         elif filter_type == "passed":
-            query = query.where((Expression.checked) & (not Expression.rejected))
+            query = query.where(Expression.checked.in_([True]) & Expression.rejected.in_([False]))
         elif filter_type == "rejected":
-            query = query.where((Expression.checked) & (Expression.rejected))
+            query = query.where(Expression.checked.in_([True]) & Expression.rejected.in_([True]))
         # all 不需要额外过滤
 
         # 搜索过滤

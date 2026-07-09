@@ -1,6 +1,6 @@
 from enum import Enum, auto
 from typing import Optional, Dict, Any, List, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from abc import ABC, abstractmethod
 
@@ -249,7 +249,7 @@ class ChatStateManager:
                 setattr(self.state_info, key, value)
 
         # 记录状态历史
-        self.state_history.append(self.state_info)
+        self.state_history.append(replace(self.state_info))
 
     def get_current_state_info(self) -> ChatStateInfo:
         """获取当前状态信息"""

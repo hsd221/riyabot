@@ -174,7 +174,7 @@ class ToolExecutor:
 
                     tool_results.append(tool_info)
                     used_tools.append(tool_name)
-                    preview = content[:200]
+                    preview = tool_info["content"][:200]
                     logger.debug(f"{self.log_prefix}工具{tool_name}结果内容: {preview}...")
             except Exception as e:
                 logger.error(f"{self.log_prefix}工具{tool_name}执行失败: {e}")
@@ -335,10 +335,9 @@ class ToolExecutor:
 
     def clear_cache(self):
         """清空所有缓存"""
-        if self.enable_cache:
-            cache_count = len(self.tool_cache)
-            self.tool_cache.clear()
-            logger.info(f"{self.log_prefix}清空了{cache_count}个缓存项")
+        cache_count = len(self.tool_cache)
+        self.tool_cache.clear()
+        logger.info(f"{self.log_prefix}清空了{cache_count}个缓存项")
 
     def get_cache_status(self) -> Dict:
         """获取缓存状态信息

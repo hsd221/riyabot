@@ -74,6 +74,7 @@ class PFCManager:
             await self._initialize_conversation(conversation_instance)
         except Exception as e:
             logger.error(f"[私聊][{private_name}]创建会话实例失败: {stream_id}, 错误: {e}")
+            self._initializing[stream_id] = False
             return None
 
         return conversation_instance
@@ -100,6 +101,7 @@ class PFCManager:
         except Exception as e:
             logger.exception(f"[私聊][{private_name}]管理器初始化会话实例失败: {stream_id}, 错误: {e}")
             # 清理失败的初始化
+            self._initializing[stream_id] = False
 
     async def get_conversation(self, stream_id: str) -> Optional[Conversation]:
         """获取已存在的会话实例

@@ -7,7 +7,6 @@
 import re
 from typing import Dict, Any, Tuple
 from src.common.logger import get_logger
-from src.config.config import MMC_VERSION
 
 # if TYPE_CHECKING:
 #     from src.plugin_system.base.base_plugin import BasePlugin
@@ -177,6 +176,8 @@ class VersionComparator:
         Returns:
             str: 当前版本号
         """
+        from src.config.config import MMC_VERSION
+
         return VersionComparator.normalize_version(MMC_VERSION)
 
     @staticmethod

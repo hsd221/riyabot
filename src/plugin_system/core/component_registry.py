@@ -438,7 +438,8 @@ class ComponentRegistry:
                     from .events_manager import events_manager  # 延迟导入防止循环导入问题
 
                     await events_manager.unregister_event_subscriber(component_name)
-            self._components[component_name].enabled = False
+            namespaced_name = f"{component_type}.{component_name}"
+            self._components[namespaced_name].enabled = False
             self._components_by_type[component_type][component_name].enabled = False
             logger.info(
                 "组件已禁用",

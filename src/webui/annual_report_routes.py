@@ -150,7 +150,7 @@ async def get_time_footprint(year: int = 2025) -> TimeFootprintData:
     try:
         # 1. 年度在线时长
         online_records = list(
-            OnlineTime.select().where((OnlineTime.start_timestamp >= start_dt) | (OnlineTime.end_timestamp <= end_dt))
+            OnlineTime.select().where((OnlineTime.start_timestamp <= end_dt) & (OnlineTime.end_timestamp >= start_dt))
         )
         total_seconds = 0
         for record in online_records:

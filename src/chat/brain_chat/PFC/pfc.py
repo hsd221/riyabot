@@ -159,7 +159,7 @@ class GoalAnalyzer:
             else:
                 # 单个目标的情况
                 conversation_info.goal_list.append(result)
-                return goal, "", reasoning
+                return result.get("goal", ""), "", result.get("reasoning", "")
 
         # 如果解析失败，返回默认值
         return "", "", ""

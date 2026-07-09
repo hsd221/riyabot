@@ -16,7 +16,7 @@ from .observation_info import ObservationInfo
 from .conversation_info import ConversationInfo  # 确保导入 ConversationInfo
 from .reply_generator import ReplyGenerator
 from src.chat.message_receive.chat_stream import ChatStream
-from maim_message import UserInfo
+from maim_message import UserInfo, Seg
 from src.chat.message_receive.chat_stream import get_chat_manager
 from .pfc_KnowledgeFetcher import KnowledgeFetcher, collect_knowledge_atom_ids, format_pfc_chat_history
 from .waiter import Waiter
@@ -271,14 +271,15 @@ class Conversation:
                     raise ValueError(f"无法确定 ChatStream for stream_id {self.stream_id}")
 
             user_info = UserInfo.from_dict(msg_dict.get("user_info", {}))
+            processed_text = msg_dict.get("processed_plain_text", "")
 
             return Message(
                 message_id=msg_dict.get("message_id", f"gen_{time.time()}"),  # 提供默认 ID
                 chat_stream=chat_stream,  # 使用确定的 chat_stream
-                time=msg_dict.get("time", time.time()),  # 提供默认时间
                 user_info=user_info,
-                processed_plain_text=msg_dict.get("processed_plain_text", ""),
-                detailed_plain_text=msg_dict.get("detailed_plain_text", ""),
+                message_segment=Seg(type="text", data=processed_text),
+                timestamp=msg_dict.get("time", time.time()),  # 提供默认时间
+                processed_plain_text=processed_text,
             )
         except Exception as e:
             logger.warning(f"[私聊][{self.private_name}]转换消息时出错: {e}")

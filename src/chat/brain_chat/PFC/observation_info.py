@@ -74,7 +74,7 @@ class ObservationInfoHandler(NotificationHandler):
             elif notification_type == NotificationType.ACTIVE_CHAT:
                 # 处理活跃通知 (通常由 COLD_CHAT 的反向状态处理)
                 is_active = data.get("is_active", False)
-                self.observation_info.is_cold = not is_active
+                self.observation_info.is_cold_chat = not is_active
 
             elif notification_type == NotificationType.BOT_SPEAKING:
                 # 处理机器人说话通知 (按需实现)

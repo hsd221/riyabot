@@ -62,7 +62,9 @@ class LocalStoreManager:
         else:
             # 不存在本地存储文件，创建新的目录和文件
             logger.warning("本地存储文件不存在，开始创建", event_code="local_store.missing_create", path=self.file_path)
-            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+            store_dir = os.path.dirname(self.file_path)
+            if store_dir:
+                os.makedirs(store_dir, exist_ok=True)
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump({}, f, ensure_ascii=False, indent=4)
             logger.info("本地存储文件创建完成", event_code="local_store.created", path=self.file_path)

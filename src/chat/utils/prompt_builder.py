@@ -297,15 +297,11 @@ class Prompt(str):
 
     def format(self, *args, **kwargs) -> "str":
         """支持位置参数和关键字参数的格式化，使用"""
-        ret = type(self)(
+        return self._format_template(
             self.template,
-            self.name,
             args=list(args) if args else self._args,
-            _should_register=False,
-            **kwargs or self._kwargs,
+            kwargs=kwargs or self._kwargs,
         )
-        # print(f"prompt build result: {ret} name: {ret.name} ")
-        return str(ret)
 
     def __str__(self) -> str:
         return super().__str__() if self._kwargs or self._args else self.template

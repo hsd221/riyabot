@@ -100,6 +100,10 @@ class ChatObserver:
             message: 消息数据
         """
         try:
+            self.message_cache.append(message)
+            message_time = message.get("time")
+            if isinstance(message_time, (int, float)) and message_time > (self.last_message_time or 0):
+                self.last_message_time = message_time
             # 发送新消息通知
             notification = create_new_message_notification(
                 sender="chat_observer", target="observation_info", message=message
@@ -173,7 +177,7 @@ class ChatObserver:
         Returns:
             List[Dict[str, Any]]: 消息列表
         """
-        filtered_messages = self.message_history
+        filtered_messages = self.message_cache
 
         if start_time is not None:
             filtered_messages = [m for m in filtered_messages if m["time"] >= start_time]

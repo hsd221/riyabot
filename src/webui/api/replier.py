@@ -247,7 +247,7 @@ async def get_replier_stats():
     recent_replies = []
     for chat in overview.chats[:5]:  # 从最近5个聊天中获取
         try:
-            chat_logs = await get_chat_reply_logs(chat.chat_id, page=1, page_size=2)
+            chat_logs = await get_chat_reply_logs(chat.chat_id, page=1, page_size=2, search=None)
             recent_replies.extend(chat_logs.data)
         except Exception:
             continue
