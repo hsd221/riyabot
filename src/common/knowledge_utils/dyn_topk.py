@@ -15,6 +15,11 @@ def dyn_select_top_k(
     # 归一化
     max_score = sorted_score[0][1]
     min_score = sorted_score[-1][1]
+    if max_score == min_score:
+        if len(sorted_score) == 1:
+            return [(sorted_score[0][0], sorted_score[0][1], 1.0)]
+        return []
+
     normalized_score = []
     for score_item in sorted_score:
         normalized_score.append(
@@ -28,8 +33,8 @@ def dyn_select_top_k(
         )
 
     # 寻找跳变点：score变化最大的位置
-    jump_idx = 0
-    for i in range(1, len(normalized_score)):
+    jump_idx = 1
+    for i in range(2, len(normalized_score)):
         if abs(normalized_score[i][2] - normalized_score[i - 1][2]) > abs(
             normalized_score[jump_idx][2] - normalized_score[jump_idx - 1][2]
         ):
