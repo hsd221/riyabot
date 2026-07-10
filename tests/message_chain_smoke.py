@@ -152,7 +152,9 @@ async def test_media_background_enrichment() -> None:
             raise AssertionError("cached media should not be analyzed")
 
         bg._analyze_media = unexpected_analyze
-        bg._load_cached_media_result = lambda kind, media_hash: "[表情包：cached]" if kind == "emoji" else None
+        bg._load_cached_media_result = (
+            lambda kind, media_hash, media_data=None: "[表情包：cached]" if kind == "emoji" else None
+        )
         bg.schedule_emoji_description_task("ZW1vamk=", "msg-cached-media")
 
         assert len(bg._media_task_states) == 1

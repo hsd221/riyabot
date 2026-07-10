@@ -28,6 +28,14 @@ def png_base64(color: tuple[int, int, int] = (0, 255, 0)) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def gif_base64() -> str:
+    first = Image.new("RGB", (2, 2), (255, 0, 0))
+    second = Image.new("RGB", (2, 2), (0, 255, 0))
+    buffer = io.BytesIO()
+    first.save(buffer, format="GIF", save_all=True, append_images=[second], duration=100, loop=0)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def make_manager() -> emoji_manager.EmojiManager:
     manager = object.__new__(emoji_manager.EmojiManager)
     manager._initialized = True
@@ -327,6 +335,106 @@ class EmojiDescriptionAndRegistrationTest(unittest.IsolatedAsyncioTestCase):
         cache_record.save.assert_called_once()
 
         self.assertEqual(await manager.build_emoji_description("not-base64"), ("", []))
+
+    async def test_build_emoji_description_sends_gif_frames_as_ordered_png_images(self) -> None:
+        manager = make_manager()
+        manager.vlm = SimpleNamespace(
+            generate_response_for_image=AsyncMock(),
+            generate_response_for_images=AsyncMock(
+                side_effect=[("逐帧与整体描述", None), ("是", None)],
+            ),
+        )
+        manager.llm_emotion_judge = SimpleNamespace(generate_response_async=AsyncMock(return_value=("开心", None)))
+        stale_cache = SimpleNamespace(description="旧拼图描述", emotion_tags="旧情绪", save=Mock())
+
+        with (
+            patch.object(emoji_manager.EmojiDescriptionCache, "get_or_none", side_effect=[stale_cache, stale_cache]),
+            patch.object(
+                emoji_manager.EmojiDescriptionCache,
+                "get_or_create",
+                return_value=(stale_cache, False),
+            ),
+            patch.object(
+                emoji_manager.global_config,
+                "emoji",
+                SimpleNamespace(content_filtration=True, filtration_prompt="合规"),
+            ),
+        ):
+            description, emotions = await manager.build_emoji_description(gif_base64())
+
+        self.assertEqual(description, "[表情包：逐帧与整体描述]")
+        self.assertEqual(emotions, ["开心"])
+        self.assertEqual(manager.vlm.generate_response_for_images.await_count, 2)
+        args = manager.vlm.generate_response_for_images.await_args_list[0].args
+        self.assertIn("分别概括每一帧", args[0])
+        self.assertIn("整体", args[0])
+        self.assertEqual([image_format for image_format, _ in args[1]], ["png", "png"])
+        self.assertEqual(manager.vlm.generate_response_for_images.await_args_list[0].kwargs["max_tokens"], 512)
+        self.assertEqual(emoji_manager.read_gif_description_cache(stale_cache.description), "逐帧与整体描述")
+        audit_args = manager.vlm.generate_response_for_images.await_args_list[1].args
+        self.assertEqual([image_format for image_format, _ in audit_args[1]], ["png", "png"])
+        manager.vlm.generate_response_for_image.assert_not_awaited()
+
+    async def test_build_emoji_description_clears_stale_gif_emotions_before_rejected_audit(self) -> None:
+        manager = make_manager()
+        manager.vlm = SimpleNamespace(
+            generate_response_for_images=AsyncMock(side_effect=[("新版逐帧描述", None), ("否", None)]),
+        )
+        manager.llm_emotion_judge = SimpleNamespace(generate_response_async=AsyncMock())
+        stale_cache = SimpleNamespace(description="旧拼图描述", emotion_tags="旧情绪", save=Mock())
+
+        with (
+            patch.object(emoji_manager.EmojiDescriptionCache, "get_or_none", return_value=stale_cache),
+            patch.object(
+                emoji_manager.EmojiDescriptionCache,
+                "get_or_create",
+                return_value=(stale_cache, False),
+            ),
+            patch.object(
+                emoji_manager.global_config,
+                "emoji",
+                SimpleNamespace(content_filtration=True, filtration_prompt="合规"),
+            ),
+        ):
+            result = await manager.build_emoji_description(gif_base64())
+
+        self.assertEqual(result, ("", []))
+        self.assertIsNone(stale_cache.emotion_tags)
+        self.assertEqual(emoji_manager.read_gif_description_cache(stale_cache.description), "新版逐帧描述")
+        manager.llm_emotion_judge.generate_response_async.assert_not_awaited()
+
+    async def test_build_emoji_description_audits_every_long_gif_batch_in_order(self) -> None:
+        manager = make_manager()
+        manager.vlm = SimpleNamespace(
+            generate_response_for_images=AsyncMock(
+                side_effect=[("第1至16帧概括", None), ("第17帧概括", None), ("是", None), ("否", None)]
+            ),
+            generate_response_async=AsyncMock(return_value=("整体概括", None)),
+        )
+        manager.llm_emotion_judge = SimpleNamespace(generate_response_async=AsyncMock())
+        image_manager = SimpleNamespace(extract_gif_frames=Mock(return_value=[f"frame-{index}" for index in range(17)]))
+
+        with (
+            patch.object(emoji_manager, "get_image_manager", return_value=image_manager),
+            patch.object(emoji_manager.EmojiDescriptionCache, "get_or_none", return_value=None),
+            patch.object(
+                emoji_manager.EmojiDescriptionCache,
+                "get_or_create",
+                return_value=(SimpleNamespace(save=Mock()), True),
+            ),
+            patch.object(
+                emoji_manager.global_config,
+                "emoji",
+                SimpleNamespace(content_filtration=True, filtration_prompt="合规"),
+            ),
+        ):
+            result = await manager.build_emoji_description(gif_base64())
+
+        self.assertEqual(result, ("", []))
+        image_calls = manager.vlm.generate_response_for_images.await_args_list
+        self.assertEqual([len(call.args[1]) for call in image_calls], [16, 1, 16, 1])
+        self.assertEqual([call.kwargs["start_index"] for call in image_calls], [1, 17, 1, 17])
+        manager.llm_emotion_judge.generate_response_async.assert_not_awaited()
 
     async def test_register_emoji_by_filename_handles_success_duplicates_replace_and_description_failures(self) -> None:
         manager = make_manager()

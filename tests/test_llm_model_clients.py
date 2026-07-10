@@ -36,7 +36,10 @@ class OpenAIClientAdapterTest(unittest.TestCase):
             MessageBuilder()
             .set_role(RoleType.User)
             .add_text_content("look")
-            .add_image_content("jpeg", "img64")
+            .add_text_content("第 1 帧：")
+            .add_image_content("png", "frame1")
+            .add_text_content("第 2 帧：")
+            .add_image_content("png", "frame2")
             .build(),
             MessageBuilder()
             .set_role(RoleType.Assistant)
@@ -50,11 +53,18 @@ class OpenAIClientAdapterTest(unittest.TestCase):
         self.assertEqual(converted[0], {"role": "system", "content": "system"})
         self.assertEqual(converted[1]["role"], "user")
         self.assertEqual(converted[1]["content"][0], {"type": "text", "text": "look"})
-        self.assertEqual(converted[1]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,img64")
+        self.assertEqual(converted[1]["content"][1], {"type": "text", "text": "第 1 帧："})
+        self.assertEqual(converted[1]["content"][2]["image_url"]["url"], "data:image/png;base64,frame1")
+        self.assertEqual(converted[1]["content"][3], {"type": "text", "text": "第 2 帧："})
+        self.assertEqual(converted[1]["content"][4]["image_url"]["url"], "data:image/png;base64,frame2")
         self.assertEqual(converted[2]["content"], "")
         self.assertEqual(converted[2]["tool_calls"][0]["function"]["name"], "search")
         self.assertEqual(json.loads(converted[2]["tool_calls"][0]["function"]["arguments"]), {"query": "MaiBot"})
         self.assertEqual(converted[3]["tool_call_id"], "call-1")
+
+        jpeg_message = MessageBuilder().add_image_content("jpeg", "img64").build()
+        jpeg_content = openai_client._convert_messages([jpeg_message])[0]["content"]
+        self.assertEqual(jpeg_content[0]["image_url"]["url"], "data:image/jpeg;base64,img64")
 
     def test_convert_tool_options_maps_json_schema_types_and_required_fields(self) -> None:
         converted = openai_client._convert_tool_options([make_tool_option()])
@@ -150,13 +160,17 @@ class OpenAIClientAdapterTest(unittest.TestCase):
 
 class GeminiClientAdapterTest(unittest.TestCase):
     def test_convert_messages_splits_system_instructions_and_converts_user_model_content(self) -> None:
-        image_base64 = base64.b64encode(b"image").decode("ascii")
+        first_image_base64 = base64.b64encode(b"first-image").decode("ascii")
+        second_image_base64 = base64.b64encode(b"second-image").decode("ascii")
         messages = [
             MessageBuilder().set_role(RoleType.System).add_text_content("system").build(),
             MessageBuilder()
             .set_role(RoleType.User)
             .add_text_content("look")
-            .add_image_content("png", image_base64)
+            .add_text_content("第 1 帧：")
+            .add_image_content("png", first_image_base64)
+            .add_text_content("第 2 帧：")
+            .add_image_content("png", second_image_base64)
             .build(),
             MessageBuilder().set_role(RoleType.Assistant).add_text_content("answer").build(),
             MessageBuilder().set_role(RoleType.Tool).add_text_content("tool result").add_tool_call("call-1").build(),
@@ -167,10 +181,17 @@ class GeminiClientAdapterTest(unittest.TestCase):
         self.assertEqual(system_instructions, ["system"])
         self.assertEqual(contents[0].role, "user")
         self.assertEqual(contents[0].parts[0].text, "look")
-        self.assertEqual(contents[0].parts[1].inline_data.mime_type, "image/png")
+        self.assertEqual(contents[0].parts[1].text, "第 1 帧：")
+        self.assertEqual(contents[0].parts[2].inline_data.mime_type, "image/png")
+        self.assertEqual(contents[0].parts[2].inline_data.data, b"first-image")
+        self.assertEqual(contents[0].parts[3].text, "第 2 帧：")
+        self.assertEqual(contents[0].parts[4].inline_data.mime_type, "image/png")
+        self.assertEqual(contents[0].parts[4].inline_data.data, b"second-image")
         self.assertEqual(contents[1].role, "model")
 
-        system_with_image = MessageBuilder().set_role(RoleType.System).add_image_content("png", image_base64).build()
+        system_with_image = (
+            MessageBuilder().set_role(RoleType.System).add_image_content("png", first_image_base64).build()
+        )
         with self.assertRaises(ValueError):
             gemini_client._convert_messages([system_with_image])
 

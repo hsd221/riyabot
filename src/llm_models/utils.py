@@ -14,17 +14,22 @@ from .model_client.base_client import UsageRecord
 logger = get_logger("消息压缩工具")
 
 
-def compress_messages(messages: list[Message], img_target_size: int = 1 * 1024 * 1024) -> list[Message]:
+def compress_messages(
+    messages: list[Message],
+    img_target_size: int = 1 * 1024 * 1024,
+    img_total_target_size: int | None = 4 * 1024 * 1024,
+) -> list[Message]:
     """
     压缩消息列表中的图片
     :param messages: 消息列表
     :param img_target_size: 图片目标大小，默认1MB
+    :param img_total_target_size: 同一请求中所有图片的总目标大小，默认4MB
     :return: 压缩后的消息列表
     """
 
     def reformat_static_image(image_data: bytes) -> bytes:
         """
-        将静态图片转换为JPEG格式
+        优化静态图片编码；PNG 保持 PNG，其他常见格式转换为 JPEG
         :param image_data: 图片数据
         :return: 转换后的图片数据
         """
@@ -38,10 +43,13 @@ def compress_messages(messages: list[Message], img_target_size: int = 1 * 1024 *
                 and (image.format.upper() in ["JPEG", "JPG", "PNG", "WEBP"])
             ):
                 reformated_image_data = io.BytesIO()
-                img_to_save = image
-                if img_to_save.mode in ("RGBA", "LA", "P"):
-                    img_to_save = img_to_save.convert("RGB")
-                img_to_save.save(reformated_image_data, format="JPEG", quality=95, optimize=True)
+                if image.format.upper() == "PNG":
+                    image.save(reformated_image_data, format="PNG", optimize=True)
+                else:
+                    img_to_save = image
+                    if img_to_save.mode in ("RGBA", "LA", "P"):
+                        img_to_save = img_to_save.convert("RGB")
+                    img_to_save.save(reformated_image_data, format="JPEG", quality=95, optimize=True)
                 image_data = reformated_image_data.getvalue()
 
             return image_data
@@ -92,9 +100,12 @@ def compress_messages(messages: list[Message], img_target_size: int = 1 * 1024 *
             else:
                 # 静态图片，直接缩放保存
                 resized_image = image.resize(new_size, Image.Resampling.LANCZOS)
-                if resized_image.mode in ("RGBA", "LA", "P"):
-                    resized_image = resized_image.convert("RGB")
-                resized_image.save(output_buffer, format="JPEG", quality=95, optimize=True)
+                if image.format and image.format.upper() == "PNG":
+                    resized_image.save(output_buffer, format="PNG", optimize=True)
+                else:
+                    if resized_image.mode in ("RGBA", "LA", "P"):
+                        resized_image = resized_image.convert("RGB")
+                    resized_image.save(output_buffer, format="JPEG", quality=95, optimize=True)
 
             return output_buffer.getvalue(), original_size, new_size
 
@@ -105,18 +116,20 @@ def compress_messages(messages: list[Message], img_target_size: int = 1 * 1024 *
             logger.error(traceback.format_exc())
             return image_data, None, None
 
-    def compress_base64_image(base64_data: str, target_size: int = 1 * 1024 * 1024) -> str:
+    def compress_base64_image(
+        image_format: str,
+        base64_data: str,
+        target_size: int = 1 * 1024 * 1024,
+    ) -> tuple[str, str]:
         original_b64_data_size = len(base64_data)  # 计算原始数据大小
 
         image_data = base64.b64decode(base64_data)
 
-        # 先尝试转换格式为JPEG
+        # 先优化编码并保持 PNG 格式契约
         image_data = reformat_static_image(image_data)
         base64_data = base64.b64encode(image_data).decode("utf-8")
         if len(base64_data) <= target_size:
-            # 如果转换后小于目标大小，直接返回
-            logger.info(f"成功将图片转为JPEG格式，编码后大小: {len(base64_data) / 1024:.1f}KB")
-            return base64_data
+            return detect_image_format(image_data, image_format), base64_data
 
         # 如果转换后仍然大于目标大小，进行尺寸压缩
         scale = min(1.0, target_size / len(base64_data))
@@ -129,7 +142,26 @@ def compress_messages(messages: list[Message], img_target_size: int = 1 * 1024 *
                 f"压缩前大小: {original_b64_data_size / 1024:.1f}KB, 压缩后大小: {len(base64_data) / 1024:.1f}KB"
             )
 
-        return base64_data
+        return detect_image_format(image_data, image_format), base64_data
+
+    def detect_image_format(image_data: bytes, fallback: str) -> str:
+        try:
+            with Image.open(io.BytesIO(image_data)) as image:
+                detected_format = (image.format or fallback).lower()
+            return "jpeg" if detected_format == "jpg" else detected_format
+        except Exception:
+            return fallback.lower()
+
+    image_count = sum(
+        1
+        for message in messages
+        if isinstance(message.content, list)
+        for content_item in message.content
+        if isinstance(content_item, tuple)
+    )
+    effective_img_target_size = img_target_size
+    if image_count and img_total_target_size is not None:
+        effective_img_target_size = min(img_target_size, max(1, img_total_target_size // image_count))
 
     compressed_messages = []
     for message in messages:
@@ -139,9 +171,14 @@ def compress_messages(messages: list[Message], img_target_size: int = 1 * 1024 *
             for content_item in message.content:
                 if isinstance(content_item, tuple):
                     # 图片，进行压缩
-                    message_builder.add_image_content(
+                    compressed_format, compressed_base64 = compress_base64_image(
                         content_item[0],
-                        compress_base64_image(content_item[1], target_size=img_target_size),
+                        content_item[1],
+                        target_size=effective_img_target_size,
+                    )
+                    message_builder.add_image_content(
+                        compressed_format,
+                        compressed_base64,
                     )
                 else:
                     message_builder.add_text_content(content_item)

@@ -4,13 +4,13 @@ import time
 import hashlib
 import uuid
 import io
-import numpy as np
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from PIL import Image
 from rich.traceback import install
 
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt_section
 from src.common.database.database import db
 from src.common.database.database_model import Images, ImageDescriptions, EmojiDescriptionCache
 from src.config.config import global_config, model_config
@@ -19,6 +19,136 @@ from src.llm_models.utils_model import LLMRequest
 install(extra_lines=3)
 
 logger = get_logger("chat_image")
+
+GIF_DESCRIPTION_CACHE_PREFIX = "[gif-frame-sequence-v1]\n"
+GIF_FRAME_BATCH_SIZE = 16
+
+
+def write_gif_description_cache(description: str) -> str:
+    """为逐帧 GIF 描述添加内部缓存版本标记。"""
+    current_description = read_gif_description_cache(description)
+    clean_description = current_description if current_description is not None else str(description).strip()
+    return f"{GIF_DESCRIPTION_CACHE_PREFIX}{clean_description}"
+
+
+def read_gif_description_cache(description: Optional[str]) -> Optional[str]:
+    """读取当前版本的 GIF 描述，旧版拼图描述返回 None。"""
+    if not description:
+        return None
+    description = str(description)
+    if not description.startswith(GIF_DESCRIPTION_CACHE_PREFIX):
+        return None
+    clean_description = description[len(GIF_DESCRIPTION_CACHE_PREFIX) :].strip()
+    return clean_description or None
+
+
+def get_gif_description_max_tokens(frame_count: int) -> int:
+    """为逐帧概括预留随帧数增长的输出空间。"""
+    return max(512, max(1, frame_count) * 64 + 128)
+
+
+async def describe_gif_frames(
+    vlm: LLMRequest,
+    frames: List[Tuple[str, str]],
+    temperature: float,
+) -> str:
+    """按顺序分批描述全部 GIF 帧，并在多批时增量生成整体概括。"""
+    if not frames:
+        raise ValueError("GIF帧列表不能为空")
+
+    frame_count = len(frames)
+    if frame_count <= GIF_FRAME_BATCH_SIZE:
+        prompt = load_prompt_section("emoji_vlm_description", "gif", frame_count=frame_count)
+        description, _ = await vlm.generate_response_for_images(
+            prompt,
+            frames,
+            temperature=temperature,
+            max_tokens=get_gif_description_max_tokens(frame_count),
+        )
+        return description
+
+    batch_summaries: List[str] = []
+    overall_summary = ""
+    for batch_start in range(0, frame_count, GIF_FRAME_BATCH_SIZE):
+        batch_frames = frames[batch_start : batch_start + GIF_FRAME_BATCH_SIZE]
+        frame_start = batch_start + 1
+        frame_end = batch_start + len(batch_frames)
+        prompt = load_prompt_section(
+            "emoji_vlm_description",
+            "gif_batch",
+            frame_count=frame_count,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            previous_batch_summary=batch_summaries[-1] if batch_summaries else "无，本批从第 1 帧开始。",
+        )
+        batch_summary, _ = await vlm.generate_response_for_images(
+            prompt,
+            batch_frames,
+            temperature=temperature,
+            max_tokens=get_gif_description_max_tokens(len(batch_frames)),
+            start_index=frame_start,
+        )
+        batch_summaries.append(batch_summary)
+
+        if not overall_summary:
+            overall_summary = batch_summary
+            continue
+
+        overall_prompt = load_prompt_section(
+            "emoji_vlm_description",
+            "gif_overall",
+            frame_count=frame_count,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            previous_summary=overall_summary,
+            batch_summary=batch_summary,
+        )
+        overall_summary, _ = await vlm.generate_response_async(
+            overall_prompt,
+            temperature=temperature,
+            max_tokens=512,
+        )
+
+    joined_batch_summaries = "\n\n".join(batch_summaries)
+    return f"逐帧概括：\n{joined_batch_summaries}\n\n整体概括：\n{overall_summary}"
+
+
+async def audit_gif_frames(
+    vlm: LLMRequest,
+    prompt: str,
+    frames: List[Tuple[str, str]],
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    """按顺序审核全部 GIF 帧批次，任一批次拒绝则返回否。"""
+    if not frames:
+        raise ValueError("GIF帧列表不能为空")
+
+    for batch_start in range(0, len(frames), GIF_FRAME_BATCH_SIZE):
+        batch_frames = frames[batch_start : batch_start + GIF_FRAME_BATCH_SIZE]
+        content, _ = await vlm.generate_response_for_images(
+            prompt,
+            batch_frames,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            start_index=batch_start + 1,
+        )
+        normalized_result = content.strip().rstrip("。.!！")
+        if normalized_result != "是":
+            return "否"
+    return "是"
+
+
+def is_gif_base64_data(image_base64: str) -> bool:
+    """通过文件头判断 Base64 图片是否为 GIF。"""
+    try:
+        normalized_data = image_base64.encode("ascii", errors="ignore").decode("ascii")
+        if normalized_data.startswith("data:") and "," in normalized_data:
+            normalized_data = normalized_data.split(",", 1)[1]
+        image_data = base64.b64decode(normalized_data)
+        return image_data.startswith((b"GIF87a", b"GIF89a"))
+    except Exception:
+        return False
 
 
 class ImageManager:
@@ -213,32 +343,41 @@ class ImageManager:
             image_bytes = base64.b64decode(image_base64)
             image_hash = hashlib.md5(image_bytes).hexdigest()
             image_format = Image.open(io.BytesIO(image_bytes)).format.lower()  # type: ignore
+            is_gif = image_format == "gif"
 
             # 优先使用EmojiManager查询已注册表情包的描述
-            try:
-                from src.chat.emoji_system.emoji_manager import get_emoji_manager
+            if not is_gif:
+                try:
+                    from src.chat.emoji_system.emoji_manager import get_emoji_manager
 
-                emoji_manager = get_emoji_manager()
-                tags = await emoji_manager.get_emoji_tag_by_hash(image_hash)
-                if tags:
-                    tag_str = ",".join(tags)
-                    logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
-                    return f"[表情包：{tag_str}]"
-            except Exception as e:
-                logger.debug(f"查询EmojiManager时出错: {e}")
+                    emoji_manager = get_emoji_manager()
+                    tags = await emoji_manager.get_emoji_tag_by_hash(image_hash)
+                    if tags:
+                        tag_str = ",".join(tags)
+                        logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
+                        return f"[表情包：{tag_str}]"
+                except Exception as e:
+                    logger.debug(f"查询EmojiManager时出错: {e}")
 
             # 查询EmojiDescriptionCache表的缓存（包含描述和情感标签）
             try:
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
                 if cache_record:
+                    cached_description = (
+                        read_gif_description_cache(cache_record.description) if is_gif else cache_record.description
+                    )
+                    if is_gif and cached_description is None:
+                        logger.debug(f"忽略旧版GIF拼图描述缓存: hash={image_hash[:8]}")
+                        cache_record = None
+
                     # 优先使用情感标签，如果没有则使用详细描述
                     result_text = ""
-                    if cache_record.emotion_tags:
+                    if cache_record and cache_record.emotion_tags:
                         logger.debug(f"表情包情感标签缓存命中: hash={image_hash[:8]}")
                         result_text = f"[表情包：{cache_record.emotion_tags}]"
-                    elif cache_record.description:
+                    elif cache_record and cached_description:
                         logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
-                        result_text = f"[表情包：{cache_record.description}]"
+                        result_text = f"[表情包：{cached_description}]"
 
                     # 即使缓存命中，如果启用了steal_emoji，也检查是否需要保存文件
                     if result_text:
@@ -250,14 +389,15 @@ class ImageManager:
             # === 二步走识别流程 ===
 
             # 第一步：VLM视觉分析 - 生成详细描述
-            if image_format in ["gif", "GIF"]:
-                image_base64_processed = self.transform_gif(image_base64)
-                if image_base64_processed is None:
-                    logger.warning("GIF转换失败，无法获取描述")
+            if is_gif:
+                gif_frames = self.extract_gif_frames(image_base64)
+                if not gif_frames:
+                    logger.warning("GIF帧提取失败，无法获取描述")
                     return "[表情包(GIF处理失败)]"
-                vlm_prompt = "这是一个动态图表情包，每一张图代表了动态图的某一帧，黑色背景代表透明，描述一下表情包表达的情感和内容，描述细节，从互联网梗,meme的角度去分析"
-                detailed_description, _ = await self.vlm.generate_response_for_image(
-                    vlm_prompt, image_base64_processed, "jpg", temperature=0.4
+                detailed_description = await describe_gif_frames(
+                    self.vlm,
+                    [("png", frame) for frame in gif_frames],
+                    temperature=0.4,
                 )
             else:
                 vlm_prompt = (
@@ -308,7 +448,8 @@ class ImageManager:
             # 再次检查缓存（防止并发情况下其他线程已经保存）
             try:
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
-                if cache_record and cache_record.emotion_tags:
+                cache_is_current = not is_gif or read_gif_description_cache(getattr(cache_record, "description", None))
+                if cache_record and cache_is_current and cache_record.emotion_tags:
                     logger.warning(f"虽然生成了描述，但是找到缓存表情包情感标签: {cache_record.emotion_tags}")
                     return f"[表情包：{cache_record.emotion_tags}]"
             except Exception as e:
@@ -317,17 +458,20 @@ class ImageManager:
             # 保存识别出的详细描述和情感标签到 emoji_description_cache
             try:
                 current_timestamp = time.time()
+                cached_description = (
+                    write_gif_description_cache(detailed_description) if is_gif else detailed_description
+                )
                 cache_record, created = EmojiDescriptionCache.get_or_create(
                     emoji_hash=image_hash,
                     defaults={
-                        "description": detailed_description,
+                        "description": cached_description,
                         "emotion_tags": final_emotion,
                         "timestamp": current_timestamp,
                     },
                 )
                 if not created:
                     # 更新已有记录
-                    cache_record.description = detailed_description
+                    cache_record.description = cached_description
                     cache_record.emotion_tags = final_emotion
                     cache_record.timestamp = current_timestamp
                     cache_record.save()
@@ -432,125 +576,45 @@ class ImageManager:
             return "[图片(处理失败)]"
 
     @staticmethod
-    def transform_gif(gif_base64: str, similarity_threshold: float = 1000.0, max_frames: int = 15) -> Optional[str]:
-        # sourcery skip: use-contextlib-suppress
-        """将GIF转换为水平拼接的静态图像, 跳过相似的帧
+    def extract_gif_frames(gif_base64: str, target_height: int = 200) -> List[str]:
+        """按播放顺序将 GIF 的每一帧提取为独立 PNG 图片。
 
         Args:
             gif_base64: GIF的base64编码字符串
-            similarity_threshold: 判定帧相似的阈值 (MSE)，越小表示要求差异越大才算不同帧，默认1000.0
-            max_frames: 最大抽取的帧数，默认15
+            target_height: 输出帧的目标高度，默认200像素；小于等于0时保持原尺寸
 
         Returns:
-            Optional[str]: 拼接后的JPG图像的base64编码字符串, 或者在失败时返回None
+            List[str]: 按播放顺序排列的 PNG Base64 列表，失败时返回空列表
         """
         try:
-            # 确保base64字符串只包含ASCII字符
             if isinstance(gif_base64, str):
                 gif_base64 = gif_base64.encode("ascii", errors="ignore").decode("ascii")
-            # 解码base64
             gif_data = base64.b64decode(gif_base64)
-            gif = Image.open(io.BytesIO(gif_data))
+            encoded_frames: List[str] = []
+            with Image.open(io.BytesIO(gif_data)) as gif:
+                frame_count = getattr(gif, "n_frames", 1)
+                for frame_index in range(frame_count):
+                    gif.seek(frame_index)
+                    frame = gif.convert("RGBA")
+                    if target_height > 0 and frame.height != target_height:
+                        if frame.height == 0:
+                            raise ValueError("GIF帧高度为0")
+                        target_width = max(1, round(frame.width * target_height / frame.height))
+                        frame = frame.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
-            # 收集所有帧
-            all_frames = []
-            try:
-                while True:
-                    gif.seek(len(all_frames))
-                    # 确保是RGB格式方便比较
-                    frame = gif.convert("RGB")
-                    all_frames.append(frame.copy())
-            except EOFError:
-                pass  # 读完啦
+                    buffer = io.BytesIO()
+                    frame.save(buffer, format="PNG", optimize=True)
+                    encoded_frames.append(base64.b64encode(buffer.getvalue()).decode("ascii"))
 
-            if not all_frames:
+            if not encoded_frames:
                 logger.warning("GIF中没有找到任何帧")
-                return None  # 空的GIF直接返回None
-
-            # --- 新的帧选择逻辑 ---
-            selected_frames = []
-            last_selected_frame_np = None
-
-            for i, current_frame in enumerate(all_frames):
-                current_frame_np = np.array(current_frame)
-
-                # 第一帧总是要选的
-                if i == 0:
-                    selected_frames.append(current_frame)
-                    last_selected_frame_np = current_frame_np
-                    continue
-
-                # 计算和上一张选中帧的差异（均方误差 MSE）
-                if last_selected_frame_np is not None:
-                    mse = np.mean((current_frame_np - last_selected_frame_np) ** 2)
-                    # logger.debug(f"帧 {i} 与上一选中帧的 MSE: {mse}") # 可以取消注释来看差异值
-
-                    # 如果差异够大，就选它！
-                    if mse > similarity_threshold:
-                        selected_frames.append(current_frame)
-                        last_selected_frame_np = current_frame_np
-                        # 检查是不是选够了
-                        if len(selected_frames) >= max_frames:
-                            # logger.debug(f"已选够 {max_frames} 帧，停止选择。")
-                            break
-                # 如果差异不大就跳过这一帧啦
-
-            # --- 帧选择逻辑结束 ---
-
-            # 如果选择后连一帧都没有（比如GIF只有一帧且后续处理失败？）或者原始GIF就没帧，也返回None
-            if not selected_frames:
-                logger.warning("处理后没有选中任何帧")
-                return None
-
-            # logger.debug(f"总帧数: {len(all_frames)}, 选中帧数: {len(selected_frames)}")
-
-            # 获取选中的第一帧的尺寸（假设所有帧尺寸一致）
-            frame_width, frame_height = selected_frames[0].size
-
-            # 计算目标尺寸，保持宽高比
-            target_height = 200  # 固定高度
-            # 防止除以零
-            if frame_height == 0:
-                logger.error("帧高度为0，无法计算缩放尺寸")
-                return None
-            target_width = int((target_height / frame_height) * frame_width)
-            # 宽度也不能是0
-            if target_width == 0:
-                logger.warning(f"计算出的目标宽度为0 (原始尺寸 {frame_width}x{frame_height})，调整为1")
-                target_width = 1
-
-            # 调整所有选中帧的大小
-            resized_frames = [
-                frame.resize((target_width, target_height), Image.Resampling.LANCZOS) for frame in selected_frames
-            ]
-
-            # 创建拼接图像
-            total_width = target_width * len(resized_frames)
-            # 防止总宽度为0
-            if total_width == 0 and resized_frames:
-                logger.warning("计算出的总宽度为0，但有选中帧，可能目标宽度太小")
-                # 至少给点宽度吧
-                total_width = len(resized_frames)
-            elif total_width == 0:
-                logger.error("计算出的总宽度为0且无选中帧")
-                return None
-
-            combined_image = Image.new("RGB", (total_width, target_height))
-
-            # 水平拼接图像
-            for idx, frame in enumerate(resized_frames):
-                combined_image.paste(frame, (idx * target_width, 0))
-
-            # 转换为base64
-            buffer = io.BytesIO()
-            combined_image.save(buffer, format="JPEG", quality=85)  # 保存为JPEG
-            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+            return encoded_frames
         except MemoryError:
-            logger.error("GIF转换失败: 内存不足，可能是GIF太大或帧数太多")
-            return None  # 内存不够啦
+            logger.error("GIF帧提取失败: 内存不足，可能是GIF太大或帧数太多")
+            return []
         except Exception as e:
-            logger.error(f"GIF转换失败: {str(e)}", exc_info=True)  # 记录详细错误信息
-            return None  # 其他错误也返回None
+            logger.error(f"GIF帧提取失败: {str(e)}", exc_info=True)
+            return []
 
     async def process_image(self, image_base64: str) -> Tuple[str, str]:
         # sourcery skip: hoist-if-from-if

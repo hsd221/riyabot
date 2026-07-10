@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from src.chat.utils.utils_image import get_image_manager
+from src.chat.utils.utils_image import get_image_manager, is_gif_base64_data, read_gif_description_cache
 from src.chat.utils.utils_voice import get_voice_text
 from src.common.database.database_model import Emoji, EmojiDescriptionCache, ImageDescriptions, Images, Messages
 from src.common.logger import get_logger
@@ -83,7 +83,7 @@ def _format_cached_result(kind: str, description: str | None) -> Optional[str]:
     return None
 
 
-def _load_cached_media_result(kind: str, media_hash: str) -> Optional[str]:
+def _load_cached_media_result(kind: str, media_hash: str, media_data: Optional[str] = None) -> Optional[str]:
     """Best-effort persistent cache lookup for media tasks.
 
     This avoids re-running VLM for image/emoji descriptions after restart. Voice
@@ -106,6 +106,15 @@ def _load_cached_media_result(kind: str, media_hash: str) -> Optional[str]:
             return _format_cached_result("image", getattr(description_record, "description", None))
 
         if kind == "emoji":
+            if media_data and is_gif_base64_data(media_data):
+                cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == media_hash)
+                cached_description = read_gif_description_cache(getattr(cache_record, "description", None))
+                if not cached_description:
+                    return None
+                if cache_record.emotion_tags:
+                    return _format_cached_result("emoji", str(cache_record.emotion_tags).replace("，", ","))
+                return _format_cached_result("emoji", cached_description)
+
             emoji_record = Emoji.get_or_none(Emoji.emoji_hash == media_hash)
             if emoji_record and emoji_record.emotion:
                 return _format_cached_result("emoji", str(emoji_record.emotion).replace("，", ","))
@@ -237,7 +246,9 @@ def _schedule_media_task(kind: str, media_data: str, message_id: Optional[str]) 
 
     _remember_message_ref(message_id, task_key, state)
 
-    if state.status in {"pending", "failed"} and (cached_result := _load_cached_media_result(kind, media_hash)):
+    if state.status in {"pending", "failed"} and (
+        cached_result := _load_cached_media_result(kind, media_hash, media_data)
+    ):
         state.status = "done"
         state.result_text = cached_result
         if message_id:

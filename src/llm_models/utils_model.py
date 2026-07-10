@@ -138,6 +138,36 @@ class LLMRequest:
             )
         return content, (reasoning_content, model_info.name, tool_calls)
 
+    async def generate_response_for_images(
+        self,
+        prompt: str,
+        images: List[Tuple[str, str]],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        start_index: int = 1,
+    ) -> Tuple[str, Tuple[str, str, Optional[List[ToolCall]]]]:
+        """按给定顺序发送多张图片并生成响应。"""
+        if not images:
+            raise ValueError("图片列表不能为空")
+
+        def message_factory(client: BaseClient) -> List[Message]:
+            message_builder = MessageBuilder().add_text_content(prompt)
+            supported_formats = client.get_support_image_formats()
+            for frame_index, (image_format, image_base64) in enumerate(images, start=start_index):
+                message_builder.add_text_content(f"第 {frame_index} 帧：")
+                message_builder.add_image_content(
+                    image_base64=image_base64,
+                    image_format=image_format,
+                    support_formats=supported_formats,
+                )
+            return [message_builder.build()]
+
+        return await self.generate_response_with_message_async(
+            message_factory=message_factory,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
     async def generate_response_for_voice(self, voice_base64: str) -> Optional[str]:
         """
         为语音生成响应

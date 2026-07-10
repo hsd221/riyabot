@@ -15,6 +15,7 @@ from src.chat.message_receive.chat_stream import ChatStream
 from src.chat.message_receive.message import MessageRecv, MessageSending, MessageSet
 from src.chat.message_receive.storage import MessageStorage
 from src.chat.message_receive import uni_message_sender
+from src.chat.utils import utils_image
 from src.common.data_models.message_component_model import (
     AtComponent,
     EmojiComponent,
@@ -301,6 +302,36 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(media_background._load_cached_media_result("emoji", media_hash), "[表情包：开心,惊讶]")
         self.assertIsNone(media_background._load_cached_media_result("voice", media_hash))
 
+    def test_load_cached_media_result_ignores_stale_gif_cache_and_strips_current_marker(self) -> None:
+        gif_data = base64.b64encode(b"GIF89a-test-data").decode("ascii")
+        media_hash = media_background._hash_media_data(gif_data)
+        Emoji.create(
+            full_path="/tmp/stale.gif",
+            format="gif",
+            emoji_hash=media_hash,
+            description="旧拼图描述",
+            emotion="旧情绪",
+            record_time=1.0,
+        )
+        EmojiDescriptionCache.create(
+            emoji_hash=media_hash,
+            description="旧拼图描述",
+            emotion_tags="旧情绪",
+            timestamp=1.0,
+        )
+
+        self.assertIsNone(media_background._load_cached_media_result("emoji", media_hash, gif_data))
+
+        cache_record = EmojiDescriptionCache.get(EmojiDescriptionCache.emoji_hash == media_hash)
+        cache_record.description = utils_image.write_gif_description_cache("新版逐帧描述")
+        cache_record.emotion_tags = "新版情绪"
+        cache_record.save()
+
+        self.assertEqual(
+            media_background._load_cached_media_result("emoji", media_hash, gif_data),
+            "[表情包：新版情绪]",
+        )
+
     def test_enhance_media_placeholders_uses_only_completed_task_refs(self) -> None:
         done_state = media_background._MediaTaskState(
             kind="image",
@@ -390,7 +421,7 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(media_background._media_task_states[task_key].status, "done")
         self.assertEqual(media_background._media_task_states[task_key].result_text, "[图片：cached]")
         schedule_backfill.assert_called_once_with("image", "msg-1", "[图片：cached]", 0)
-        load_cache.assert_called_once_with("image", media_hash)
+        load_cache.assert_called_once_with("image", media_hash, "image-data")
 
         with patch.object(media_background, "_schedule_placeholder_backfill") as schedule_backfill:
             media_background.schedule_image_description_task("image-data", "msg-2")

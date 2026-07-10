@@ -23,6 +23,19 @@ def _png_base64() -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def _large_png_base64() -> str:
+    image = Image.new("RGBA", (256, 256))
+    value = 1
+    pixels = []
+    for _ in range(image.width * image.height):
+        value = (1103515245 * value + 12345) & 0x7FFFFFFF
+        pixels.append((value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF, 255))
+    image.putdata(pixels)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 class LLMExceptionsTest(unittest.TestCase):
     def test_exceptions_format_defaults_mapped_codes_custom_messages_and_original_errors(self) -> None:
         self.assertEqual(str(exceptions.NetworkConnectionError()), "连接异常，请检查网络连接状态或URL是否正确")
@@ -52,7 +65,7 @@ class LLMCompressMessagesTest(unittest.TestCase):
 
         self.assertEqual(compressed.content[0], "look")
         self.assertEqual(compressed.content[1][0], "png")
-        self.assertTrue(base64.b64decode(compressed.content[1][1]).startswith(b"\xff\xd8"))
+        self.assertTrue(base64.b64decode(compressed.content[1][1]).startswith(b"\x89PNG"))
 
     def test_compress_messages_leaves_non_multimodal_messages_unchanged(self) -> None:
         text_message = MessageBuilder().add_text_content("hello").build()
@@ -60,6 +73,27 @@ class LLMCompressMessagesTest(unittest.TestCase):
         compressed = compress_messages([text_message])
 
         self.assertIs(compressed[0], text_message)
+
+    def test_compress_messages_applies_aggregate_budget_without_changing_png_format(self) -> None:
+        image_base64 = _large_png_base64()
+        message = (
+            MessageBuilder()
+            .add_image_content("png", image_base64)
+            .add_text_content("next")
+            .add_image_content("png", image_base64)
+            .build()
+        )
+
+        compressed = compress_messages(
+            [message],
+            img_target_size=10_000_000,
+            img_total_target_size=20_000,
+        )[0]
+
+        compressed_images = [item for item in compressed.content if isinstance(item, tuple)]
+        self.assertEqual([image_format for image_format, _ in compressed_images], ["png", "png"])
+        self.assertTrue(all(len(data) < len(image_base64) for _, data in compressed_images))
+        self.assertEqual(compressed.content[1], "next")
 
 
 class LLMUsageRecorderTest(unittest.TestCase):
@@ -175,6 +209,36 @@ class LLMRequestHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("底层异常类型: KeyError", original_info)
         self.assertIn("底层异常信息: 'root'", original_info)
 
+    async def test_generate_response_for_images_labels_and_sends_frames_in_order(self) -> None:
+        request = LLMRequest(self.task, request_type="image")
+        captured_messages = []
+
+        async def fake_execute_request(**kwargs):
+            client = SimpleNamespace(get_support_image_formats=lambda: ["png"])
+            captured_messages.extend(kwargs["message_factory"](client))
+            return APIResponse(content="逐帧与整体概括"), ModelInfo(
+                model_identifier="a",
+                name="model-a",
+                api_provider="provider-a",
+            )
+
+        with (
+            patch.object(request, "_execute_request", side_effect=fake_execute_request),
+            patch("src.llm_models.utils_model.llm_usage_recorder.record_usage_to_database"),
+        ):
+            content, _ = await request.generate_response_for_images(
+                "请分析动图",
+                [("png", "frame-1"), ("png", "frame-2")],
+                temperature=0.4,
+                start_index=17,
+            )
+
+        self.assertEqual(content, "逐帧与整体概括")
+        self.assertEqual(
+            captured_messages[0].content,
+            ["请分析动图", "第 17 帧：", ("png", "frame-1"), "第 18 帧：", ("png", "frame-2")],
+        )
+
     def test_select_model_uses_balance_scores_exclusions_and_embedding_force_new_clients(self) -> None:
         request = LLMRequest(self.task, request_type="embedding")
         request.model_usage = {"model-a": (200, 0, 0), "model-b": (10, 0, 0)}
@@ -278,7 +342,8 @@ class LLMRequestHelpersTest(unittest.IsolatedAsyncioTestCase):
         second_call_messages = client.calls[1][1]["message_list"]
         self.assertIs(first_call_messages[0], message)
         self.assertIsNot(second_call_messages[0], message)
-        self.assertTrue(base64.b64decode(second_call_messages[0].content[1][1]).startswith(b"\xff\xd8"))
+        self.assertEqual(second_call_messages[0].content[1][0], "png")
+        self.assertTrue(base64.b64decode(second_call_messages[0].content[1][1]).startswith(b"\x89PNG"))
 
     async def test_attempt_request_wraps_exhausted_empty_responses_in_model_attempt_failed(self) -> None:
         class EmptyClient(CapturingClient):

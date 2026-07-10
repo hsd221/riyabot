@@ -17,7 +17,14 @@ from src.common.database.database_model import Emoji, EmojiDescriptionCache
 from src.common.database.database import db as peewee_db
 from src.common.logger import get_logger
 from src.config.config import global_config, model_config
-from src.chat.utils.utils_image import image_path_to_base64, get_image_manager
+from src.chat.utils.utils_image import (
+    audit_gif_frames,
+    describe_gif_frames,
+    get_image_manager,
+    image_path_to_base64,
+    read_gif_description_cache,
+    write_gif_description_cache,
+)
 from src.llm_models.utils_model import LLMRequest
 
 install(extra_lines=3)
@@ -916,30 +923,38 @@ class EmojiManager:
             image_bytes = base64.b64decode(image_base64)
             image_hash = hashlib.md5(image_bytes).hexdigest()
             image_format = Image.open(io.BytesIO(image_bytes)).format.lower()  # type: ignore
+            is_gif = image_format == "gif"
 
             # 尝试从 EmojiDescriptionCache 表获取已有的详细描述
             existing_description = None
             try:
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
                 if cache_record and cache_record.description:
-                    existing_description = cache_record.description
-                    logger.debug(f"表情描述缓存命中: hash={image_hash[:8]}")
+                    existing_description = (
+                        read_gif_description_cache(cache_record.description) if is_gif else cache_record.description
+                    )
+                    if existing_description:
+                        logger.debug(f"表情描述缓存命中: hash={image_hash[:8]}")
+                    elif is_gif:
+                        logger.debug(f"忽略旧版GIF拼图描述缓存: hash={image_hash[:8]}")
             except Exception as e:
                 logger.debug(f"查询表情描述缓存时出错: {e}")
 
             # 第一步：VLM视觉分析（如果没有已有描述才调用）
+            gif_frames: List[Tuple[str, str]] = []
             if existing_description:
                 description = existing_description
                 logger.info("[优化] 复用已有的详细描述，跳过VLM调用")
             else:
                 logger.info("[VLM分析] 生成新的详细描述")
-                if image_format in ["gif", "GIF"]:
-                    image_base64 = get_image_manager().transform_gif(image_base64)  # type: ignore
-                    if not image_base64:
-                        raise RuntimeError("GIF表情包转换失败")
-                    prompt = "这是一个动态图表情包，每一张图代表了动态图的某一帧，黑色背景代表透明，简短描述一下表情包表达的情感和内容，从互联网梗,meme的角度去分析，精简回答"
-                    description, _ = await self.vlm.generate_response_for_image(
-                        prompt, image_base64, "jpg", temperature=0.5
+                if is_gif:
+                    gif_frames = [("png", frame) for frame in get_image_manager().extract_gif_frames(image_base64)]
+                    if not gif_frames:
+                        raise RuntimeError("GIF表情包帧提取失败")
+                    description = await describe_gif_frames(
+                        self.vlm,
+                        gif_frames,
+                        temperature=0.5,
                     )
                 else:
                     prompt = "这是一个表情包，请详细描述一下表情包所表达的情感和内容，简短描述细节，从互联网梗,meme的角度去分析，精简回答"
@@ -947,16 +962,20 @@ class EmojiManager:
                         prompt, image_base64, image_format, temperature=0.5
                     )
 
+            cached_description = write_gif_description_cache(description) if is_gif else description
+
             # 若是新生成的描述，写入缓存表（此时还没有情感标签，稍后会更新）
             if not existing_description:
                 try:
                     cache_record, created = EmojiDescriptionCache.get_or_create(
                         emoji_hash=image_hash,
-                        defaults={"description": description, "timestamp": time.time()},
+                        defaults={"description": cached_description, "timestamp": time.time()},
                     )
                     if not created:
-                        # 更新描述，但保留已有的情感标签（如果有）
-                        cache_record.description = description
+                        # 旧拼图描述对应的情感标签也必须一并失效
+                        if is_gif and read_gif_description_cache(cache_record.description) is None:
+                            cache_record.emotion_tags = None
+                        cache_record.description = cached_description
                         cache_record.timestamp = time.time()
                         cache_record.save()
                 except Exception as cache_error:
@@ -972,9 +991,22 @@ class EmojiManager:
                     4. 不要出现5个以上文字
                     请回答这个表情包是否满足上述要求，是则回答是，否则回答否，不要出现任何其他内容
                 '''
-                content, _ = await self.vlm.generate_response_for_image(
-                    prompt, image_base64, image_format, temperature=0.3, max_tokens=1000
-                )
+                if is_gif:
+                    if not gif_frames:
+                        gif_frames = [("png", frame) for frame in get_image_manager().extract_gif_frames(image_base64)]
+                    if not gif_frames:
+                        raise RuntimeError("GIF表情包帧提取失败")
+                    content = await audit_gif_frames(
+                        self.vlm,
+                        prompt,
+                        gif_frames,
+                        temperature=0.3,
+                        max_tokens=1000,
+                    )
+                else:
+                    content, _ = await self.vlm.generate_response_for_image(
+                        prompt, image_base64, image_format, temperature=0.3, max_tokens=1000
+                    )
                 if content == "否":
                     return "", []
 
@@ -1017,7 +1049,7 @@ class EmojiManager:
                     # 如果缓存不存在，创建新记录（包含描述和情感标签）
                     EmojiDescriptionCache.create(
                         emoji_hash=image_hash,
-                        description=description,
+                        description=cached_description,
                         emotion_tags=emotion_tags_str,
                         timestamp=time.time(),
                     )
