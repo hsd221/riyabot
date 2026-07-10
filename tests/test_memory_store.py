@@ -193,6 +193,7 @@ class QdrantManagerUtilityTest(unittest.TestCase):
         self.assertEqual(QdrantManager._normalize_point_id(42), 42)
         self.assertNotEqual(QdrantManager._normalize_point_id(-1), -1)
         self.assertEqual(QdrantManager._normalize_point_id("42"), 42)
+        self.assertNotEqual(QdrantManager._normalize_point_id("01"), QdrantManager._normalize_point_id("1"))
 
         uuid_text = str(uuid.uuid4())
         self.assertEqual(QdrantManager._normalize_point_id(uuid_text), uuid_text)
@@ -243,7 +244,9 @@ class QdrantManagerUtilityTest(unittest.TestCase):
         self.assertIsNone(QdrantManager._build_filter(None, schema))
         self.assertIsNone(empty_filter)
         self.assertEqual([condition.key for condition in qdrant_filter.must], ["status", "source_id"])
-        self.assertIsNone(QdrantManager._collection_vector_size(SimpleNamespace(config=SimpleNamespace(params=object()))))
+        self.assertIsNone(
+            QdrantManager._collection_vector_size(SimpleNamespace(config=SimpleNamespace(params=object())))
+        )
         self.assertEqual(
             QdrantManager._collection_vector_size(
                 SimpleNamespace(config=SimpleNamespace(params=SimpleNamespace(vectors=SimpleNamespace(size=128))))
@@ -268,6 +271,121 @@ class QdrantManagerUtilityTest(unittest.TestCase):
 
 
 class QdrantManagerOperationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_upsert_atom_vector_overrides_missing_or_incorrect_payload_atom_id(self) -> None:
+        manager = QdrantManager(MemoryStoreConfig(collection_name_atoms="atoms"))
+        client = FakeQdrantClient(collections=["atoms"])
+        manager._available = True
+        manager._client = client
+
+        self.assertTrue(await manager.upsert_atom_vector("atom-empty", [0.1], {"status": "active"}))
+        self.assertTrue(
+            await manager.upsert_atom_vector(
+                "atom-wrong",
+                [0.2],
+                {"atom_id": "different-atom", "status": "archived"},
+            )
+        )
+
+        written_points = [call[1][0] for call in client.upserts]
+        self.assertEqual(
+            [point.payload for point in written_points],
+            [
+                {"atom_id": "atom-empty", "status": "active"},
+                {"atom_id": "atom-wrong", "status": "archived"},
+            ],
+        )
+
+    async def test_batch_upsert_atom_vectors_overrides_missing_or_incorrect_payload_atom_id(self) -> None:
+        manager = QdrantManager(MemoryStoreConfig(collection_name_atoms="atoms"))
+        client = FakeQdrantClient(collections=["atoms"])
+        manager._available = True
+        manager._client = client
+
+        written = await manager.batch_upsert_atom_vectors(
+            [
+                ("atom-empty", [0.1], {"status": "active"}),
+                ("atom-wrong", [0.2], {"atom_id": "different-atom", "status": "archived"}),
+            ]
+        )
+
+        self.assertEqual(written, 2)
+        self.assertEqual(
+            [point.payload for point in client.upserts[0][1]],
+            [
+                {"atom_id": "atom-empty", "status": "active"},
+                {"atom_id": "atom-wrong", "status": "archived"},
+            ],
+        )
+
+    async def test_list_atom_points_preserves_physical_ids_and_only_trusts_matching_business_ids(self) -> None:
+        manager = QdrantManager(MemoryStoreConfig(collection_name_atoms="atoms"))
+        valid_physical_id = manager._normalize_point_id("atom-valid")
+        missing_payload_physical_id = str(uuid.uuid4())
+        mismatched_physical_id = manager._normalize_point_id("atom-physical")
+        client = FakeQdrantClient(collections=["atoms"])
+        client.scroll = Mock(
+            side_effect=[
+                (
+                    [
+                        SimpleNamespace(id=valid_physical_id, payload={"atom_id": "atom-valid"}),
+                        SimpleNamespace(id=missing_payload_physical_id, payload={}),
+                    ],
+                    "next-page",
+                ),
+                (
+                    [SimpleNamespace(id=mismatched_physical_id, payload={"atom_id": "atom-payload"})],
+                    None,
+                ),
+            ]
+        )
+        manager._available = True
+        manager._client = client
+
+        atom_points = await manager.list_atom_points()
+
+        self.assertEqual(
+            atom_points,
+            [
+                {"physical_id": valid_physical_id, "business_id": "atom-valid"},
+                {"physical_id": missing_payload_physical_id, "business_id": None},
+                {"physical_id": mismatched_physical_id, "business_id": None},
+            ],
+        )
+        self.assertEqual(client.scroll.call_count, 2)
+        self.assertEqual(client.scroll.call_args_list[1].kwargs["offset"], "next-page")
+
+    async def test_list_atom_ids_scrolls_all_pages_and_uses_business_ids(self) -> None:
+        manager = QdrantManager(MemoryStoreConfig(collection_name_atoms="atoms"))
+        client = FakeQdrantClient(collections=["atoms"])
+        client.scroll = Mock(
+            side_effect=[
+                (
+                    [
+                        SimpleNamespace(id=manager._normalize_point_id("atom-a"), payload={"atom_id": "atom-a"}),
+                        SimpleNamespace(id=str(uuid.uuid4()), payload={}),
+                    ],
+                    "next-page",
+                ),
+                (
+                    [
+                        SimpleNamespace(
+                            id=manager._normalize_point_id("atom-b"),
+                            payload={"atom_id": "atom-b"},
+                        )
+                    ],
+                    None,
+                ),
+            ]
+        )
+        manager._available = True
+        manager._client = client
+
+        atom_ids = await manager.list_atom_ids()
+
+        self.assertEqual(atom_ids, {"atom-a", "atom-b"})
+        self.assertEqual(client.scroll.call_count, 2)
+        self.assertEqual(client.scroll.call_args_list[1].kwargs["offset"], "next-page")
+
     async def test_qdrant_manager_init_warns_when_optional_dependency_is_unavailable(self) -> None:
         with patch.object(store_module, "QDRANT_AVAILABLE", False):
             manager = QdrantManager(MemoryStoreConfig())
@@ -432,6 +550,23 @@ class QdrantManagerOperationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await failing.collection_info("atoms"))
         self.assertFalse(await failing.delete_collection("graphs"))
 
+    async def test_set_atom_payload_treats_missing_local_point_as_recoverable_drift(self) -> None:
+        manager = QdrantManager(MemoryStoreConfig(collection_name_atoms="atoms"))
+        client = FakeQdrantClient(collections=["atoms"])
+        client.set_payload = Mock(side_effect=KeyError("missing-point"))
+        manager._available = True
+        manager._client = client
+
+        with (
+            patch.object(store_module.logger, "debug") as debug_log,
+            patch.object(store_module.logger, "exception") as exception_log,
+        ):
+            updated = await manager.set_atom_payload("missing-point", {"weight": 0.4})
+
+        self.assertFalse(updated)
+        debug_log.assert_called_once()
+        exception_log.assert_not_called()
+
 
 class MemoryStoreCrudTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
     def make_store(self) -> MemoryStore:
@@ -446,6 +581,14 @@ class MemoryStoreCrudTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
             collection_info=AsyncMock(return_value={"name": "memory_atoms", "vectors_count": 1, "status": "green"}),
         )
         return store
+
+    async def test_list_atom_ids_returns_filtered_persisted_ids(self) -> None:
+        store = self.make_store()
+        create_atom("active-atom", status="active")
+        create_atom("archived-atom", status="archived")
+
+        self.assertEqual(await store.list_atom_ids(status="active"), {"active-atom"})
+        self.assertEqual(await store.list_atom_ids(), {"active-atom", "archived-atom"})
 
     async def test_singleton_initialize_close_and_statistics(self) -> None:
         with self.assertRaises(RuntimeError):
@@ -510,15 +653,22 @@ class MemoryStoreCrudTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
         create_atom("older", created_at=datetime.datetime.fromtimestamp(10.0))
         create_atom("bad-json", entities="not-json", created_at=datetime.datetime.fromtimestamp(200.0))
 
-        updated = await store.update_atom("inserted", {"entities": {"id": "user-2"}, "last_accessed_at": "bad"})
+        update_payload = {"entities": {"id": "user-2"}, "last_accessed_at": "bad"}
+        batch_updates = [
+            ("inserted", {"weight": 0.9, "entities": ["user-3"], "last_reinforced_at": 130.0}),
+            ("older", {"status": "archived"}),
+            ("missing", {"weight": 0.1}),
+        ]
+        expected_update_payload = {"entities": {"id": "user-2"}, "last_accessed_at": "bad"}
+        expected_batch_updates = [
+            ("inserted", {"weight": 0.9, "entities": ["user-3"], "last_reinforced_at": 130.0}),
+            ("older", {"status": "archived"}),
+            ("missing", {"weight": 0.1}),
+        ]
+
+        updated = await store.update_atom("inserted", update_payload)
         missing_update = await store.update_atom("missing", {"weight": 0.9})
-        batch_count = await store.update_atoms_batch(
-            [
-                ("inserted", {"weight": 0.9, "entities": ["user-3"]}),
-                ("older", {"status": "archived"}),
-                ("missing", {"weight": 0.1}),
-            ]
-        )
+        batch_count = await store.update_atoms_batch(batch_updates)
         empty_batch_count = await store.update_atoms_batch([])
         fetched = await store.get_atom("inserted")
         missing = await store.get_atom("missing")
@@ -532,6 +682,8 @@ class MemoryStoreCrudTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
         row = MemoryAtom.get_by_id("inserted")
         self.assertEqual(json.loads(row.entities), ["user-3"])
         self.assertTrue(updated)
+        self.assertEqual(update_payload, expected_update_payload)
+        self.assertEqual(batch_updates, expected_batch_updates)
         self.assertFalse(missing_update)
         self.assertEqual(batch_count, 2)
         self.assertEqual(empty_batch_count, 0)

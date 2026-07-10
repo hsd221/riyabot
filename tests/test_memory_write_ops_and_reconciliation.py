@@ -318,25 +318,34 @@ class FakeQdrant:
         delete_result: bool = True,
         upsert_result: bool = True,
         payload_result: bool = True,
+        atom_ids: set[str] | None = None,
     ) -> None:
         self.delete_result = delete_result
         self.upsert_result = upsert_result
         self.payload_result = payload_result
+        self.atom_ids = set(atom_ids or set())
         self.deleted: list[str] = []
         self.upserts: list[dict] = []
         self.payload_updates: list[tuple[str, dict]] = []
 
     async def delete_atom_vector(self, atom_id: str) -> bool:
         self.deleted.append(atom_id)
+        if self.delete_result:
+            self.atom_ids.discard(atom_id)
         return self.delete_result
 
     async def upsert_atom_vector(self, **kwargs) -> bool:
         self.upserts.append(kwargs)
+        if self.upsert_result:
+            self.atom_ids.add(kwargs["point_id"])
         return self.upsert_result
 
     async def set_atom_payload(self, atom_id: str, payload: dict) -> bool:
         self.payload_updates.append((atom_id, payload))
         return self.payload_result
+
+    async def list_atom_ids(self) -> set[str]:
+        return set(self.atom_ids)
 
 
 class FakeStore:
@@ -360,6 +369,23 @@ class FakeStore:
 
     async def get_atom(self, atom_id: str) -> dict | None:
         return self.atoms.get(atom_id)
+
+    async def list_atoms(
+        self,
+        atom_type: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        atoms = list(self.atoms.values())
+        if atom_type is not None:
+            atoms = [atom for atom in atoms if atom.get("atom_type") == atom_type]
+        if status is not None:
+            atoms = [atom for atom in atoms if atom.get("status") == status]
+        return atoms[offset : offset + limit]
+
+    async def list_atom_ids(self, status: str | None = None) -> set[str]:
+        return {atom_id for atom_id, atom in self.atoms.items() if status is None or atom.get("status") == status}
 
     async def insert_atom(self, atom: dict) -> str:
         self.insert_calls += 1
@@ -684,6 +710,50 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
+    async def test_run_repairs_actual_store_drift_without_inconsistent_write_ops(self) -> None:
+        missing_atom = {
+            "atom_id": "missing-active",
+            "atom_type": "preference",
+            "content": "user prefers concise replies",
+            "weight": 0.8,
+            "importance": 0.7,
+            "confidence": 0.9,
+            "status": "active",
+            "source_scene": "private_chat",
+            "source_id": "stream-1",
+            "privacy_level": "context_sensitive",
+        }
+        shared_atom = {
+            "atom_id": "shared-active",
+            "content": "already indexed",
+            "status": "active",
+        }
+        inactive_atom = {
+            "atom_id": "inactive",
+            "content": "must not be re-indexed",
+            "status": "archived",
+        }
+        qdrant = FakeQdrant(atom_ids={"shared-active", "orphan-vector"})
+        store = FakeStore(
+            atoms={
+                "missing-active": missing_atom,
+                "shared-active": shared_atom,
+                "inactive": inactive_atom,
+            },
+            qdrant=qdrant,
+        )
+        op_logger = FakeOpLogger([])
+        task = ReconciliationTask(store, op_logger=op_logger)  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.1, 0.2])) as embed:
+            await task.run()
+            await task.run()
+
+        self.assertEqual(qdrant.atom_ids, {"missing-active", "shared-active"})
+        self.assertEqual(qdrant.deleted, ["orphan-vector"])
+        self.assertEqual([upsert["point_id"] for upsert in qdrant.upserts], ["missing-active"])
+        embed.assert_awaited_once_with("user prefers concise replies")
+
     async def test_reconcile_sqlite_to_qdrant_uses_payload_or_store_fallback_and_payload_defaults(self) -> None:
         atom = {
             "atom_id": "atom-1",
@@ -697,7 +767,12 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
             "source_id": "stream-1",
             "privacy_level": "context_sensitive",
         }
-        store = FakeStore(atoms={"atom-2": {**atom, "atom_id": "atom-2"}})
+        store = FakeStore(
+            atoms={
+                "atom-1": atom,
+                "atom-2": {**atom, "atom_id": "atom-2"},
+            }
+        )
         task = ReconciliationTask(store)  # type: ignore[arg-type]
 
         with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.1, 0.2])) as embed:
@@ -733,7 +808,7 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
                 await upsert_fails._sync_sqlite_to_qdrant("atom-1", make_op("op-upsert", payload={"atom": atom}))
             )
 
-    async def test_reconcile_one_routes_cross_store_cases_and_treats_missing_qdrant_vector_as_done(self) -> None:
+    async def test_reconcile_one_routes_cross_store_cases_and_reports_failed_qdrant_delete(self) -> None:
         store = FakeStore(qdrant=FakeQdrant(delete_result=False))
         task = ReconciliationTask(store)  # type: ignore[arg-type]
 
@@ -746,7 +821,7 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
             )
         sync.assert_awaited_once()
 
-        self.assertTrue(
+        self.assertFalse(
             await task._reconcile_one(
                 make_op("qdrant-ok", target="qdrant", status=OpStatus.COMPLETED),
                 make_op("sqlite-bad", target="sqlite", status=OpStatus.FAILED),
@@ -765,6 +840,284 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
                 make_op("no-common-bad", target="qdrant", atom_ids=["b"], status=OpStatus.FAILED),
             )
         )
+
+    async def test_storage_drift_preserves_vector_for_archived_sqlite_atom(self) -> None:
+        atom_id = "archived-atom"
+        qdrant = FakeQdrant(atom_ids={atom_id})
+        store = FakeStore(
+            atoms={atom_id: {"atom_id": atom_id, "content": "archived memory", "status": "archived"}},
+            qdrant=qdrant,
+        )
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        await task._reconcile_storage_drift()
+        await task._reconcile_storage_drift()
+
+        self.assertEqual(qdrant.deleted, [])
+        self.assertEqual(qdrant.atom_ids, {atom_id})
+
+    async def test_storage_drift_does_not_upsert_atom_archived_after_scan(self) -> None:
+        atom_id = "archived-during-scan"
+
+        class ArchiveAfterActiveScanStore(FakeStore):
+            async def list_atom_ids(self, status: str | None = None) -> set[str]:
+                atom_ids = await super().list_atom_ids(status=status)
+                if status == "active":
+                    self.atoms[atom_id]["status"] = "archived"
+                return atom_ids
+
+        qdrant = FakeQdrant()
+        store = ArchiveAfterActiveScanStore(
+            atoms={atom_id: {"atom_id": atom_id, "content": "stale active atom", "status": "active"}},
+            qdrant=qdrant,
+        )
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.1])) as embed:
+            await task._reconcile_storage_drift()
+
+        self.assertEqual(qdrant.upserts, [])
+        embed.assert_not_awaited()
+
+    async def test_storage_drift_requires_two_consecutive_observations_before_deleting_orphan(self) -> None:
+        atom_id = "orphan-vector"
+        qdrant = FakeQdrant(atom_ids={atom_id})
+        task = ReconciliationTask(FakeStore(qdrant=qdrant))  # type: ignore[arg-type]
+
+        await task._reconcile_storage_drift()
+        self.assertEqual(qdrant.deleted, [])
+
+        await task._reconcile_storage_drift()
+        self.assertEqual(qdrant.deleted, [atom_id])
+
+    async def test_storage_drift_cancels_orphan_deletion_when_sqlite_row_appears_between_scans(self) -> None:
+        atom_id = "transient-orphan"
+        qdrant = FakeQdrant(atom_ids={atom_id})
+        store = FakeStore(qdrant=qdrant)
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        await task._reconcile_storage_drift()
+        store.atoms[atom_id] = {"atom_id": atom_id, "content": "restored row", "status": "archived"}
+        await task._reconcile_storage_drift()
+        store.atoms.pop(atom_id)
+        await task._reconcile_storage_drift()
+
+        self.assertEqual(qdrant.deleted, [])
+
+        await task._reconcile_storage_drift()
+        self.assertEqual(qdrant.deleted, [atom_id])
+
+    async def test_storage_drift_advances_past_failed_batch_on_next_run(self) -> None:
+        atoms = {
+            f"atom-{index:03d}": {
+                "atom_id": f"atom-{index:03d}",
+                "content": f"content-{index:03d}",
+                "status": "active",
+            }
+            for index in range(60)
+        }
+        qdrant = FakeQdrant()
+        task = ReconciliationTask(FakeStore(atoms=atoms, qdrant=qdrant))  # type: ignore[arg-type]
+
+        async def embed(content: str) -> list[float]:
+            index = int(content.rsplit("-", maxsplit=1)[1])
+            return [] if index < 50 else [0.1]
+
+        clock = Mock(return_value=0.0)
+        with (
+            patch.object(reconciliation, "generate_embedding", new=AsyncMock(side_effect=embed)),
+            patch.object(reconciliation.time, "monotonic", new=clock),
+        ):
+            await task._reconcile_storage_drift()
+            self.assertEqual(qdrant.atom_ids, set())
+            clock.return_value = 121.0
+            await task._reconcile_storage_drift()
+
+        later_ids = {f"atom-{index:03d}" for index in range(50, 60)}
+        self.assertTrue(qdrant.atom_ids & later_ids)
+
+    async def test_sync_rechecks_status_and_content_around_embedding_and_upsert(self) -> None:
+        archived_during_embedding = {
+            "atom_id": "archived-during-embedding",
+            "content": "old archived content",
+            "status": "active",
+        }
+        archived_store = FakeStore(atoms={archived_during_embedding["atom_id"]: archived_during_embedding})
+        archived_task = ReconciliationTask(archived_store)  # type: ignore[arg-type]
+
+        async def archive_during_embedding(content: str) -> list[float]:
+            archived_store.atoms[archived_during_embedding["atom_id"]]["status"] = "archived"
+            return [0.1]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(side_effect=archive_during_embedding)):
+            self.assertFalse(await archived_task._sync_sqlite_to_qdrant(archived_during_embedding["atom_id"]))
+        self.assertEqual(archived_store.qdrant.upserts, [])
+
+        changed_atom = {"atom_id": "changed-content", "content": "old content", "status": "active"}
+        changed_store = FakeStore(atoms={changed_atom["atom_id"]: changed_atom})
+        changed_task = ReconciliationTask(changed_store)  # type: ignore[arg-type]
+
+        async def change_content(content: str) -> list[float]:
+            if content == "old content":
+                changed_store.atoms[changed_atom["atom_id"]]["content"] = "new content"
+                return [0.1]
+            return [0.2]
+
+        embed = AsyncMock(side_effect=change_content)
+        with patch.object(reconciliation, "generate_embedding", new=embed):
+            self.assertTrue(await changed_task._sync_sqlite_to_qdrant(changed_atom["atom_id"]))
+        self.assertEqual([call.args[0] for call in embed.await_args_list], ["old content", "new content"])
+        self.assertEqual(changed_store.qdrant.upserts[0]["vector"], [0.2])
+
+        post_upsert_atom = {"atom_id": "archived-after-upsert", "content": "content", "status": "active"}
+        post_upsert_store = FakeStore(atoms={post_upsert_atom["atom_id"]: post_upsert_atom})
+        original_upsert = post_upsert_store.qdrant.upsert_atom_vector
+
+        async def archive_after_upsert(**kwargs) -> bool:
+            result = await original_upsert(**kwargs)
+            post_upsert_store.atoms[post_upsert_atom["atom_id"]]["status"] = "archived"
+            return result
+
+        post_upsert_store.qdrant.upsert_atom_vector = archive_after_upsert  # type: ignore[method-assign]
+        post_upsert_task = ReconciliationTask(post_upsert_store)  # type: ignore[arg-type]
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.3])):
+            self.assertTrue(await post_upsert_task._sync_sqlite_to_qdrant(post_upsert_atom["atom_id"]))
+        self.assertEqual(post_upsert_store.qdrant.deleted, [post_upsert_atom["atom_id"]])
+        self.assertEqual(post_upsert_store.qdrant.atom_ids, set())
+
+    async def test_sync_keeps_forced_retry_when_refresh_fails_after_stale_upsert(self) -> None:
+        atom_id = "stale-after-upsert"
+        atom = {"atom_id": atom_id, "content": "content-v1", "status": "active"}
+        store = FakeStore(atoms={atom_id: atom})
+        original_upsert = store.qdrant.upsert_atom_vector
+
+        async def change_content_after_upsert(**kwargs) -> bool:
+            result = await original_upsert(**kwargs)
+            if len(store.qdrant.upserts) == 1:
+                atom["content"] = "content-v2"
+            return result
+
+        store.qdrant.upsert_atom_vector = change_content_after_upsert  # type: ignore[method-assign]
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        with patch.object(
+            reconciliation,
+            "generate_embedding",
+            new=AsyncMock(side_effect=[[0.1], []]),
+        ):
+            self.assertFalse(await task._sync_sqlite_to_qdrant(atom_id))
+
+        self.assertIn(atom_id, task._forced_resync_ids)
+        self.assertEqual(store.qdrant.atom_ids, set())
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.2])):
+            repaired, removed = await task._reconcile_storage_drift()
+
+        self.assertEqual((repaired, removed), (1, 0))
+        self.assertNotIn(atom_id, task._forced_resync_ids)
+        self.assertEqual(store.qdrant.atom_ids, {atom_id})
+        self.assertEqual(store.qdrant.upserts[-1]["vector"], [0.2])
+
+    async def test_sync_refreshes_concurrently_changed_vector_payload(self) -> None:
+        atom_id = "privacy-changed-during-upsert"
+        atom = {
+            "atom_id": atom_id,
+            "content": "private memory",
+            "status": "active",
+            "privacy_level": "context_sensitive",
+            "weight": 0.5,
+        }
+        store = FakeStore(atoms={atom_id: atom})
+        original_upsert = store.qdrant.upsert_atom_vector
+
+        async def change_payload_after_upsert(**kwargs) -> bool:
+            result = await original_upsert(**kwargs)
+            if len(store.qdrant.upserts) == 1:
+                atom["privacy_level"] = "private"
+                atom["weight"] = 0.9
+            return result
+
+        store.qdrant.upsert_atom_vector = change_payload_after_upsert  # type: ignore[method-assign]
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.3])) as embed:
+            self.assertTrue(await task._sync_sqlite_to_qdrant(atom_id))
+
+        self.assertEqual(embed.await_count, 2)
+        self.assertEqual(store.qdrant.upserts[-1]["payload"]["privacy_level"], "private")
+        self.assertEqual(store.qdrant.upserts[-1]["payload"]["weight"], 0.9)
+        self.assertNotIn(atom_id, task._forced_resync_ids)
+
+    async def test_sync_retries_failed_stale_vector_cleanup_even_when_point_id_exists(self) -> None:
+        atom_id = "cleanup-retry"
+        atom = {"atom_id": atom_id, "content": "content", "status": "active"}
+        qdrant = FakeQdrant(delete_result=False)
+        store = FakeStore(atoms={atom_id: atom}, qdrant=qdrant)
+        original_upsert = qdrant.upsert_atom_vector
+
+        async def archive_after_upsert(**kwargs) -> bool:
+            result = await original_upsert(**kwargs)
+            atom["status"] = "archived"
+            return result
+
+        qdrant.upsert_atom_vector = archive_after_upsert  # type: ignore[method-assign]
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.4])):
+            self.assertFalse(await task._sync_sqlite_to_qdrant(atom_id))
+
+        self.assertIn(atom_id, task._forced_cleanup_ids)
+        self.assertEqual(qdrant.atom_ids, {atom_id})
+
+        qdrant.delete_result = True
+        repaired, removed = await task._reconcile_storage_drift()
+
+        self.assertEqual((repaired, removed), (0, 1))
+        self.assertNotIn(atom_id, task._forced_cleanup_ids)
+        self.assertEqual(qdrant.atom_ids, set())
+
+    async def test_forced_cleanup_rechecks_active_state_before_deleting(self) -> None:
+        atom_id = "reactivated-before-cleanup"
+
+        class ReactivateAfterActiveScanStore(FakeStore):
+            async def list_atom_ids(self, status: str | None = None) -> set[str]:
+                atom_ids = await super().list_atom_ids(status=status)
+                if status == "active":
+                    self.atoms[atom_id]["status"] = "active"
+                return atom_ids
+
+        qdrant = FakeQdrant(atom_ids={atom_id})
+        store = ReactivateAfterActiveScanStore(
+            atoms={atom_id: {"atom_id": atom_id, "content": "restored content", "status": "archived"}},
+            qdrant=qdrant,
+        )
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+        task._forced_cleanup_ids.add(atom_id)
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.5])):
+            repaired, removed = await task._reconcile_storage_drift()
+
+        self.assertEqual((repaired, removed), (0, 1))
+        self.assertEqual(qdrant.deleted, [])
+        self.assertEqual(qdrant.upserts[-1]["point_id"], atom_id)
+        self.assertNotIn(atom_id, task._forced_cleanup_ids)
+        self.assertNotIn(atom_id, task._forced_resync_ids)
+
+    async def test_storage_drift_prunes_retry_state_for_atoms_no_longer_in_drift(self) -> None:
+        atom_id = "failed-then-archived"
+        atom = {"atom_id": atom_id, "content": "content", "status": "active"}
+        store = FakeStore(atoms={atom_id: atom})
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[])):
+            await task._reconcile_storage_drift()
+        self.assertIn(f"sync:{atom_id}", task._drift_retry_after)
+
+        atom["status"] = "archived"
+        await task._reconcile_storage_drift()
+
+        self.assertNotIn(f"sync:{atom_id}", task._drift_retry_after)
+        self.assertNotIn(f"sync:{atom_id}", task._drift_failure_counts)
 
     async def test_run_skips_blacklisted_or_max_retry_ops_and_increments_failed_reconciliations(self) -> None:
         completed = make_op("ok", target="sqlite", status=OpStatus.COMPLETED)

@@ -550,7 +550,7 @@ class MemoryWriter:
                 payload={"atom": store_dict},
             ):
                 with memory_db.atomic():
-                    await self.store.insert_atom(store_dict)
+                    await self.store.insert_atom(dict(store_dict))
                     if episodic_detail is not None:
                         await self._write_episodic_detail(atom.atom_id, episodic_detail)
                     if semantic_detail is not None:
@@ -625,7 +625,7 @@ class MemoryWriter:
                     atom_ids=[atom.atom_id],
                     payload={"atom": store_dict},
                 ):
-                    await self.store.insert_atom(store_dict)
+                    await self.store.insert_atom(dict(store_dict))
                 atom_ids.append(atom.atom_id)
 
                 # 生成 embedding（如果尚未设置）
@@ -714,9 +714,9 @@ class MemoryWriter:
                 OpType.UPDATE_ATOM,
                 "sqlite",
                 atom_ids=[atom_id],
-                payload={"updates": store_updates},
+                payload={"updates": dict(store_updates)},
             ):
-                success = await self.store.update_atom(atom_id, store_updates)
+                success = await self.store.update_atom(atom_id, dict(store_updates))
                 if not success:
                     logger.warning(f"更新记忆原子返回 False: {atom_id}")
         except Exception as e:
@@ -745,7 +745,7 @@ class MemoryWriter:
                         OpType.UPDATE_ATOM,
                         "qdrant",
                         atom_ids=[atom_id],
-                        payload={"updates": store_updates},
+                        payload={"updates": dict(store_updates)},
                     ):
                         if not await self.store.qdrant.upsert_atom_vector(
                             point_id=atom_id,

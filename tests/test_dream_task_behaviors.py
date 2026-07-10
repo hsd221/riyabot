@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 from src.memory.dream_agent import DreamTask
 from src.memory.layer1_summarizer import UnclosedTopicBridge
@@ -35,9 +36,19 @@ from src.memory.user_profile import ProfileStore, UserProfile
 class FakeQdrant:
     def __init__(self) -> None:
         self.payload_updates: list[tuple[str, dict[str, Any]]] = []
+        self.vector_upserts: list[tuple[str, list[float], dict[str, Any]]] = []
 
     async def set_atom_payload(self, atom_id: str, payload: dict[str, Any]) -> None:
         self.payload_updates.append((atom_id, payload))
+
+    async def upsert_atom_vector(
+        self,
+        point_id: str,
+        vector: list[float],
+        payload: dict[str, Any],
+    ) -> bool:
+        self.vector_upserts.append((point_id, vector, payload))
+        return True
 
 
 class FakeStore:
@@ -64,8 +75,15 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self._bridge_file_path = UnclosedTopicBridge._FILE_PATH
         UnclosedTopicBridge._DATA_DIR = self.tmpdir.name
         UnclosedTopicBridge._FILE_PATH = str(Path(self.tmpdir.name) / "topic_bridge.json")
+        self.generate_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
+        self._embedding_patcher = patch(
+            "src.memory.dream_agent.generate_embedding",
+            new=self.generate_embedding,
+        )
+        self._embedding_patcher.start()
 
     def tearDown(self) -> None:
+        self._embedding_patcher.stop()
         UnclosedTopicBridge._DATA_DIR = self._bridge_data_dir
         UnclosedTopicBridge._FILE_PATH = self._bridge_file_path
         if not memory_db.is_closed():
@@ -264,6 +282,34 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repeated, {"high": 0, "medium": 0, "low": 0, "skipped": 0})
         self.assertEqual(MemoryAtom.select().count(), 2)
         self.assertEqual(NoisePool.select().count(), 1)
+
+    async def test_triage_syncs_new_active_dream_raw_atom_to_qdrant(self) -> None:
+        raw = RawMessageArchive.create(
+            stream_id="group-1",
+            message_id="msg-vector-sync",
+            user_id="user-a",
+            content="小明说今天开始练钢琴",
+            timestamp=datetime.datetime.now().timestamp(),
+            chat_type="group",
+        )
+        task = DreamTask(FakeStore())
+        embedding = [0.1, 0.2, 0.3]
+
+        self.generate_embedding.return_value = embedding
+        stats = await task._triage_raw_archive(max_age_days=1)
+
+        atom_id = f"dream-raw-{raw.id}"
+        atom = MemoryAtom.get(MemoryAtom.atom_id == atom_id)
+        self.assertEqual(stats["medium"], 1)
+        self.assertEqual(atom.status, "active")
+        self.generate_embedding.assert_awaited_once_with(atom.content)
+        self.assertTrue(
+            any(
+                point_id == atom_id and vector == embedding and payload.get("status") == "active"
+                for point_id, vector, payload in task._store.qdrant.vector_upserts
+            ),
+            "A newly active dream-raw atom must have a matching Qdrant vector before triage returns",
+        )
 
     async def test_triage_treats_archived_conversation_summary_as_summary_material(self) -> None:
         now_ts = datetime.datetime.now().timestamp()

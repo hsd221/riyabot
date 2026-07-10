@@ -35,6 +35,7 @@ from src.memory.schema import (
     initialize_database,
     memory_db,
 )
+from src.memory.write_ops import WriteOpLogger
 
 
 class MemoryDatabaseFixtureMixin:
@@ -416,6 +417,85 @@ class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAs
 
 
 class MemoryWriterLayer3Test(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_write_atom_keeps_write_ops_serializable_when_store_mutates_payload(self) -> None:
+        async def insert_atom(atom_data: dict) -> str:
+            for field_name in ("created_at", "last_accessed_at", "last_reinforced_at"):
+                atom_data[field_name] = datetime.fromtimestamp(atom_data[field_name])
+            return atom_data["atom_id"]
+
+        qdrant = SimpleNamespace(upsert_atom_vector=AsyncMock(return_value=True))
+        store = SimpleNamespace(qdrant=qdrant, insert_atom=AsyncMock(side_effect=insert_atom))
+        op_logger = WriteOpLogger(str(Path(self.tmpdir.name) / "write-ops.db"))
+        writer = MemoryWriter(store, op_logger)
+
+        atom_id = await writer.write_atom(make_atom(atom_id="mutated-payload"))
+
+        self.assertEqual(atom_id, "mutated-payload")
+        qdrant.upsert_atom_vector.assert_awaited_once()
+        with open(op_logger.log_file, encoding="utf-8") as log_file:
+            write_ops = [json.loads(line) for line in log_file if line.strip()]
+        self.assertEqual(
+            [(write_op["target"], write_op["status"]) for write_op in write_ops],
+            [("sqlite", "completed"), ("qdrant", "completed")],
+        )
+
+    async def test_update_atom_keeps_write_ops_serializable_when_store_mutates_updates(self) -> None:
+        converter = MemoryWriter(SimpleNamespace())
+        content_atom = converter._atom_to_store_dict(make_atom(atom_id="content-update"))
+        payload_atom = converter._atom_to_store_dict(make_atom(atom_id="payload-update"))
+        payload_atom.pop("content")
+        persisted = {
+            "content-update": content_atom,
+            "payload-update": payload_atom,
+        }
+
+        async def update_atom(atom_id: str, atom_updates: dict) -> bool:
+            for field_name in ("last_accessed_at", "last_reinforced_at"):
+                atom_updates[field_name] = datetime.fromtimestamp(atom_updates[field_name])
+            persisted[atom_id].update(atom_updates)
+            return True
+
+        qdrant = SimpleNamespace(
+            upsert_atom_vector=AsyncMock(return_value=True),
+            set_atom_payload=AsyncMock(return_value=True),
+        )
+        store = SimpleNamespace(
+            qdrant=qdrant,
+            get_atom=AsyncMock(side_effect=lambda atom_id: dict(persisted[atom_id])),
+            update_atom=AsyncMock(side_effect=update_atom),
+        )
+        op_logger = WriteOpLogger(str(Path(self.tmpdir.name) / "update-write-ops.db"))
+        writer = MemoryWriter(store, op_logger)
+
+        with patch.object(layer3_retrieval, "generate_embedding", new=AsyncMock(return_value=[0.2, 0.8])):
+            content_updated = await writer.update_atom(
+                "content-update",
+                {"content": "更新后的爵士乐事实", "last_accessed_at": 400.0},
+            )
+            payload_updated = await writer.update_atom(
+                "payload-update",
+                {"weight": 0.65, "last_accessed_at": 500.0},
+            )
+
+        self.assertEqual(content_updated["content"], "更新后的爵士乐事实")
+        self.assertEqual(payload_updated["weight"], 0.65)
+        self.assertEqual(store.update_atom.await_count, 2)
+        qdrant.upsert_atom_vector.assert_awaited_once()
+        qdrant.set_atom_payload.assert_awaited_once()
+        self.assertEqual(qdrant.upsert_atom_vector.await_args.kwargs["payload"]["atom_id"], "content-update")
+        self.assertEqual(qdrant.set_atom_payload.await_args.args[1]["weight"], 0.65)
+        with open(op_logger.log_file, encoding="utf-8") as log_file:
+            write_ops = [json.loads(line) for line in log_file if line.strip()]
+        self.assertEqual(
+            [(write_op["target"], write_op["status"]) for write_op in write_ops],
+            [
+                ("sqlite", "completed"),
+                ("qdrant", "completed"),
+                ("sqlite", "completed"),
+                ("qdrant", "completed"),
+            ],
+        )
+
     async def test_writer_validation_conversion_detail_writes_and_qdrant_payloads(self) -> None:
         qdrant = SimpleNamespace(upsert_atom_vector=AsyncMock(return_value=True))
         writer = MemoryWriter(SimpleNamespace(qdrant=qdrant))

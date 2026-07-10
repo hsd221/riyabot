@@ -163,7 +163,9 @@ class QdrantManager:
 
         if value.isdecimal():
             try:
-                return int(value)
+                numeric_id = int(value)
+                if str(numeric_id) == value:
+                    return numeric_id
             except ValueError:
                 pass
 
@@ -397,13 +399,15 @@ class QdrantManager:
         if not self._client:
             return False
         try:
+            normalized_payload = dict(payload)
+            normalized_payload["atom_id"] = str(point_id)
             self._client.upsert(
                 collection_name=self.config.collection_name_atoms,
                 points=[
                     qdrant_models.PointStruct(
                         id=self._normalize_point_id(point_id),
                         vector=vector,
-                        payload=payload,
+                        payload=normalized_payload,
                     )
                 ],
             )
@@ -467,7 +471,7 @@ class QdrantManager:
                 qdrant_models.PointStruct(
                     id=self._normalize_point_id(pid),
                     vector=vec,
-                    payload=pl,
+                    payload={**pl, "atom_id": str(pid)},
                 )
                 for pid, vec, pl in points
             ]
@@ -561,9 +565,66 @@ class QdrantManager:
             )
             return []
 
+    async def list_atom_points(self, page_size: int = 256) -> Optional[list[dict[str, Any]]]:
+        """分页读取 Qdrant 原子的物理 ID 与可信业务 ID。"""
+        if not self._available or not self._client:
+            return None
+
+        atom_points: list[dict[str, Any]] = []
+        offset: Any = None
+        untrusted = 0
+        try:
+            while True:
+                points, next_offset = self._client.scroll(
+                    collection_name=self.config.collection_name_atoms,
+                    limit=page_size,
+                    offset=offset,
+                    with_payload=["atom_id"],
+                    with_vectors=False,
+                )
+                for point in points:
+                    physical_id = point.id
+                    payload_atom_id = (getattr(point, "payload", None) or {}).get("atom_id")
+                    business_id: Optional[str] = None
+                    if payload_atom_id is not None:
+                        candidate = str(payload_atom_id)
+                        if self._normalize_point_id(candidate) == self._normalize_point_id(physical_id):
+                            business_id = candidate
+                    if business_id is None:
+                        untrusted += 1
+                    atom_points.append({"physical_id": physical_id, "business_id": business_id})
+
+                if next_offset is None:
+                    break
+                if next_offset == offset:
+                    raise RuntimeError("Qdrant scroll offset did not advance")
+                offset = next_offset
+
+            if untrusted:
+                logger.warning(
+                    "Qdrant 原子业务 atom_id 缺失或与物理 ID 不匹配",
+                    event_code="memory.qdrant.atom_ids_untrusted_payload",
+                    count=untrusted,
+                )
+            return atom_points
+        except Exception:
+            logger.exception("Qdrant 原子 point 列表获取失败", event_code="memory.qdrant.atom_points_list_failed")
+            return None
+
+    async def list_atom_ids(self, page_size: int = 256) -> Optional[set[str]]:
+        """分页读取 Qdrant 中已验证可映射回业务主键的原子 ID。"""
+        atom_points = await self.list_atom_points(page_size=page_size)
+        if atom_points is None:
+            return None
+        return {
+            point["business_id"]
+            for point in atom_points
+            if isinstance(point.get("business_id"), str) and point["business_id"]
+        }
+
     # -- 向量删除 -----------------------------------------------------------
 
-    async def delete_atom_vector(self, point_id: str) -> bool:
+    async def delete_atom_vector(self, point_id: str | int) -> bool:
         """删除指定记忆原子的向量"""
         if not self._available:
             return True
@@ -607,6 +668,13 @@ class QdrantManager:
                 points=[self._normalize_point_id(point_id)],
             )
             return True
+        except KeyError:
+            logger.debug(
+                "Qdrant 原子不存在，等待一致性协调",
+                event_code="memory.qdrant.atom_payload_missing",
+                point_id=point_id,
+            )
+            return False
         except Exception:
             logger.exception(
                 "Qdrant 原子 payload 设置失败",
@@ -745,6 +813,7 @@ class MemoryStore:
         Returns:
             str: 生成的 atom_id
         """
+        atom_data = dict(atom_data)
         atom_id = str(atom_data.get("atom_id") or uuid.uuid4())
         atom_data["atom_id"] = atom_id
         _normalize_datetime_fields(atom_data, fill_missing=True)
@@ -778,6 +847,7 @@ class MemoryStore:
         Returns:
             bool: 是否成功
         """
+        updates = dict(updates)
         _normalize_datetime_fields(updates)
 
         # JSON 字段序列化
@@ -816,10 +886,11 @@ class MemoryStore:
         try:
             with memory_db.atomic():
                 for atom_id, updates in updates_list:
-                    _normalize_datetime_fields(updates)
-                    if isinstance(updates.get("entities"), (list, dict)):
-                        updates["entities"] = json.dumps(updates["entities"], ensure_ascii=False)
-                    query = MemoryAtom.update(**updates).where(MemoryAtom.atom_id == atom_id)
+                    normalized_updates = dict(updates)
+                    _normalize_datetime_fields(normalized_updates)
+                    if isinstance(normalized_updates.get("entities"), (list, dict)):
+                        normalized_updates["entities"] = json.dumps(normalized_updates["entities"], ensure_ascii=False)
+                    query = MemoryAtom.update(**normalized_updates).where(MemoryAtom.atom_id == atom_id)
                     count += query.execute()
             return count
         except Exception:
@@ -970,6 +1041,22 @@ class MemoryStore:
         except Exception:
             logger.exception("记忆原子批量获取失败", event_code="memory.atom.batch_get_failed", count=len(atom_ids))
             return {}
+
+    async def list_atom_ids(self, status: Optional[str] = None) -> Optional[set[str]]:
+        """读取 SQLite 中的记忆原子 ID；查询失败时返回 ``None``。"""
+        try:
+            with memory_db:
+                query = MemoryAtom.select(MemoryAtom.atom_id)
+                if status:
+                    query = query.where(MemoryAtom.status == status)
+                return {str(atom.atom_id) for atom in query}
+        except Exception:
+            logger.exception(
+                "记忆原子 ID 列表获取失败",
+                event_code="memory.atom.ids_list_failed",
+                status=status,
+            )
+            return None
 
     async def list_atoms(
         self,

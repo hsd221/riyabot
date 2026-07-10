@@ -42,6 +42,7 @@ from src.memory.schema import (
     memory_db,
 )
 from src.memory.forgetting import _safe_timestamp
+from src.memory.embedding_utils import generate_embedding
 from src.memory.store import MemoryStore
 
 logger = get_logger("memory.dream")
@@ -671,7 +672,7 @@ class DreamTask(AsyncTask):
                     continue
 
                 if route in ("high", "medium"):
-                    created = self._write_triaged_episodic_atom(record, route, significance, emotion_tags)
+                    created = await self._write_triaged_episodic_atom(record, route, significance, emotion_tags)
                 else:
                     created = self._record_raw_noise(record, significance)
 
@@ -806,7 +807,7 @@ class DreamTask(AsyncTask):
             return "夜晚"
         return "深夜"
 
-    def _write_triaged_episodic_atom(
+    async def _write_triaged_episodic_atom(
         self,
         record: RawMessageArchive,
         route: str,
@@ -911,6 +912,29 @@ class DreamTask(AsyncTask):
             )
             if route == "high":
                 self._run_high_significance_chain(record, atom_id, significance, emotion_tags)
+
+        embedding = await generate_embedding(content)
+        if embedding:
+            indexed = await self._store.qdrant.upsert_atom_vector(
+                point_id=atom_id,
+                vector=embedding,
+                payload={
+                    "atom_id": atom_id,
+                    "atom_type": AtomType.EPISODIC.value,
+                    "weight": weight,
+                    "importance": importance,
+                    "confidence": confidence,
+                    "status": "active",
+                    "source_scene": source_scene,
+                    "source_id": source_id,
+                    "privacy_level": privacy_level,
+                },
+            )
+            if not indexed:
+                logger.warning("梦境分诊原子向量写入失败", atom_id=atom_id)
+        else:
+            logger.warning("梦境分诊原子 embedding 生成失败", atom_id=atom_id)
+
         self._sync_profile_from_triaged_atom(str(record.user_id), atom_dc)
         return True
 

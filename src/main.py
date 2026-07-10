@@ -253,32 +253,26 @@ class MainSystem:
                 logger.warning("梦境维护任务注册失败", event_code="memory.dream.task_register_failed", exc_info=True)
 
             # 启动双写一致性协调任务
-            if memory_op_logger is not None:
-                try:
-                    from src.memory.reconciliation import ReconciliationTask
+            try:
+                from src.memory.reconciliation import ReconciliationTask
 
-                    recon_task = ReconciliationTask(
-                        store=store,
-                        op_logger=memory_op_logger,
-                        interval=120,
-                    )
-                    await async_task_manager.add_task(recon_task)
-                    logger.info(
-                        "双写一致性协调任务已注册",
-                        event_code="memory.reconciliation.task_registered",
-                        interval_seconds=120,
-                    )
-                except Exception:
-                    logger.warning(
-                        "双写一致性协调任务注册失败",
-                        event_code="memory.reconciliation.task_register_failed",
-                        exc_info=True,
-                    )
-            else:
+                recon_task = ReconciliationTask(
+                    store=store,
+                    op_logger=memory_op_logger,
+                    interval=120,
+                )
+                await async_task_manager.add_task(recon_task)
+                logger.info(
+                    "双写一致性协调任务已注册",
+                    event_code="memory.reconciliation.task_registered",
+                    interval_seconds=120,
+                    write_op_log_available=memory_op_logger is not None,
+                )
+            except Exception:
                 logger.warning(
-                    "双写一致性协调任务未注册",
-                    event_code="memory.reconciliation.task_skipped",
-                    reason="write_op_logger_unavailable",
+                    "双写一致性协调任务注册失败",
+                    event_code="memory.reconciliation.task_register_failed",
+                    exc_info=True,
                 )
         except Exception:
             logger.warning("记忆存储初始化失败，主系统继续启动", event_code="memory.store.init_failed", exc_info=True)
