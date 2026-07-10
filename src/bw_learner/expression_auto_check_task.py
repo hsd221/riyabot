@@ -15,6 +15,7 @@ from typing import List
 
 from src.common.database.database_model import Expression
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt
 from src.config.config import global_config
 from src.config.config import model_config
 from src.llm_models.utils_model import LLMRequest
@@ -53,23 +54,12 @@ def create_evaluation_prompt(situation: str, style: str) -> str:
     # 构建评估标准列表字符串
     criteria_list = "\n".join([f"{i + 1}. {criterion}" for i, criterion in enumerate(all_criteria)])
 
-    prompt = f"""请评估以下表达方式或语言风格以及使用条件或使用情景是否合适：
-使用条件或使用情景：{situation}
-表达方式或言语风格：{style}
-
-请从以下方面进行评估：
-{criteria_list}
-
-请以JSON格式输出评估结果：
-{{
-    "suitable": true/false,
-    "reason": "评估理由（如果不合适，请说明原因）"
-
-}}
-如果合适，suitable设为true；如果不合适，suitable设为false，并在reason中说明原因。
-请严格按照JSON格式输出，不要包含其他内容。"""
-
-    return prompt
+    return load_prompt(
+        "expression_auto_check",
+        situation=situation,
+        style=style,
+        criteria_list=criteria_list,
+    )
 
 
 judge_llm = LLMRequest(model_set=model_config.model_task_config.tool_use, request_type="expression_check")

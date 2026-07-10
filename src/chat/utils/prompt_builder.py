@@ -96,6 +96,7 @@ class PromptContext:
 class PromptManager:
     def __init__(self):
         self._prompts = {}
+        self._external_sources: Dict[str, tuple[str, Optional[str]]] = {}
         self._counter = 0
         self._context = PromptContext()
         self._lock = asyncio.Lock()
@@ -117,7 +118,22 @@ class PromptManager:
             # logger.debug(f"从全局获取提示词: {name}")
             if name not in self._prompts:
                 raise KeyError(f"Prompt '{name}' not found")
-            return self._prompts[name]
+            external_source = self._external_sources.get(name)
+            prompt = self._prompts[name]
+
+        if external_source is None:
+            return prompt
+
+        from src.common.prompt_loader import load_prompt_template, parse_prompt_sections
+
+        file_name, section_name = external_source
+        template = load_prompt_template(file_name)
+        if section_name is not None:
+            sections = parse_prompt_sections(template)
+            if section_name not in sections:
+                raise KeyError(f"段 '{section_name}' 不存在于提示词 '{file_name}' 中")
+            template = sections[section_name]
+        return Prompt(template, name=name, _should_register=False)
 
     def generate_name(self, template: str) -> str:
         """为未命名的prompt生成名称"""
@@ -128,7 +144,25 @@ class PromptManager:
         """注册一个prompt"""
         if not prompt.name:
             prompt.name = self.generate_name(prompt.template)
+        self._external_sources.pop(prompt.name, None)
         self._prompts[prompt.name] = prompt
+
+    def register_external(
+        self,
+        name: str,
+        file_name: str,
+        template: str,
+        section_name: Optional[str] = None,
+    ) -> bool:
+        """注册外部模板来源，返回是否新增了模板。"""
+        if name in self._prompts:
+            if name in self._external_sources:
+                self._external_sources[name] = (file_name, section_name)
+            return False
+
+        self.register(Prompt(template, name=name, _should_register=False))
+        self._external_sources[name] = (file_name, section_name)
+        return True
 
     def add_prompt(self, name: str, fstr: str) -> "Prompt":
         prompt = Prompt(fstr, name=name)
@@ -166,11 +200,14 @@ def init_external_prompts() -> int:
         sections = parse_prompt_sections(template)
         if sections:
             for section_name, section_template in sections.items():
-                if section_name not in global_prompt_manager._prompts:
-                    Prompt(section_template, name=section_name)
+                if global_prompt_manager.register_external(
+                    section_name,
+                    file_name=name,
+                    template=section_template,
+                    section_name=section_name,
+                ):
                     count += 1
-        elif name not in global_prompt_manager._prompts:
-            Prompt(template, name=name)
+        elif global_prompt_manager.register_external(name, file_name=name, template=template):
             count += 1
     logger.info(f"从外部文件同步了 {count} 个提示词到兼容层")
     return count

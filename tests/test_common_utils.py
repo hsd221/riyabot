@@ -203,6 +203,20 @@ bye {name}
                 self.assertEqual(prompt_loader.list_prompt_templates(), [])
             prompt_loader.clear_prompt_cache()
 
+    def test_load_prompt_observes_file_changes_without_manual_cache_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_path = Path(tmpdir) / "live.prompt"
+            prompt_path.write_text("first {value}", encoding="utf-8")
+
+            prompt_loader.clear_prompt_cache()
+            with patch.object(prompt_loader, "PROMPTS_ROOT", Path(tmpdir)):
+                self.assertEqual(prompt_loader.load_prompt("live", value="one"), "first one")
+
+                prompt_path.write_text("updated prompt {value}", encoding="utf-8")
+                self.assertEqual(prompt_loader.load_prompt("live", value="two"), "updated prompt two")
+
+            prompt_loader.clear_prompt_cache()
+
     def test_load_prompt_section_formats_requested_section_from_patched_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             prompt_path = Path(tmpdir) / "sample.prompt"
@@ -236,6 +250,23 @@ class PromptManagerTest(unittest.TestCase):
                 prompt_path.write_text("bye {name}", encoding="utf-8")
                 prompt_loader.clear_prompt_cache()
                 self.assertEqual(manager.format_prompt("sample", name="Mai"), "bye Mai")
+
+            prompt_loader.clear_prompt_cache()
+
+    def test_prompt_manager_observes_file_changes_without_manual_cache_clear(self) -> None:
+        manager = prompt_manager.PromptManager()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_path = Path(tmpdir) / "sample.prompt"
+            prompt_path.write_text("before {name}", encoding="utf-8")
+
+            prompt_loader.clear_prompt_cache()
+            with patch.object(prompt_loader, "PROMPTS_ROOT", Path(tmpdir)):
+                manager.load_prompts()
+                self.assertEqual(manager.format_prompt("sample", name="Mai"), "before Mai")
+
+                prompt_path.write_text("after reload {name}", encoding="utf-8")
+                self.assertEqual(manager.format_prompt("sample", name="Mai"), "after reload Mai")
 
             prompt_loader.clear_prompt_cache()
 

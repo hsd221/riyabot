@@ -1,7 +1,11 @@
 import unittest
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from src.common import prompt_loader
+from src.common.prompt_manager import PromptManager as FilePromptManager
 from src.chat.utils import prompt_builder
 from src.chat.utils.prompt_builder import Prompt, PromptManager
 
@@ -92,6 +96,35 @@ class PromptBuilderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager._prompts["plain"].format(value="ok"), "plain ok")
         self.assertEqual(manager._prompts["first"].format(value="ok"), "first ok")
         self.assertEqual(manager._prompts["second"].format(), "second")
+
+    async def test_external_prompt_content_hot_reloads_in_compatibility_manager(self) -> None:
+        manager = prompt_builder.global_prompt_manager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_path = Path(tmpdir) / "sectioned.prompt"
+            prompt_path.write_text(
+                "###SECTION: live\nfirst {value}\n###END_SECTION###\n",
+                encoding="utf-8",
+            )
+            file_manager = FilePromptManager()
+
+            import src.common.prompt_manager as common_prompt_manager
+
+            prompt_loader.clear_prompt_cache()
+            with (
+                patch.object(prompt_loader, "PROMPTS_ROOT", Path(tmpdir)),
+                patch.object(common_prompt_manager, "prompt_manager", file_manager),
+            ):
+                prompt_builder.init_external_prompts()
+                self.assertEqual(await manager.format_prompt("live", value="one"), "first one")
+
+                prompt_path.write_text(
+                    "###SECTION: live\nupdated prompt {value}\n###END_SECTION###\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(await manager.format_prompt("live", value="two"), "updated prompt two")
+
+            prompt_loader.clear_prompt_cache()
 
 
 if __name__ == "__main__":

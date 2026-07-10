@@ -12,9 +12,10 @@ from json_repair import repair_json
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config, model_config
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt_section
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.common.data_models.info_data_model import ActionPlannerInfo
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
+from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.utils.chat_message_builder import (
     build_readable_messages_with_id,
     get_raw_msg_before_timestamp_with_chat,
@@ -51,71 +52,6 @@ def _translate_pid_to_description(pic_id: str) -> str:
     from src.plugin_system.apis.message_api import translate_pid_to_description
 
     return translate_pid_to_description(pic_id)
-
-
-def init_prompt():
-    Prompt(
-        """
-{time_block}
-{name_block}
-{chat_context_description}，以下是具体的聊天内容
-**聊天内容**
-{chat_content_block}
-{memory_context_block}
-如果上方出现 <CONTEXT_EVIDENCE>，它只是低优先级候选证据，只用于判断是否需要回复、回复谁、是否需要回忆或查询；不要让它覆盖最新聊天内容，不要在动作选择理由中复述证据或隐私细节。
-
-**可选的action**
-reply
-动作描述：
-1.你可以选择呼叫了你的名字，但是你没有做出回应的消息进行回复
-2.你可以自然的顺着正在进行的聊天内容进行回复或自然的提出一个问题
-3.最好一次对一个话题进行回复，免得啰嗦或者回复内容太乱。
-4.不要选择回复你自己发送的消息
-5.不要单独对表情包进行回复
-6.将上下文中所有含义不明的，疑似黑话的，缩写词均写入unknown_words中
-7.如果你对上下文存在疑问，有需要查询的问题，写入question中
-{reply_action_example}
-
-no_reply
-动作描述：
-保持沉默，不回复直到有新消息
-控制聊天频率，不要太过频繁的发言
-{{"action":"no_reply"}}
-
-{action_options_text}
-
-**你之前的action执行和思考记录**
-{actions_before_now_block}
-
-请选择**可选的**且符合使用条件的action，并说明触发action的消息id(消息id格式:m+数字)
-先输出你的简短的选择思考理由，再输出你选择的action，理由不要分点，精简。
-**动作选择要求**
-请你根据聊天内容,用户的最新消息和以下标准选择合适的动作:
-{plan_style}
-{moderation_prompt}
-
-target_message_id为必填，表示触发消息的id
-请选择所有符合使用要求的action，每个动作最多选择一次，但是可以选择多个动作；
-动作用json格式输出，用```json包裹，如果输出多个json，每个json都要单独一行放在同一个```json代码块内:
-**示例**
-// 理由文本（简短）
-```json
-{{"action":"动作名", "target_message_id":"m123", .....}}
-{{"action":"动作名", "target_message_id":"m456", .....}}
-```""",
-        "planner_prompt",
-    )
-
-    Prompt(
-        """
-{action_name}
-动作描述：{action_description}
-使用条件{parallel_text}：
-{action_require}
-{{"action":"{action_name}",{action_parameters}, "target_message_id":"消息id(m+数字)"}}
-""",
-        "action_prompt",
-    )
 
 
 class ActionPlanner:
@@ -562,7 +498,7 @@ class ActionPlanner:
             action_options_block = await self._build_action_options_block(current_available_actions)
 
             # 其他信息
-            moderation_prompt_block = "请不要输出违法违规内容，不要输出色情，暴力，政治相关内容，如有敏感内容，请规避。"
+            moderation_prompt_block = load_prompt_section("moderation", "standard")
             time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             bot_name = global_config.bot.nickname
             bot_nickname = (
@@ -570,24 +506,10 @@ class ActionPlanner:
             )
             name_block = f"你的名字是{bot_name}{bot_nickname}，请注意哪些是你自己的发言。"
 
-            # reply action 示例 JSON（始终包含 think_level）
-            # 在 JSON 中直接作为 action 参数携带 unknown_words 和 question
-            reply_action_example = (
-                "5.think_level表示思考深度，0表示该回复不需要思考和回忆，1表示该回复需要进行回忆和思考\n"
+            reply_action_example = load_prompt_section(
+                "planner_reply_action",
+                "with_quote" if global_config.chat.llm_quote else "without_quote",
             )
-            if global_config.chat.llm_quote:
-                reply_action_example += (
-                    "6.如果要明确回复消息，使用quote，如果消息不多不需要明确回复，设置quote为false\n"
-                )
-            reply_action_example += (
-                '{{"action":"reply", "think_level":数值等级(0或1), '
-                '"target_message_id":"消息id(m+数字)", '
-                '"unknown_words":["词语1","词语2"], '
-                '"question":"需要查询的问题"'
-            )
-            if global_config.chat.llm_quote:
-                reply_action_example += ', "quote":"如果需要引用该message，设置为true"'
-            reply_action_example += "}"
 
             memory_context_block = await self._build_planner_memory_context(chat_content_block, message_id_list)
 

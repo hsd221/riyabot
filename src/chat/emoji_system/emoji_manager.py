@@ -16,6 +16,7 @@ from rich.traceback import install
 from src.common.database.database_model import Emoji, EmojiDescriptionCache
 from src.common.database.database import db as peewee_db
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt, load_prompt_section
 from src.config.config import global_config, model_config
 from src.chat.utils.utils_image import (
     audit_gif_frames,
@@ -847,17 +848,13 @@ class EmojiManager:
             # 将表情包信息转换为可读的字符串
             emoji_info_list = _emoji_objects_to_readable_list(selected_emojis)
 
-            # 构建提示词
-            prompt = (
-                f"{global_config.bot.nickname}的表情包存储已满({self.emoji_num}/{self.emoji_num_max})，"
-                f"需要决定是否删除一个旧表情包来为新表情包腾出空间。\n\n"
-                f"新表情包信息：\n"
-                f"描述: {new_emoji.description}\n\n"
-                f"现有表情包列表：\n" + "\n".join(emoji_info_list) + "\n\n"
-                "请决定：\n"
-                "1. 是否要删除某个现有表情包来为新表情包腾出空间？\n"
-                "2. 如果要删除，应该删除哪一个(给出编号)？\n"
-                "请只回答：'不删除'或'删除编号X'(X为表情包编号)。"
+            prompt = load_prompt(
+                "emoji_replace_decision",
+                bot_nickname=global_config.bot.nickname,
+                current_num=self.emoji_num,
+                max_num=self.emoji_num_max,
+                new_description=new_emoji.description,
+                emoji_list="\n".join(emoji_info_list),
             )
 
             # 调用大模型进行决策
@@ -957,7 +954,7 @@ class EmojiManager:
                         temperature=0.5,
                     )
                 else:
-                    prompt = "这是一个表情包，请详细描述一下表情包所表达的情感和内容，简短描述细节，从互联网梗,meme的角度去分析，精简回答"
+                    prompt = load_prompt_section("emoji_vlm_description", "static")
                     description, _ = await self.vlm.generate_response_for_image(
                         prompt, image_base64, image_format, temperature=0.5
                     )
@@ -983,14 +980,10 @@ class EmojiManager:
 
             # 审核表情包
             if global_config.emoji.content_filtration:
-                prompt = f'''
-                    这是一个表情包，请对这个表情包进行审核，标准如下：
-                    1. 必须符合"{global_config.emoji.filtration_prompt}"的要求
-                    2. 不能是色情、暴力、等违法违规内容，必须符合公序良俗
-                    3. 不能是任何形式的截图，聊天记录或视频截图
-                    4. 不要出现5个以上文字
-                    请回答这个表情包是否满足上述要求，是则回答是，否则回答否，不要出现任何其他内容
-                '''
+                prompt = load_prompt(
+                    "emoji_content_filter",
+                    filtration_prompt=global_config.emoji.filtration_prompt,
+                )
                 if is_gif:
                     if not gif_frames:
                         gif_frames = [("png", frame) for frame in get_image_manager().extract_gif_frames(image_base64)]
@@ -1011,13 +1004,7 @@ class EmojiManager:
                     return "", []
 
             # 第二步：LLM情感分析 - 基于详细描述生成情感标签列表
-            emotion_prompt = f"""
-这是一个聊天场景中的表情包描述：'{description}'
-
-请你识别这个表情包的含义和适用场景，给我简短的描述，每个描述不要超过15个字
-你可以关注其幽默和讽刺意味，动用贴吧，微博，小红书的知识，必须从互联网梗,meme的角度去分析
-请直接输出描述，不要出现任何其他内容，如果有多个描述，可以用逗号分隔
-            """
+            emotion_prompt = load_prompt("emoji_emotion_analysis", description=description)
             emotions_text, _ = await self.llm_emotion_judge.generate_response_async(
                 emotion_prompt, temperature=0.7, max_tokens=256
             )

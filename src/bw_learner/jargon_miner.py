@@ -8,6 +8,7 @@ from peewee import fn
 
 from src.common.logger import get_logger
 from src.common.database.database_model import Jargon
+from src.common.prompt_loader import load_prompt_section
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import model_config, global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -43,34 +44,6 @@ def _is_single_char_jargon(content: str) -> bool:
         or "A" <= char <= "Z"  # 大写字母
         or "0" <= char <= "9"  # 数字
     )
-
-
-# def _init_prompt() -> None:
-#     prompt_str = """
-# **聊天内容，其中的{bot_name}的发言内容是你自己的发言，[msg_id] 是消息ID**
-# {chat_str}
-
-# 请从上面这段聊天内容中提取"可能是黑话"的候选项（黑话/俚语/网络缩写/口头禅）。
-# - 必须为对话中真实出现过的短词或短语
-# - 必须是你无法理解含义的词语，没有明确含义的词语，请不要选择有明确含义，或者含义清晰的词语
-# - 排除：人名、@、表情包/图片中的内容、纯标点、常规功能词（如的、了、呢、啊等）
-# - 每个词条长度建议 2-8 个字符（不强制），尽量短小
-
-# 黑话必须为以下几种类型：
-# - 由字母构成的，汉语拼音首字母的简写词，例如：nb、yyds、xswl
-# - 英文词语的缩写，用英文字母概括一个词汇或含义，例如：CPU、GPU、API
-# - 中文词语的缩写，用几个汉字概括一个词汇或含义，例如：社死、内卷
-
-# 以 JSON 数组输出，元素为对象（严格按以下结构）：
-# 请你提取出可能的黑话，最多30个黑话，请尽量提取所有
-# [
-#   {{"content": "词条", "msg_id": "m12"}},  // msg_id 必须与上方聊天中展示的ID完全一致
-#   {{"content": "词条2", "msg_id": "m15"}}
-# ]
-
-# 现在请输出：
-# """
-#     Prompt(prompt_str, "extract_jargon_prompt")
 
 
 def _should_infer_meaning(jargon_obj: Jargon) -> bool:
@@ -216,13 +189,10 @@ class JargonMiner:
             previous_meaning_section = ""
             previous_meaning_instruction = ""
             if current_count in [24, 60, 100] and previous_meaning:
-                previous_meaning_section = f"""
-**上一次推断的含义（仅供参考）**
-{previous_meaning}
-"""
-                previous_meaning_instruction = (
-                    "- 请参考上一次推断的含义，结合新的上下文信息，给出更准确或更新的推断结果"
+                previous_meaning_section = load_prompt_section(
+                    "jargon_previous_meaning", "context", previous_meaning=previous_meaning
                 )
+                previous_meaning_instruction = load_prompt_section("jargon_previous_meaning", "instruction")
 
             prompt1 = await global_prompt_manager.format_prompt(
                 "jargon_inference_with_context",

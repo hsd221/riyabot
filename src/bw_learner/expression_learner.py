@@ -371,10 +371,9 @@ class ExpressionLearner:
         if not sanitized:
             return fallback
 
-        prompt = (
-            "请阅读以下多个聊天情境描述，并将它们概括成一句简短的话，"
-            "长度不超过20个字，保留共同特点：\n"
-            f"{chr(10).join(f'- {s}' for s in sanitized[-10:])}\n只输出概括内容。"
+        prompt = await global_prompt_manager.format_prompt(
+            "expression_situation_summary",
+            situations="\n".join(f"- {s}" for s in sanitized[-10:]),
         )
 
         try:

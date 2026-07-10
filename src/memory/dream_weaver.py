@@ -14,6 +14,7 @@ import datetime
 from typing import Any, Optional
 
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt
 from src.config.config import model_config
 from src.llm_models.utils_model import LLMRequest
 from src.memory.schema import InsightPool, NoisePool, memory_db
@@ -187,33 +188,7 @@ class DreamWeaver:
 
         entries_text = "\n".join(lines)
 
-        prompt = f"""你是记忆系统的噪声审阅器。下面是被过滤进 NoisePool 的片段，它们默认不是可靠记忆。
-
-<NOISE_POOL>
-{entries_text}
-</NOISE_POOL>
-
-任务：
-从噪声片段中寻找 1-3 条“弱洞见”。弱洞见只能是低置信度的观察或假设，用于以后人工/系统复核，不能写成确定事实。
-
-必须遵守：
-1. 每条洞见必须由至少两个噪声编号共同支持，noise_sources 至少包含 2 个编号
-2. 不要补全上下文，不要编造人物关系、长期偏好、稳定习惯或事件结论
-3. 如果只是随机词句、寒暄、表情反应、孤立玩笑，返回 []
-4. insight 用一句中文写清楚“可能/似乎/像是”的弱关联，不要写成事实
-5. confidence 只能在 0.2 到 0.6 之间；越像巧合越低
-
-只返回严格 JSON 数组，不要 markdown、注释或额外说明。格式：
-[
-  {{
-    "insight": "可能存在的弱关联",
-    "mood": "情绪标签",
-    "confidence": 0.4,
-    "noise_sources": [1, 3]
-  }}
-]
-如果没有至少两个片段支持的弱关联，返回 []。"""
-        return prompt
+        return load_prompt("memory_noise_insight", entries_text=entries_text)
 
     # ── LLM 调用 ────────────────────────────────────────────────────
 

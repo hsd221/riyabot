@@ -44,12 +44,13 @@ def normalize_prompt_name(name: str) -> str:
 
 
 @lru_cache(maxsize=128)
-def _read_prompt_file(filepath: Path, cache_revision: int) -> str:
+def _read_prompt_file(filepath: Path, file_signature: tuple[int, int], cache_revision: int) -> str:
     """读取提示词文件内容（LRU 缓存）
 
     Args:
         filepath: .prompt 文件的完整路径
-        cache_revision: 当前缓存修订号，用于缓存失效
+        file_signature: 文件修改时间和大小，用于自动感知磁盘变更
+        cache_revision: 当前缓存修订号，用于强制缓存失效
 
     Returns:
         文件内容字符串
@@ -74,7 +75,15 @@ def load_prompt_template(name: str) -> str:
     """
     safe_name = normalize_prompt_name(name)
     filepath = PROMPTS_ROOT / f"{safe_name}{PROMPT_EXTENSION}"
-    return _read_prompt_file(filepath, _PROMPT_CACHE_REVISION)
+    file_signature = get_prompt_file_signature(safe_name)
+    return _read_prompt_file(filepath, file_signature, _PROMPT_CACHE_REVISION)
+
+
+def get_prompt_file_signature(name: str) -> tuple[int, int]:
+    """返回提示词文件的修改时间和大小，用于检测热更新。"""
+    safe_name = normalize_prompt_name(name)
+    stat = (PROMPTS_ROOT / f"{safe_name}{PROMPT_EXTENSION}").stat()
+    return stat.st_mtime_ns, stat.st_size
 
 
 def load_prompt(name: str, /, **kwargs) -> str:

@@ -10,7 +10,7 @@ from PIL import Image
 from rich.traceback import install
 
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_loader import load_prompt, load_prompt_section
 from src.common.database.database import db
 from src.common.database.database_model import Images, ImageDescriptions, EmojiDescriptionCache
 from src.config.config import global_config, model_config
@@ -400,9 +400,7 @@ class ImageManager:
                     temperature=0.4,
                 )
             else:
-                vlm_prompt = (
-                    "这是一个表情包，请详细描述一下表情包所表达的情感和内容，描述细节，从互联网梗,meme的角度去分析"
-                )
+                vlm_prompt = load_prompt_section("emoji_vlm_description", "static_detailed")
                 detailed_description, _ = await self.vlm.generate_response_for_image(
                     vlm_prompt, image_base64, image_format, temperature=0.4
                 )
@@ -412,16 +410,7 @@ class ImageManager:
                 return "[表情包(VLM描述生成失败)]"
 
             # 第二步：LLM情感分析 - 基于详细描述生成简短的情感标签
-            emotion_prompt = f"""
-            请你基于这个表情包的详细描述，提取出最核心的情感含义，用1-2个词概括。
-            详细描述：'{detailed_description}'
-            
-            要求：
-            1. 只输出1-2个最核心的情感词汇
-            2. 从互联网梗、meme的角度理解
-            3. 输出简短精准，不要解释
-            4. 如果有多个词用逗号分隔
-            """
+            emotion_prompt = load_prompt("emoji_core_emotion", description=detailed_description)
 
             # 使用较低温度确保输出稳定
             emotion_llm = LLMRequest(model_set=model_config.model_task_config.utils, request_type="emoji")

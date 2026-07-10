@@ -6,6 +6,7 @@ from src.plugin_system import BaseAction, ActionActivationType
 
 # 导入依赖的系统组件
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt
 
 # 导入API模块 - 标准Python包方式
 from src.plugin_system.apis import emoji_api, llm_api, message_api
@@ -83,17 +84,12 @@ class EmojiAction(BaseAction):
                         show_actions=False,
                     )
 
-                # 4. 构建prompt让LLM选择情感
-                prompt = f"""你正在进行QQ聊天，你需要根据聊天记录，选出一个合适的情感标签。
-请你根据以下原因和聊天记录进行选择
-原因：{reason}
-聊天记录：
-{messages_text}
-
-这里是可用的情感标签：
-{available_emotions_str}
-请直接返回最匹配的那个情感标签，不要进行任何解释或添加其他多余的文字。
-                """
+                prompt = load_prompt(
+                    "emoji_selection",
+                    reason=reason,
+                    messages_text=messages_text,
+                    available_emotions=available_emotions_str,
+                )
 
                 if global_config.debug.show_prompt:
                     logger.info(f"{self.log_prefix} 生成的LLM Prompt: {prompt}")

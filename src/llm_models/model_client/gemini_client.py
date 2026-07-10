@@ -32,6 +32,7 @@ from google.genai.errors import (
 
 from src.config.api_ada_configs import ModelInfo, APIProvider
 from src.common.logger import get_logger
+from src.common.prompt_loader import load_prompt
 
 from .base_client import APIResponse, UsageRecord, BaseClient, client_registry
 from ..exceptions import (
@@ -748,7 +749,7 @@ class GeminiClient(BaseClient):
         tb = self.clamp_thinking_budget(extra_params, model_info.model_identifier)
 
         # 构造 prompt + 音频输入
-        prompt = "Generate a transcript of the speech. The language of the transcript should **match the language of the speech**."
+        prompt = load_prompt("audio_transcription")
         contents = [
             Content(
                 role="user",
