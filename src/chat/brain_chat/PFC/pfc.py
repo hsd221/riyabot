@@ -1,6 +1,6 @@
 from typing import List, Tuple, TYPE_CHECKING
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config
 import random
@@ -118,8 +118,8 @@ class GoalAnalyzer:
         for action in action_history_list:
             action_history_text += f"{action}\n"
 
-        prompt = load_prompt(
-            "pfc_goal_analyzer",
+        prompt = prompt_manager.format_prompt(
+            "chat.private.pfc.goal_analyzer",
             persona_text=persona_text,
             action_history_text=action_history_text,
             goals_str=goals_str,
@@ -214,8 +214,8 @@ class GoalAnalyzer:
         # ===> Persona 文本构建结束 <===
 
         # --- 修改 Prompt 字符串，使用 persona_text ---
-        prompt = load_prompt(
-            "pfc_goal_analyzer_assess",
+        prompt = prompt_manager.format_prompt(
+            "chat.private.pfc.goal_assessment",
             persona_text=persona_text,
             goal=goal,
             reasoning=reasoning,

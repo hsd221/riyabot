@@ -14,7 +14,7 @@ import datetime
 from typing import Any, Optional
 
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 from src.config.config import model_config
 from src.llm_models.utils_model import LLMRequest
 from src.memory.schema import InsightPool, NoisePool, memory_db
@@ -188,7 +188,7 @@ class DreamWeaver:
 
         entries_text = "\n".join(lines)
 
-        return load_prompt("memory_noise_insight", entries_text=entries_text)
+        return prompt_manager.format_prompt("memory.noise_insight", entries_text=entries_text)
 
     # ── LLM 调用 ────────────────────────────────────────────────────
 

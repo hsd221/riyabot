@@ -15,7 +15,7 @@ from typing import List
 
 from src.common.database.database_model import Expression
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 from src.config.config import global_config
 from src.config.config import model_config
 from src.llm_models.utils_model import LLMRequest
@@ -54,8 +54,8 @@ def create_evaluation_prompt(situation: str, style: str) -> str:
     # 构建评估标准列表字符串
     criteria_list = "\n".join([f"{i + 1}. {criterion}" for i, criterion in enumerate(all_criteria)])
 
-    return load_prompt(
-        "expression_auto_check",
+    return prompt_manager.format_prompt(
+        "learning.expression.auto_check",
         situation=situation,
         style=style,
         criteria_list=criteria_list,

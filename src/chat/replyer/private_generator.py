@@ -9,7 +9,7 @@ import re
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from datetime import datetime
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.common.data_models.llm_data_model import LLMGenerationDataModel
@@ -20,7 +20,6 @@ from src.chat.message_receive.chat_stream import ChatStream
 from src.chat.message_receive.uni_message_sender import UniversalMessageSender
 from src.chat.utils.timer_calculator import Timer  # <--- Import Timer
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
-from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.utils.chat_message_builder import (
     build_readable_messages,
     get_raw_msg_before_timestamp_with_chat,
@@ -845,7 +844,7 @@ class PrivateReplyer:
 
         time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        moderation_prompt_block = load_prompt_section("moderation", "standard")
+        moderation_prompt_block = prompt_manager.format_prompt("shared.moderation.standard")
 
         # 使用预先分析的内容类型结果
         if has_only_pics and not has_text:
@@ -878,8 +877,8 @@ class PrivateReplyer:
 
         # 使用统一的 is_bot_self 函数判断是否是机器人自己（支持多平台，包括 WebUI）
         if is_bot_self(platform, user_id):
-            return await global_prompt_manager.format_prompt(
-                "private_replyer_self_prompt",
+            return prompt_manager.format_prompt(
+                "chat.private.reply_self",
                 expression_habits_block=expression_habits_block,
                 tool_info_block=tool_info,
                 knowledge_prompt=prompt_info,
@@ -900,8 +899,8 @@ class PrivateReplyer:
                 chat_prompt=chat_prompt_block,
             ), selected_expressions
         else:
-            return await global_prompt_manager.format_prompt(
-                "private_replyer_prompt",
+            return prompt_manager.format_prompt(
+                "chat.private.reply",
                 expression_habits_block=expression_habits_block,
                 tool_info_block=tool_info,
                 knowledge_prompt=prompt_info,
@@ -964,7 +963,7 @@ class PrivateReplyer:
 
         time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        moderation_prompt_block = load_prompt_section("moderation", "strict")
+        moderation_prompt_block = prompt_manager.format_prompt("shared.moderation.strict")
 
         if sender and target:
             if sender:
@@ -992,7 +991,7 @@ class PrivateReplyer:
         chat_target_1 = f"你正在和{chat_target_name}聊天，这是你们之前聊的内容："
         chat_target_2 = f"和{chat_target_name}聊天"
 
-        template_name = "default_expressor_prompt"
+        template_name = "chat.shared.expressor"
 
         # 根据配置构建最终的 reply_style：支持 multiple_reply_style 按概率随机替换
         reply_style = global_config.personality.reply_style
@@ -1005,7 +1004,7 @@ class PrivateReplyer:
                 # 兜底：即使 multiple_reply_style 配置异常也不影响正常回复
                 reply_style = global_config.personality.reply_style
 
-        return await global_prompt_manager.format_prompt(
+        return prompt_manager.format_prompt(
             template_name,
             expression_habits_block=expression_habits_block,
             # relation_info_block=relation_info,
@@ -1096,8 +1095,8 @@ class PrivateReplyer:
 
             bot_name = global_config.bot.nickname
 
-            prompt = await global_prompt_manager.format_prompt(
-                "lpmm_get_knowledge_prompt",
+            prompt = prompt_manager.format_prompt(
+                "memory.knowledge_query",
                 bot_name=bot_name,
                 time_now=time_now,
                 chat_history=neutralize_prompt_boundaries(message),

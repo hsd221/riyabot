@@ -9,7 +9,7 @@ from src.common.logger import get_logger
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.common.data_models.message_data_model import ReplyContentType
 from src.chat.message_receive.chat_stream import ChatStream, get_chat_manager
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.chat.utils.timer_calculator import Timer
 from src.chat.planner_actions.planner import ActionPlanner
 from src.chat.planner_actions.action_modifier import ActionModifier
@@ -306,7 +306,7 @@ class HeartFChatting:
                 logger.debug(f"{self.log_prefix} ReflectTracker resolved and removed.")
 
         start_time = time.time()
-        async with global_prompt_manager.async_message_scope(self.chat_stream.context.get_template_name()):
+        async with prompt_manager.async_message_scope(self.chat_stream.context.get_template_name()):
             # 通过 MessageRecorder 统一提取消息并分发给 expression_learner 和 jargon_miner
             # 在 replyer 执行时触发，统一管理时间窗口，避免重复获取消息
             asyncio.create_task(extract_and_distribute_messages(self.stream_id))

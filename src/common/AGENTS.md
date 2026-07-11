@@ -11,8 +11,8 @@ common/
 ├── message_repository.py  # Message storage abstraction
 ├── logger.py              # structlog setup (994 lines), get_logger(), initialize_logging()
 ├── toml_utils.py          # TOML read/write helpers
-├── prompt_loader.py       # Layer 1: 文件 I/O + LRU 缓存 + ###SECTION 分节解析
-├── prompt_manager.py      # Layer 2: 单例管理器，全量加载 prompts/ → 热重载
+├── prompt_loader.py       # Layer 1: 递归文件 I/O + LRU 缓存 + ###SECTION 分节解析
+├── prompt_manager.py      # Layer 2: 单例管理器、命名空间、上下文覆盖与热重载
 ├── message/
 │   └── api.py             # MessageServer (maim_message wrapper) — QQ msg broker
 ├── database/
@@ -36,7 +36,7 @@ common/
 | Message broker | `message/api.py` — MessageServer, message handler registration |
 | Telemetry | `remote.py` — TelemetryHeartBeatTask |
 | Prompt file I/O | `prompt_loader.py` — `load_prompt_template()`, `clear_prompt_cache()`, `parse_prompt_sections()` |
-| Prompt manager | `prompt_manager.py` — `prompt_manager.load_prompts()`, `get_prompt()`, `safe_get_prompt()` |
+| Prompt manager | `prompt_manager.py` — `load_prompts()`, `get_prompt()`, `format_prompt()`, `async_message_scope()` |
 
 ## CONVENTIONS
 - **Logger**: structlog-based. Get via `from src.common.logger import get_logger; logger = get_logger("prefix")`.

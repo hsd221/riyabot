@@ -385,7 +385,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        with patch.object(group_planner.global_prompt_manager, "get_prompt_async", new=AsyncMock(return_value=prompt)):
+        with patch.object(group_planner.prompt_manager, "get_prompt", new=Mock(return_value=prompt)):
             block = await planner._build_action_options_block(
                 {
                     "plugin": make_action_info("plugin", parallel_action=False),
@@ -424,9 +424,9 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(
-            group_planner.global_prompt_manager,
-            "get_prompt_async",
-            new=AsyncMock(return_value=load_prompt_template("action_prompt")),
+            group_planner.prompt_manager,
+            "get_prompt",
+            new=Mock(return_value=load_prompt_template("chat.group.action")),
         ):
             block = await planner._build_action_options_block({"emoji": parameterless_action})
 
@@ -442,9 +442,9 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
             action_require=[],
         )
         with patch.object(
-            group_planner.global_prompt_manager,
-            "get_prompt_async",
-            new=AsyncMock(return_value=load_prompt_template("action_prompt")),
+            group_planner.prompt_manager,
+            "get_prompt",
+            new=Mock(return_value=load_prompt_template("chat.group.action")),
         ):
             block = await planner._build_action_options_block({"quote": parameterized_action})
 

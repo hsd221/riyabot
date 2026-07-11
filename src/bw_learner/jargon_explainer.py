@@ -6,7 +6,7 @@ from src.common.logger import get_logger
 from src.common.database.database_model import Jargon
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import model_config, global_config
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.bw_learner.jargon_miner import search_jargon
 from src.bw_learner.learner_utils import (
     is_bot_message,
@@ -201,8 +201,8 @@ class JargonExplainer:
         explanations_text = "\n".join(jargon_explanations)
 
         # 使用LLM概括黑话解释
-        summarize_prompt = await global_prompt_manager.format_prompt(
-            "jargon_explainer_summarize",
+        summarize_prompt = prompt_manager.format_prompt(
+            "learning.jargon.explainer_summarize",
             chat_context=chat_context,
             jargon_explanations=explanations_text,
         )

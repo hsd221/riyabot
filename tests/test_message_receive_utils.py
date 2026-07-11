@@ -447,7 +447,9 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         media_background._remember_message_ref(None, "unknown:hash", unknown_done)
         self.assertEqual(unknown_done.message_refs, [])
 
-        with patch.object(media_background, "asyncio", SimpleNamespace(get_running_loop=Mock(side_effect=RuntimeError))):
+        with patch.object(
+            media_background, "asyncio", SimpleNamespace(get_running_loop=Mock(side_effect=RuntimeError))
+        ):
             media_background._schedule_placeholder_backfill("image", "msg-4", "[图片：done]", 0)
             media_background._schedule_media_task("voice", "voice-data", "msg-5")
 
@@ -851,7 +853,9 @@ class ChatBotHelpersTest(unittest.IsolatedAsyncioTestCase):
             "find_command_by_text",
             side_effect=RuntimeError("registry down"),
         ):
-            self.assertEqual(await chat_bot._process_commands(make_recv(processed_plain_text="!cmd")), (False, None, True))
+            self.assertEqual(
+                await chat_bot._process_commands(make_recv(processed_plain_text="!cmd")), (False, None, True)
+            )
 
     async def test_message_process_runs_hooked_pipeline_and_stores_command_skip(self) -> None:
         from src.chat.message_receive import bot as bot_module
@@ -929,7 +933,9 @@ class ChatBotHelpersTest(unittest.IsolatedAsyncioTestCase):
         chat_bot = bot_module.ChatBot.__new__(bot_module.ChatBot)
         chat_bot._started = True
         chat_bot.heartflow_message_receiver = SimpleNamespace(process_message=AsyncMock())
-        after_cancel_events = SimpleNamespace(handle_mai_events=AsyncMock(side_effect=[(True, None), (True, None), (False, None)]))
+        after_cancel_events = SimpleNamespace(
+            handle_mai_events=AsyncMock(side_effect=[(True, None), (True, None), (False, None)])
+        )
         with patch.object(bot_module, "events_manager", after_cancel_events):
             await chat_bot.message_process(dict(message_data))
         chat_bot.heartflow_message_receiver.process_message.assert_not_awaited()
@@ -939,7 +945,9 @@ class ChatBotHelpersTest(unittest.IsolatedAsyncioTestCase):
         chat_bot._started = True
         chat_bot.heartflow_message_receiver = SimpleNamespace(process_message=AsyncMock())
         with (
-            patch.object(bot_module, "events_manager", SimpleNamespace(handle_mai_events=AsyncMock(return_value=(True, None)))),
+            patch.object(
+                bot_module, "events_manager", SimpleNamespace(handle_mai_events=AsyncMock(return_value=(True, None)))
+            ),
             patch.object(bot_module, "get_chat_manager", return_value=manager),
             patch.object(bot_module, "_check_ban_words", return_value=True),
             patch.object(bot_module, "_check_ban_regex", return_value=False),
@@ -954,30 +962,36 @@ class ChatBotHelpersTest(unittest.IsolatedAsyncioTestCase):
             "template_items": {"rule": "value"},
         }
         scope_calls = []
-        prompt_manager = SimpleNamespace(async_message_scope=Mock(side_effect=lambda name: AsyncScope(name, scope_calls)))
+        prompt_manager = SimpleNamespace(
+            async_message_scope=Mock(side_effect=lambda name: AsyncScope(name, scope_calls)),
+            register_context_prompts=Mock(),
+        )
         manager = SimpleNamespace(register_message=Mock(), get_or_create_stream=AsyncMock(return_value=stream))
         chat_bot = bot_module.ChatBot.__new__(bot_module.ChatBot)
         chat_bot._started = True
         chat_bot.heartflow_message_receiver = SimpleNamespace(process_message=AsyncMock())
         with (
-            patch.object(bot_module, "events_manager", SimpleNamespace(handle_mai_events=AsyncMock(return_value=(True, None)))),
+            patch.object(
+                bot_module, "events_manager", SimpleNamespace(handle_mai_events=AsyncMock(return_value=(True, None)))
+            ),
             patch.object(bot_module, "get_chat_manager", return_value=manager),
             patch.object(bot_module, "_check_ban_words", return_value=False),
             patch.object(bot_module, "_check_ban_regex", return_value=False),
             patch.object(chat_bot, "_process_commands", new=AsyncMock(return_value=(False, None, True))),
-            patch.object(bot_module, "global_prompt_manager", prompt_manager),
-            patch.object(bot_module.Prompt, "create_async", new=AsyncMock()) as create_prompt,
+            patch.object(bot_module, "prompt_manager", prompt_manager),
         ):
             await chat_bot.message_process(template_data)
 
-        self.assertEqual(scope_calls, ["custom-scope", "custom-scope"])
-        create_prompt.assert_awaited_once_with("value", "rule")
+        self.assertEqual(scope_calls, ["custom-scope"])
+        prompt_manager.register_context_prompts.assert_called_once_with("custom-scope", {"rule": "value"})
         chat_bot.heartflow_message_receiver.process_message.assert_awaited_once()
 
         chat_bot = bot_module.ChatBot.__new__(bot_module.ChatBot)
         chat_bot._started = True
         chat_bot.heartflow_message_receiver = SimpleNamespace(process_message=AsyncMock())
-        with patch.object(bot_module, "events_manager", SimpleNamespace(handle_mai_events=AsyncMock(return_value=(True, None)))):
+        with patch.object(
+            bot_module, "events_manager", SimpleNamespace(handle_mai_events=AsyncMock(return_value=(True, None)))
+        ):
             await chat_bot.message_process({"message_info": None})
 
 
@@ -1067,8 +1081,12 @@ class UniversalMessageSenderHelpersTest(unittest.IsolatedAsyncioTestCase):
         chat_manager = SimpleNamespace(broadcast=AsyncMock())
         message = make_sending(platform="webui", group_id="webui_virtual_group_unit")
         message.processed_plain_text = "sent text"
-        message.message_segment = Seg(type="seglist", data=[Seg(type="image", data="img64"), Seg(type="text", data="caption")])
-        message.message_components = MessageComponentSequence([ImageComponent(base64_data="img64"), TextComponent("caption")])
+        message.message_segment = Seg(
+            type="seglist", data=[Seg(type="image", data="img64"), Seg(type="text", data="caption")]
+        )
+        message.message_components = MessageComponentSequence(
+            [ImageComponent(base64_data="img64"), TextComponent("caption")]
+        )
 
         with patch.object(uni_message_sender, "get_webui_chat_broadcaster", return_value=(chat_manager, "webui")):
             self.assertTrue(await uni_message_sender._send_message(message, show_log=True))
@@ -1247,9 +1265,7 @@ class UniversalMessageSenderHelpersTest(unittest.IsolatedAsyncioTestCase):
         message.reply = reply
         sender = uni_message_sender.UniversalMessageSender()
         sender.storage = SimpleNamespace(store_message=AsyncMock())
-        post_cancel_events = SimpleNamespace(
-            handle_mai_events=AsyncMock(side_effect=[(True, None), (False, None)])
-        )
+        post_cancel_events = SimpleNamespace(handle_mai_events=AsyncMock(side_effect=[(True, None), (False, None)]))
 
         with (
             patch.dict(

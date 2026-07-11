@@ -12,10 +12,9 @@ from json_repair import repair_json
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config, model_config
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.common.data_models.info_data_model import ActionPlannerInfo
-from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.utils.chat_message_builder import (
     build_readable_messages_with_id,
     get_raw_msg_before_timestamp_with_chat,
@@ -498,7 +497,7 @@ class ActionPlanner:
             action_options_block = await self._build_action_options_block(current_available_actions)
 
             # 其他信息
-            moderation_prompt_block = load_prompt_section("moderation", "standard")
+            moderation_prompt_block = prompt_manager.format_prompt("shared.moderation.standard")
             time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             bot_name = global_config.bot.nickname
             bot_nickname = (
@@ -506,14 +505,12 @@ class ActionPlanner:
             )
             name_block = f"你的名字是{bot_name}{bot_nickname}，请注意哪些是你自己的发言。"
 
-            reply_action_example = load_prompt_section(
-                "planner_reply_action",
-                "with_quote" if global_config.chat.llm_quote else "without_quote",
-            )
+            reply_action_section = "with_quote" if global_config.chat.llm_quote else "without_quote"
+            reply_action_example = prompt_manager.format_prompt(f"chat.group.reply_action.{reply_action_section}")
 
             memory_context_block = await self._build_planner_memory_context(chat_content_block, message_id_list)
 
-            planner_prompt_template = await global_prompt_manager.get_prompt_async("planner_prompt")
+            planner_prompt_template = prompt_manager.get_prompt("chat.group.planner")
             prompt = planner_prompt_template.format(
                 time_block=time_block,
                 chat_context_description=chat_context_description,
@@ -660,7 +657,7 @@ class ActionPlanner:
                 parallel_text = ""
 
             # 获取动作提示模板并填充
-            using_action_prompt = await global_prompt_manager.get_prompt_async("action_prompt")
+            using_action_prompt = prompt_manager.get_prompt("chat.group.action")
             using_action_prompt = using_action_prompt.format(
                 action_name=action_name,
                 action_description=action_info.description,

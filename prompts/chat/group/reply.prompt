@@ -1,4 +1,4 @@
-###SECTION: replyer_prompt_0
+###SECTION: light
 {knowledge_prompt}
 {tool_info_block}
 {extra_info_block}
@@ -32,7 +32,7 @@
 只输出一条最终回复文本，不要输出前后缀、解释、冒号、引号、括号、Markdown、表情包、emoji、at 或 @。
 ###END_SECTION###
 
-###SECTION: replyer_prompt
+###SECTION: standard
 {knowledge_prompt}
 {tool_info_block}
 {extra_info_block}

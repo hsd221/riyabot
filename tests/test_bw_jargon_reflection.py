@@ -189,22 +189,22 @@ class JargonExplainerTest(unittest.IsolatedAsyncioTestCase):
                 ],
             ),
             patch.object(
-                jargon_explainer.global_prompt_manager,
+                jargon_explainer.prompt_manager,
                 "format_prompt",
-                new=AsyncMock(return_value="prompt"),
+                new=Mock(return_value="prompt"),
             ) as format_prompt,
         ):
             summary = await explainer.explain_jargon([object()], "聊天上下文")
 
         self.assertEqual(summary, "总结解释")
-        format_prompt.assert_awaited_once()
+        format_prompt.assert_called_once()
         explainer.llm.generate_response_async.assert_awaited_once_with("prompt", temperature=0.3)
 
         explainer.llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=("", None)))
         with (
             patch.object(explainer, "match_jargon_from_messages", return_value=[{"content": "yyds"}]),
             patch.object(jargon_explainer, "search_jargon", return_value=[{"content": "yyds", "meaning": "永远的神"}]),
-            patch.object(jargon_explainer.global_prompt_manager, "format_prompt", new=AsyncMock(return_value="prompt")),
+            patch.object(jargon_explainer.prompt_manager, "format_prompt", new=Mock(return_value="prompt")),
         ):
             fallback = await explainer.explain_jargon([object()], "聊天上下文")
 
@@ -282,7 +282,7 @@ class ReflectionHelpersTest(unittest.IsolatedAsyncioTestCase):
             patch.object(reflect_tracker.time, "time", return_value=100.0),
             patch.object(reflect_tracker, "get_raw_msg_by_timestamp_with_chat", return_value=[object()]),
             patch.object(reflect_tracker, "build_readable_messages", return_value="context"),
-            patch.object(reflect_tracker.global_prompt_manager, "format_prompt", new=AsyncMock(return_value="prompt")),
+            patch.object(reflect_tracker.prompt_manager, "format_prompt", new=Mock(return_value="prompt")),
         ):
             self.assertTrue(await approve_tracker.trigger_tracker())
 
@@ -298,7 +298,7 @@ class ReflectionHelpersTest(unittest.IsolatedAsyncioTestCase):
             patch.object(reflect_tracker.time, "time", return_value=100.0),
             patch.object(reflect_tracker, "get_raw_msg_by_timestamp_with_chat", return_value=[object()]),
             patch.object(reflect_tracker, "build_readable_messages", return_value="context"),
-            patch.object(reflect_tracker.global_prompt_manager, "format_prompt", new=AsyncMock(return_value="prompt")),
+            patch.object(reflect_tracker.prompt_manager, "format_prompt", new=Mock(return_value="prompt")),
         ):
             self.assertTrue(await reject_tracker.trigger_tracker())
         self.assertEqual(reject_expr.situation, "新情景")
@@ -310,7 +310,7 @@ class ReflectionHelpersTest(unittest.IsolatedAsyncioTestCase):
             patch.object(reflect_tracker.time, "time", return_value=100.0),
             patch.object(reflect_tracker, "get_raw_msg_by_timestamp_with_chat", return_value=[object()]),
             patch.object(reflect_tracker, "build_readable_messages", return_value="context"),
-            patch.object(reflect_tracker.global_prompt_manager, "format_prompt", new=AsyncMock(return_value="prompt")),
+            patch.object(reflect_tracker.prompt_manager, "format_prompt", new=Mock(return_value="prompt")),
         ):
             self.assertFalse(await ignore_tracker.trigger_tracker())
 

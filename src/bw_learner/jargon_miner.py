@@ -8,11 +8,10 @@ from peewee import fn
 
 from src.common.logger import get_logger
 from src.common.database.database_model import Jargon
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import model_config, global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.chat.utils.prompt_builder import global_prompt_manager
 from src.bw_learner.learner_utils import (
     parse_chat_id_list,
     chat_id_list_contains,
@@ -189,13 +188,15 @@ class JargonMiner:
             previous_meaning_section = ""
             previous_meaning_instruction = ""
             if current_count in [24, 60, 100] and previous_meaning:
-                previous_meaning_section = load_prompt_section(
-                    "jargon_previous_meaning", "context", previous_meaning=previous_meaning
+                previous_meaning_section = prompt_manager.format_prompt(
+                    "learning.jargon.previous_meaning.context", previous_meaning=previous_meaning
                 )
-                previous_meaning_instruction = load_prompt_section("jargon_previous_meaning", "instruction")
+                previous_meaning_instruction = prompt_manager.format_prompt(
+                    "learning.jargon.previous_meaning.instruction"
+                )
 
-            prompt1 = await global_prompt_manager.format_prompt(
-                "jargon_inference_with_context",
+            prompt1 = prompt_manager.format_prompt(
+                "learning.jargon.inference_with_context",
                 content=content,
                 bot_name=global_config.bot.nickname,
                 raw_content_list=raw_content_text,
@@ -235,8 +236,8 @@ class JargonMiner:
                 return
 
             # 步骤2: 仅基于content推断
-            prompt2 = await global_prompt_manager.format_prompt(
-                "jargon_inference_content_only",
+            prompt2 = prompt_manager.format_prompt(
+                "learning.jargon.inference_content_only",
                 content=content,
             )
 
@@ -278,8 +279,8 @@ class JargonMiner:
                 logger.debug(f"jargon {content} 推断1结果: {response1}")
 
             # 步骤3: 比较两个推断结果
-            prompt3 = await global_prompt_manager.format_prompt(
-                "jargon_compare_inference",
+            prompt3 = prompt_manager.format_prompt(
+                "learning.jargon.compare_inference",
                 inference1=json.dumps(inference1, ensure_ascii=False),
                 inference2=json.dumps(inference2, ensure_ascii=False),
             )

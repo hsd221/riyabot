@@ -9,7 +9,7 @@ import re
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from datetime import datetime
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.common.data_models.llm_data_model import LLMGenerationDataModel
@@ -20,7 +20,6 @@ from src.chat.message_receive.chat_stream import ChatStream
 from src.chat.message_receive.uni_message_sender import UniversalMessageSender
 from src.chat.utils.timer_calculator import Timer  # <--- Import Timer
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
-from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.utils.chat_message_builder import (
     build_readable_messages,
     get_raw_msg_before_timestamp_with_chat,
@@ -994,7 +993,7 @@ class DefaultReplyer:
 
         time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        moderation_prompt_block = load_prompt_section("moderation", "standard")
+        moderation_prompt_block = prompt_manager.format_prompt("shared.moderation.standard")
 
         if sender:
             # 使用预先分析的内容类型结果
@@ -1031,9 +1030,9 @@ class DefaultReplyer:
         # think_level=0: 轻量回复（简短平淡）
         # think_level=1: 中等回复（日常口语化）
         if think_level == 0:
-            prompt_name = "replyer_prompt_0"
+            prompt_name = "chat.group.reply.light"
         else:  # think_level == 1 或默认
-            prompt_name = "replyer_prompt"
+            prompt_name = "chat.group.reply.standard"
 
         # 根据配置构建最终的 reply_style：支持 multiple_reply_style 按概率随机替换
         reply_style = global_config.personality.reply_style
@@ -1047,7 +1046,7 @@ class DefaultReplyer:
                 reply_style = global_config.personality.reply_style
 
         return (
-            await global_prompt_manager.format_prompt(
+            prompt_manager.format_prompt(
                 prompt_name,
                 expression_habits_block=expression_habits_block,
                 tool_info_block=tool_info,
@@ -1115,7 +1114,7 @@ class DefaultReplyer:
 
         time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        moderation_prompt_block = load_prompt_section("moderation", "strict")
+        moderation_prompt_block = prompt_manager.format_prompt("shared.moderation.strict")
 
         if sender and target:
             # 使用预先分析的内容类型结果
@@ -1143,7 +1142,7 @@ class DefaultReplyer:
         chat_target_1 = "你正在qq群里聊天，下面是群里正在聊的内容:"
         chat_target_2 = "正在群里聊天"
 
-        template_name = "default_expressor_prompt"
+        template_name = "chat.shared.expressor"
 
         # 根据配置构建最终的 reply_style：支持 multiple_reply_style 按概率随机替换
         reply_style = global_config.personality.reply_style
@@ -1155,7 +1154,7 @@ class DefaultReplyer:
             except Exception:
                 reply_style = global_config.personality.reply_style
 
-        return await global_prompt_manager.format_prompt(
+        return prompt_manager.format_prompt(
             template_name,
             expression_habits_block=expression_habits_block,
             # relation_info_block=relation_info,
@@ -1246,8 +1245,8 @@ class DefaultReplyer:
 
             bot_name = global_config.bot.nickname
 
-            prompt = await global_prompt_manager.format_prompt(
-                "lpmm_get_knowledge_prompt",
+            prompt = prompt_manager.format_prompt(
+                "memory.knowledge_query",
                 bot_name=bot_name,
                 time_now=time_now,
                 chat_history=neutralize_prompt_boundaries(message),

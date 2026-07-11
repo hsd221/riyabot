@@ -188,18 +188,17 @@ async def _build_memory_question_with_llm(
     sender: str,
     target: str,
 ) -> str:
-    """使用 memory_retrieval.prompt 判断是否需要查记忆，并生成一个查询问题。"""
+    """使用 memory.retrieval.question 判断是否需要查记忆，并生成一个查询问题。"""
     if not (chat_talking_prompt_short or target):
         return ""
 
     try:
-        from src.common.prompt_loader import load_prompt_section
+        from src.common.prompt_manager import prompt_manager
         from src.config.config import global_config, model_config
         from src.llm_models.utils_model import LLMRequest
 
-        prompt = load_prompt_section(
-            "memory_retrieval",
-            "question",
+        prompt = prompt_manager.format_prompt(
+            "memory.retrieval.question",
             bot_name=global_config.bot.nickname,
             time_now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             chat_history=_neutralize_prompt_boundaries(chat_talking_prompt_short),
@@ -283,7 +282,7 @@ async def build_memory_retrieval_prompt(
         question: 回复中带的问题
         user_id: 用户 ID（可选，用于 profile 上下文检索）
                 不传则尝试从 chat_stream.user_info 提取
-        allow_llm_question: 无可用 planner question 时，是否调用 memory_retrieval.prompt 判断/生成查询
+        allow_llm_question: 无可用 planner question 时，是否调用 memory.retrieval.question 判断/生成查询
         question_from_planner: question 是否来自 group/private planner；False 时始终信任显式 question
 
     Returns:

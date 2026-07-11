@@ -8,7 +8,7 @@ from .reply_checker import ReplyChecker
 from .observation_info import ObservationInfo
 from .conversation_info import ConversationInfo
 from .pfc_KnowledgeFetcher import format_knowledge_evidence, format_pfc_chat_history
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 
 logger = get_logger("reply_generator")
 
@@ -99,9 +99,8 @@ class ReplyGenerator:
 
         # --- 选择并格式化 Prompt ---
         if action_type == "send_new_message":
-            prompt = load_prompt_section(
-                "pfc_reply_generation",
-                "send_new_message",
+            prompt = prompt_manager.format_prompt(
+                "chat.private.pfc.reply_generation.send_new_message",
                 persona_text=persona_text,
                 goals_str=goals_str,
                 chat_history_text=chat_history_text,
@@ -109,9 +108,8 @@ class ReplyGenerator:
             )
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_SEND_NEW_MESSAGE (追问生成)")
         elif action_type == "say_goodbye":  # 处理告别动作
-            prompt = load_prompt_section(
-                "pfc_reply_generation",
-                "farewell",
+            prompt = prompt_manager.format_prompt(
+                "chat.private.pfc.reply_generation.farewell",
                 persona_text=persona_text,
                 goals_str=goals_str,
                 chat_history_text=chat_history_text,
@@ -119,9 +117,8 @@ class ReplyGenerator:
             )
             logger.info(f"[私聊][{self.private_name}]使用 PROMPT_FAREWELL (告别语生成)")
         else:  # 默认使用 direct_reply 的 prompt (包括 'direct_reply' 或其他未明确处理的类型)
-            prompt = load_prompt_section(
-                "pfc_reply_generation",
-                "direct_reply",
+            prompt = prompt_manager.format_prompt(
+                "chat.private.pfc.reply_generation.direct_reply",
                 persona_text=persona_text,
                 goals_str=goals_str,
                 chat_history_text=chat_history_text,

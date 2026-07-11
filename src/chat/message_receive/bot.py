@@ -5,13 +5,13 @@ from typing import Dict, Any, Optional
 from maim_message import UserInfo, Seg, GroupInfo
 
 from src.common.logger import get_logger, hash_id
+from src.common.prompt_manager import prompt_manager
 from src.common.data_models.message_component_model import from_seg_to_components
 from src.config.config import global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.message_receive.message import MessageRecv
 from src.chat.message_receive.storage import MessageStorage
 from src.chat.heart_flow.heartflow_message_processor import HeartFCMessageReceiver
-from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
 from src.plugin_system.core import component_registry, events_manager, global_announcement_manager
 from src.plugin_system.base import BaseCommand, EventType
 
@@ -518,17 +518,16 @@ class ChatBot:
             if message.message_info.template_info and not message.message_info.template_info.template_default:
                 template_group_name: Optional[str] = message.message_info.template_info.template_name  # type: ignore
                 template_items = message.message_info.template_info.template_items
-                async with global_prompt_manager.async_message_scope(template_group_name):
-                    if isinstance(template_items, dict):
-                        for k in template_items.keys():
-                            await Prompt.create_async(template_items[k], k)
-                            logger.debug(
-                                "消息自定义提示词模板已注册",
-                                event_code="chat.prompt_template.registered",
-                                template_key=k,
-                                template_hash=hash_id(template_items[k]),
-                                template_length=len(str(template_items[k])),
-                            )
+                if template_group_name and isinstance(template_items, dict):
+                    prompt_manager.register_context_prompts(template_group_name, template_items)
+                    for template_key, template in template_items.items():
+                        logger.debug(
+                            "消息自定义提示词模板已注册",
+                            event_code="chat.prompt_template.registered",
+                            template_key=template_key,
+                            template_hash=hash_id(template),
+                            template_length=len(str(template)),
+                        )
             else:
                 template_group_name = None
 
@@ -536,7 +535,7 @@ class ChatBot:
                 await self.heartflow_message_receiver.process_message(message)
 
             if template_group_name:
-                async with global_prompt_manager.async_message_scope(template_group_name):
+                async with prompt_manager.async_message_scope(template_group_name):
                     await preprocess()
             else:
                 await preprocess()

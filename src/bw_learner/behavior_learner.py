@@ -16,7 +16,7 @@ from src.bw_learner.behavior_store import (
 from src.bw_learner.learner_utils import contains_bot_self_name, filter_message_content
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.utils.chat_message_builder import build_anonymous_messages, build_readable_messages
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.common.logger import get_logger
 from src.config.config import global_config, model_config
 from src.llm_models.utils_model import LLMRequest
@@ -144,8 +144,8 @@ class BehaviorLearner:
             return []
 
         scene_profile = self._build_local_scene_profile(messages)
-        prompt = await global_prompt_manager.format_prompt(
-            "learn_behavior",
+        prompt = prompt_manager.format_prompt(
+            "learning.behavior.learn",
             bot_name=global_config.bot.nickname,
             chat_str=chat_str,
             scene_profile=scene_profile,

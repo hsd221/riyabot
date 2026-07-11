@@ -1,256 +1,106 @@
-import re
-import asyncio
-import contextvars
+"""旧提示词 API 的无状态兼容入口。
 
-from rich.traceback import install
+新代码应直接使用 :mod:`src.common.prompt_manager`。本模块只保留旧异步调用形态
+和 ``Prompt`` 模板对象，所有模板、缓存和上下文状态都由公共 ``PromptManager`` 持有。
+"""
+
+import re
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, List, Optional, Union
 
 from src.common.logger import get_logger
-
-install(extra_lines=3)
+from src.common.prompt_manager import PromptManager, prompt_manager
 
 logger = get_logger("prompt_build")
 
 
-class PromptContext:
-    def __init__(self):
-        self._context_prompts: Dict[str, Dict[str, "Prompt"]] = {}
-        # 使用contextvars创建协程上下文变量
-        self._current_context_var = contextvars.ContextVar("current_context", default=None)
-        self._context_lock = asyncio.Lock()  # 保留锁用于其他操作
+class _LegacyPromptContextAdapter:
+    def __init__(self, manager: PromptManager):
+        self.manager = manager
 
     @property
-    def _current_context(self) -> Optional[str]:
-        """获取当前协程的上下文ID"""
-        return self._current_context_var.get()
+    def _current_context(self) -> str | None:
+        return self.manager.current_context_id
 
-    @_current_context.setter
-    def _current_context(self, value: Optional[str]):
-        """设置当前协程的上下文ID"""
-        self._current_context_var.set(value)
-
-    @asynccontextmanager
-    async def async_scope(self, context_id: Optional[str] = None):
-        # sourcery skip: hoist-statement-from-if, use-contextlib-suppress
-        """创建一个异步的临时提示模板作用域"""
-        # 保存当前上下文并设置新上下文
-        if context_id is not None:
-            try:
-                # 添加超时保护，避免长时间等待锁
-                await asyncio.wait_for(self._context_lock.acquire(), timeout=5.0)
-                try:
-                    if context_id not in self._context_prompts:
-                        self._context_prompts[context_id] = {}
-                finally:
-                    self._context_lock.release()
-            except asyncio.TimeoutError:
-                logger.warning(f"获取上下文锁超时，context_id: {context_id}")
-                # 超时时直接进入，不设置上下文
-                context_id = None
-
-            # 保存当前协程的上下文值，不影响其他协程
-            previous_context = self._current_context
-            # 设置当前协程的新上下文
-            token = self._current_context_var.set(context_id) if context_id else None
-        else:
-            # 如果没有提供新上下文，保持当前上下文不变
-            previous_context = self._current_context
-            token = None
-
-        try:
-            yield self
-        finally:
-            # 恢复之前的上下文，添加异常保护
-            if context_id is not None and token is not None:
-                try:
-                    self._current_context_var.reset(token)
-                except Exception as e:
-                    logger.warning(f"恢复上下文时出错: {e}")
-                    # 如果reset失败，尝试直接设置
-                    try:
-                        self._current_context = previous_context
-                    except Exception:
-                        pass  # 静默忽略恢复失败
-
-    async def get_prompt_async(self, name: str) -> Optional["Prompt"]:
-        """异步获取当前作用域中的提示模板"""
-        async with self._context_lock:
-            current_context = self._current_context
-            logger.debug(f"获取提示词: {name} 当前上下文: {current_context}")
-            if (
-                current_context
-                and current_context in self._context_prompts
-                and name in self._context_prompts[current_context]
-            ):
-                return self._context_prompts[current_context][name]
-            return None
-
-    async def register_async(self, prompt: "Prompt", context_id: Optional[str] = None) -> None:
-        """异步注册提示模板到指定作用域"""
-        async with self._context_lock:
-            if target_context := context_id or self._current_context:
-                self._context_prompts.setdefault(target_context, {})[prompt.name] = prompt
+    async def register_async(self, prompt: "Prompt", context_id: str | None = None) -> None:
+        target_context = context_id or self.manager.current_context_id
+        if target_context is None:
+            return
+        if not prompt.name:
+            raise ValueError("上下文提示词必须提供名称")
+        self.manager.register_context_prompt(prompt.name, prompt.template, context_id=target_context)
 
 
-class PromptManager:
-    def __init__(self):
-        self._prompts = {}
-        self._external_sources: Dict[str, tuple[str, Optional[str]]] = {}
-        self._counter = 0
-        self._context = PromptContext()
-        self._lock = asyncio.Lock()
+class LegacyPromptManagerAdapter:
+    """保留旧异步方法签名，但不持有任何提示词状态。"""
+
+    def __init__(self, manager: PromptManager):
+        self.manager = manager
+        self._context = _LegacyPromptContextAdapter(manager)
 
     @asynccontextmanager
-    async def async_message_scope(self, message_id: Optional[str] = None):
-        """为消息处理创建异步临时作用域，支持 message_id 为 None 的情况"""
-        async with self._context.async_scope(message_id):
+    async def async_message_scope(self, message_id: str | None = None):
+        async with self.manager.async_message_scope(message_id):
             yield self
 
     async def get_prompt_async(self, name: str) -> "Prompt":
-        # 首先尝试从当前上下文获取
-        context_prompt = await self._context.get_prompt_async(name)
-        if context_prompt is not None:
-            logger.debug(f"从上下文中获取提示词: {name} {context_prompt}")
-            return context_prompt
-        # 如果上下文中不存在，则使用全局提示模板
-        async with self._lock:
-            # logger.debug(f"从全局获取提示词: {name}")
-            if name not in self._prompts:
-                raise KeyError(f"Prompt '{name}' not found")
-            external_source = self._external_sources.get(name)
-            prompt = self._prompts[name]
-
-        if external_source is None:
-            return prompt
-
-        from src.common.prompt_loader import load_prompt_template, parse_prompt_sections
-
-        file_name, section_name = external_source
-        template = load_prompt_template(file_name)
-        if section_name is not None:
-            sections = parse_prompt_sections(template)
-            if section_name not in sections:
-                raise KeyError(f"段 '{section_name}' 不存在于提示词 '{file_name}' 中")
-            template = sections[section_name]
-        return Prompt(template, name=name, _should_register=False)
-
-    def generate_name(self, template: str) -> str:
-        """为未命名的prompt生成名称"""
-        self._counter += 1
-        return f"prompt_{self._counter}"
-
-    def register(self, prompt: "Prompt") -> None:
-        """注册一个prompt"""
-        if not prompt.name:
-            prompt.name = self.generate_name(prompt.template)
-        self._external_sources.pop(prompt.name, None)
-        self._prompts[prompt.name] = prompt
-
-    def register_external(
-        self,
-        name: str,
-        file_name: str,
-        template: str,
-        section_name: Optional[str] = None,
-    ) -> bool:
-        """注册外部模板来源，返回是否新增了模板。"""
-        if name in self._prompts:
-            if name in self._external_sources:
-                self._external_sources[name] = (file_name, section_name)
-            return False
-
-        self.register(Prompt(template, name=name, _should_register=False))
-        self._external_sources[name] = (file_name, section_name)
-        return True
-
-    def add_prompt(self, name: str, fstr: str) -> "Prompt":
-        prompt = Prompt(fstr, name=name)
-        self._prompts[prompt.name] = prompt
-        return prompt
+        return Prompt(self.manager.get_prompt(name), name=name, _should_register=False)
 
     async def format_prompt(self, name: str, **kwargs) -> str:
-        prompt = await self.get_prompt_async(name)
-        return prompt.format(**kwargs)
+        return self.manager.format_prompt(name, **kwargs)
+
+    def register(self, prompt: "Prompt") -> None:
+        prompt.name = self.manager.register_prompt(prompt.template, name=prompt.name)
+
+    def add_prompt(self, name: str, template: str) -> "Prompt":
+        prompt = Prompt(template, name=name, _should_register=False)
+        self.register(prompt)
+        return prompt
 
 
-# 全局单例
-global_prompt_manager = PromptManager()
+global_prompt_manager = LegacyPromptManagerAdapter(prompt_manager)
 
 
 def init_external_prompts() -> int:
-    """从外部 .prompt 文件系统同步提示词到旧的 PromptManager 兼容层
-
-    支持分节文件（###SECTION: name / ###END_SECTION###）：每个分节作为独立 Prompt 注册，
-    使用分节名称。非分节文件使用文件名注册。
-
-    调用后，global_prompt_manager 将包含所有外部化提示词的 Prompt 对象，
-    使现有代码中通过 global_prompt_manager.format_prompt() 的调用无需修改。
-
-    Returns:
-        成功同步的提示词数量
-    """
-    from src.common.prompt_manager import prompt_manager as new_pm
-    from src.common.prompt_loader import parse_prompt_sections
-
-    if not new_pm._loaded:
-        new_pm.load_prompts()
-    count = 0
-    for name, template in new_pm._prompts.items():
-        sections = parse_prompt_sections(template)
-        if sections:
-            for section_name, section_template in sections.items():
-                if global_prompt_manager.register_external(
-                    section_name,
-                    file_name=name,
-                    template=section_template,
-                    section_name=section_name,
-                ):
-                    count += 1
-        elif global_prompt_manager.register_external(name, file_name=name, template=template):
-            count += 1
-    logger.info(f"从外部文件同步了 {count} 个提示词到兼容层")
-    return count
+    """兼容旧启动入口；公共管理器已经直接加载外部模板。"""
+    if not prompt_manager.is_loaded:
+        prompt_manager.load_prompts()
+    return prompt_manager.prompt_count
 
 
 class Prompt(str):
-    # 临时标记，作为类常量
     _TEMP_LEFT_BRACE = "__ESCAPED_LEFT_BRACE__"
     _TEMP_RIGHT_BRACE = "__ESCAPED_RIGHT_BRACE__"
 
     @staticmethod
     def _process_escaped_braces(template) -> str:
-        """处理模板中的转义花括号,替换为临时标记"""  # type: ignore
-        # 如果传入的是列表，将其转换为字符串
         if isinstance(template, list):
             template = "\n".join(str(item) for item in template)
         elif not isinstance(template, str):
             template = str(template)
-
         return template.replace("\\{", Prompt._TEMP_LEFT_BRACE).replace("\\}", Prompt._TEMP_RIGHT_BRACE)
 
     @staticmethod
     def _restore_escaped_braces(template: str) -> str:
-        """将临时标记还原为实际的花括号字符"""
         return template.replace(Prompt._TEMP_LEFT_BRACE, "{").replace(Prompt._TEMP_RIGHT_BRACE, "}")
 
-    def __new__(cls, fstr, name: Optional[str] = None, args: Union[List[Any], tuple[Any, ...]] = None, **kwargs):
-        # 如果传入的是元组，转换为列表
+    def __new__(
+        cls,
+        fstr,
+        name: Optional[str] = None,
+        args: Union[List[Any], tuple[Any, ...], None] = None,
+        **kwargs,
+    ):
         if isinstance(args, tuple):
             args = list(args)
         should_register = kwargs.pop("_should_register", True)
-
-        # 预处理模板中的转义花括号
         processed_fstr = cls._process_escaped_braces(fstr)
 
-        # 解析模板
         template_args = []
-        result = re.findall(r"\{(.*?)}", processed_fstr)
-        for expr in result:
+        for expr in re.findall(r"\{(.*?)}", processed_fstr):
             if expr and expr not in template_args:
                 template_args.append(expr)
 
-        # 如果提供了初始参数，立即格式化
         if kwargs or args:
             formatted = cls._format_template(fstr, args=args, kwargs=kwargs)
             obj = super().__new__(cls, formatted)
@@ -263,77 +113,72 @@ class Prompt(str):
         obj._args = args or []
         obj._kwargs = kwargs
 
-        # 修改自动注册逻辑
-        if should_register and not global_prompt_manager._context._current_context:
-            global_prompt_manager.register(obj)
+        manager = getattr(global_prompt_manager, "manager", global_prompt_manager)
+        if should_register and manager.current_context_id is None:
+            obj.name = manager.register_prompt(obj.template, name=obj.name)
         return obj
 
     @classmethod
     async def create_async(
-        cls, fstr, name: Optional[str] = None, args: Union[List[Any], tuple[Any, ...]] = None, **kwargs
+        cls,
+        fstr,
+        name: Optional[str] = None,
+        args: Union[List[Any], tuple[Any, ...], None] = None,
+        **kwargs,
     ):
-        """异步创建Prompt实例"""
         prompt = cls(fstr, name, args, **kwargs)
-        if global_prompt_manager._context._current_context:
-            await global_prompt_manager._context.register_async(prompt)
+        manager = getattr(global_prompt_manager, "manager", global_prompt_manager)
+        if manager.current_context_id:
+            if not prompt.name:
+                raise ValueError("上下文提示词必须提供名称")
+            manager.register_context_prompt(prompt.name, prompt.template)
         return prompt
 
     @classmethod
-    def _format_template(cls, template, args: List[Any] = None, kwargs: Dict[str, Any] = None) -> str:
-        # 预处理模板中的转义花括号
+    def _format_template(
+        cls,
+        template,
+        args: Optional[List[Any]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> str:
         processed_template = cls._process_escaped_braces(template)
-
         template_args = []
-        result = re.findall(r"\{(.*?)}", processed_template)
-        for expr in result:
+        for expr in re.findall(r"\{(.*?)}", processed_template):
             if expr and expr not in template_args:
                 template_args.append(expr)
-        formatted_args = {}
-        formatted_kwargs = {}
 
-        # 处理位置参数
+        formatted_args = {}
         if args:
-            # print(len(template_args), len(args), template_args, args)
-            for i in range(len(args)):
-                if i < len(template_args):
-                    arg = args[i]
-                    if isinstance(arg, Prompt):
-                        formatted_args[template_args[i]] = arg.format(**kwargs)
-                    else:
-                        formatted_args[template_args[i]] = arg
-                else:
+            for index, arg in enumerate(args):
+                if index >= len(template_args):
                     logger.error(
-                        f"构建提示词模板失败，解析到的参数列表{template_args}，长度为{len(template_args)}，输入的参数列表为{args}，提示词模板为{template}"
+                        f"构建提示词模板失败，解析到的参数列表{template_args}，长度为{len(template_args)}，"
+                        f"输入的参数列表为{args}，提示词模板为{template}"
                     )
                     raise ValueError("格式化模板失败")
+                formatted_args[template_args[index]] = arg.format(**(kwargs or {})) if isinstance(arg, Prompt) else arg
 
-        # 处理关键字参数
+        formatted_kwargs = {}
         if kwargs:
             for key, value in kwargs.items():
                 if isinstance(value, Prompt):
-                    remaining_kwargs = {k: v for k, v in kwargs.items() if k != key}
+                    remaining_kwargs = {item_key: item for item_key, item in kwargs.items() if item_key != key}
                     formatted_kwargs[key] = value.format(**remaining_kwargs)
                 else:
                     formatted_kwargs[key] = value
 
         try:
-            # 先用位置参数格式化
             if args:
                 processed_template = processed_template.format(**formatted_args)
-            # 再用关键字参数格式化
             if kwargs:
                 processed_template = processed_template.format(**formatted_kwargs)
-
-            # 将临时标记还原为实际的花括号
-            result = cls._restore_escaped_braces(processed_template)
-            return result
-        except (IndexError, KeyError) as e:
+            return cls._restore_escaped_braces(processed_template)
+        except (IndexError, KeyError) as exc:
             raise ValueError(
-                f"格式化模板失败: {template}, args={formatted_args}, kwargs={formatted_kwargs} {str(e)}"
-            ) from e
+                f"格式化模板失败: {template}, args={formatted_args}, kwargs={formatted_kwargs} {exc}"
+            ) from exc
 
-    def format(self, *args, **kwargs) -> "str":
-        """支持位置参数和关键字参数的格式化，使用"""
+    def format(self, *args, **kwargs) -> str:
         return self._format_template(
             self.template,
             args=list(args) if args else self._args,

@@ -183,7 +183,7 @@ class BrainPlannerUnitTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        with patch.object(brain_planner.global_prompt_manager, "get_prompt_async", new=AsyncMock(return_value=prompt)):
+        with patch.object(brain_planner.prompt_manager, "get_prompt", new=Mock(return_value=prompt)):
             block = await planner._build_action_options_block({"plugin": make_action_info("plugin")})
 
         self.assertIn("plugin|plugin desc", block)
@@ -215,9 +215,9 @@ class BrainPlannerUnitTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(
-            brain_planner.global_prompt_manager,
-            "get_prompt_async",
-            new=AsyncMock(return_value=load_prompt_template("brain_action_prompt")),
+            brain_planner.prompt_manager,
+            "get_prompt",
+            new=Mock(return_value=load_prompt_template("chat.private.action")),
         ):
             block = await planner._build_action_options_block({"emoji": parameterless_action})
 
@@ -233,9 +233,9 @@ class BrainPlannerUnitTest(unittest.IsolatedAsyncioTestCase):
             action_require=[],
         )
         with patch.object(
-            brain_planner.global_prompt_manager,
-            "get_prompt_async",
-            new=AsyncMock(return_value=load_prompt_template("brain_action_prompt")),
+            brain_planner.prompt_manager,
+            "get_prompt",
+            new=Mock(return_value=load_prompt_template("chat.private.action")),
         ):
             block = await planner._build_action_options_block({"quote": parameterized_action})
 

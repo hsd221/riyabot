@@ -16,7 +16,7 @@ from rich.traceback import install
 from src.common.database.database_model import Emoji, EmojiDescriptionCache
 from src.common.database.database import db as peewee_db
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt, load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.config.config import global_config, model_config
 from src.chat.utils.utils_image import (
     audit_gif_frames,
@@ -848,8 +848,8 @@ class EmojiManager:
             # 将表情包信息转换为可读的字符串
             emoji_info_list = _emoji_objects_to_readable_list(selected_emojis)
 
-            prompt = load_prompt(
-                "emoji_replace_decision",
+            prompt = prompt_manager.format_prompt(
+                "media.emoji.replace_decision",
                 bot_nickname=global_config.bot.nickname,
                 current_num=self.emoji_num,
                 max_num=self.emoji_num_max,
@@ -954,7 +954,7 @@ class EmojiManager:
                         temperature=0.5,
                     )
                 else:
-                    prompt = load_prompt_section("emoji_vlm_description", "static")
+                    prompt = prompt_manager.format_prompt("media.emoji.vision_description.static")
                     description, _ = await self.vlm.generate_response_for_image(
                         prompt, image_base64, image_format, temperature=0.5
                     )
@@ -980,8 +980,8 @@ class EmojiManager:
 
             # 审核表情包
             if global_config.emoji.content_filtration:
-                prompt = load_prompt(
-                    "emoji_content_filter",
+                prompt = prompt_manager.format_prompt(
+                    "media.emoji.content_filter",
                     filtration_prompt=global_config.emoji.filtration_prompt,
                 )
                 if is_gif:
@@ -1004,7 +1004,7 @@ class EmojiManager:
                     return "", []
 
             # 第二步：LLM情感分析 - 基于详细描述生成情感标签列表
-            emotion_prompt = load_prompt("emoji_emotion_analysis", description=description)
+            emotion_prompt = prompt_manager.format_prompt("media.emoji.emotion_analysis", description=description)
             emotions_text, _ = await self.llm_emotion_judge.generate_response_async(
                 emotion_prompt, temperature=0.7, max_tokens=256
             )

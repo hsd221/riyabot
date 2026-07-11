@@ -10,10 +10,9 @@ from json_repair import repair_json
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config, model_config
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.common.data_models.info_data_model import ActionPlannerInfo
-from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.utils.chat_message_builder import (
     build_readable_actions,
     get_actions_by_timestamp_with_chat,
@@ -201,7 +200,7 @@ class BrainPlanner:
 
         prompt_build_start = time.perf_counter()
         # 构建包含所有动作的提示词：使用统一的 ReAct Prompt
-        prompt_key = "brain_planner_prompt_react"
+        prompt_key = "chat.private.planner"
         # 这里不记录日志，避免重复打印，由调用方按需控制 log_prompt
         prompt, message_id_list = await self.build_planner_prompt(
             chat_target_info=chat_target_info,
@@ -270,7 +269,7 @@ class BrainPlanner:
         message_id_list: List[Tuple[str, "DatabaseMessages"]],
         chat_content_block: str = "",
         interest: str = "",
-        prompt_key: str = "brain_planner_prompt_react",
+        prompt_key: str = "chat.private.planner",
     ) -> tuple[str, List[Tuple[str, "DatabaseMessages"]]]:
         """构建 Planner LLM 的提示词 (获取模板并填充数据)"""
         try:
@@ -297,7 +296,7 @@ class BrainPlanner:
             action_options_block = await self._build_action_options_block(current_available_actions)
 
             # 其他信息
-            moderation_prompt_block = load_prompt_section("moderation", "standard")
+            moderation_prompt_block = prompt_manager.format_prompt("shared.moderation.standard")
             time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             bot_name = global_config.bot.nickname
             bot_nickname = (
@@ -306,7 +305,7 @@ class BrainPlanner:
             name_block = f"你的名字是{bot_name}{bot_nickname}，请注意哪些是你自己的发言。"
 
             # 获取主规划器模板并填充
-            planner_prompt_template = await global_prompt_manager.get_prompt_async(prompt_key)
+            planner_prompt_template = prompt_manager.get_prompt(prompt_key)
             prompt = planner_prompt_template.format(
                 time_block=time_block,
                 chat_context_description=chat_context_description,
@@ -397,7 +396,7 @@ class BrainPlanner:
             require_text = require_text.rstrip("\n")
 
             # 获取动作提示模板并填充
-            using_action_prompt = await global_prompt_manager.get_prompt_async("brain_action_prompt")
+            using_action_prompt = prompt_manager.get_prompt("chat.private.action")
             using_action_prompt = using_action_prompt.format(
                 action_name=action_name,
                 action_description=action_info.description,

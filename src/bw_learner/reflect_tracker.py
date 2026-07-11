@@ -3,7 +3,7 @@ from typing import Optional, Dict, TYPE_CHECKING
 from src.common.logger import get_logger
 from src.common.database.database_model import Expression
 from src.llm_models.utils_model import LLMRequest
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.config.config import model_config
 from src.chat.message_receive.chat_stream import ChatStream
 from src.chat.utils.chat_message_builder import (
@@ -72,8 +72,8 @@ class ReflectTracker:
 
         # LLM Judge
         try:
-            prompt = await global_prompt_manager.format_prompt(
-                "reflect_judge",
+            prompt = prompt_manager.format_prompt(
+                "learning.expression.reflect_judge",
                 situation=self.expression.situation,
                 style=self.expression.style,
                 context_block=context_block,

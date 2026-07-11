@@ -10,7 +10,7 @@ from PIL import Image
 from rich.traceback import install
 
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt, load_prompt_section
+from src.common.prompt_manager import prompt_manager
 from src.common.database.database import db
 from src.common.database.database_model import Images, ImageDescriptions, EmojiDescriptionCache
 from src.config.config import global_config, model_config
@@ -58,7 +58,7 @@ async def describe_gif_frames(
 
     frame_count = len(frames)
     if frame_count <= GIF_FRAME_BATCH_SIZE:
-        prompt = load_prompt_section("emoji_vlm_description", "gif", frame_count=frame_count)
+        prompt = prompt_manager.format_prompt("media.emoji.vision_description.gif", frame_count=frame_count)
         description, _ = await vlm.generate_response_for_images(
             prompt,
             frames,
@@ -73,9 +73,8 @@ async def describe_gif_frames(
         batch_frames = frames[batch_start : batch_start + GIF_FRAME_BATCH_SIZE]
         frame_start = batch_start + 1
         frame_end = batch_start + len(batch_frames)
-        prompt = load_prompt_section(
-            "emoji_vlm_description",
-            "gif_batch",
+        prompt = prompt_manager.format_prompt(
+            "media.emoji.vision_description.gif_batch",
             frame_count=frame_count,
             frame_start=frame_start,
             frame_end=frame_end,
@@ -94,9 +93,8 @@ async def describe_gif_frames(
             overall_summary = batch_summary
             continue
 
-        overall_prompt = load_prompt_section(
-            "emoji_vlm_description",
-            "gif_overall",
+        overall_prompt = prompt_manager.format_prompt(
+            "media.emoji.vision_description.gif_overall",
             frame_count=frame_count,
             frame_start=frame_start,
             frame_end=frame_end,
@@ -400,7 +398,7 @@ class ImageManager:
                     temperature=0.4,
                 )
             else:
-                vlm_prompt = load_prompt_section("emoji_vlm_description", "static_detailed")
+                vlm_prompt = prompt_manager.format_prompt("media.emoji.vision_description.static_detailed")
                 detailed_description, _ = await self.vlm.generate_response_for_image(
                     vlm_prompt, image_base64, image_format, temperature=0.4
                 )
@@ -410,7 +408,7 @@ class ImageManager:
                 return "[表情包(VLM描述生成失败)]"
 
             # 第二步：LLM情感分析 - 基于详细描述生成简短的情感标签
-            emotion_prompt = load_prompt("emoji_core_emotion", description=detailed_description)
+            emotion_prompt = prompt_manager.format_prompt("media.emoji.core_emotion", description=detailed_description)
 
             # 使用较低温度确保输出稳定
             emotion_llm = LLMRequest(model_set=model_config.model_task_config.utils, request_type="emoji")

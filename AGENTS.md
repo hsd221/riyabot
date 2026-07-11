@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-MaiBot is a Python 3.10+ backend with a React 19/Vite dashboard. `bot.py` starts the runner/worker process; `src/main.py` initializes the system. Backend code lives in `src/`: `chat/` handles group/private chat behavior, `plugin_system/` contains the plugin SDK, `common/` holds infrastructure utilities, `config/` defines TOML schemas, and `webui/` exposes the FastAPI dashboard backend. Frontend code is in `webui/src/`; prompts are in `prompts/*.prompt`; external plugins live under `plugins/` and require `_manifest.json`. Runtime `config/`, `data/`, and `logs/` are gitignored; copy from `template/` for local setup. Read nested `AGENTS.md` files before editing covered subtrees.
+MaiBot is a Python 3.10+ backend with a React 19/Vite dashboard. `bot.py` starts the runner/worker process; `src/main.py` initializes the system. Backend code lives in `src/`: `chat/` handles group/private chat behavior, `plugin_system/` contains the plugin SDK, `common/` holds infrastructure utilities, `config/` defines TOML schemas, and `webui/` exposes the FastAPI dashboard backend. Frontend code is in `webui/src/`; prompts are grouped by domain under `prompts/`, where paths map to dotted prompt IDs; external plugins live under `plugins/` and require `_manifest.json`. Runtime `config/`, `data/`, and `logs/` are gitignored; copy from `template/` for local setup. Read nested `AGENTS.md` files before editing covered subtrees.
 
 ## Build, Test, and Development Commands
 - `uv sync`: install Python dependencies from `pyproject.toml` and `uv.lock`.

@@ -9,7 +9,7 @@ from .pfc_utils import get_items_from_json
 from .observation_info import ObservationInfo
 from .conversation_info import ConversationInfo
 from .pfc_KnowledgeFetcher import format_knowledge_evidence, format_pfc_chat_history
-from src.common.prompt_loader import load_prompt_section
+from src.common.prompt_manager import prompt_manager
 
 
 logger = get_logger("pfc_action_planner")
@@ -259,9 +259,8 @@ class ActionPlanner:
 
         # --- 选择并格式化 Prompt ---
         if last_successful_reply_action in ["direct_reply", "send_new_message"]:
-            prompt = load_prompt_section(
-                "pfc_action_decision",
-                "follow_up",
+            prompt = prompt_manager.format_prompt(
+                "chat.private.pfc.action_decision.follow_up",
                 persona_text=persona_text,
                 goals_str=goals_str if goals_str.strip() else "- 目前没有明确对话目标，请考虑设定一个。",
                 action_history_summary=action_history_summary,
@@ -273,9 +272,8 @@ class ActionPlanner:
             )
             logger.debug(f"[私聊][{self.private_name}]使用 PROMPT_FOLLOW_UP (追问决策)")
         else:
-            prompt = load_prompt_section(
-                "pfc_action_decision",
-                "initial_reply",
+            prompt = prompt_manager.format_prompt(
+                "chat.private.pfc.action_decision.initial_reply",
                 persona_text=persona_text,
                 goals_str=goals_str if goals_str.strip() else "- 目前没有明确对话目标，请考虑设定一个。",
                 action_history_summary=action_history_summary,
@@ -309,9 +307,8 @@ class ActionPlanner:
                 logger.info(f"[私聊][{self.private_name}]初步规划结束对话，进入告别决策...")
 
                 # 使用 end_decision section
-                end_decision_prompt = load_prompt_section(
-                    "pfc_action_decision",
-                    "end_decision",
+                end_decision_prompt = prompt_manager.format_prompt(
+                    "chat.private.pfc.action_decision.end_decision",
                     persona_text=persona_text,
                     chat_history_text=chat_history_text,
                 )

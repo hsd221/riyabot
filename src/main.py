@@ -116,13 +116,7 @@ class MainSystem:
         init_start_time = time.time()
 
         prompt_manager.load_prompts()
-        logger.info("外部提示词模板已加载", event_code="prompt.templates.loaded", count=len(prompt_manager._prompts))
-
-        # 同步外部提示词到旧 PromptManager 兼容层
-        from src.chat.utils.prompt_builder import init_external_prompts
-
-        synced = init_external_prompts()
-        logger.info("提示词兼容层已同步", event_code="prompt.compat_synced", count=synced)
+        logger.info("外部提示词模板已加载", event_code="prompt.templates.loaded", count=prompt_manager.prompt_count)
 
         # 添加在线时间统计任务
         await async_task_manager.add_task(OnlineTimeRecordTask())

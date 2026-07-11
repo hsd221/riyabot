@@ -202,7 +202,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(tool_use.global_prompt_manager, "format_prompt", new=AsyncMock(return_value="tool prompt")),
+            patch.object(tool_use.prompt_manager, "format_prompt", new=Mock(return_value="tool prompt")),
             patch.object(tool_use.global_config.bot, "nickname", "Mai"),
         ):
             result, used_tools, prompt = await executor.execute_from_chat_message(
@@ -239,7 +239,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
             return_value=("response", ("reasoning", "model", [ToolCall("call-2", "lookup", {"q": "y"})]))
         )
         with (
-            patch.object(tool_use.global_prompt_manager, "format_prompt", new=AsyncMock(return_value="tool prompt")),
+            patch.object(tool_use.prompt_manager, "format_prompt", new=Mock(return_value="tool prompt")),
             patch.object(tool_use.global_config.bot, "nickname", "Mai"),
         ):
             result, used_tools, prompt = await executor.execute_from_chat_message(

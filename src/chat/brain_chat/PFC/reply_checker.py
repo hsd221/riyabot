@@ -1,7 +1,7 @@
 import json
 from typing import Tuple, List, Dict, Any
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config
 from .chat_observer import ChatObserver
@@ -83,7 +83,12 @@ class ReplyChecker:
         except Exception as e:
             logger.exception(f"[私聊][{self.private_name}]检查回复时出错: 类型={type(e)}, 值={e}")
 
-        prompt = load_prompt("pfc_reply_check", goal=goal, chat_history_text=chat_history_text, reply=reply)
+        prompt = prompt_manager.format_prompt(
+            "chat.private.pfc.reply_check",
+            goal=goal,
+            chat_history_text=chat_history_text,
+            reply=reply,
+        )
 
         try:
             content, _ = await self.llm.generate_response_async(prompt)

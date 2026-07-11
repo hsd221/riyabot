@@ -36,18 +36,17 @@ class ExpressionSelectorCandidateTest(unittest.IsolatedAsyncioTestCase):
             {"id": 10, "situation": "问候", "style": "短句回应"},
             {"id": 20, "situation": "被追问", "style": "先确认问题"},
         ]
+        prompt_template = (
+            "{bot_name}|{chat_observe_info}|{all_situations}|{max_num}|"
+            "{target_message}|{target_message_extra_block}|{reply_reason_block}"
+        )
         prompt_manager = SimpleNamespace(
-            get_prompt_async=AsyncMock(
-                return_value=(
-                    "{bot_name}|{chat_observe_info}|{all_situations}|{max_num}|"
-                    "{target_message}|{target_message_extra_block}|{reply_reason_block}"
-                )
-            )
+            format_prompt=Mock(side_effect=lambda _name, **kwargs: prompt_template.format(**kwargs))
         )
         fake_config = SimpleNamespace(bot=SimpleNamespace(nickname="Mai"))
 
         with (
-            patch.object(expression_selector, "global_prompt_manager", prompt_manager),
+            patch.object(expression_selector, "prompt_manager", prompt_manager),
             patch.object(expression_selector, "global_config", fake_config),
         ):
             selected, selected_ids = await selector._select_from_candidate_pool(
@@ -70,11 +69,13 @@ class ExpressionSelectorCandidateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await selector._select_from_candidate_pool([], "", 2, None, None), ([], []))
 
         selector.llm_model.generate_response_async.return_value = ('{"selected_situations": "bad"}', None)
-        prompt_manager = SimpleNamespace(get_prompt_async=AsyncMock(return_value="{reply_reason_block}"))
+        prompt_manager = SimpleNamespace(
+            format_prompt=Mock(side_effect=lambda _name, **kwargs: "{reply_reason_block}".format(**kwargs))
+        )
         fake_config = SimpleNamespace(bot=SimpleNamespace(nickname="Mai"))
 
         with (
-            patch.object(expression_selector, "global_prompt_manager", prompt_manager),
+            patch.object(expression_selector, "prompt_manager", prompt_manager),
             patch.object(expression_selector, "global_config", fake_config),
         ):
             selected = await selector._select_from_candidate_pool(

@@ -98,7 +98,7 @@ class GoalAnalyzerTest(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(pfc, "load_prompt", return_value="goal prompt") as load_prompt,
+            patch.object(pfc.prompt_manager, "format_prompt", return_value="goal prompt") as load_prompt,
             patch.object(pfc, "format_pfc_chat_history", return_value="新消息文本"),
         ):
             result = await analyzer.analyze_goal(conversation, observation)
@@ -112,7 +112,7 @@ class GoalAnalyzerTest(unittest.IsolatedAsyncioTestCase):
 
         conversation = ConversationInfo()
         analyzer = self.make_analyzer(('{"goal": "单个目标", "reasoning": "单个原因"}', None))
-        with patch.object(pfc, "load_prompt", return_value="goal prompt"):
+        with patch.object(pfc.prompt_manager, "format_prompt", return_value="goal prompt"):
             result = await analyzer.analyze_goal(conversation, ObservationInfo("Alice"))
 
         self.assertEqual(result, ("单个目标", "", "单个原因"))
@@ -121,19 +121,19 @@ class GoalAnalyzerTest(unittest.IsolatedAsyncioTestCase):
     async def test_analyze_goal_and_conversation_fallbacks_are_structured(self) -> None:
         conversation = ConversationInfo()
         analyzer = self.make_analyzer(("not json", None))
-        with patch.object(pfc, "load_prompt", return_value="goal prompt"):
+        with patch.object(pfc.prompt_manager, "format_prompt", return_value="goal prompt"):
             self.assertEqual(await analyzer.analyze_goal(conversation, ObservationInfo("Alice")), ("", "", ""))
 
         analyzer = self.make_analyzer(('{"goal_achieved": true, "stop_conversation": false, "reason": "达成"}', None))
         analyzer.chat_observer = SimpleNamespace(get_cached_messages=Mock(return_value=[{"message_id": "m1"}]))
         with (
-            patch.object(pfc, "load_prompt", return_value="assess prompt"),
+            patch.object(pfc.prompt_manager, "format_prompt", return_value="assess prompt"),
             patch.object(pfc, "format_pfc_chat_history", return_value="history"),
         ):
             self.assertEqual(await analyzer.analyze_conversation("目标", "原因"), (True, False, "达成"))
 
         analyzer = self.make_analyzer(("not json", None))
-        with patch.object(pfc, "load_prompt", return_value="assess prompt"):
+        with patch.object(pfc.prompt_manager, "format_prompt", return_value="assess prompt"):
             self.assertEqual(await analyzer.analyze_conversation("目标", "原因"), (False, False, "解析结果失败"))
 
 
@@ -151,15 +151,14 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         planner = self.make_planner(('{"action": "direct_reply", "reason": "该回复了"}', None))
         fake_config = SimpleNamespace(BOT_QQ="bot")
 
-        def fake_prompt(prompt_name, section_name, **kwargs):
-            self.assertEqual(prompt_name, "pfc_action_decision")
-            self.assertEqual(section_name, "follow_up")
+        def fake_prompt(prompt_id, **kwargs):
+            self.assertEqual(prompt_id, "chat.private.pfc.action_decision.follow_up")
             self.assertIn("上一条成功发送的消息", kwargs["time_since_last_bot_message_info"])
-            return f"prompt:{section_name}"
+            return "prompt:follow_up"
 
         with (
             patch.object(action_planner, "global_config", fake_config),
-            patch.object(action_planner, "load_prompt_section", side_effect=fake_prompt),
+            patch.object(action_planner.prompt_manager, "format_prompt", side_effect=fake_prompt),
             patch.object(action_planner.time, "time", return_value=100.0),
         ):
             self.assertEqual(
@@ -171,7 +170,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         planner = self.make_planner(('{"action": "dance", "reason": "想跳舞"}', None))
         with (
             patch.object(action_planner, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(action_planner, "load_prompt_section", return_value="prompt"),
+            patch.object(action_planner.prompt_manager, "format_prompt", return_value="prompt"),
         ):
             action, reason = await planner.plan(make_observation(), make_conversation(), None)
 
@@ -181,7 +180,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         planner = self.make_planner(RuntimeError("llm down"))
         with (
             patch.object(action_planner, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(action_planner, "load_prompt_section", return_value="prompt"),
+            patch.object(action_planner.prompt_manager, "format_prompt", return_value="prompt"),
         ):
             action, reason = await planner.plan(make_observation(), make_conversation(), None)
 
@@ -196,14 +195,17 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(action_planner, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(action_planner, "load_prompt_section", return_value="prompt") as load_prompt_section,
+            patch.object(action_planner.prompt_manager, "format_prompt", return_value="prompt") as load_prompt_section,
         ):
             action, reason = await planner.plan(make_observation(), make_conversation(), None)
 
         self.assertEqual(action, "say_goodbye")
         self.assertIn("礼貌告别", reason)
         self.assertEqual(planner.llm.generate_response_async.await_count, 2)
-        self.assertEqual(load_prompt_section.call_args_list[1].args[:2], ("pfc_action_decision", "end_decision"))
+        self.assertEqual(
+            load_prompt_section.call_args_list[1].args[0],
+            "chat.private.pfc.action_decision.end_decision",
+        )
 
 
 class ReplyCheckerTest(unittest.IsolatedAsyncioTestCase):
@@ -236,14 +238,14 @@ class ReplyCheckerTest(unittest.IsolatedAsyncioTestCase):
         checker = self.make_checker(('{"suitable": "true", "reason": "可以", "need_replan": true}', None))
         with (
             patch.object(reply_checker, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(reply_checker, "load_prompt", return_value="check prompt"),
+            patch.object(reply_checker.prompt_manager, "format_prompt", return_value="check prompt"),
         ):
             self.assertEqual(await checker.check("新回复", "goal", [], "history"), (True, "可以", True))
 
         checker = self.make_checker(('{"suitable": false, "reason": "不够好"}', None))
         with (
             patch.object(reply_checker, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(reply_checker, "load_prompt", return_value="check prompt"),
+            patch.object(reply_checker.prompt_manager, "format_prompt", return_value="check prompt"),
         ):
             self.assertEqual(
                 await checker.check("新回复", "goal", [], "history", retry_count=0), (False, "不够好", False)
@@ -252,7 +254,7 @@ class ReplyCheckerTest(unittest.IsolatedAsyncioTestCase):
         checker = self.make_checker(('{"suitable": false, "reason": "不够好"}', None))
         with (
             patch.object(reply_checker, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(reply_checker, "load_prompt", return_value="check prompt"),
+            patch.object(reply_checker.prompt_manager, "format_prompt", return_value="check prompt"),
         ):
             self.assertEqual(
                 await checker.check("新回复", "goal", [], "history", retry_count=3),
@@ -262,7 +264,7 @@ class ReplyCheckerTest(unittest.IsolatedAsyncioTestCase):
         checker = self.make_checker(("这段回复不合适，需要重新规划", None))
         with (
             patch.object(reply_checker, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(reply_checker, "load_prompt", return_value="check prompt"),
+            patch.object(reply_checker.prompt_manager, "format_prompt", return_value="check prompt"),
         ):
             self.assertEqual(
                 await checker.check("新回复", "goal", [], "history"),
@@ -273,7 +275,7 @@ class ReplyCheckerTest(unittest.IsolatedAsyncioTestCase):
         checker = self.make_checker(RuntimeError("llm down"))
         with (
             patch.object(reply_checker, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(reply_checker, "load_prompt", return_value="check prompt"),
+            patch.object(reply_checker.prompt_manager, "format_prompt", return_value="check prompt"),
         ):
             retry = await checker.check("新回复", "goal", [], "history", retry_count=0)
 
@@ -282,7 +284,7 @@ class ReplyCheckerTest(unittest.IsolatedAsyncioTestCase):
         checker = self.make_checker(RuntimeError("llm down"))
         with (
             patch.object(reply_checker, "global_config", SimpleNamespace(BOT_QQ="bot")),
-            patch.object(reply_checker, "load_prompt", return_value="check prompt"),
+            patch.object(reply_checker.prompt_manager, "format_prompt", return_value="check prompt"),
         ):
             replan = await checker.check("新回复", "goal", [], "history", retry_count=3)
 
@@ -303,8 +305,9 @@ class ReplyGeneratorTest(unittest.IsolatedAsyncioTestCase):
     async def test_generate_uses_action_specific_prompt_sections_and_returns_llm_content(self) -> None:
         sections = []
 
-        def fake_prompt(prompt_name, section_name, **kwargs):
-            self.assertEqual(prompt_name, "pfc_reply_generation")
+        def fake_prompt(prompt_id, **kwargs):
+            section_name = prompt_id.rsplit(".", maxsplit=1)[-1]
+            self.assertTrue(prompt_id.startswith("chat.private.pfc.reply_generation."))
             self.assertIn("继续聊天", kwargs["goals_str"])
             self.assertIn("以下是 1 条新消息", kwargs["chat_history_text"])
             sections.append(section_name)
@@ -317,7 +320,7 @@ class ReplyGeneratorTest(unittest.IsolatedAsyncioTestCase):
             ("unknown", "direct_reply"),
         ]:
             generator = self.make_generator((f"reply:{expected_section}", None))
-            with patch.object(reply_generator, "load_prompt_section", side_effect=fake_prompt):
+            with patch.object(reply_generator.prompt_manager, "format_prompt", side_effect=fake_prompt):
                 self.assertEqual(
                     await generator.generate(make_observation(), make_conversation(), action_type),
                     f"reply:{expected_section}",
@@ -327,7 +330,7 @@ class ReplyGeneratorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_error_fallback_and_check_reply_delegation(self) -> None:
         generator = self.make_generator(RuntimeError("llm down"))
-        with patch.object(reply_generator, "load_prompt_section", return_value="prompt"):
+        with patch.object(reply_generator.prompt_manager, "format_prompt", return_value="prompt"):
             self.assertEqual(
                 await generator.generate(make_observation(), make_conversation(), "direct_reply"),
                 "抱歉，我现在有点混乱，让我重新思考一下...",

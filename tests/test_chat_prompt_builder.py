@@ -1,19 +1,19 @@
 import unittest
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from src.common import prompt_loader
-from src.common.prompt_manager import PromptManager as FilePromptManager
+from src.common.prompt_manager import PromptManager
 from src.chat.utils import prompt_builder
-from src.chat.utils.prompt_builder import Prompt, PromptManager
+from src.chat.utils.prompt_builder import LegacyPromptManagerAdapter, Prompt
 
 
 class PromptBuilderTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.original_manager = prompt_builder.global_prompt_manager
-        prompt_builder.global_prompt_manager = PromptManager()
+        self.manager = PromptManager()
+        prompt_builder.global_prompt_manager = LegacyPromptManagerAdapter(self.manager)
         self.addCleanup(self._restore_manager)
 
     def _restore_manager(self) -> None:
@@ -64,6 +64,10 @@ class PromptBuilderTest(unittest.IsolatedAsyncioTestCase):
     async def test_prompt_context_register_async_accepts_explicit_context_without_current_scope(self) -> None:
         manager = prompt_builder.global_prompt_manager
         context_prompt = Prompt("explicit {value}", name="explicit", _should_register=False)
+        await manager._context.register_async(context_prompt)
+        with self.assertRaisesRegex(KeyError, "explicit"):
+            await manager.get_prompt_async("explicit")
+
         await manager._context.register_async(context_prompt, context_id="ctx")
 
         async with manager.async_message_scope("ctx"):
@@ -72,57 +76,26 @@ class PromptBuilderTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(KeyError, "explicit"):
             await manager.get_prompt_async("explicit")
 
-    def test_init_external_prompts_syncs_plain_and_sectioned_prompts_without_overwriting_existing(self) -> None:
-        manager = prompt_builder.global_prompt_manager
-        manager.add_prompt("existing", "local value")
-        fake_new_manager = SimpleNamespace(
-            _loaded=False,
-            _prompts={
-                "existing": "external ignored",
-                "plain": "plain {value}",
-                "sectioned": "###SECTION: first\nfirst {value}\n###END_SECTION###\n###SECTION: second\nsecond\n###END_SECTION###",
-            },
-            load_prompts=Mock(),
-        )
-
-        import src.common.prompt_manager as common_prompt_manager
-
-        with patch.object(common_prompt_manager, "prompt_manager", fake_new_manager):
-            count = prompt_builder.init_external_prompts()
-
-        self.assertEqual(count, 3)
-        fake_new_manager.load_prompts.assert_called_once_with()
-        self.assertEqual(manager._prompts["existing"].template, "local value")
-        self.assertEqual(manager._prompts["plain"].format(value="ok"), "plain ok")
-        self.assertEqual(manager._prompts["first"].format(value="ok"), "first ok")
-        self.assertEqual(manager._prompts["second"].format(), "second")
-
-    async def test_external_prompt_content_hot_reloads_in_compatibility_manager(self) -> None:
-        manager = prompt_builder.global_prompt_manager
-
+    async def test_external_prompt_content_hot_reloads_through_legacy_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             prompt_path = Path(tmpdir) / "sectioned.prompt"
             prompt_path.write_text(
                 "###SECTION: live\nfirst {value}\n###END_SECTION###\n",
                 encoding="utf-8",
             )
-            file_manager = FilePromptManager()
-
-            import src.common.prompt_manager as common_prompt_manager
+            file_manager = PromptManager()
+            manager = LegacyPromptManagerAdapter(file_manager)
 
             prompt_loader.clear_prompt_cache()
-            with (
-                patch.object(prompt_loader, "PROMPTS_ROOT", Path(tmpdir)),
-                patch.object(common_prompt_manager, "prompt_manager", file_manager),
-            ):
-                prompt_builder.init_external_prompts()
-                self.assertEqual(await manager.format_prompt("live", value="one"), "first one")
+            with patch.object(prompt_loader, "PROMPTS_ROOT", Path(tmpdir)):
+                file_manager.load_prompts()
+                self.assertEqual(await manager.format_prompt("sectioned.live", value="one"), "first one")
 
                 prompt_path.write_text(
                     "###SECTION: live\nupdated prompt {value}\n###END_SECTION###\n",
                     encoding="utf-8",
                 )
-                self.assertEqual(await manager.format_prompt("live", value="two"), "updated prompt two")
+                self.assertEqual(await manager.format_prompt("sectioned.live", value="two"), "updated prompt two")
 
             prompt_loader.clear_prompt_cache()
 

@@ -11,7 +11,7 @@ from src.config.config import model_config, global_config
 from src.chat.utils.chat_message_builder import (
     build_anonymous_messages,
 )
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.bw_learner.learner_utils import (
     filter_message_content,
@@ -68,8 +68,8 @@ class ExpressionLearner:
         # 学习用（开启行编号，便于溯源）
         random_msg_str: str = await build_anonymous_messages(random_msg, show_ids=True)
 
-        prompt: str = await global_prompt_manager.format_prompt(
-            "learn_style",
+        prompt: str = prompt_manager.format_prompt(
+            "learning.expression.learn_style",
             bot_name=global_config.bot.nickname,
             chat_str=random_msg_str,
         )
@@ -371,8 +371,8 @@ class ExpressionLearner:
         if not sanitized:
             return fallback
 
-        prompt = await global_prompt_manager.format_prompt(
-            "expression_situation_summary",
+        prompt = prompt_manager.format_prompt(
+            "learning.expression.situation_summary",
             situations="\n".join(f"- {s}" for s in sanitized[-10:]),
         )
 

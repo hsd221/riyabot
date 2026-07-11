@@ -12,8 +12,8 @@ from functools import lru_cache
 PROMPTS_ROOT = Path(__file__).resolve().parents[2] / "prompts"
 PROMPT_EXTENSION = ".prompt"
 
-# 安全名称模式：仅允许字母、数字、下划线、点、连字符
-SAFE_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+# 安全名称段模式：仅允许字母、数字、下划线和连字符
+SAFE_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # 缓存修订号：每次 clear_prompt_cache() 调用时递增，
 # prompt_manager 通过轮询此值感知缓存变化并触发重载
@@ -36,11 +36,23 @@ def normalize_prompt_name(name: str) -> str:
     if name.endswith(PROMPT_EXTENSION):
         name = name[: -len(PROMPT_EXTENSION)]
 
-    # 校验名称安全性
-    if not SAFE_SEGMENT_PATTERN.match(name):
-        raise ValueError(f"提示词名称 '{name}' 包含不安全字符，仅允许字母、数字、下划线、点和连字符")
+    segments = name.split(".")
+    if not segments or any(not segment or not SAFE_SEGMENT_PATTERN.fullmatch(segment) for segment in segments):
+        raise ValueError(f"提示词名称 '{name}' 包含不安全字符，仅允许点分隔的字母、数字、下划线和连字符")
 
-    return name
+    return ".".join(segments)
+
+
+def _prompt_path(name: str) -> Path:
+    """把点分提示词 ID 映射为 prompts/ 下的文件路径。"""
+    safe_name = normalize_prompt_name(name)
+    return PROMPTS_ROOT.joinpath(*safe_name.split(".")).with_suffix(PROMPT_EXTENSION)
+
+
+def _prompt_name(filepath: Path) -> str:
+    """把 prompts/ 下的文件路径映射为点分提示词 ID。"""
+    relative_path = filepath.relative_to(PROMPTS_ROOT).with_suffix("")
+    return ".".join(relative_path.parts)
 
 
 @lru_cache(maxsize=128)
@@ -74,15 +86,14 @@ def load_prompt_template(name: str) -> str:
         FileNotFoundError: 提示词文件不存在
     """
     safe_name = normalize_prompt_name(name)
-    filepath = PROMPTS_ROOT / f"{safe_name}{PROMPT_EXTENSION}"
+    filepath = _prompt_path(safe_name)
     file_signature = get_prompt_file_signature(safe_name)
     return _read_prompt_file(filepath, file_signature, _PROMPT_CACHE_REVISION)
 
 
 def get_prompt_file_signature(name: str) -> tuple[int, int]:
     """返回提示词文件的修改时间和大小，用于检测热更新。"""
-    safe_name = normalize_prompt_name(name)
-    stat = (PROMPTS_ROOT / f"{safe_name}{PROMPT_EXTENSION}").stat()
+    stat = _prompt_path(name).stat()
     return stat.st_mtime_ns, stat.st_size
 
 
@@ -123,7 +134,10 @@ def list_prompt_templates() -> list[str]:
     """
     if not PROMPTS_ROOT.exists():
         return []
-    return sorted(p.stem for p in PROMPTS_ROOT.glob(f"*{PROMPT_EXTENSION}"))
+    names = [_prompt_name(path) for path in PROMPTS_ROOT.rglob(f"*{PROMPT_EXTENSION}")]
+    if len(names) != len(set(names)):
+        raise ValueError("提示词目录中存在映射到同一点分 ID 的重复文件")
+    return sorted(names)
 
 
 # 多段模板解析：用于合并 prompt 文件中的分节标记

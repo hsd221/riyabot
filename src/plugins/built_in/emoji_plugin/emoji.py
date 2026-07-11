@@ -6,7 +6,7 @@ from src.plugin_system import BaseAction, ActionActivationType
 
 # 导入依赖的系统组件
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 
 # 导入API模块 - 标准Python包方式
 from src.plugin_system.apis import emoji_api, llm_api, message_api
@@ -84,8 +84,8 @@ class EmojiAction(BaseAction):
                         show_actions=False,
                     )
 
-                prompt = load_prompt(
-                    "emoji_selection",
+                prompt = prompt_manager.format_prompt(
+                    "media.emoji.selection",
                     reason=reason,
                     messages_text=messages_text,
                     available_emotions=available_emotions_str,

@@ -27,7 +27,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 from src.memory.types import BufferMessage
 from src.config.config import model_config
 from src.llm_models.utils_model import LLMRequest
@@ -435,8 +435,8 @@ class BatchEncoder:
         conversation_text = "\n".join(lines)
         topic_summary = neutralize_prompt_boundaries(topic_summary or "（无）")
 
-        return load_prompt(
-            "memory_atom_extraction",
+        return prompt_manager.format_prompt(
+            "memory.atom_extraction",
             topic_summary=topic_summary,
             conversation_text=conversation_text,
         )

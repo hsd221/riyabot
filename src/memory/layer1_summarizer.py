@@ -22,7 +22,7 @@ import re
 import time
 
 from src.common.logger import get_logger
-from src.common.prompt_loader import load_prompt
+from src.common.prompt_manager import prompt_manager
 
 logger = get_logger("memory.layer1")
 
@@ -353,7 +353,7 @@ class TopicJudgeAgent:
             )
         message_block = "\n\n".join(lines)
 
-        return load_prompt("memory_topic_judge", message_block=message_block)
+        return prompt_manager.format_prompt("memory.topic_judge", message_block=message_block)
 
     async def _call_llm(self, prompt: str) -> str:
         if self._llm_request is None:

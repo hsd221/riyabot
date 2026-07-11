@@ -8,7 +8,7 @@ from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config, model_config
 from src.common.logger import get_logger
 from src.common.database.database_model import Expression
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.bw_learner.learner_utils import weighted_sample
 from src.bw_learner.expression_vector_index import expression_vector_index
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -283,7 +283,8 @@ class ExpressionSelector:
         else:
             reply_reason_block = ""
 
-        prompt = (await global_prompt_manager.get_prompt_async("expression_evaluation_prompt")).format(
+        prompt = prompt_manager.format_prompt(
+            "learning.expression.evaluation",
             bot_name=global_config.bot.nickname,
             chat_observe_info=chat_context,
             all_situations=all_situations_str,

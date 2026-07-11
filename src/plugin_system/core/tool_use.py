@@ -6,7 +6,7 @@ from src.plugin_system.core.global_announcement_manager import global_announceme
 from src.llm_models.utils_model import LLMRequest
 from src.llm_models.payload_content import ToolCall
 from src.config.config import global_config, model_config
-from src.chat.utils.prompt_builder import global_prompt_manager
+from src.common.prompt_manager import prompt_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.common.logger import get_logger
 
@@ -87,8 +87,8 @@ class ToolExecutor:
         bot_name = global_config.bot.nickname
 
         # 构建工具调用提示词
-        prompt = await global_prompt_manager.format_prompt(
-            "tool_executor",
+        prompt = prompt_manager.format_prompt(
+            "shared.tool_executor",
             target_message=target_message,
             chat_history=chat_history,
             sender=sender,
