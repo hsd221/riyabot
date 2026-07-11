@@ -1,10 +1,18 @@
 ###SECTION: without_quote
-5.think_level表示思考深度，0表示该回复不需要思考和回忆，1表示该回复需要进行回忆和思考
-{{"action":"reply", "think_level":数值等级(0或1), "target_message_id":"消息id(m+数字)", "unknown_words":["词语1","词语2"], "question":"需要查询的问题"}}
+reply 动作字段规则：
+- think_level 只能是整数 0 或 1。只有回复必须依赖旧聊天事实、关系、约定、偏好、旧梗或需要额外查询/较深推理时填 1；当前上下文足够时填 0。
+- target_message_id 必须是当前上下文中真实存在且非机器人自身的 `m+数字` 消息 ID。
+- unknown_words 只列出当前语境下确实无法可靠理解、且会影响回复的黑话/缩写；普通词、清楚的词和猜测词不要列，未发现则填 []。
+- question 只在需要查询一个关键缺失信息时填写具体可检索的问题；否则填空字符串。
+{{"action":"reply", "think_level":0, "target_message_id":"m123", "unknown_words":[], "question":""}}
 ###END_SECTION###
 
 ###SECTION: with_quote
-5.think_level表示思考深度，0表示该回复不需要思考和回忆，1表示该回复需要进行回忆和思考
-6.如果要明确回复消息，使用quote，如果消息不多不需要明确回复，设置quote为false
-{{"action":"reply", "think_level":数值等级(0或1), "target_message_id":"消息id(m+数字)", "unknown_words":["词语1","词语2"], "question":"需要查询的问题", "quote":"如果需要引用该message，设置为true"}}
+reply 动作字段规则：
+- think_level 只能是整数 0 或 1。只有回复必须依赖旧聊天事实、关系、约定、偏好、旧梗或需要额外查询/较深推理时填 1；当前上下文足够时填 0。
+- target_message_id 必须是当前上下文中真实存在且非机器人自身的 `m+数字` 消息 ID。
+- unknown_words 只列出当前语境下确实无法可靠理解、且会影响回复的黑话/缩写；普通词、清楚的词和猜测词不要列，未发现则填 []。
+- question 只在需要查询一个关键缺失信息时填写具体可检索的问题；否则填空字符串。
+- quote 必须是 JSON 布尔值 true 或 false。只有需要明确引用某条消息以避免歧义时为 true；消息很少或自然接话时为 false。
+{{"action":"reply", "think_level":0, "target_message_id":"m123", "unknown_words":[], "question":"", "quote":false}}
 ###END_SECTION###

@@ -642,10 +642,11 @@ class ActionPlanner:
             # 构建参数文本
             param_text = ""
             if action_info.action_parameters:
-                param_text = "\n"
-                for param_name, param_description in action_info.action_parameters.items():
-                    param_text += f'    "{param_name}":"{param_description}"\n'
-                param_text = param_text.rstrip("\n")
+                param_text = "".join(
+                    f",\n    {json.dumps(str(param_name), ensure_ascii=False)}: "
+                    f"{json.dumps(str(param_description), ensure_ascii=False)}"
+                    for param_name, param_description in action_info.action_parameters.items()
+                )
 
             # 构建要求文本
             require_text = ""

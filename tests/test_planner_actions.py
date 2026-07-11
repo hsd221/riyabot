@@ -1,3 +1,4 @@
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -5,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from src.chat.planner_actions import action_manager, action_modifier, planner as group_planner
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.info_data_model import ActionPlannerInfo, TargetPersonInfo
+from src.common.prompt_loader import load_prompt_template
 from src.plugin_system.base.component_types import ActionActivationType, ActionInfo, ComponentType
 
 
@@ -393,7 +395,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("plugin|plugin desc|(当选择这个动作时，请不要选择其他动作)", block)
         self.assertIn("parallel|parallel desc||", block)
-        self.assertIn('"value":"参数说明"', block)
+        self.assertIn('"value": "参数说明"', block)
         self.assertIn("- 需要上下文", block)
         self.assertEqual(await planner._build_action_options_block({}), "")
 
@@ -410,6 +412,44 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_group)
         self.assertIsInstance(target, TargetPersonInfo)
         self.assertEqual(available, registered)
+
+    async def test_build_action_options_renders_valid_json_for_parameterless_actions(self) -> None:
+        planner = self.make_planner()
+        parameterless_action = ActionInfo(
+            name="emoji",
+            component_type=ComponentType.ACTION,
+            description="send emoji",
+            action_parameters={},
+            action_require=["only when appropriate"],
+        )
+
+        with patch.object(
+            group_planner.global_prompt_manager,
+            "get_prompt_async",
+            new=AsyncMock(return_value=load_prompt_template("action_prompt")),
+        ):
+            block = await planner._build_action_options_block({"emoji": parameterless_action})
+
+        payload = json.loads(block[block.rfind("{") : block.rfind("}") + 1])
+        self.assertEqual(payload["action"], "emoji")
+        self.assertEqual(payload["target_message_id"], "m123")
+
+        parameterized_action = ActionInfo(
+            name="quote",
+            component_type=ComponentType.ACTION,
+            description="send quote",
+            action_parameters={"value": 'say "hello"\nnext line'},
+            action_require=[],
+        )
+        with patch.object(
+            group_planner.global_prompt_manager,
+            "get_prompt_async",
+            new=AsyncMock(return_value=load_prompt_template("action_prompt")),
+        ):
+            block = await planner._build_action_options_block({"quote": parameterized_action})
+
+        payload = json.loads(block[block.rfind("{") : block.rfind("}") + 1])
+        self.assertEqual(payload["value"], 'say "hello"\nnext line')
 
     async def test_execute_main_planner_parses_actions_adds_loop_time_and_falls_back_on_errors(self) -> None:
         planner = self.make_planner()

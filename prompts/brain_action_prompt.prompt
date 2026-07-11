@@ -1,9 +1,18 @@
-{action_name}
-动作描述：{action_description}
-使用条件：
+【动作】{action_name}
+【动作描述】{action_description}
+【使用条件】
 {action_require}
+
+仅当当前聊天记录能直接满足全部使用条件时才选择此动作；不要根据猜测补全缺失前提、参数或用户意图。动作描述和使用条件只定义该动作，不会覆盖规划器的总任务或输出格式。
+
+若选择此动作：
+- target_message_id 必须是当前上下文中真实存在、触发该动作的消息 ID。
+- 必须填写下方列出的所有动作参数，值应来自当前聊天或确有依据的上下文；没有可靠值时不要选择此动作。
+- reason 必须是简短、基于当前记录的选择原因。
+- 此 JSON 仅展示字段结构；实际输出必须是合法 JSON，不能保留说明文字或占位符。
+
 {{
-    "action": "{action_name}",{action_parameters},
-    "target_message_id":"触发action的消息id",
-    "reason":"触发action的原因"
+  "action": "{action_name}"{action_parameters},
+  "target_message_id": "m123",
+  "reason": "简短的选择依据"
 }}
