@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 
 REPLY_TOOL_NAME = "reply"
+MAX_TOOL_RESULT_CHARS = 6000
+TOOL_RESULT_TRUNCATION_MARKER = "\n[工具结果已截断]"
 logger = get_logger("planner")
 
 
@@ -40,6 +42,7 @@ class PlannerDecision:
     messages_by_id: dict[str, "DatabaseMessages"]
     started_at: float
     duration_ms: float | None = None
+    tool_results: list[ToolExecutionResult] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -102,14 +105,34 @@ class PrivateToolRegistry:
             ],
         }
 
-    def get_tool_definitions(self) -> list[dict[str, Any]]:
+    def _get_plugin_definitions(self) -> list[tuple[str, dict[str, Any]]]:
         disabled_tools = set(global_announcement_manager.get_disabled_chat_tools(self.chat_id))
-        definitions = [self._reply_definition()]
+        definitions: list[tuple[str, dict[str, Any]]] = []
         for tool_name, definition in get_llm_available_tool_definitions():
             if tool_name == REPLY_TOOL_NAME or tool_name in disabled_tools:
                 continue
-            definitions.append(dict(definition))
+            normalized_definition = dict(definition)
+            normalized_definition["name"] = tool_name
+            definitions.append((tool_name, normalized_definition))
         return definitions
+
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
+        return [self._reply_definition(), *[definition for _, definition in self._get_plugin_definitions()]]
+
+    @staticmethod
+    def _normalize_content(content: Any) -> str:
+        if isinstance(content, str):
+            rendered = content
+        else:
+            try:
+                rendered = json.dumps(content, ensure_ascii=False)
+            except (TypeError, ValueError):
+                rendered = str(content)
+
+        if len(rendered) <= MAX_TOOL_RESULT_CHARS:
+            return rendered
+        content_limit = MAX_TOOL_RESULT_CHARS - len(TOOL_RESULT_TRUNCATION_MARKER)
+        return rendered[:content_limit] + TOOL_RESULT_TRUNCATION_MARKER
 
     async def execute_plugin(self, tool_call: ToolCall) -> ToolExecutionResult:
         if tool_call.func_name == REPLY_TOOL_NAME:
@@ -118,6 +141,15 @@ class PrivateToolRegistry:
                 tool_name=tool_call.func_name,
                 success=False,
                 content="reply 是内置终止工具，不能按插件工具执行。",
+            )
+
+        available_tools = {tool_name for tool_name, _ in self._get_plugin_definitions()}
+        if tool_call.func_name not in available_tools:
+            return ToolExecutionResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.func_name,
+                success=False,
+                content=f"工具 {tool_call.func_name} 当前不可用或已被禁用。",
             )
 
         safe_call = ToolCall(
@@ -143,9 +175,7 @@ class PrivateToolRegistry:
                 content=f"工具 {tool_call.func_name} 不可用或没有返回结果。",
             )
 
-        content = result.get("content", "")
-        if not isinstance(content, str):
-            content = json.dumps(content, ensure_ascii=False)
+        content = self._normalize_content(result.get("content", ""))
         return ToolExecutionResult(
             call_id=tool_call.call_id,
             tool_name=tool_call.func_name,
@@ -164,10 +194,11 @@ class PrivateToolPlanner:
         self.planner_llm = LLMRequest(model_set=model_config.model_task_config.planner, request_type="planner")
         self.last_obs_time_mark = 0.0
 
-    def _load_context(self) -> tuple[str, dict[str, "DatabaseMessages"], str]:
+    def _load_context(self) -> tuple[str, dict[str, "DatabaseMessages"], str, float]:
+        snapshot_at = time.time()
         messages = get_raw_msg_before_timestamp_with_chat(
             chat_id=self.chat_id,
-            timestamp=time.time(),
+            timestamp=snapshot_at,
             limit=int(global_config.chat.max_context_size * 0.6),
             filter_intercept_message_level=1,
         )
@@ -182,7 +213,7 @@ class PrivateToolPlanner:
         chat_target = "对方"
         if chat_target_info:
             chat_target = chat_target_info.person_name or chat_target_info.user_nickname or chat_target
-        return chat_content, dict(message_id_list), chat_target
+        return chat_content, dict(message_id_list), chat_target, snapshot_at
 
     def _build_prompt(
         self,
@@ -218,9 +249,8 @@ class PrivateToolPlanner:
         tool_results: list[ToolExecutionResult] | None = None,
         loop_start_time: float = 0.0,
     ) -> PlannerDecision:
-        started_at = time.time()
         tool_results = tool_results or []
-        chat_content, messages_by_id, chat_target = self._load_context()
+        chat_content, messages_by_id, chat_target, started_at = self._load_context()
         prompt = self._build_prompt(
             chat_content=chat_content,
             chat_target=chat_target,
@@ -243,6 +273,7 @@ class PrivateToolPlanner:
                 tool_calls=[],
                 messages_by_id=messages_by_id,
                 started_at=started_at,
+                tool_results=list(tool_results),
             )
         if modified_message and modified_message._modify_flags.modify_llm_prompt:
             prompt = str(modified_message.llm_prompt)
@@ -266,6 +297,7 @@ class PrivateToolPlanner:
                 tool_calls=[],
                 messages_by_id=messages_by_id,
                 started_at=started_at,
+                tool_results=list(tool_results),
             )
 
         normalized_calls = list(tool_calls or [])
@@ -309,6 +341,7 @@ class PrivateToolPlanner:
             messages_by_id=messages_by_id,
             started_at=started_at,
             duration_ms=duration_ms,
+            tool_results=list(tool_results),
         )
 
 

@@ -59,6 +59,7 @@ class PrivateToolRegistryTest(unittest.IsolatedAsyncioTestCase):
                 return_value=[
                     ("lookup", lookup_definition),
                     ("reply", conflicting_reply),
+                    ("safe_alias", conflicting_reply),
                     ("disabled", disabled_definition),
                 ],
             ),
@@ -70,30 +71,63 @@ class PrivateToolRegistryTest(unittest.IsolatedAsyncioTestCase):
         ):
             definitions = registry.get_tool_definitions()
 
-        self.assertEqual([definition["name"] for definition in definitions], ["reply", "lookup"])
+        self.assertEqual(
+            [definition["name"] for definition in definitions],
+            ["reply", "lookup", "safe_alias"],
+        )
         reply_parameters = definitions[0]["parameters"]
         self.assertEqual(reply_parameters[0][0], "target_message_id")
         self.assertEqual(reply_parameters[0][1], ToolParamType.STRING)
         self.assertTrue(reply_parameters[0][3])
 
     async def test_execute_plugin_normalizes_success_missing_tool_and_errors(self) -> None:
+        class CustomResult:
+            def __str__(self) -> str:
+                return "custom result"
+
         registry, executor = self.make_registry()
         executor.execute_tool_call.side_effect = [
             {"content": {"answer": 42}},
-            None,
             RuntimeError("boom"),
+            {"content": CustomResult()},
+            {"content": "x" * (private_tool_pipeline.MAX_TOOL_RESULT_CHARS + 20)},
         ]
 
-        success = await registry.execute_plugin(ToolCall("call-1", "lookup", {"query": "MaiBot"}))
-        missing = await registry.execute_plugin(ToolCall("call-2", "missing", {}))
-        failed = await registry.execute_plugin(ToolCall("call-3", "broken", {}))
+        available_definitions = [
+            (name, {"name": name, "description": name, "parameters": []})
+            for name in ("lookup", "broken", "custom", "large", "disabled")
+        ]
+        with (
+            patch.object(
+                private_tool_pipeline,
+                "get_llm_available_tool_definitions",
+                return_value=available_definitions,
+            ),
+            patch.object(
+                private_tool_pipeline.global_announcement_manager,
+                "get_disabled_chat_tools",
+                return_value=["disabled"],
+            ),
+        ):
+            success = await registry.execute_plugin(ToolCall("call-1", "lookup", {"query": "MaiBot"}))
+            missing = await registry.execute_plugin(ToolCall("call-2", "missing", {}))
+            disabled = await registry.execute_plugin(ToolCall("call-disabled", "disabled", {}))
+            failed = await registry.execute_plugin(ToolCall("call-3", "broken", {}))
+            custom = await registry.execute_plugin(ToolCall("call-4", "custom", {}))
+            truncated = await registry.execute_plugin(ToolCall("call-5", "large", {}))
 
         self.assertTrue(success.success)
         self.assertEqual(success.content, '{"answer": 42}')
         self.assertFalse(missing.success)
         self.assertIn("不可用", missing.content)
+        self.assertFalse(disabled.success)
+        self.assertIn("禁用", disabled.content)
         self.assertFalse(failed.success)
         self.assertIn("boom", failed.content)
+        self.assertEqual(custom.content, "custom result")
+        self.assertEqual(len(truncated.content), private_tool_pipeline.MAX_TOOL_RESULT_CHARS)
+        self.assertTrue(truncated.content.endswith("[工具结果已截断]"))
+        self.assertEqual(executor.execute_tool_call.await_count, 4)
 
 
 class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
@@ -127,7 +161,7 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         message = make_message()
-        planner._load_context = Mock(return_value=("[m1] Alice: hello", {"m1": message}, "Alice"))
+        planner._load_context = Mock(return_value=("[m1] Alice: hello", {"m1": message}, "Alice", 9.0))
         planner._build_prompt = Mock(return_value="planner prompt")
         previous_result = private_tool_pipeline.ToolExecutionResult(
             call_id="call-0",
@@ -149,6 +183,8 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.tool_calls[0].func_name, "reply")
         self.assertIs(decision.messages_by_id["m1"], message)
         self.assertEqual(decision.reasoning, "需要回复")
+        self.assertEqual(decision.started_at, 9.0)
+        self.assertEqual(decision.tool_results, [previous_result])
         planner._build_prompt.assert_called_once_with(
             chat_content="[m1] Alice: hello",
             chat_target="Alice",
@@ -167,7 +203,7 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
         planner.tool_registry = SimpleNamespace(get_tool_definitions=Mock(return_value=[]))
         planner.last_obs_time_mark = 0.0
         planner.planner_llm = SimpleNamespace(generate_response_async=AsyncMock(side_effect=RuntimeError("down")))
-        planner._load_context = Mock(return_value=("history", {}, "Alice"))
+        planner._load_context = Mock(return_value=("history", {}, "Alice", 9.0))
         planner._build_prompt = Mock(return_value="prompt")
 
         with patch.object(

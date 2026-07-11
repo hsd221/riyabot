@@ -69,9 +69,9 @@ class ReplyTurnScheduler:
     ) -> TurnDecision:
         has_new_message = len(recent_messages) >= 1
         return TurnDecision(
-            should_observe=True,
+            should_observe=has_new_message,
             sleep_seconds=0.1,
-            reason="private_iteration",
+            reason="private_new_message" if has_new_message else "no_new_private_message",
             should_update_last_read_time=has_new_message,
             should_set_new_message_event=has_new_message,
         )

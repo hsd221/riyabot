@@ -8,7 +8,7 @@ chat/
 ├── message_receive/     # Inbound pipeline: ChatStream, MessageRecv, UniversalMessageSender
 ├── heart_flow/          # Group chat main loop: Heartflow → HeartFChatting (750 lines)
 ├── planner_actions/     # Group chat LLM planner: ActionPlanner (882 lines, ReAct-style)
-├── brain_chat/          # Private chat: BrainChatting (803 lines) + BrainPlanner
+├── brain_chat/          # Private chat: TurnGate → native-tool Planner → ToolRegistry → Replyer
 ├── brain_chat/PFC/      # ★ Prefrontal Cortex state machine (16 files, literal brain metaphor)
 ├── replyer/             # LLM reply gen: group_generator (1251) + private_generator (1116)
 ├── knowledge/           # [已移除] LPMM knowledge base — 不要导入旧模块
@@ -21,9 +21,9 @@ chat/
 | Task | Location |
 |------|----------|
 | Group chat behavior | `heart_flow/heartFC_chat.py` + `planner_actions/planner.py` |
-| Private chat behavior | `brain_chat/PFC/conversation.py` (state machine orchestrator) |
+| Private chat behavior | `brain_chat/brain_chat.py` + `brain_chat/private_tool_pipeline.py` |
 | Reply text generation | `replyer/group_generator.py` / `private_generator.py` |
-| Action selection (private) | `PFC/action_planner.py` (2 prompt templates: initial + follow-up) |
+| Tool/reply selection (private) | `brain_chat/private_tool_pipeline.py` (native tool calls; no JSON action protocol) |
 | Goal setting | `PFC/pfc.py` (GoalAnalyzer, max 3 concurrent goals) |
 | Knowledge retrieval | `PFC/pfc_KnowledgeFetcher.py`（桥接新记忆系统，返回低优先级证据块） |
 | Message context building | `utils/chat_message_builder.py` |
@@ -42,13 +42,15 @@ chat/
 | Waiter | Attention | `PFC/waiter.py` (300s timeout, 5s poll) |
 | Conversation | Global coordinator | `PFC/conversation.py` (701 lines) |
 
-State flow: OBSERVE → ANALYZE → PLAN → (FETCH?) → GENERATE → CHECK → SEND → WAIT/LISTEN.
+Active private flow: inbound → pure-code TurnGate → native-tool Planner → plugin tools or built-in `reply` → Replyer → outbound.
+
+The old `BrainPlanner`/Action chain remains only as the `experimental.private_tool_pipeline = false` rollback path. PFC is not the active private runtime.
 
 ## CONVENTIONS
 - **Logger prefixes**: `"bc"` (BrainChat), `"hfc"` (HeartFChat), `"pfc"`, `"planner"`, `"replyer"`, `"emoji"`.
 - **Singletons**: `PFCManager`, `ChatManager`, `EmojiManager` — explicit `_instance` attr.
 - **Tight coupling** with `bw_learner` (expression learning) and `memory_system`.
-- **Two planner systems coexist**: `planner_actions/` (group, ReAct) vs `PFC/` (private, brain metaphor). Different architectures, same goal.
+- **Two active planner systems coexist**: `planner_actions/` (group JSON actions) vs `brain_chat/private_tool_pipeline.py` (private native tools).
 
 ## ANTI-PATTERNS
 - **DO NOT import** `knowledge/mem_active_manager.py` — crashes with DeprecationWarning.

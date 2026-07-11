@@ -129,7 +129,8 @@ class ReplyTurnSchedulerTest(unittest.TestCase):
         empty_private = scheduler.decide_private_turn(recent_messages=[])
         new_private = scheduler.decide_private_turn(recent_messages=[object()])
 
-        self.assertTrue(empty_private.should_observe)
+        self.assertFalse(empty_private.should_observe)
+        self.assertEqual(empty_private.reason, "no_new_private_message")
         self.assertEqual(empty_private.sleep_seconds, 0.1)
         self.assertFalse(empty_private.should_update_last_read_time)
         self.assertFalse(empty_private.should_set_new_message_event)
