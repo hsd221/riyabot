@@ -24,6 +24,7 @@ PROMPT_IDS = {
     "chat.private.planner",
     "chat.private.reply",
     "chat.private.reply_self",
+    "chat.private.tool_planner",
     "chat.shared.expressor",
     "learning.behavior.learn",
     "learning.expression.auto_check",
