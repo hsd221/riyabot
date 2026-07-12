@@ -20,6 +20,8 @@ class Heartflow:
         try:
             if chat_id in self.heartflow_chat_list:
                 if chat := self.heartflow_chat_list.get(chat_id):
+                    if isinstance(chat, BrainChatting):
+                        chat.notify_new_message()
                     return chat
             else:
                 chat_stream: ChatStream | None = get_chat_manager().get_stream(chat_id)
@@ -31,6 +33,8 @@ class Heartflow:
                     new_chat = BrainChatting(chat_id=chat_id)
                 await new_chat.start()
                 self.heartflow_chat_list[chat_id] = new_chat
+                if isinstance(new_chat, BrainChatting):
+                    new_chat.notify_new_message()
                 return new_chat
         except Exception as e:
             logger.error(f"创建心流聊天 {chat_id} 失败: {e}", exc_info=True)

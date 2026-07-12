@@ -76,6 +76,9 @@ class RelationshipConfig(ConfigBase):
 class ChatConfig(ConfigBase):
     """聊天配置类"""
 
+    private_message_buffer_seconds: float = 1.5
+    """私聊首条消息进入 TurnGate 后的固定聚合窗口，0 为关闭"""
+
     max_context_size: int = 18
     """上下文长度"""
 

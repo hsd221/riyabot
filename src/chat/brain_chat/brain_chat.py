@@ -135,6 +135,10 @@ class BrainChatting:
         self.message_archiver = _MessageArchiver() if _HAS_MEMORY_ARCHIVE else None
         self.topic_summarizer = _PrivateChatSummarizer() if _HAS_MEMORY_ARCHIVE else None
 
+    def notify_new_message(self) -> None:
+        """唤醒私聊循环，由 TurnGate 负责后续消息聚合。"""
+        self._new_message_event.set()
+
     async def start(self):
         """检查是否需要启动主循环，如果未激活则启动。"""
 
@@ -194,22 +198,31 @@ class BrainChatting:
             + (f"\n详情: {'; '.join(timer_strings)}" if timer_strings else "")
         )
 
-    async def _loopbody(self):  # sourcery skip: hoist-if-from-if
-        # 获取最新消息（用于上下文，但不影响是否调用 observe）
-        recent_messages_list = message_api.get_messages_by_time_in_chat(
+    def _get_pending_private_messages(self, end_time: float) -> List["DatabaseMessages"]:
+        # 窗口内消息必须完整交给 Planner，不能截断后再推进读取游标。
+        return message_api.get_messages_by_time_in_chat(
             chat_id=self.stream_id,
             start_time=self.last_read_time,
-            end_time=time.time(),
-            limit=20,
-            limit_mode="latest",
+            end_time=end_time,
+            limit=0,
             filter_mai=True,
             filter_command=False,
             filter_intercept_message_level=1,
         )
 
+    async def _loopbody(self):  # sourcery skip: hoist-if-from-if
+        # 获取最新消息（用于上下文，但不影响是否调用 observe）
+        batch_end_time = time.time()
+        recent_messages_list = self._get_pending_private_messages(batch_end_time)
+
         decision = self.turn_scheduler.decide_private_turn(recent_messages=recent_messages_list)
+        if decision.should_observe and decision.batch_wait_seconds > 0:
+            await asyncio.sleep(decision.batch_wait_seconds)
+            batch_end_time = time.time()
+            recent_messages_list = self._get_pending_private_messages(batch_end_time)
+
         if decision.should_update_last_read_time:
-            self.last_read_time = time.time()
+            self.last_read_time = batch_end_time
         if decision.should_set_new_message_event:
             self._new_message_event.set()  # 触发新消息事件，打断 wait
 
@@ -666,9 +679,8 @@ class BrainChatting:
                 filter_intercept_message_level=1,
             )
 
-            # 如果有新消息，更新 last_read_time 并返回
+            # 这里只负责唤醒，读取游标由下一轮 TurnGate 在聚合完成后推进
             if len(recent_messages_list) >= 1:
-                self.last_read_time = time.time()
                 logger.info(f"{self.log_prefix} 检测到新消息，恢复循环")
                 return
 

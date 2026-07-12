@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 class TurnDecision:
     should_observe: bool
     force_reply_message: Optional["DatabaseMessages"] = None
+    batch_wait_seconds: float = 0.0
     sleep_seconds: float = 0.0
     reason: str = ""
     should_update_last_read_time: bool = False
@@ -70,6 +71,9 @@ class ReplyTurnScheduler:
         has_new_message = len(recent_messages) >= 1
         return TurnDecision(
             should_observe=has_new_message,
+            batch_wait_seconds=max(0.0, float(global_config.chat.private_message_buffer_seconds))
+            if has_new_message
+            else 0.0,
             sleep_seconds=0.1,
             reason="private_new_message" if has_new_message else "no_new_private_message",
             should_update_last_read_time=has_new_message,

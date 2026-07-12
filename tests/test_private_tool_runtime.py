@@ -10,7 +10,7 @@ from src.chat.heart_flow.turn_scheduler import TurnDecision
 from src.chat.message_receive.chat_stream import ChatStream
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.message_data_model import ReplySetModel
-from src.config.official_configs import ExperimentalConfig
+from src.config.official_configs import ChatConfig, ExperimentalConfig
 from src.llm_models.payload_content import ToolCall
 
 
@@ -220,8 +220,100 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(should_continue)
         chat._observe.assert_not_awaited()
 
+    async def test_private_wait_polling_wakes_without_consuming_the_turn_gate_cursor(self) -> None:
+        chat = make_chat()
+        chat.running = True
+        message = make_message()
+
+        with (
+            patch.object(
+                brain_chat.message_api,
+                "get_messages_by_time_in_chat",
+                return_value=[message],
+            ),
+            patch.object(brain_chat.time, "time", return_value=10.0),
+        ):
+            await chat._wait_for_new_message()
+
+        self.assertEqual(chat.last_read_time, 1.0)
+
+    async def test_native_loop_waits_once_and_sends_buffered_private_messages_to_planner(self) -> None:
+        chat = make_chat()
+        first_message = make_message("db-1")
+        second_message = make_message("db-2")
+        chat.turn_scheduler = SimpleNamespace(
+            decide_private_turn=Mock(
+                return_value=TurnDecision(
+                    should_observe=True,
+                    batch_wait_seconds=1.5,
+                    sleep_seconds=0.1,
+                    reason="private_new_message",
+                    should_update_last_read_time=True,
+                    should_set_new_message_event=True,
+                )
+            )
+        )
+        chat._observe = AsyncMock(return_value=False)
+
+        with (
+            patch.object(
+                brain_chat.message_api,
+                "get_messages_by_time_in_chat",
+                side_effect=[[first_message], [first_message, second_message]],
+            ) as get_messages,
+            patch.object(brain_chat.asyncio, "sleep", new=AsyncMock()) as sleep,
+            patch.object(brain_chat.time, "time", side_effect=[10.0, 11.5]),
+        ):
+            should_continue = await chat._loopbody()
+
+        self.assertFalse(should_continue)
+        sleep.assert_awaited_once_with(1.5)
+        chat._observe.assert_awaited_once_with(recent_messages_list=[first_message, second_message])
+        self.assertEqual(get_messages.call_count, 2)
+        self.assertEqual(get_messages.call_args_list[0].kwargs["start_time"], 1.0)
+        self.assertEqual(get_messages.call_args_list[1].kwargs["start_time"], 1.0)
+        self.assertEqual(get_messages.call_args_list[1].kwargs["end_time"], 11.5)
+        self.assertTrue(all(call.kwargs["limit"] == 0 for call in get_messages.call_args_list))
+        self.assertEqual(chat.last_read_time, 11.5)
+        self.assertTrue(chat._new_message_event.is_set())
+
+    async def test_native_loop_skips_buffer_wait_when_private_buffer_is_disabled(self) -> None:
+        chat = make_chat()
+        message = make_message()
+        chat.turn_scheduler = SimpleNamespace(
+            decide_private_turn=Mock(
+                return_value=TurnDecision(
+                    should_observe=True,
+                    batch_wait_seconds=0.0,
+                    reason="private_new_message",
+                    should_update_last_read_time=True,
+                )
+            )
+        )
+        chat._observe = AsyncMock(return_value=False)
+
+        with (
+            patch.object(
+                brain_chat.message_api,
+                "get_messages_by_time_in_chat",
+                return_value=[message],
+            ) as get_messages,
+            patch.object(brain_chat.asyncio, "sleep", new=AsyncMock()) as sleep,
+            patch.object(brain_chat.time, "time", return_value=10.0),
+        ):
+            should_continue = await chat._loopbody()
+
+        self.assertFalse(should_continue)
+        sleep.assert_not_awaited()
+        get_messages.assert_called_once()
+        chat._observe.assert_awaited_once_with(recent_messages_list=[message])
+        self.assertEqual(chat.last_read_time, 10.0)
+
     def test_native_private_pipeline_is_enabled_by_default(self) -> None:
         self.assertTrue(ExperimentalConfig().private_tool_pipeline)
+
+    def test_private_message_buffer_defaults_to_one_and_a_half_seconds(self) -> None:
+        self.assertEqual(ChatConfig().private_message_buffer_seconds, 1.5)
 
     async def test_native_turn_binds_reply_handler_and_loop_start_time(self) -> None:
         chat = make_chat()

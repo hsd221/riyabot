@@ -75,7 +75,12 @@ class HeartflowCoordinatorTest(unittest.IsolatedAsyncioTestCase):
                 self.started = True
 
         class FakePrivateChat(FakeGroupChat):
-            pass
+            def __init__(self, chat_id: str):
+                super().__init__(chat_id)
+                self.new_message_count = 0
+
+            def notify_new_message(self):
+                self.new_message_count += 1
 
         coordinator = heartflow.Heartflow()
         fake_manager = SimpleNamespace(get_stream=Mock(return_value=make_stream(group=True)))
@@ -100,8 +105,11 @@ class HeartflowCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             patch.object(heartflow, "BrainChatting", FakePrivateChat),
         ):
             private_chat = await coordinator.get_or_create_heartflow_chat("private")
+            cached_private_chat = await coordinator.get_or_create_heartflow_chat("private")
 
         self.assertIsInstance(private_chat, FakePrivateChat)
+        self.assertIs(private_chat, cached_private_chat)
+        self.assertEqual(private_chat.new_message_count, 2)
 
         coordinator = heartflow.Heartflow()
         fake_manager = SimpleNamespace(get_stream=Mock(return_value=None))
