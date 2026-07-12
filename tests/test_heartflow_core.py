@@ -50,6 +50,7 @@ def make_hfc() -> heartFC_chat.HeartFChatting:
     chat.log_prefix = "[stream-1]"
     chat.running = False
     chat._loop_task = None
+    chat._new_message_event = asyncio.Event()
     chat.history_loop = []
     chat._cycle_counter = 0
     chat._current_cycle_detail = None
@@ -70,17 +71,16 @@ class HeartflowCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self, chat_id: str):
                 self.chat_id = chat_id
                 self.started = False
+                self.new_message_count = 0
 
             async def start(self):
                 self.started = True
 
-        class FakePrivateChat(FakeGroupChat):
-            def __init__(self, chat_id: str):
-                super().__init__(chat_id)
-                self.new_message_count = 0
-
             def notify_new_message(self):
                 self.new_message_count += 1
+
+        class FakePrivateChat(FakeGroupChat):
+            pass
 
         coordinator = heartflow.Heartflow()
         fake_manager = SimpleNamespace(get_stream=Mock(return_value=make_stream(group=True)))
@@ -96,6 +96,7 @@ class HeartflowCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(group_chat, cached)
         self.assertIsInstance(group_chat, FakeGroupChat)
         self.assertTrue(group_chat.started)
+        self.assertEqual(group_chat.new_message_count, 2)
 
         coordinator = heartflow.Heartflow()
         fake_manager = SimpleNamespace(get_stream=Mock(return_value=make_stream(group=False)))
@@ -234,6 +235,7 @@ class HeartFChattingLifecycleTest(unittest.IsolatedAsyncioTestCase):
             force_reply_message=None,
         )
         chat.turn_scheduler = SimpleNamespace(decide_group_turn=Mock(return_value=wait_decision))
+        chat._wait_for_group_message_or_timeout = AsyncMock()
 
         with (
             patch.object(heartFC_chat.message_api, "get_messages_by_time_in_chat", return_value=recent),
@@ -243,7 +245,8 @@ class HeartFChattingLifecycleTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await chat._loopbody())
 
         self.assertEqual(chat.last_read_time, 20.0)
-        sleep.assert_awaited_once_with(0.5)
+        chat._wait_for_group_message_or_timeout.assert_awaited_once_with(0.5)
+        sleep.assert_not_awaited()
         chat._observe.assert_not_awaited()
 
         observe_decision = SimpleNamespace(
@@ -260,6 +263,51 @@ class HeartFChattingLifecycleTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await chat._loopbody())
 
         chat._observe.assert_awaited_once_with(recent_messages_list=recent, force_reply_message=force)
+
+    async def test_loopbody_buffers_group_messages_before_turn_gate_decision(self) -> None:
+        chat = make_hfc()
+        first_message = make_db_message("first")
+        second_message = make_db_message("second")
+        force_message = make_db_message("force")
+        chat._new_message_event.set()
+        chat._observe = AsyncMock(return_value=True)
+        decision = SimpleNamespace(
+            should_update_last_read_time=True,
+            should_observe=True,
+            sleep_seconds=0.0,
+            force_reply_message=force_message,
+        )
+        chat.turn_scheduler = SimpleNamespace(
+            get_group_buffer_wait_seconds=Mock(return_value=3.0),
+            decide_group_turn=Mock(return_value=decision),
+        )
+
+        with (
+            patch.object(
+                heartFC_chat.message_api,
+                "get_messages_by_time_in_chat",
+                side_effect=[[first_message], [first_message, second_message]],
+            ) as get_messages,
+            patch.object(heartFC_chat.asyncio, "sleep", new=AsyncMock()) as sleep,
+            patch.object(heartFC_chat.time, "time", side_effect=[10.0, 13.0]),
+        ):
+            self.assertTrue(await chat._loopbody())
+
+        sleep.assert_awaited_once_with(3.0)
+        chat.turn_scheduler.decide_group_turn.assert_called_once_with(
+            stream_id="stream-1",
+            recent_messages=[first_message, second_message],
+            consecutive_no_reply_count=0,
+        )
+        chat._observe.assert_awaited_once_with(
+            recent_messages_list=[first_message, second_message],
+            force_reply_message=force_message,
+        )
+        self.assertEqual(get_messages.call_count, 2)
+        self.assertTrue(all(call.kwargs["start_time"] == 1.0 for call in get_messages.call_args_list))
+        self.assertTrue(all(call.kwargs["limit"] == 0 for call in get_messages.call_args_list))
+        self.assertEqual(chat.last_read_time, 13.0)
+        self.assertFalse(chat._new_message_event.is_set())
 
 
 class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):

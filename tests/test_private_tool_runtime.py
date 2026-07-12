@@ -242,16 +242,16 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         first_message = make_message("db-1")
         second_message = make_message("db-2")
         chat.turn_scheduler = SimpleNamespace(
+            get_private_buffer_wait_seconds=Mock(return_value=1.5),
             decide_private_turn=Mock(
                 return_value=TurnDecision(
                     should_observe=True,
-                    batch_wait_seconds=1.5,
                     sleep_seconds=0.1,
                     reason="private_new_message",
                     should_update_last_read_time=True,
                     should_set_new_message_event=True,
                 )
-            )
+            ),
         )
         chat._observe = AsyncMock(return_value=False)
 
@@ -281,14 +281,14 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         chat = make_chat()
         message = make_message()
         chat.turn_scheduler = SimpleNamespace(
+            get_private_buffer_wait_seconds=Mock(return_value=0.0),
             decide_private_turn=Mock(
                 return_value=TurnDecision(
                     should_observe=True,
-                    batch_wait_seconds=0.0,
                     reason="private_new_message",
                     should_update_last_read_time=True,
                 )
-            )
+            ),
         )
         chat._observe = AsyncMock(return_value=False)
 
@@ -312,7 +312,8 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
     def test_native_private_pipeline_is_enabled_by_default(self) -> None:
         self.assertTrue(ExperimentalConfig().private_tool_pipeline)
 
-    def test_private_message_buffer_defaults_to_one_and_a_half_seconds(self) -> None:
+    def test_message_buffer_defaults_differ_for_group_and_private_chat(self) -> None:
+        self.assertEqual(ChatConfig().group_message_buffer_seconds, 3.0)
         self.assertEqual(ChatConfig().private_message_buffer_seconds, 1.5)
 
     async def test_native_turn_binds_reply_handler_and_loop_start_time(self) -> None:

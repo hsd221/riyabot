@@ -199,7 +199,7 @@ class BrainChatting:
         )
 
     def _get_pending_private_messages(self, end_time: float) -> List["DatabaseMessages"]:
-        # 窗口内消息必须完整交给 Planner，不能截断后再推进读取游标。
+        # 窗口内消息必须完整交给 TurnGate，不能截断后再推进读取游标。
         return message_api.get_messages_by_time_in_chat(
             chat_id=self.stream_id,
             start_time=self.last_read_time,
@@ -215,12 +215,14 @@ class BrainChatting:
         batch_end_time = time.time()
         recent_messages_list = self._get_pending_private_messages(batch_end_time)
 
-        decision = self.turn_scheduler.decide_private_turn(recent_messages=recent_messages_list)
-        if decision.should_observe and decision.batch_wait_seconds > 0:
-            await asyncio.sleep(decision.batch_wait_seconds)
-            batch_end_time = time.time()
-            recent_messages_list = self._get_pending_private_messages(batch_end_time)
+        if recent_messages_list:
+            buffer_wait_seconds = self.turn_scheduler.get_private_buffer_wait_seconds()
+            if buffer_wait_seconds > 0:
+                await asyncio.sleep(buffer_wait_seconds)
+                batch_end_time = time.time()
+                recent_messages_list = self._get_pending_private_messages(batch_end_time)
 
+        decision = self.turn_scheduler.decide_private_turn(recent_messages=recent_messages_list)
         if decision.should_update_last_read_time:
             self.last_read_time = batch_end_time
         if decision.should_set_new_message_event:

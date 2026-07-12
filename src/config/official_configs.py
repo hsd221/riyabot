@@ -76,8 +76,11 @@ class RelationshipConfig(ConfigBase):
 class ChatConfig(ConfigBase):
     """聊天配置类"""
 
+    group_message_buffer_seconds: float = 3.0
+    """群聊首条消息进入 TurnGate 后的固定等待时长，0 为关闭"""
+
     private_message_buffer_seconds: float = 1.5
-    """私聊首条消息进入 TurnGate 后的固定聚合窗口，0 为关闭"""
+    """私聊首条消息进入 TurnGate 后的固定等待时长，0 为关闭"""
 
     max_context_size: int = 18
     """上下文长度"""

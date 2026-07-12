@@ -17,10 +17,12 @@ class FakeChatConfig:
         *,
         mentioned_bot_reply: bool = True,
         talk_value: float = 0.5,
+        group_message_buffer_seconds: float = 3.0,
         private_message_buffer_seconds: float = 1.5,
     ) -> None:
         self.mentioned_bot_reply = mentioned_bot_reply
         self.talk_value = talk_value
+        self.group_message_buffer_seconds = group_message_buffer_seconds
         self.private_message_buffer_seconds = private_message_buffer_seconds
         self.requested_streams = []
 
@@ -133,27 +135,28 @@ class ReplyTurnSchedulerTest(unittest.TestCase):
         with patch.object(turn_scheduler.random, "random", return_value=0.5):
             self.assertEqual(scheduler._group_message_threshold(3), 1)
 
-        fake_global_config = SimpleNamespace(
-            chat=FakeChatConfig(private_message_buffer_seconds=1.5),
-        )
+        fake_global_config = SimpleNamespace(chat=FakeChatConfig())
         with patch.object(turn_scheduler, "global_config", fake_global_config):
             empty_private = scheduler.decide_private_turn(recent_messages=[])
             new_private = scheduler.decide_private_turn(recent_messages=[object()])
+            group_wait = scheduler.get_group_buffer_wait_seconds()
+            private_wait = scheduler.get_private_buffer_wait_seconds()
 
         self.assertFalse(empty_private.should_observe)
         self.assertEqual(empty_private.reason, "no_new_private_message")
-        self.assertEqual(empty_private.batch_wait_seconds, 0.0)
         self.assertEqual(empty_private.sleep_seconds, 0.1)
         self.assertFalse(empty_private.should_update_last_read_time)
         self.assertFalse(empty_private.should_set_new_message_event)
-        self.assertEqual(new_private.batch_wait_seconds, 1.5)
         self.assertTrue(new_private.should_update_last_read_time)
         self.assertTrue(new_private.should_set_new_message_event)
+        self.assertEqual(group_wait, 3.0)
+        self.assertEqual(private_wait, 1.5)
 
+        fake_global_config.chat.group_message_buffer_seconds = -1
         fake_global_config.chat.private_message_buffer_seconds = -1
         with patch.object(turn_scheduler, "global_config", fake_global_config):
-            disabled_private = scheduler.decide_private_turn(recent_messages=[object()])
-        self.assertEqual(disabled_private.batch_wait_seconds, 0.0)
+            self.assertEqual(scheduler.get_group_buffer_wait_seconds(), 0.0)
+            self.assertEqual(scheduler.get_private_buffer_wait_seconds(), 0.0)
 
 
 class FrequencyControlTest(unittest.TestCase):

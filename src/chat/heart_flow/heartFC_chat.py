@@ -97,6 +97,7 @@ class HeartFChatting:
         # 循环控制内部状态
         self.running: bool = False
         self._loop_task: Optional[asyncio.Task] = None  # 主循环任务
+        self._new_message_event = asyncio.Event()
 
         # 添加循环信息管理相关的属性
         self.history_loop: List[CycleDetail] = []
@@ -119,6 +120,16 @@ class HeartFChatting:
         # 新记忆系统 — 原始消息归档器 + 话题摘要器
         self.message_archiver = _MessageArchiver() if _HAS_MEMORY_ARCHIVE else None
         self.topic_summarizer = _GroupTopicSummarizer() if _HAS_MEMORY_ARCHIVE else None
+
+    def notify_new_message(self) -> None:
+        """标记群聊有新消息，下一轮 TurnGate 只聚合一次。"""
+        self._new_message_event.set()
+
+    async def _wait_for_group_message_or_timeout(self, timeout: float) -> None:
+        try:
+            await asyncio.wait_for(self._new_message_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
 
     async def start(self):
         """检查是否需要启动主循环，如果未激活则启动。"""
@@ -185,17 +196,30 @@ class HeartFChatting:
             + (f"详情: {'; '.join(timer_strings)}" if timer_strings else "")
         )
 
-    async def _loopbody(self):
-        recent_messages_list = message_api.get_messages_by_time_in_chat(
+    def _get_pending_group_messages(self, end_time: float) -> List["DatabaseMessages"]:
+        # 窗口内消息必须完整交给 TurnGate，不能截断后再推进读取游标。
+        return message_api.get_messages_by_time_in_chat(
             chat_id=self.stream_id,
             start_time=self.last_read_time,
-            end_time=time.time(),
-            limit=20,
-            limit_mode="latest",
+            end_time=end_time,
+            limit=0,
             filter_mai=True,
             filter_command=False,
             filter_intercept_message_level=0,
         )
+
+    async def _loopbody(self):
+        batch_end_time = time.time()
+        recent_messages_list = self._get_pending_group_messages(batch_end_time)
+
+        if recent_messages_list and self._new_message_event.is_set():
+            self._new_message_event.clear()
+            buffer_wait_seconds = self.turn_scheduler.get_group_buffer_wait_seconds()
+            if buffer_wait_seconds > 0:
+                await asyncio.sleep(buffer_wait_seconds)
+                batch_end_time = time.time()
+                recent_messages_list = self._get_pending_group_messages(batch_end_time)
+                self._new_message_event.clear()
 
         decision = self.turn_scheduler.decide_group_turn(
             stream_id=self.stream_id,
@@ -203,10 +227,10 @@ class HeartFChatting:
             consecutive_no_reply_count=self.consecutive_no_reply_count,
         )
         if decision.should_update_last_read_time:
-            self.last_read_time = time.time()
+            self.last_read_time = batch_end_time
 
         if not decision.should_observe:
-            await asyncio.sleep(decision.sleep_seconds)
+            await self._wait_for_group_message_or_timeout(decision.sleep_seconds)
             return True
 
         await self._observe(
