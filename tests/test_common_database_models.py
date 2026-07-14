@@ -1,5 +1,6 @@
 import datetime
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -61,9 +62,10 @@ class CommonDatabaseModelsTest(unittest.TestCase):
 
     def test_database_module_uses_project_data_sqlite_with_expected_pragmas(self) -> None:
         pragmas = dict(db._pragmas)
+        project_root = Path(__file__).resolve().parents[1]
 
-        self.assertTrue(db.database.endswith("data/RiyaBot.db"))
-        self.assertIn("maibot", ROOT_PATH)
+        self.assertEqual(Path(ROOT_PATH), project_root)
+        self.assertEqual(Path(db.database), project_root / "data" / "RiyaBot.db")
         self.assertEqual(pragmas["journal_mode"], "wal")
         self.assertEqual(pragmas["foreign_keys"], 1)
 
@@ -539,7 +541,12 @@ class CommonDatabaseModelsTest(unittest.TestCase):
         }
         model = SimpleNamespace(_meta=SimpleNamespace(fields=fields, primary_key=SimpleNamespace(name="id")))
         constraints_to_fix = [
-            {"field_name": name, "action": "disallow_null", "current_constraint": "NULL", "target_constraint": "NOT NULL"}
+            {
+                "field_name": name,
+                "action": "disallow_null",
+                "current_constraint": "NULL",
+                "target_constraint": "NOT NULL",
+            }
             for name in fields
             if name != "id"
         ]
@@ -665,7 +672,9 @@ class CommonDatabaseModelsTest(unittest.TestCase):
         self.assertIn("COALESCE(field_one, '') as field_one, field_two", insert_sql)
 
     def test_fix_table_constraints_restores_backup_on_failure_and_suppresses_restore_errors(self) -> None:
-        model = SimpleNamespace(_meta=SimpleNamespace(fields={"id": IntegerField()}, primary_key=SimpleNamespace(name="id")))
+        model = SimpleNamespace(
+            _meta=SimpleNamespace(fields={"id": IntegerField()}, primary_key=SimpleNamespace(name="id"))
+        )
 
         class RecoveringDb:
             def __init__(self) -> None:

@@ -40,11 +40,18 @@ def create_atom(atom_id: str, *, content: str, weight: float = 0.5, status: str 
     MemoryAtomModel.create(**data)
 
 
-def create_noise(content: str, *, significance: float = 0.5, created_at: datetime.datetime | None = None) -> NoisePool:
+def create_noise(
+    content: str,
+    *,
+    significance: float = 0.5,
+    created_at: datetime.datetime | None = None,
+    source_id: str | None = None,
+) -> NoisePool:
     return NoisePool.create(
         content=content,
         significance=significance,
         created_at=created_at or datetime.datetime.now(),
+        source_id=source_id,
     )
 
 
@@ -102,7 +109,9 @@ class InspirationEngineTest(unittest.IsolatedAsyncioTestCase):
     async def test_recycle_discards_keyworded_noise_when_it_matches_too_few_atoms(self) -> None:
         create_atom("single", content="钢琴 孤立线索", weight=0.9)
         create_noise("钢琴 但没有形成足够关联", significance=0.4)
-        engine = InspirationEngine(store=SimpleNamespace(), writer=SimpleNamespace(write_atom=AsyncMock()), retention_days=7)
+        engine = InspirationEngine(
+            store=SimpleNamespace(), writer=SimpleNamespace(write_atom=AsyncMock()), retention_days=7
+        )
 
         with patch("src.memory.inspiration_engine.extract_keywords", return_value=["钢琴"]):
             result = await engine.recycle()
@@ -111,6 +120,29 @@ class InspirationEngineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(NoisePool.select().count(), 0)
         self.assertEqual(InsightPool.select().count(), 0)
         engine._writer.write_atom.assert_not_awaited()
+
+    async def test_recycle_never_promotes_raw_archive_content_directly(self) -> None:
+        create_atom("piano", content="小明 钢琴 练习记录", weight=0.9)
+        create_atom("training", content="训练 复盘 比赛准备", weight=0.8)
+        create_atom("match", content="比赛 舞台 迟到", weight=0.7)
+        create_noise(
+            "昨天 user-a 在群聊中说自己练了钢琴",
+            significance=0.9,
+            source_id="raw_message_archive:42",
+        )
+        writer = SimpleNamespace(write_atom=AsyncMock(return_value=True))
+        engine = InspirationEngine(store=SimpleNamespace(), writer=writer, retention_days=7)
+
+        with (
+            patch("src.memory.inspiration_engine.extract_keywords", return_value=["钢琴", "训练", "比赛"]),
+            patch.object(engine, "_has_temporal_gap", return_value=True),
+        ):
+            result = await engine.recycle()
+
+        self.assertEqual(result, {"promoted": 0, "discarded": 0, "insights": 1})
+        self.assertEqual(NoisePool.select().count(), 0)
+        self.assertEqual(InsightPool.select().count(), 1)
+        writer.write_atom.assert_not_awaited()
 
     async def test_recycle_returns_empty_stats_when_no_candidates_exist(self) -> None:
         engine = InspirationEngine(store=SimpleNamespace(), writer=SimpleNamespace(), retention_days=7)

@@ -108,6 +108,16 @@ class InspirationEngine:
             matched_atoms = self._matched_keyword_atoms(keywords)
             match_count = len(matched_atoms)
 
+            # 原始聊天只能作为待核验线索，不能绕过语义提取直接晋升为记忆原子。
+            if self._is_raw_archive_candidate(noise):
+                if match_count >= self.FORESHADOW_MATCH_MIN:
+                    self._write_foreshadowing_insight(noise, keywords, matched_atoms)
+                    insights += 1
+                else:
+                    discarded += 1
+                self._delete_noise(noise.id)
+                continue
+
             # ── Step 3: 时间覆盖率验证 ──
             temporal_gap = self._has_temporal_gap(content)
 
@@ -286,6 +296,10 @@ class InspirationEngine:
         Args:
             noise: NoisePool 模型实例
         """
+        if self._is_raw_archive_candidate(noise):
+            logger.warning("噪声回收跳过原始聊天直写晋升: source_id=%s", noise.source_id)
+            return
+
         atom = MemoryAtomDC(
             atom_id=f"recycled_{uuid.uuid4().hex[:12]}",
             atom_type=AtomType.EPISODIC,
@@ -299,6 +313,11 @@ class InspirationEngine:
             self._delete_noise(noise.id)
         except Exception as e:
             logger.error(f"噪声回收: 晋升失败 (id={noise.id}): {e}")
+
+    @staticmethod
+    def _is_raw_archive_candidate(noise: Any) -> bool:
+        """判断候选是否直接来自未经语义提取的原始聊天。"""
+        return str(getattr(noise, "source_id", "") or "").startswith("raw_message_archive:")
 
     def _write_foreshadowing_insight(
         self,

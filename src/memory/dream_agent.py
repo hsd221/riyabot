@@ -24,13 +24,11 @@ from src.memory.atom import (
     MemoryAtom as MemoryAtomDC,
     AtomType,
     DecayType,
-    EpisodicDetail as EpisodicDetailDC,
     apply_dream_consolidation,
     compute_weight,
 )
 from src.memory.schema import (
     ConflictObservation,
-    EpisodicDetail as EpisodicDetailModel,
     InsightPool,
     DreamRun,
     GraphEdge,
@@ -42,7 +40,6 @@ from src.memory.schema import (
     memory_db,
 )
 from src.memory.forgetting import _safe_timestamp
-from src.memory.embedding_utils import generate_embedding
 from src.memory.store import MemoryStore
 
 logger = get_logger("memory.dream")
@@ -132,8 +129,17 @@ MEMORY_SIGNAL_KEYWORDS: tuple[str, ...] = (
 SELF_REPORT_KEYWORDS: tuple[str, ...] = ("说", "表示", "告诉", "承认", "提到")
 """用于识别用户自述或转述的轻量关键词"""
 
-LOW_VALUE_CHARS: set[str] = set("哈啊嗯哦呃诶嘿哇。.!！?？~～…")
+LOW_VALUE_CHARS: set[str] = set("哈啊嗯哦呃诶嘿哇唉。.!！?？~～…")
 """常见低信息量短消息字符集合"""
+
+RAW_REPLY_PREFIX_RE = re.compile(r"^\[回复.*?\]\s*，说：\s*", re.DOTALL)
+"""消息归档中的引用回复前缀；评分时不能把被引用内容算作新信号。"""
+
+RAW_MENTION_RE = re.compile(r"@<[^>]+>")
+"""消息归档中的用户提及标记。"""
+
+RAW_MEDIA_ONLY_RE = re.compile(r"^(?:\[(?:表情|表情包|图片|语音|视频)[^\]]*\]\s*)+$")
+"""只有表情或媒体占位符的即时反应。"""
 
 SUMMARY_CHAT_TYPES: set[str] = {"summary", "topic_summary", "group_summary", "private_summary"}
 """归档表中代表对话摘要/话题摘要的 chat_type 值"""
@@ -178,15 +184,6 @@ PRIVATE_LOCK_KEYWORDS: tuple[str, ...] = (
     "欠款",
 )
 """私聊敏感信息关键词，命中时梦境隐私重评会收紧为 private"""
-
-HIGH_SIGNIFICANCE_PATTERN_SIGNALS: dict[str, tuple[str, ...]] = {
-    "压力": ("压力", "崩溃", "焦虑", "绝望", "受不了"),
-    "回避/拒绝": ("再也不", "不想", "不愿", "讨厌"),
-    "计划变化": ("开始", "以后", "计划", "决定"),
-    "偏好变化": ("喜欢", "讨厌", "想要"),
-    "风险": ("出事", "生病", "危险", "害怕"),
-}
-"""高显著性片段提炼模式候选时使用的轻量信号词"""
 
 RAW_ARCHIVE_SOURCE_RE = re.compile(r"raw_message_archive:(\d+)")
 """从证据文本中提取 raw_message_archive 来源 ID"""
@@ -631,6 +628,39 @@ class DreamTask(AsyncTask):
         except (TypeError, ValueError):
             return fallback
 
+    async def _archive_legacy_direct_raw_atoms(self, batch_size: int | None = None) -> int:
+        """归档旧版本直接从原始消息生成的原子，并移除对应向量。"""
+        limit = batch_size or RAW_TRIAGE_BATCH_SIZE
+        try:
+            with memory_db:
+                atom_ids = [
+                    atom.atom_id
+                    for atom in (
+                        MemoryAtomModel.select(MemoryAtomModel.atom_id)
+                        .where(
+                            MemoryAtomModel.status == "active",
+                            MemoryAtomModel.atom_id.startswith("dream-raw-"),
+                            MemoryAtomModel.source_id.startswith("raw_message_archive:"),
+                        )
+                        .limit(limit)
+                    )
+                ]
+        except Exception as e:
+            logger.warning("旧版原始消息原子读取失败: %s", e)
+            return 0
+
+        archived = 0
+        for atom_id in atom_ids:
+            try:
+                if await self._store.archive_atom(atom_id):
+                    archived += 1
+            except Exception as e:
+                logger.warning("旧版原始消息原子归档失败 atom_id=%s: %s", atom_id, e)
+
+        if archived:
+            logger.info("已归档 %d 条旧版原始消息直写原子", archived)
+        return archived
+
     async def _triage_raw_archive(
         self,
         max_age_days: int | None = 1,
@@ -638,8 +668,7 @@ class DreamTask(AsyncTask):
     ) -> dict[str, int]:
         """扫描原始消息归档并按显著性分流。
 
-        高/中显著性消息会被压缩成情景记忆并记录追溯链；
-        低显著性消息流入 NoisePool，等待后续梦境回收。
+        所有原始消息只进入 NoisePool 候选层，不能绕过语义提取器直接成为记忆原子。
         """
         stats = {"high": 0, "medium": 0, "low": 0, "skipped": 0}
         limit = batch_size or RAW_TRIAGE_BATCH_SIZE
@@ -671,10 +700,7 @@ class DreamTask(AsyncTask):
                     stats["skipped"] += 1
                     continue
 
-                if route in ("high", "medium"):
-                    created = await self._write_triaged_episodic_atom(record, route, significance, emotion_tags)
-                else:
-                    created = self._record_raw_noise(record, significance)
+                created = self._record_raw_candidate(record, significance)
 
                 self._mark_raw_triaged(record, route, significance)
                 if created:
@@ -717,9 +743,12 @@ class DreamTask(AsyncTask):
         这里先提供可解释、可测试的 baseline：情绪词、自述/转述、偏好/计划等信号
         会提升显著性；纯短应答会被压低。
         """
-        text = content.strip()
+        text = DreamTask._raw_signal_text(content)
         if not text:
             return 0.0, []
+
+        if RAW_MEDIA_ONLY_RE.fullmatch(text):
+            return 0.05, []
 
         compact = "".join(text.split())
         if len(compact) <= 6 and set(compact) <= LOW_VALUE_CHARS:
@@ -743,6 +772,12 @@ class DreamTask(AsyncTask):
             score += 0.1
 
         return _clamp01(score), emotion_tags
+
+    @staticmethod
+    def _raw_signal_text(content: str) -> str:
+        """移除引用和提及包装，仅对当前消息正文做显著性评分。"""
+        text = RAW_REPLY_PREFIX_RE.sub("", content.strip(), count=1)
+        return RAW_MENTION_RE.sub("", text).strip()
 
     @staticmethod
     def _is_summary_chat_type(chat_type: str | None) -> bool:
@@ -781,299 +816,8 @@ class DreamTask(AsyncTask):
         """生成可追溯的原始消息来源 ID。"""
         return f"raw_message_archive:{record.id}"
 
-    @staticmethod
-    def _raw_atom_id(record: RawMessageArchive) -> str:
-        """生成梦境分诊产生的情景原子 ID。"""
-        return f"dream-raw-{record.id}"
-
-    @staticmethod
-    def _format_raw_episodic_content(record: RawMessageArchive) -> str:
-        """将原始消息压缩成客观情景记忆内容。"""
-        if DreamTask._is_summary_chat_type(record.chat_type):
-            scene = "对话摘要"
-        else:
-            scene = "群聊" if record.chat_type == "group" else "私聊" if record.chat_type == "private" else "聊天"
-        return f"用户 {record.user_id} 在{scene}中说：{(record.content or '').strip()}"
-
-    @staticmethod
-    def _temporal_context(event_time: datetime.datetime) -> str:
-        """为情景细节生成简单时间语境。"""
-        hour = event_time.hour
-        if 5 <= hour < 12:
-            return "上午"
-        if 12 <= hour < 18:
-            return "下午"
-        if 18 <= hour < 23:
-            return "夜晚"
-        return "深夜"
-
-    async def _write_triaged_episodic_atom(
-        self,
-        record: RawMessageArchive,
-        route: str,
-        significance: float,
-        emotion_tags: list[str],
-    ) -> bool:
-        """将高/中显著性 raw message 写成情景原子。"""
-        atom_id = self._raw_atom_id(record)
-        source_id = self._raw_source_id(record)
-        source_scene = self._raw_source_scene(record)
-
-        if MemoryAtomModel.get_or_none(MemoryAtomModel.atom_id == atom_id) is not None:
-            return False
-        if MemoryAtomModel.select().where(MemoryAtomModel.source_id == source_id).exists():
-            return False
-
-        now = datetime.datetime.now()
-        now_ts = now.timestamp()
-        event_time = datetime.datetime.fromtimestamp(float(record.timestamp or now_ts))
-        temporal_context = self._temporal_context(event_time)
-        sensory_tags = self._emotion_sensory_tags(emotion_tags)
-        importance = _clamp01(max(significance, 0.75 if route == "high" else 0.45))
-        confidence = 0.75 if route == "high" else 0.65
-        privacy_level = "private" if source_scene == "private_chat" else "context_sensitive"
-        content = self._format_raw_episodic_content(record)
-        entities = [str(record.user_id), str(record.stream_id)]
-
-        atom_dc = MemoryAtomDC(
-            atom_id=atom_id,
-            atom_type=AtomType.EPISODIC,
-            content=content,
-            entities=entities,
-            importance=importance,
-            confidence=confidence,
-            weight=0.5,
-            created_at=event_time.timestamp(),
-            last_accessed_at=now_ts,
-            last_reinforced_at=now_ts,
-            ttl_days=7,
-            decay_type=DecayType.EXPONENTIAL,
-            reinforcement_count=0,
-            source_scene=source_scene,
-            source_id=source_id,
-            privacy_level=privacy_level,
-            status="active",
-            episodic_detail=EpisodicDetailDC(
-                atom_id=atom_id,
-                event_time=event_time.timestamp(),
-                participants=[str(record.user_id)],
-                emotion_tags=list(emotion_tags),
-                sensory_tags=sensory_tags,
-                temporal_context=temporal_context,
-            ),
-        )
-        weight = compute_weight(atom_dc, current_time=now_ts)
-
-        with memory_db.atomic():
-            MemoryAtomModel.create(
-                atom_id=atom_id,
-                atom_type=AtomType.EPISODIC.value,
-                content=content,
-                entities=json.dumps(entities, ensure_ascii=False),
-                importance=importance,
-                confidence=confidence,
-                weight=weight,
-                created_at=event_time,
-                last_accessed_at=now,
-                last_reinforced_at=now,
-                ttl_days=7,
-                decay_type=DecayType.EXPONENTIAL.value,
-                reinforcement_count=0,
-                source_scene=source_scene,
-                source_id=source_id,
-                privacy_level=privacy_level,
-                status="active",
-                embedding_id=atom_id,
-            )
-            EpisodicDetailModel.create(
-                id=atom_id,
-                atom=atom_id,
-                event_time=event_time,
-                participants=json.dumps([str(record.user_id)], ensure_ascii=False),
-                emotion_tags=(json.dumps(emotion_tags, ensure_ascii=False) if emotion_tags else None),
-                sensory_tags=(json.dumps(sensory_tags, ensure_ascii=False) if sensory_tags else None),
-                temporal_context=temporal_context,
-            )
-            MemoryTraceChain.create(
-                atom_id=atom_id,
-                step_number=1,
-                agent_name="DreamTriageAgent",
-                operation_type="triage",
-                input_source=f"{source_id} | {record.content[:120]}",
-                output_summary=json.dumps(
-                    {
-                        "route": route,
-                        "significance": round(significance, 3),
-                        "emotion_tags": emotion_tags,
-                    },
-                    ensure_ascii=False,
-                ),
-                confidence_decay=1.0 if route == "high" else 0.95,
-            )
-            if route == "high":
-                self._run_high_significance_chain(record, atom_id, significance, emotion_tags)
-
-        embedding = await generate_embedding(content)
-        if embedding:
-            indexed = await self._store.qdrant.upsert_atom_vector(
-                point_id=atom_id,
-                vector=embedding,
-                payload={
-                    "atom_id": atom_id,
-                    "atom_type": AtomType.EPISODIC.value,
-                    "weight": weight,
-                    "importance": importance,
-                    "confidence": confidence,
-                    "status": "active",
-                    "source_scene": source_scene,
-                    "source_id": source_id,
-                    "privacy_level": privacy_level,
-                },
-            )
-            if not indexed:
-                logger.warning("梦境分诊原子向量写入失败", atom_id=atom_id)
-        else:
-            logger.warning("梦境分诊原子 embedding 生成失败", atom_id=atom_id)
-
-        self._sync_profile_from_triaged_atom(record, atom_dc)
-        return True
-
-    @staticmethod
-    def _emotion_sensory_tags(emotion_tags: list[str]) -> list[str]:
-        """将情绪标签映射为检索/画像可识别的感官标签。"""
-        if not emotion_tags:
-            return []
-        tags = ["emotional"]
-        for tag in emotion_tags:
-            normalized = str(tag).strip()
-            if normalized:
-                tags.append(f"emotional:{normalized}")
-        return tags
-
-    @staticmethod
-    def _sync_profile_from_triaged_atom(record: RawMessageArchive, atom_dc: MemoryAtomDC) -> None:
-        """把梦境分诊产生的情景情绪同步到用户画像。"""
-        detail = atom_dc.episodic_detail
-        if detail is None or not (detail.emotion_tags or detail.sensory_tags):
-            return
-
-        try:
-            from src.memory.user_profile import PersonIdentity, ProfileBuilder, ProfileStore
-
-            identity = PersonIdentity(
-                platform=str(record.platform or "legacy"),
-                user_id=str(record.user_id),
-                nickname=str(record.nickname or ""),
-                cardname=str(record.cardname or ""),
-                group_id=str(record.group_id or ""),
-                group_name=str(record.group_name or ""),
-            )
-            ProfileBuilder(ProfileStore()).update_profile_from_atom(identity, atom_dc)
-        except Exception as e:
-            logger.debug("梦境情绪画像同步失败 user=%s atom=%s: %s", record.user_id, atom_dc.atom_id, e)
-
-    def _run_high_significance_chain(
-        self,
-        record: RawMessageArchive,
-        atom_id: str,
-        significance: float,
-        emotion_tags: list[str],
-    ) -> None:
-        """对高显著性消息执行情绪重演与模式提炼，并写入可观测产物。"""
-        content = (record.content or "").strip()
-        emotion_summary = self._build_emotion_replay_summary(record, significance, emotion_tags)
-        pattern_labels = self._extract_high_significance_patterns(content, emotion_tags)
-        pattern_summary = self._build_pattern_extract_summary(record, pattern_labels)
-        source_atoms = json.dumps([atom_id], ensure_ascii=False)
-        replay_confidence = _clamp01(max(0.6, significance - 0.05))
-        pattern_confidence = _clamp01(max(0.55, significance - 0.1))
-        next_step = self._next_trace_step(atom_id)
-
-        MemoryTraceChain.create(
-            atom_id=atom_id,
-            step_number=next_step,
-            agent_name="DreamEmotionReplayAgent",
-            operation_type="emotion_replay",
-            input_source=self._raw_source_id(record),
-            output_summary=json.dumps(
-                {
-                    "significance": round(significance, 3),
-                    "emotion_tags": emotion_tags,
-                    "summary": emotion_summary,
-                },
-                ensure_ascii=False,
-            ),
-            confidence_decay=0.92,
-        )
-        InsightPool.create(
-            content=emotion_summary,
-            source_atoms=source_atoms,
-            agent_name="dream_emotion_replay",
-            confidence=replay_confidence,
-        )
-
-        MemoryTraceChain.create(
-            atom_id=atom_id,
-            step_number=next_step + 1,
-            agent_name="DreamPatternAgent",
-            operation_type="pattern_extract",
-            input_source=self._raw_source_id(record),
-            output_summary=json.dumps(
-                {
-                    "pattern_labels": pattern_labels,
-                    "summary": pattern_summary,
-                },
-                ensure_ascii=False,
-            ),
-            confidence_decay=0.88,
-        )
-        InsightPool.create(
-            content=pattern_summary,
-            source_atoms=source_atoms,
-            agent_name="dream_pattern_extract",
-            confidence=pattern_confidence,
-        )
-
-    @staticmethod
-    def _build_emotion_replay_summary(
-        record: RawMessageArchive,
-        significance: float,
-        emotion_tags: list[str],
-    ) -> str:
-        """生成高显著性情绪重演洞见文本。"""
-        scene = "群聊" if record.chat_type == "group" else "私聊" if record.chat_type == "private" else "聊天"
-        tag_text = "、".join(emotion_tags) if emotion_tags else "高显著性情绪线索"
-        preview = " ".join((record.content or "").split())[:80]
-        return (
-            f"情绪重演: 用户 {record.user_id} 在{scene}中的高显著性片段呈现 {tag_text} "
-            f"(显著性 {significance:.2f})，原文线索：{preview}"
-        )
-
-    @staticmethod
-    def _extract_high_significance_patterns(content: str, emotion_tags: list[str]) -> list[str]:
-        """从高显著性片段提取后续画像/周梦境可用的模式候选。"""
-        labels: list[str] = []
-        for label, keywords in HIGH_SIGNIFICANCE_PATTERN_SIGNALS.items():
-            if any(keyword in content for keyword in keywords):
-                labels.append(label)
-
-        if emotion_tags and "情绪高波动" not in labels:
-            labels.append("情绪高波动")
-        if not labels:
-            labels.append("高显著性事件")
-        return labels
-
-    @staticmethod
-    def _build_pattern_extract_summary(record: RawMessageArchive, pattern_labels: list[str]) -> str:
-        """生成高显著性模式提炼洞见文本。"""
-        label_text = "、".join(pattern_labels)
-        preview = " ".join((record.content or "").split())[:80]
-        return (
-            f"模式提炼: 用户 {record.user_id} 的高显著性片段包含 {label_text} 线索，后续应结合跨日证据复查：{preview}"
-        )
-
-    def _record_raw_noise(self, record: RawMessageArchive, significance: float) -> bool:
-        """将低显著性 raw message 记录到噪声池。"""
+    def _record_raw_candidate(self, record: RawMessageArchive, significance: float) -> bool:
+        """将 raw message 留在候选层，等待后续交叉验证。"""
         source_id = self._raw_source_id(record)
         if NoisePool.select().where(NoisePool.source_id == source_id).exists():
             return False
@@ -1954,9 +1698,12 @@ class DreamTask(AsyncTask):
 
         try:
             summary_ingested = self._ingest_topic_bridge_summaries(max_age_days=1)
+            legacy_raw_archived = await self._archive_legacy_direct_raw_atoms()
             triage_stats = await self._triage_raw_archive(max_age_days=1)
             if summary_ingested:
                 triage_stats["summary_imported"] = summary_ingested
+            if legacy_raw_archived:
+                triage_stats["legacy_raw_archived"] = legacy_raw_archived
             conflicts_resolved = await self._resolve_conflicts()
             scores_reassessed = await self._reassess_memory_scores(max_age_days=1)
             privacy_stats = await self._adjust_privacy_levels(max_age_days=1)
@@ -2735,6 +2482,9 @@ class DreamTask(AsyncTask):
             imported_summaries = triage_stats.get("summary_imported", 0)
             if imported_summaries:
                 parts.append(f"导入{imported_summaries}条对话摘要")
+            legacy_raw_archived = triage_stats.get("legacy_raw_archived", 0)
+            if legacy_raw_archived:
+                parts.append(f"归档{legacy_raw_archived}条旧版直写原子")
             triaged = triage_stats.get("high", 0) + triage_stats.get("medium", 0) + triage_stats.get("low", 0)
             if triaged:
                 parts.append(

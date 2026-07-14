@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from src.memory.dream_agent import DreamTask
 from src.memory.layer1_summarizer import UnclosedTopicBridge
@@ -54,6 +54,7 @@ class FakeQdrant:
 class FakeStore:
     def __init__(self) -> None:
         self.qdrant = FakeQdrant()
+        self.archive_atom = AsyncMock(return_value=True)
 
 
 class FakeForgettingManager:
@@ -75,15 +76,8 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self._bridge_file_path = UnclosedTopicBridge._FILE_PATH
         UnclosedTopicBridge._DATA_DIR = self.tmpdir.name
         UnclosedTopicBridge._FILE_PATH = str(Path(self.tmpdir.name) / "topic_bridge.json")
-        self.generate_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
-        self._embedding_patcher = patch(
-            "src.memory.dream_agent.generate_embedding",
-            new=self.generate_embedding,
-        )
-        self._embedding_patcher.start()
 
     def tearDown(self) -> None:
-        self._embedding_patcher.stop()
         UnclosedTopicBridge._DATA_DIR = self._bridge_data_dir
         UnclosedTopicBridge._FILE_PATH = self._bridge_file_path
         if not memory_db.is_closed():
@@ -268,10 +262,10 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             },
             {"high", "medium", "low"},
         )
-        self.assertEqual(MemoryAtom.select().count(), 2)
-        self.assertEqual(EpisodicDetail.select().count(), 2)
-        self.assertEqual(NoisePool.select().count(), 1)
-        self.assertTrue(
+        self.assertEqual(MemoryAtom.select().count(), 0)
+        self.assertEqual(EpisodicDetail.select().count(), 0)
+        self.assertEqual(NoisePool.select().count(), 3)
+        self.assertFalse(
             MemoryTraceChain.select()
             .where(MemoryTraceChain.agent_name == "DreamTriageAgent", MemoryTraceChain.operation_type == "triage")
             .exists()
@@ -280,10 +274,10 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         repeated = await task._triage_raw_archive(max_age_days=1)
 
         self.assertEqual(repeated, {"high": 0, "medium": 0, "low": 0, "skipped": 0})
-        self.assertEqual(MemoryAtom.select().count(), 2)
-        self.assertEqual(NoisePool.select().count(), 1)
+        self.assertEqual(MemoryAtom.select().count(), 0)
+        self.assertEqual(NoisePool.select().count(), 3)
 
-    async def test_triage_syncs_new_active_dream_raw_atom_to_qdrant(self) -> None:
+    async def test_triage_keeps_raw_material_out_of_active_memory_and_qdrant(self) -> None:
         raw = RawMessageArchive.create(
             stream_id="group-1",
             message_id="msg-vector-sync",
@@ -293,23 +287,38 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             chat_type="group",
         )
         task = DreamTask(FakeStore())
-        embedding = [0.1, 0.2, 0.3]
 
-        self.generate_embedding.return_value = embedding
         stats = await task._triage_raw_archive(max_age_days=1)
 
-        atom_id = f"dream-raw-{raw.id}"
-        atom = MemoryAtom.get(MemoryAtom.atom_id == atom_id)
         self.assertEqual(stats["medium"], 1)
-        self.assertEqual(atom.status, "active")
-        self.generate_embedding.assert_awaited_once_with(atom.content)
-        self.assertTrue(
-            any(
-                point_id == atom_id and vector == embedding and payload.get("status") == "active"
-                for point_id, vector, payload in task._store.qdrant.vector_upserts
-            ),
-            "A newly active dream-raw atom must have a matching Qdrant vector before triage returns",
+        self.assertFalse(MemoryAtom.select().where(MemoryAtom.atom_id == f"dream-raw-{raw.id}").exists())
+        self.assertEqual(NoisePool.select().where(NoisePool.source_id == f"raw_message_archive:{raw.id}").count(), 1)
+        self.assertEqual(task._store.qdrant.vector_upserts, [])
+
+    async def test_triage_does_not_promote_reply_wrappers_reactions_or_immediate_prompts(self) -> None:
+        now_ts = datetime.datetime.now().timestamp()
+        contents = (
+            "[回复<翎:3774820644>： 能换啊 ]，说： @<翎:3774820644> 唉",
+            "@<翎:3774820644> 说话！",
+            "[表情：生气]",
         )
+        for index, content in enumerate(contents):
+            RawMessageArchive.create(
+                stream_id="group-1",
+                message_id=f"msg-noise-{index}",
+                user_id="user-a",
+                content=content,
+                timestamp=now_ts,
+                chat_type="group",
+            )
+        task = DreamTask(FakeStore())
+
+        stats = await task._triage_raw_archive(max_age_days=1)
+
+        self.assertEqual(stats, {"high": 0, "medium": 0, "low": 3, "skipped": 0})
+        self.assertEqual(MemoryAtom.select().count(), 0)
+        self.assertEqual(NoisePool.select().count(), 3)
+        self.assertEqual(task._store.qdrant.vector_upserts, [])
 
     async def test_triage_treats_archived_conversation_summary_as_summary_material(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
@@ -327,10 +336,10 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         stats = await task._triage_raw_archive(max_age_days=1)
 
         self.assertEqual(stats["high"], 1)
-        atom = MemoryAtom.get(MemoryAtom.atom_id == f"dream-raw-{summary.id}")
-        self.assertEqual(atom.source_scene, "summary")
-        self.assertIn("对话摘要", atom.content)
-        self.assertIn("raw_message_archive", atom.source_id or "")
+        self.assertFalse(MemoryAtom.select().where(MemoryAtom.atom_id == f"dream-raw-{summary.id}").exists())
+        candidate = NoisePool.get(NoisePool.source_id == f"raw_message_archive:{summary.id}")
+        self.assertEqual(candidate.source_scene, "summary")
+        self.assertIn("对话摘要", candidate.content)
 
     async def test_ingest_topic_bridge_summaries_as_pending_dream_material_without_consuming_bridge(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
@@ -365,9 +374,12 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         stats = await task._triage_raw_archive(max_age_days=1)
 
         self.assertEqual(stats["high"], 1)
-        atom = MemoryAtom.get(MemoryAtom.source_id == f"raw_message_archive:{archived.id}")
-        self.assertEqual(atom.source_scene, "summary")
-        self.assertIn("对话摘要", atom.content)
+        self.assertFalse(
+            MemoryAtom.select().where(MemoryAtom.source_id == f"raw_message_archive:{archived.id}").exists()
+        )
+        candidate = NoisePool.get(NoisePool.source_id == f"raw_message_archive:{archived.id}")
+        self.assertEqual(candidate.source_scene, "summary")
+        self.assertIn("话题摘要", candidate.content)
 
     async def test_ingest_topic_bridge_summaries_skips_legacy_raw_archive_schema_without_warning(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
@@ -408,7 +420,7 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             row_count = memory_db.execute_sql("SELECT COUNT(*) FROM raw_message_archive").fetchone()[0]
         self.assertEqual(row_count, 0)
 
-    async def test_high_significance_triage_runs_emotion_replay_and_pattern_extraction(self) -> None:
+    async def test_high_significance_raw_material_stays_out_of_atoms_and_insights(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
         raw = RawMessageArchive.create(
             stream_id="group-1",
@@ -422,38 +434,13 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
 
         stats = await task._triage_raw_archive(max_age_days=1)
 
-        atom_id = f"dream-raw-{raw.id}"
         self.assertEqual(stats["high"], 1)
-        self.assertTrue(MemoryAtom.select().where(MemoryAtom.atom_id == atom_id).exists())
-        trace_operations = [
-            (trace.agent_name, trace.operation_type)
-            for trace in MemoryTraceChain.select()
-            .where(MemoryTraceChain.atom_id == atom_id)
-            .order_by(MemoryTraceChain.step_number.asc())
-        ]
-        self.assertEqual(
-            trace_operations,
-            [
-                ("DreamTriageAgent", "triage"),
-                ("DreamEmotionReplayAgent", "emotion_replay"),
-                ("DreamPatternAgent", "pattern_extract"),
-            ],
-        )
+        self.assertFalse(MemoryAtom.select().where(MemoryAtom.atom_id == f"dream-raw-{raw.id}").exists())
+        self.assertEqual(NoisePool.select().where(NoisePool.source_id == f"raw_message_archive:{raw.id}").count(), 1)
+        self.assertEqual(MemoryTraceChain.select().count(), 0)
+        self.assertEqual(InsightPool.select().count(), 0)
 
-        emotion_insight = InsightPool.get_or_none(InsightPool.agent_name == "dream_emotion_replay")
-        pattern_insight = InsightPool.get_or_none(InsightPool.agent_name == "dream_pattern_extract")
-        self.assertIsNotNone(emotion_insight)
-        self.assertIsNotNone(pattern_insight)
-        assert emotion_insight is not None
-        assert pattern_insight is not None
-        self.assertIn("情绪重演", emotion_insight.content)
-        self.assertIn("distress", emotion_insight.content)
-        self.assertIn("模式提炼", pattern_insight.content)
-        self.assertIn("压力", pattern_insight.content)
-        self.assertIn(atom_id, emotion_insight.source_atoms or "")
-        self.assertIn(atom_id, pattern_insight.source_atoms or "")
-
-    async def test_high_significance_emotion_replay_updates_profile_mood_history(self) -> None:
+    async def test_high_significance_raw_material_does_not_update_profile_before_semantic_extraction(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
         RawMessageArchive.create(
             stream_id="group-1",
@@ -467,14 +454,39 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
 
         await task._triage_raw_archive(max_age_days=1)
 
-        profile = ProfileStore().get_profile("user-a")
-        self.assertIsNotNone(profile)
-        assert profile is not None
-        self.assertEqual(len(profile.mood_history), 1)
-        mood_entry = profile.mood_history[0]
-        self.assertIn("distress", mood_entry["emotion_tags"])
-        self.assertIn("emotional:distress", mood_entry["sensory_tags"])
-        self.assertIn("小明焦虑到崩溃", mood_entry["content"])
+        self.assertIsNone(ProfileStore().get_profile("user-a"))
+
+    async def test_archives_legacy_direct_raw_atoms_without_touching_normal_atoms(self) -> None:
+        now = datetime.datetime.now()
+        for atom_id, source_id in (
+            ("dream-raw-42", "raw_message_archive:42"),
+            ("normal-atom", "group-1"),
+        ):
+            MemoryAtom.create(
+                atom_id=atom_id,
+                atom_type="episodic",
+                content="用户 user-a 在群聊中说：测试内容" if atom_id.startswith("dream-raw-") else "用户喜欢爵士乐",
+                entities='["user-a"]',
+                importance=0.5,
+                confidence=0.7,
+                weight=0.4,
+                created_at=now,
+                last_accessed_at=now,
+                last_reinforced_at=now,
+                ttl_days=7,
+                decay_type="exponential",
+                reinforcement_count=0,
+                source_scene="group_chat",
+                source_id=source_id,
+                privacy_level="context_sensitive",
+                status="active",
+            )
+        task = DreamTask(FakeStore())
+
+        archived = await task._archive_legacy_direct_raw_atoms()
+
+        self.assertEqual(archived, 1)
+        task._store.archive_atom.assert_awaited_once_with("dream-raw-42")
 
     async def test_adjust_privacy_levels_locks_sensitive_private_memories(self) -> None:
         now = datetime.datetime.now()
@@ -837,6 +849,10 @@ class DreamTaskCycleTest(unittest.IsolatedAsyncioTestCase):
                 events.append("triage_raw")
                 return {"high": 1, "medium": 1, "low": 1, "skipped": 0}
 
+            async def _archive_legacy_direct_raw_atoms(self, batch_size: int | None = None) -> int:
+                events.append("archive_legacy_raw")
+                return 2
+
             async def _resolve_conflicts(self) -> int:
                 events.append("resolve_conflicts")
                 return 2
@@ -873,11 +889,14 @@ class DreamTaskCycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("N2", final_summary)
         self.assertIn("N3", final_summary)
         self.assertIn("REM", final_summary)
+        self.assertIn("归档2条旧版直写原子", final_summary)
+        self.assertIn("archive_legacy_raw", events)
         self.assertIn("triage_raw", events)
         self.assertIn("resolve_conflicts", events)
         self.assertIn("reassess", events)
         self.assertIn("privacy", events)
         self.assertIn("forgetting", events)
+        self.assertLess(events.index("archive_legacy_raw"), events.index("triage_raw"))
         self.assertLess(events.index("triage_raw"), events.index("resolve_conflicts"))
         self.assertLess(events.index("resolve_conflicts"), events.index("reassess"))
         self.assertLess(events.index("reassess"), events.index("privacy"))
