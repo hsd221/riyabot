@@ -84,6 +84,7 @@ class SemanticDetail:
         attr_category: 属性分类（如 personality, interest, habit 等）
         attr_name: 属性名
         attr_value: 属性值
+        subject_key: 属性所属的平台化人物画像 ID
         evidence_list: 证据来源列表
         evidence_counter: 证据计数（同一属性被确认的次数）
     """
@@ -92,8 +93,9 @@ class SemanticDetail:
     attr_category: str = "general"
     attr_name: str = ""
     attr_value: str = ""
+    subject_key: str = ""
     evidence_list: list[str] = field(default_factory=list)
-    evidence_counter: int = 0
+    evidence_counter: int = 1
 
 
 @dataclass

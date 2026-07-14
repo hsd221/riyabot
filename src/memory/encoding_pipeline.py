@@ -29,8 +29,14 @@ from src.memory.atom import (
     EpisodicDetail,
     MemoryAtom as MemoryAtomDC,
     SemanticDetail,
+    update_weight,
 )
-from src.memory.layer2_encoder import BatchEncoder, SOURCE_USER_IDS_DETAIL_KEY
+from src.memory.layer2_encoder import (
+    SOURCE_IDENTITIES_DETAIL_KEY,
+    SOURCE_MESSAGE_IDS_DETAIL_KEY,
+    SOURCE_USER_IDS_DETAIL_KEY,
+    BatchEncoder,
+)
 from src.memory.layer3_retrieval import MemoryWriter
 from src.memory.store import MemoryStore
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
@@ -49,6 +55,22 @@ def get_encoding_pipeline() -> Optional["EncodingPipeline"]:
     返回 None 表示尚未初始化或初始化失败。
     """
     return _encoding_pipeline
+
+
+def _safe_internal_text_list(value: Any) -> list[str]:
+    """仅接受编码器内部生成的短文本列表，避免复杂对象进入证据字段。"""
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, (str, int)):
+            continue
+        text = str(item).strip()[:200]
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
 
 
 class EncodingPipeline:
@@ -116,6 +138,11 @@ class EncodingPipeline:
         timestamp: float,
         stream_type: str = "group_chat",
         message_id: Optional[str] = None,
+        platform: str = "",
+        nickname: str = "",
+        cardname: str = "",
+        group_id: str = "",
+        group_name: str = "",
     ) -> None:
         """摄入一条消息到编码缓冲区
 
@@ -136,6 +163,11 @@ class EncodingPipeline:
             content=content,
             timestamp=datetime.fromtimestamp(timestamp),
             message_id=message_id,
+            platform=platform,
+            nickname=nickname or speaker,
+            cardname=cardname,
+            group_id=group_id,
+            group_name=group_name,
         )
         logger.debug(
             "消息摄入编码管线",
@@ -263,6 +295,10 @@ class EncodingPipeline:
                                 temporal_context=episodic_detail.temporal_context,
                             )
 
+                        # 画像冲突排序必须使用实际写入的权重，而不是构建原子的默认 0.5。
+                        if atom.weight == 0.5:
+                            atom = update_weight(atom)
+
                         await self.writer.write_atom(
                             atom=atom,
                             semantic_detail=semantic_detail,
@@ -282,15 +318,15 @@ class EncodingPipeline:
                                 )
                             )
 
-                        profile_entities = self._profile_target_entities(atom, detail)
-                        if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and profile_entities:
+                        profile_identities = self._profile_target_identities(atom, detail)
+                        if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and profile_identities:
                             try:
                                 from src.memory.user_profile import ProfileBuilder, ProfileStore
 
                                 ps = ProfileStore()
                                 pb = ProfileBuilder(ps)
-                                for entity in profile_entities:
-                                    pb.update_profile_from_atom(entity, atom)
+                                for identity in profile_identities:
+                                    pb.update_profile_from_atom(identity, atom)
                             except Exception:
                                 pass
 
@@ -305,8 +341,8 @@ class EncodingPipeline:
 
                                 ps = ProfileStore()
                                 pb = ProfileBuilder(ps)
-                                for entity in profile_entities:
-                                    pb.update_profile_from_atom(entity, atom)
+                                for identity in profile_identities:
+                                    pb.update_profile_from_atom(identity, atom)
                             except Exception:
                                 pass
                         # 收集已写入原子供关联构建
@@ -389,22 +425,55 @@ class EncodingPipeline:
     @staticmethod
     def _profile_target_entities(atom: MemoryAtomDC, detail: dict[str, Any]) -> list[str]:
         """只允许本批真实消息发送者触发画像更新，避免 LLM 伪造 entities 串写画像。"""
-        source_user_ids = detail.get(SOURCE_USER_IDS_DETAIL_KEY, [])
-        if not isinstance(source_user_ids, list):
-            return []
+        return [identity.user_id for identity in EncodingPipeline._profile_target_identities(atom, detail)]
 
-        allowed = {str(user_id).strip() for user_id in source_user_ids if str(user_id).strip()}
-        if not allowed:
-            return []
+    @staticmethod
+    def _profile_target_identities(atom: MemoryAtomDC, detail: dict[str, Any]) -> list[Any]:
+        """从编码器内部元数据恢复可验证的平台人物身份。"""
+        from src.memory.user_profile import PersonIdentity
 
-        targets: list[str] = []
+        raw_identities = detail.get(SOURCE_IDENTITIES_DETAIL_KEY, [])
+        identities: list[PersonIdentity] = []
+        if isinstance(raw_identities, list):
+            for raw_identity in raw_identities:
+                if not isinstance(raw_identity, dict):
+                    continue
+                try:
+                    identities.append(
+                        PersonIdentity(
+                            platform=str(raw_identity.get("platform") or "legacy"),
+                            user_id=str(raw_identity.get("user_id") or ""),
+                            nickname=str(raw_identity.get("nickname") or ""),
+                            cardname=str(raw_identity.get("cardname") or ""),
+                            group_id=str(raw_identity.get("group_id") or ""),
+                            group_name=str(raw_identity.get("group_name") or ""),
+                        )
+                    )
+                except ValueError:
+                    continue
+
+        if not identities:
+            source_user_ids = detail.get(SOURCE_USER_IDS_DETAIL_KEY, [])
+            if not isinstance(source_user_ids, list):
+                return []
+            for user_id in source_user_ids:
+                normalized = str(user_id).strip()
+                if normalized:
+                    identities.append(PersonIdentity(platform="legacy", user_id=normalized))
+
+        explicit_subject = str(detail.get("subject_user_id") or "").strip()
+        atom_entities = {str(entity).strip() for entity in atom.entities if str(entity).strip()}
+        target_user_ids = {explicit_subject} if explicit_subject else atom_entities
+        targets: list[PersonIdentity] = []
         seen: set[str] = set()
-        for entity in atom.entities:
-            normalized = str(entity).strip()
-            if normalized in allowed and normalized not in seen:
-                targets.append(normalized)
-                seen.add(normalized)
-        return targets
+        for identity in identities:
+            if identity.user_id not in target_user_ids or identity.profile_id in seen:
+                continue
+            targets.append(identity)
+            seen.add(identity.profile_id)
+
+        # 当一条属性同时指向多个发送者时，无法安全判定属于谁。
+        return targets if len(targets) == 1 else []
 
     def _build_atom(
         self,
@@ -460,11 +529,16 @@ class EncodingPipeline:
             if attr_name:
                 attr_category = detail.get("attr_category", "general")
                 attr_value = detail.get("attr_value", "")
+                targets = self._profile_target_identities(atom, detail)
+                evidence_list = _safe_internal_text_list(detail.get(SOURCE_MESSAGE_IDS_DETAIL_KEY))
                 semantic_detail = SemanticDetail(
                     atom_id=atom_id,
                     attr_category=str(attr_category),
                     attr_name=str(attr_name),
                     attr_value=str(attr_value),
+                    subject_key=targets[0].profile_id if targets else "",
+                    evidence_list=evidence_list,
+                    evidence_counter=max(1, len(evidence_list)),
                 )
                 atom.semantic_detail = semantic_detail
 

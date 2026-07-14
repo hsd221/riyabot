@@ -12,6 +12,7 @@ from src.memory.atom import AtomType
 from src.memory.dream_weaver import DreamWeaver, _escape_prompt_data, _validate_insights
 from src.memory.encoding_pipeline import EncodingPipeline, EncodingTask, get_encoding_pipeline
 from src.memory.layer2_encoder import SOURCE_USER_IDS_DETAIL_KEY
+from src.memory.user_profile import PersonIdentity
 from src.memory.schema import InsightPool, NoisePool, configure_memory_database, initialize_database, memory_db
 
 
@@ -184,12 +185,17 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
             timestamp=123.0,
             stream_type="private_chat",
             message_id="msg-1",
+            platform="qq",
+            nickname="Alice",
+            cardname="群名片",
         )
 
         fake_encoder.set_stream_type.assert_called_once_with("stream-1", "private_chat")
         kwargs = fake_encoder.ingest_message.await_args.kwargs
         self.assertEqual(kwargs["timestamp"], datetime.fromtimestamp(123.0))
         self.assertEqual(kwargs["message_id"], "msg-1")
+        self.assertEqual(kwargs["platform"], "qq")
+        self.assertEqual(kwargs["nickname"], "Alice")
 
     def test_set_trace_recorder_assigns_recorder(self) -> None:
         pipeline = self.make_pipeline()
@@ -313,8 +319,14 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
             patch("src.memory.user_profile.ProfileStore", return_value=SimpleNamespace()),
             patch("src.memory.user_profile.ProfileBuilder", return_value=fake_builder),
-            patch("src.memory.conflict_arbitration.ConflictArbiter", return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0))),
-            patch("src.memory.atom_association.AtomAssociationStore", return_value=SimpleNamespace(build_from_batch=Mock(return_value=0))),
+            patch(
+                "src.memory.conflict_arbitration.ConflictArbiter",
+                return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0)),
+            ),
+            patch(
+                "src.memory.atom_association.AtomAssociationStore",
+                return_value=SimpleNamespace(build_from_batch=Mock(return_value=0)),
+            ),
         ):
             pipeline, stats = await self.run_single_atom_cycle()
 
@@ -323,7 +335,9 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(written_atom.confidence, 0.33)
         self.assertEqual(conflicts[0].new_atom_id, written_atom.atom_id)
         checkers[0].record_conflict.assert_awaited_once_with(conflicts[0])
-        fake_builder.update_profile_from_atom.assert_called_once_with("user-1", written_atom)
+        fake_builder.update_profile_from_atom.assert_called_once_with(
+            PersonIdentity(platform="legacy", user_id="user-1"), written_atom
+        )
 
     async def test_run_cycle_import_error_in_objectivity_check_still_writes_atom(self) -> None:
         real_import = builtins.__import__
@@ -335,8 +349,14 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("builtins.__import__", side_effect=import_without_objectivity),
-            patch("src.memory.conflict_arbitration.ConflictArbiter", return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0))),
-            patch("src.memory.atom_association.AtomAssociationStore", return_value=SimpleNamespace(build_from_batch=Mock(return_value=0))),
+            patch(
+                "src.memory.conflict_arbitration.ConflictArbiter",
+                return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0)),
+            ),
+            patch(
+                "src.memory.atom_association.AtomAssociationStore",
+                return_value=SimpleNamespace(build_from_batch=Mock(return_value=0)),
+            ),
         ):
             pipeline, stats = await self.run_single_atom_cycle()
 
@@ -413,8 +433,14 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
             patch("src.memory.user_profile.ProfileStore", return_value=SimpleNamespace()),
             patch("src.memory.user_profile.ProfileBuilder", return_value=fake_builder),
-            patch("src.memory.conflict_arbitration.ConflictArbiter", return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0))),
-            patch("src.memory.atom_association.AtomAssociationStore", return_value=SimpleNamespace(build_from_batch=Mock(return_value=0))),
+            patch(
+                "src.memory.conflict_arbitration.ConflictArbiter",
+                return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0)),
+            ),
+            patch(
+                "src.memory.atom_association.AtomAssociationStore",
+                return_value=SimpleNamespace(build_from_batch=Mock(return_value=0)),
+            ),
         ):
             pipeline, stats = await self.run_single_atom_cycle(
                 atom_type=AtomType.EPISODIC,
@@ -425,7 +451,9 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["atoms_written"], 1)
         written_kwargs = pipeline.writer.write_atom.await_args.kwargs
         self.assertEqual(written_kwargs["episodic_detail"].sensory_tags, ["visual"])
-        fake_builder.update_profile_from_atom.assert_called_once_with("user-1", written_kwargs["atom"])
+        fake_builder.update_profile_from_atom.assert_called_once_with(
+            PersonIdentity(platform="legacy", user_id="user-1"), written_kwargs["atom"]
+        )
 
     async def test_run_cycle_ignores_profile_update_failures_for_semantic_and_episodic_atoms(self) -> None:
         class AcceptingChecker:
@@ -458,8 +486,14 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
             patch("src.memory.user_profile.ProfileStore", side_effect=RuntimeError("profile unavailable")),
-            patch("src.memory.conflict_arbitration.ConflictArbiter", return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0))),
-            patch("src.memory.atom_association.AtomAssociationStore", return_value=SimpleNamespace(build_from_batch=Mock(return_value=0))),
+            patch(
+                "src.memory.conflict_arbitration.ConflictArbiter",
+                return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0)),
+            ),
+            patch(
+                "src.memory.atom_association.AtomAssociationStore",
+                return_value=SimpleNamespace(build_from_batch=Mock(return_value=0)),
+            ),
         ):
             stats = await pipeline.run_cycle()
 
@@ -489,27 +523,39 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
             patch("builtins.__import__", side_effect=fail_conflict_import),
-            patch("src.memory.atom_association.AtomAssociationStore", return_value=SimpleNamespace(build_from_batch=Mock(return_value=0))),
+            patch(
+                "src.memory.atom_association.AtomAssociationStore",
+                return_value=SimpleNamespace(build_from_batch=Mock(return_value=0)),
+            ),
         ):
             _, conflict_import_stats = await self.run_single_atom_cycle()
 
         with (
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
             patch("src.memory.conflict_arbitration.ConflictArbiter", side_effect=RuntimeError("arbiter down")),
-            patch("src.memory.atom_association.AtomAssociationStore", return_value=SimpleNamespace(build_from_batch=Mock(return_value=0))),
+            patch(
+                "src.memory.atom_association.AtomAssociationStore",
+                return_value=SimpleNamespace(build_from_batch=Mock(return_value=0)),
+            ),
         ):
             _, conflict_runtime_stats = await self.run_single_atom_cycle()
 
         with (
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
-            patch("src.memory.conflict_arbitration.ConflictArbiter", return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0))),
+            patch(
+                "src.memory.conflict_arbitration.ConflictArbiter",
+                return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0)),
+            ),
             patch("builtins.__import__", side_effect=fail_association_import),
         ):
             _, association_import_stats = await self.run_single_atom_cycle()
 
         with (
             patch("src.memory.objectivity_check.ObjectivityChecker", AcceptingChecker),
-            patch("src.memory.conflict_arbitration.ConflictArbiter", return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0))),
+            patch(
+                "src.memory.conflict_arbitration.ConflictArbiter",
+                return_value=SimpleNamespace(check_and_resolve=AsyncMock(return_value=0)),
+            ),
             patch("src.memory.atom_association.AtomAssociationStore", side_effect=RuntimeError("association down")),
         ):
             _, association_runtime_stats = await self.run_single_atom_cycle()

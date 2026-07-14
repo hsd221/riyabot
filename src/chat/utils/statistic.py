@@ -221,7 +221,7 @@ class StatisticOutputTask(AsyncTask):
 
         output = [
             self.SEP_LINE,
-            f"  最近1小时的统计数据  (自{now.strftime('%Y-%m-%d %H:%M:%S')}开始，详细信息见文件：{self.record_file_path})",
+            f"  最近1小时的统计数据  (统计截止时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，完整数据请查看 WebUI)",
             self.SEP_LINE,
             self._format_total_stat(stats["last_hour"]),
             "",
@@ -243,7 +243,7 @@ class StatisticOutputTask(AsyncTask):
             # 使用线程池并行执行耗时操作
             loop = asyncio.get_event_loop()
 
-            # 在线程池中并行执行数据收集和之前的HTML生成（如果存在）
+            # 在线程池中执行数据库汇总和控制台输出。
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 logger.info("正在收集统计数据...")
 
@@ -254,12 +254,8 @@ class StatisticOutputTask(AsyncTask):
                 stats = await collect_task
                 logger.info("统计数据收集完成")
 
-                # 并行执行控制台输出和HTML报告生成
-                console_task = loop.run_in_executor(executor, self._statistic_console_output, stats, now)
-                html_task = loop.run_in_executor(executor, self._generate_html_report, stats, now)
-
-                # 等待两个输出任务完成
-                await asyncio.gather(console_task, html_task)
+                # 数据已经持久化到 SQLite，定时任务只保留控制台摘要。
+                await loop.run_in_executor(executor, self._statistic_console_output, stats, now)
 
             logger.info("统计数据输出完成")
         except Exception as e:
@@ -289,14 +285,7 @@ class StatisticOutputTask(AsyncTask):
                     stats = await collect_task
                     logger.info("统计数据收集完成")
 
-                    # 创建并发的输出任务
-                    output_tasks = [
-                        asyncio.create_task(loop.run_in_executor(executor, self._statistic_console_output, stats, now)),  # type: ignore
-                        asyncio.create_task(loop.run_in_executor(executor, self._generate_html_report, stats, now)),  # type: ignore
-                    ]
-
-                    # 等待所有输出任务完成
-                    await asyncio.gather(*output_tasks)
+                    await loop.run_in_executor(executor, self._statistic_console_output, stats, now)
 
                 logger.info("统计数据后台输出完成")
             except Exception as e:
@@ -2233,14 +2222,7 @@ class AsyncStatisticOutputTask(AsyncTask):
                     stats = await collect_task
                     logger.info("统计数据收集完成")
 
-                    # 创建并发的输出任务
-                    output_tasks = [
-                        asyncio.create_task(loop.run_in_executor(executor, self._statistic_console_output, stats, now)),  # type: ignore
-                        asyncio.create_task(loop.run_in_executor(executor, self._generate_html_report, stats, now)),  # type: ignore
-                    ]
-
-                    # 等待所有输出任务完成
-                    await asyncio.gather(*output_tasks)
+                    await loop.run_in_executor(executor, self._statistic_console_output, stats, now)
 
                 logger.info("统计数据后台输出完成")
             except Exception as e:

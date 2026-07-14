@@ -64,6 +64,8 @@ MAX_DETAIL_LIST_ITEMS = 12
 
 # 内部元数据键：EncodingPipeline 用它限制画像更新目标，避免信任 LLM 伪造 entities
 SOURCE_USER_IDS_DETAIL_KEY = "_source_user_ids"
+SOURCE_IDENTITIES_DETAIL_KEY = "_source_identities"
+SOURCE_MESSAGE_IDS_DETAIL_KEY = "_source_message_ids"
 
 # ---------------------------------------------------------------------------
 # EncodingBuffer — 单流编码缓冲区
@@ -96,6 +98,11 @@ class EncodingBuffer:
         content: str,
         timestamp: float,
         message_id: Optional[str] = None,
+        platform: str = "",
+        nickname: str = "",
+        cardname: str = "",
+        group_id: str = "",
+        group_name: str = "",
     ) -> bool:
         """添加一条消息到缓冲区"""
         normalized_message_id = str(message_id or "").strip()
@@ -114,6 +121,11 @@ class EncodingBuffer:
                 "speaker": speaker,
                 "content": content,
                 "timestamp": timestamp,
+                "platform": str(platform or "").strip(),
+                "nickname": str(nickname or "").strip(),
+                "cardname": str(cardname or "").strip(),
+                "group_id": str(group_id or "").strip(),
+                "group_name": str(group_name or "").strip(),
             }
         )
         self.message_count_since_trigger += 1
@@ -196,6 +208,11 @@ class BatchEncoder:
         content: str,
         timestamp: Optional[datetime] = None,
         message_id: Optional[str] = None,
+        platform: str = "",
+        nickname: str = "",
+        cardname: str = "",
+        group_id: str = "",
+        group_name: str = "",
     ) -> None:
         """摄取一条消息到缓冲区
 
@@ -223,7 +240,18 @@ class BatchEncoder:
             )
 
         buf = self.buffers[stream_id]
-        added = buf.add_message(user_id=user_id, speaker=speaker, content=content, timestamp=ts, message_id=message_id)
+        added = buf.add_message(
+            user_id=user_id,
+            speaker=speaker,
+            content=content,
+            timestamp=ts,
+            message_id=message_id,
+            platform=platform,
+            nickname=nickname,
+            cardname=cardname,
+            group_id=group_id,
+            group_name=group_name,
+        )
         if not added:
             return
 
@@ -376,9 +404,13 @@ class BatchEncoder:
             return []
 
         source_user_ids = self._source_user_ids(messages)
-        if source_user_ids:
+        source_identities = self._source_identities(messages)
+        source_message_ids = self._source_message_ids(messages)
+        if source_user_ids or source_identities:
             for _, _, detail in extracted:
                 detail[SOURCE_USER_IDS_DETAIL_KEY] = list(source_user_ids)
+                detail[SOURCE_IDENTITIES_DETAIL_KEY] = source_identities
+                detail[SOURCE_MESSAGE_IDS_DETAIL_KEY] = source_message_ids
 
         # 6. 清空缓冲区
         buf.clear()
@@ -430,7 +462,8 @@ class BatchEncoder:
             speaker = neutralize_prompt_boundaries(str(msg.get("speaker", msg.get("user_id", "unknown"))))
             user_id = neutralize_prompt_boundaries(str(msg.get("user_id", "unknown")))
             content = neutralize_prompt_boundaries(str(msg.get("content", "")))
-            lines.append(f"[speaker={speaker} user_id={user_id}]: {content}")
+            platform = neutralize_prompt_boundaries(str(msg.get("platform", "") or "legacy"))
+            lines.append(f"[platform={platform} speaker={speaker} user_id={user_id}]: {content}")
 
         conversation_text = "\n".join(lines)
         topic_summary = neutralize_prompt_boundaries(topic_summary or "（无）")
@@ -619,6 +652,51 @@ class BatchEncoder:
             seen.add(user_id)
         return user_ids
 
+    @staticmethod
+    def _source_message_ids(messages: list[BufferMessage]) -> list[str]:
+        """提取批次内稳定的原始消息 ID，作为语义证据来源。"""
+        message_ids: list[str] = []
+        seen: set[str] = set()
+        for msg in messages:
+            message_id = BatchEncoder._safe_text(msg.get("message_id"), MAX_ENTITY_LENGTH)
+            if not message_id or message_id in seen:
+                continue
+            message_ids.append(message_id)
+            seen.add(message_id)
+        return message_ids
+
+    @staticmethod
+    def _source_identities(messages: list[BufferMessage]) -> list[dict[str, str]]:
+        """提取可信消息发送者身份及展示元数据，按平台身份去重。"""
+        identities_by_key: dict[tuple[str, str], dict[str, str]] = {}
+        for msg in messages:
+            user_id = BatchEncoder._safe_text(msg.get("user_id"), MAX_ENTITY_LENGTH)
+            if not user_id:
+                continue
+            platform = BatchEncoder._safe_text(msg.get("platform"), 64).lower() or "legacy"
+            key = (platform, user_id)
+            current = identities_by_key.setdefault(
+                key,
+                {
+                    "platform": platform,
+                    "user_id": user_id,
+                    "nickname": "",
+                    "cardname": "",
+                    "group_id": "",
+                    "group_name": "",
+                },
+            )
+            for field_name, raw_value in (
+                ("nickname", msg.get("nickname") or msg.get("speaker")),
+                ("cardname", msg.get("cardname")),
+                ("group_id", msg.get("group_id")),
+                ("group_name", msg.get("group_name")),
+            ):
+                value = BatchEncoder._safe_text(raw_value, MAX_ENTITY_LENGTH)
+                if value:
+                    current[field_name] = value
+        return list(identities_by_key.values())
+
     def _validate_atom_item(
         self,
         item: Any,
@@ -769,22 +847,30 @@ class BatchEncoder:
             }
 
         elif atom_type == AtomType.FACTUAL:
-            return {
+            normalized = {
                 "attr_category": BatchEncoder._safe_text(detail.get("attr_category", "general"), 80) or "general",
                 "attr_name": BatchEncoder._safe_text(detail.get("attr_name", ""), 120),
                 "attr_value": BatchEncoder._safe_text(detail.get("attr_value", "")),
             }
+            subject_user_id = BatchEncoder._safe_text(detail.get("subject_user_id"), MAX_ENTITY_LENGTH)
+            if subject_user_id:
+                normalized["subject_user_id"] = subject_user_id
+            return normalized
 
         elif atom_type == AtomType.RELATIONAL:
             # 关系型记忆的内容本身描述关系，detail 可留空或包含额外字段
             return {}
 
         elif atom_type == AtomType.PREFERENCE:
-            return {
+            normalized = {
                 "attr_category": "preference",
                 "attr_name": BatchEncoder._safe_text(detail.get("attr_name", ""), 120),
                 "attr_value": BatchEncoder._safe_text(detail.get("attr_value", "喜欢")),
             }
+            subject_user_id = BatchEncoder._safe_text(detail.get("subject_user_id"), MAX_ENTITY_LENGTH)
+            if subject_user_id:
+                normalized["subject_user_id"] = subject_user_id
+            return normalized
 
         return {}
 

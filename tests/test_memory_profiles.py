@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from src.memory.atom import AtomType, EpisodicDetail, MemoryAtom, SemanticDetail
+from src.memory.expression_bridge import ExpressionBridge
 from src.memory.schema import (
     MemoryAtom as MemoryAtomModel,
     SemanticDetail as SemanticDetailModel,
@@ -12,6 +13,7 @@ from src.memory.schema import (
     memory_db,
 )
 from src.memory.user_profile import (
+    PersonIdentity,
     ProfileBuilder,
     ProfileRetriever,
     ProfileStore,
@@ -74,15 +76,22 @@ def create_semantic_detail(
     name: str,
     value: str,
     evidence_counter: int = 1,
+    evidence_list: str = '["msg-1"]',
+    subject_key: str | None = None,
 ) -> None:
+    fields = {
+        "id": atom_id,
+        "atom": atom_id,
+        "attr_category": category,
+        "attr_name": name,
+        "attr_value": value,
+        "evidence_list": evidence_list,
+        "evidence_counter": evidence_counter,
+    }
+    if subject_key is not None:
+        fields["subject_key"] = subject_key
     SemanticDetailModel.create(
-        id=atom_id,
-        atom=atom_id,
-        attr_category=category,
-        attr_name=name,
-        attr_value=value,
-        evidence_list='["msg-1"]',
-        evidence_counter=evidence_counter,
+        **fields,
     )
 
 
@@ -110,6 +119,186 @@ def make_memory_atom(
 
 
 class ProfileStoreTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
+    def test_person_identity_merges_latest_nonempty_display_metadata(self) -> None:
+        original = PersonIdentity(
+            platform="qq",
+            user_id="42",
+            nickname="旧昵称",
+            cardname="旧群名片",
+            group_id="group-1",
+            group_name="旧群名",
+        )
+        latest = PersonIdentity(
+            platform="qq",
+            user_id="42",
+            nickname="新昵称",
+            group_id="group-1",
+            group_name="新群名",
+        )
+
+        merged = original.merged_with(latest)
+
+        self.assertEqual(merged.nickname, "新昵称")
+        self.assertEqual(merged.cardname, "旧群名片")
+        self.assertEqual(merged.group_name, "新群名")
+        self.assertEqual(merged.profile_id, "qq:42")
+
+    def test_verified_platform_identities_are_isolated_and_refresh_display_metadata(self) -> None:
+        store = ProfileStore()
+        qq_identity = PersonIdentity(
+            platform="qq",
+            user_id="42",
+            nickname="Alice",
+            cardname="群名片 A",
+            group_id="group-1",
+            group_name="测试群",
+        )
+        discord_identity = PersonIdentity(
+            platform="discord",
+            user_id="42",
+            nickname="Alice D",
+        )
+
+        qq_profile = store.get_or_create_profile(qq_identity)
+        discord_profile = store.get_or_create_profile(discord_identity)
+        store.get_or_create_profile(
+            PersonIdentity(
+                platform="qq",
+                user_id="42",
+                nickname="Alice 新昵称",
+                cardname="群名片 B",
+                group_id="group-2",
+                group_name="另一个群",
+            )
+        )
+
+        refreshed_qq = store.get_profile("42", platform="qq")
+        refreshed_discord = store.get_profile("42", platform="discord")
+
+        self.assertEqual(qq_profile.profile_id, "qq:42")
+        self.assertEqual(discord_profile.profile_id, "discord:42")
+        self.assertIsNotNone(refreshed_qq)
+        self.assertIsNotNone(refreshed_discord)
+        assert refreshed_qq is not None
+        assert refreshed_discord is not None
+        self.assertEqual(refreshed_qq.nickname, "Alice 新昵称")
+        self.assertEqual(refreshed_discord.nickname, "Alice D")
+        self.assertEqual(
+            refreshed_qq.group_nicknames,
+            [
+                {
+                    "platform": "qq",
+                    "group_id": "group-1",
+                    "group_name": "测试群",
+                    "group_nick_name": "群名片 A",
+                },
+                {
+                    "platform": "qq",
+                    "group_id": "group-2",
+                    "group_name": "另一个群",
+                    "group_nick_name": "群名片 B",
+                },
+            ],
+        )
+        self.assertEqual(refreshed_qq.person_type, "person")
+        self.assertEqual(refreshed_qq.identity_source, "message_sender")
+        self.assertEqual(refreshed_qq.verification_status, "verified")
+        self.assertEqual(set(store.list_profiles()), {"qq:42", "discord:42"})
+
+    def test_legacy_entity_profile_is_migrated_as_unverified_and_excluded_from_people(self) -> None:
+        now = datetime.datetime.now()
+        memory_db.execute_sql(
+            """
+            CREATE TABLE user_profiles (
+                user_id VARCHAR(128) PRIMARY KEY,
+                version INTEGER NOT NULL DEFAULT 1,
+                traits_json TEXT NOT NULL,
+                interests_json TEXT NOT NULL,
+                preferences_json TEXT NOT NULL,
+                facts_json TEXT NOT NULL,
+                stats_json TEXT NOT NULL,
+                mood_history_json TEXT NOT NULL DEFAULT '[]',
+                impression TEXT NOT NULL DEFAULT '',
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                last_extracted_at DATETIME
+            )
+            """
+        )
+        memory_db.execute_sql(
+            """
+            INSERT INTO user_profiles (
+                user_id, version, traits_json, interests_json, preferences_json,
+                facts_json, stats_json, mood_history_json, impression, created_at, updated_at
+            ) VALUES (?, 1, '{}', '[]', '{}', '{}', '{}', '[]', ?, ?, ?)
+            """,
+            ("梦幻游戏", "遗留脏画像", now, now),
+        )
+
+        store = ProfileStore()
+        legacy = store.get_profile("梦幻游戏")
+
+        self.assertIsNotNone(legacy)
+        assert legacy is not None
+        self.assertEqual(legacy.person_type, "unknown")
+        self.assertEqual(legacy.identity_source, "legacy_entity")
+        self.assertEqual(legacy.verification_status, "unverified")
+        self.assertEqual(store.list_profiles(), [])
+        self.assertEqual(store.list_profiles(include_non_people=True), ["梦幻游戏"])
+
+    def test_trusted_identity_claims_legacy_profile_and_backfills_semantic_subject(self) -> None:
+        store = ProfileStore()
+        store.save_profile(
+            UserProfile(
+                user_id="legacy-user",
+                person_type="unknown",
+                identity_source="legacy_entity",
+                verification_status="unverified",
+            )
+        )
+        create_atom_model("legacy-fact", user_id="legacy-user", atom_type="factual")
+        create_semantic_detail(
+            "legacy-fact",
+            category="fact",
+            name="city",
+            value="上海",
+        )
+
+        profile = store.get_or_create_profile(PersonIdentity(platform="qq", user_id="legacy-user", nickname="小明"))
+
+        self.assertEqual(profile.profile_id, "qq:legacy-user")
+        self.assertEqual(store.get_profile("legacy-user").profile_id, "qq:legacy-user")
+        detail = SemanticDetailModel.get_by_id("legacy-fact")
+        self.assertEqual(detail.subject_key, "qq:legacy-user")
+
+    def test_existing_modern_profile_also_claims_unscoped_historical_semantic_details(self) -> None:
+        store = ProfileStore()
+        identity = PersonIdentity(platform="qq", user_id="late-user", nickname="小明")
+        store.get_or_create_profile(identity)
+        create_atom_model("late-fact", user_id="late-user", atom_type="factual")
+        create_semantic_detail("late-fact", category="fact", name="city", value="上海")
+
+        store.get_or_create_profile(identity)
+
+        detail = SemanticDetailModel.get_by_id("late-fact")
+        self.assertEqual(detail.subject_key, "qq:late-user")
+
+    def test_expression_bridge_persists_into_real_profile_and_retriever_context(self) -> None:
+        store = ProfileStore()
+        identity = PersonIdentity(platform="qq", user_id="expression-user", nickname="表达用户")
+        store.get_or_create_profile(identity)
+        bridge = ExpressionBridge(store)
+
+        bridge.update_expression_profile(identity, ["好耶😀", "冲鸭😀"])
+
+        loaded = store.get_profile("expression-user", platform="qq")
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertTrue(loaded.expression_style)
+        self.assertTrue(loaded.expression_patterns.get("favorite_expressions"))
+        context = ProfileRetriever(store).get_profile_context("expression-user", platform="qq")
+        self.assertIn("表达风格:", context)
+
     def test_safe_json_entity_keyword_helpers_and_profile_store_roundtrip(self) -> None:
         self.assertEqual(_safe_json_loads(None, dict), {})
         self.assertEqual(_safe_json_loads("not-json", list), [])
@@ -159,6 +348,144 @@ class ProfileStoreTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
 
 
 class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
+    def test_build_profile_honors_prompt_categories_evidence_and_highest_weight_value(self) -> None:
+        identity = PersonIdentity(platform="qq", user_id="u1", nickname="小明")
+        create_atom_model("pref-high", weight=0.9, confidence=0.9)
+        create_semantic_detail(
+            "pref-high",
+            category="preference",
+            name="梦幻游戏",
+            value="喜欢",
+            subject_key=identity.profile_id,
+        )
+        create_atom_model("pref-low", weight=0.1, confidence=0.95)
+        create_semantic_detail(
+            "pref-low",
+            category="preference",
+            name="梦幻游戏",
+            value="不喜欢",
+            subject_key=identity.profile_id,
+        )
+        for atom_id, category, name, value in (
+            ("personality", "personality", "性格", "耐心"),
+            ("habit", "habit", "作息", "早睡"),
+            ("skill", "skill", "技能", "Python"),
+        ):
+            create_atom_model(atom_id, atom_type="factual", confidence=0.8)
+            create_semantic_detail(
+                atom_id,
+                category=category,
+                name=name,
+                value=value,
+                evidence_counter=0,
+                evidence_list='["msg-1"]',
+                subject_key=identity.profile_id,
+            )
+
+        profile = ProfileBuilder(ProfileStore()).build_profile(identity)
+
+        self.assertEqual(profile.preferences, {"梦幻游戏": "喜欢"})
+        self.assertEqual(profile.interests, ["梦幻游戏"])
+        self.assertEqual(profile.facts, {"性格": "耐心", "作息": "早睡", "技能": "Python"})
+        self.assertEqual(profile.traits, {"耐心": 0.8})
+        self.assertEqual(SemanticDetail(atom_id="new-detail").evidence_counter, 1)
+
+    def test_build_profile_filters_subject_before_limit_and_separates_same_id_across_platforms(self) -> None:
+        now = datetime.datetime.now()
+        other_atoms = [
+            {
+                "atom_id": f"other-{index}",
+                "atom_type": "preference",
+                "content": "其他用户喜欢别的内容",
+                "entities": '["other-user"]',
+                "importance": 0.9,
+                "confidence": 0.9,
+                "weight": 0.9,
+                "created_at": now,
+                "last_accessed_at": now,
+                "last_reinforced_at": now,
+                "ttl_days": 180,
+                "decay_type": "exponential",
+                "reinforcement_count": 0,
+                "source_scene": "group_chat",
+                "privacy_level": "context_sensitive",
+                "status": "active",
+            }
+            for index in range(500)
+        ]
+        with memory_db.atomic():
+            MemoryAtomModel.insert_many(other_atoms).execute()
+
+        qq_identity = PersonIdentity(platform="qq", user_id="42", nickname="QQ 用户")
+        discord_identity = PersonIdentity(platform="discord", user_id="42", nickname="Discord 用户")
+        create_atom_model("qq-tail", user_id="42", weight=0.1)
+        create_semantic_detail(
+            "qq-tail",
+            category="interest",
+            name="游戏",
+            value="梦幻游戏",
+            subject_key=qq_identity.profile_id,
+        )
+        create_atom_model("discord-tail", user_id="42", weight=0.05)
+        create_semantic_detail(
+            "discord-tail",
+            category="interest",
+            name="音乐",
+            value="爵士乐",
+            subject_key=discord_identity.profile_id,
+        )
+
+        builder = ProfileBuilder(ProfileStore())
+        qq_profile = builder.build_profile(qq_identity)
+        discord_profile = builder.build_profile(discord_identity)
+
+        self.assertEqual(qq_profile.interests, ["梦幻游戏"])
+        self.assertEqual(qq_profile.preferences, {"游戏": "梦幻游戏"})
+        self.assertEqual(discord_profile.interests, ["爵士乐"])
+        self.assertEqual(discord_profile.preferences, {"音乐": "爵士乐"})
+
+    def test_incremental_update_does_not_let_low_weight_value_replace_legacy_high_weight_value(self) -> None:
+        identity = PersonIdentity(platform="qq", user_id="u1", nickname="小明")
+        store = ProfileStore()
+        store.save_profile(
+            UserProfile(
+                user_id="u1",
+                platform="qq",
+                preferences={"music": "jazz"},
+                person_type="person",
+                verification_status="verified",
+            )
+        )
+        create_atom_model("existing-high", user_id="u1", weight=0.95, confidence=0.9)
+        create_semantic_detail(
+            "existing-high",
+            category="preference",
+            name="music",
+            value="jazz",
+            subject_key=identity.profile_id,
+        )
+
+        updated = ProfileBuilder(store).update_profile_from_atom(
+            identity,
+            make_memory_atom(
+                "incoming-low",
+                semantic_detail=SemanticDetail(
+                    atom_id="incoming-low",
+                    attr_category="preference",
+                    attr_name="music",
+                    attr_value="rock",
+                    subject_key=identity.profile_id,
+                    evidence_counter=1,
+                ),
+            ),
+        )
+
+        self.assertIsNone(updated)
+        persisted = store.get_profile(identity.profile_id)
+        self.assertIsNotNone(persisted)
+        assert persisted is not None
+        self.assertEqual(persisted.preferences["music"], "jazz")
+
     def test_build_profile_filters_user_entities_and_aggregates_preference_fact_and_traits(self) -> None:
         create_atom_model("pref-u1", user_id="u1", atom_type="preference", confidence=0.8)
         create_semantic_detail("pref-u1", category="preference", name="music", value="jazz", evidence_counter=2)
@@ -173,6 +500,7 @@ class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
             name="drink",
             value="tea",
             evidence_counter=0,
+            evidence_list="[]",
         )
 
         store = ProfileStore()

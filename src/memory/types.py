@@ -139,6 +139,11 @@ class BufferMessage(TypedDict):
         content: 消息内容
         timestamp: 时间戳
         is_self: 是否机器人自身消息（可选）
+        platform: 消息发送者所属平台（可选）
+        nickname: 平台昵称（可选）
+        cardname: 群名片（可选）
+        group_id: 群 ID（可选）
+        group_name: 群名称（可选）
     """
 
     user_id: str
@@ -147,6 +152,11 @@ class BufferMessage(TypedDict):
     content: str
     timestamp: float
     is_self: NotRequired[bool]
+    platform: NotRequired[str]
+    nickname: NotRequired[str]
+    cardname: NotRequired[str]
+    group_id: NotRequired[str]
+    group_name: NotRequired[str]
 
 
 class RollbackAction(TypedDict):

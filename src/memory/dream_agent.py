@@ -935,7 +935,7 @@ class DreamTask(AsyncTask):
         else:
             logger.warning("梦境分诊原子 embedding 生成失败", atom_id=atom_id)
 
-        self._sync_profile_from_triaged_atom(str(record.user_id), atom_dc)
+        self._sync_profile_from_triaged_atom(record, atom_dc)
         return True
 
     @staticmethod
@@ -951,18 +951,26 @@ class DreamTask(AsyncTask):
         return tags
 
     @staticmethod
-    def _sync_profile_from_triaged_atom(user_id: str, atom_dc: MemoryAtomDC) -> None:
+    def _sync_profile_from_triaged_atom(record: RawMessageArchive, atom_dc: MemoryAtomDC) -> None:
         """把梦境分诊产生的情景情绪同步到用户画像。"""
         detail = atom_dc.episodic_detail
         if detail is None or not (detail.emotion_tags or detail.sensory_tags):
             return
 
         try:
-            from src.memory.user_profile import ProfileBuilder, ProfileStore
+            from src.memory.user_profile import PersonIdentity, ProfileBuilder, ProfileStore
 
-            ProfileBuilder(ProfileStore()).update_profile_from_atom(user_id, atom_dc)
+            identity = PersonIdentity(
+                platform=str(record.platform or "legacy"),
+                user_id=str(record.user_id),
+                nickname=str(record.nickname or ""),
+                cardname=str(record.cardname or ""),
+                group_id=str(record.group_id or ""),
+                group_name=str(record.group_name or ""),
+            )
+            ProfileBuilder(ProfileStore()).update_profile_from_atom(identity, atom_dc)
         except Exception as e:
-            logger.debug("梦境情绪画像同步失败 user=%s atom=%s: %s", user_id, atom_dc.atom_id, e)
+            logger.debug("梦境情绪画像同步失败 user=%s atom=%s: %s", record.user_id, atom_dc.atom_id, e)
 
     def _run_high_significance_chain(
         self,
@@ -2426,7 +2434,7 @@ class DreamTask(AsyncTask):
                 profile = profile_store.get_profile(uid)
                 if not profile:
                     continue
-                source_atom_ids = self._profile_source_atom_ids(uid)
+                source_atom_ids = self._profile_source_atom_ids(profile)
                 rebuilt_profile = profile_builder.build_profile(uid)
                 changes = self._profile_audit_changes(profile, rebuilt_profile)
                 self._restore_profile_runtime_fields(profile, rebuilt_profile)
@@ -2445,7 +2453,10 @@ class DreamTask(AsyncTask):
     def _restore_profile_runtime_fields(previous: Any, rebuilt: Any) -> None:
         """重建语义字段后保留非语义画像字段。"""
         rebuilt.created_at = previous.created_at
+        rebuilt_sources = (rebuilt.stats or {}).get("_profile_field_sources")
         rebuilt.stats = dict(previous.stats or {})
+        if rebuilt_sources:
+            rebuilt.stats["_profile_field_sources"] = rebuilt_sources
         rebuilt.mood_history = list(previous.mood_history or [])
         rebuilt.expression_style = previous.expression_style
         rebuilt.expression_patterns = dict(previous.expression_patterns or {})
@@ -2499,11 +2510,10 @@ class DreamTask(AsyncTask):
             logger.error(f"写入画像审计洞见失败 user={user_id}: {e}")
 
     @staticmethod
-    def _profile_source_atom_ids(user_id: str) -> list[str]:
+    def _profile_source_atom_ids(profile: Any) -> list[str]:
         """获取某用户参与画像重建的活跃语义原子 ID。"""
-        atom_ids: list[str] = []
         try:
-            rows = (
+            query = (
                 MemoryAtomModel.select()
                 .where(
                     MemoryAtomModel.status == "active",
@@ -2515,14 +2525,23 @@ class DreamTask(AsyncTask):
                     ),
                 )
                 .order_by(MemoryAtomModel.weight.desc())
-                .limit(500)
             )
-            for atom in rows:
-                if DreamTask._atom_entities_include(atom, user_id):
-                    atom_ids.append(atom.atom_id)
+            profile_id = str(getattr(profile, "profile_id", "") or "")
+            platform = str(getattr(profile, "platform", "legacy") or "legacy")
+            if profile_id and platform != "legacy":
+                detail_atom_ids = SemanticDetailModel.select(SemanticDetailModel.atom).where(
+                    SemanticDetailModel.subject_key == profile_id
+                )
+                rows = query.where(MemoryAtomModel.atom_id.in_(detail_atom_ids)).limit(50)
+                return [atom.atom_id for atom in rows]
+
+            user_id = str(getattr(profile, "user_id", profile) or "")
+            entity_token = json.dumps(user_id, ensure_ascii=False)
+            rows = query.where(MemoryAtomModel.entities.contains(entity_token))
+            return [atom.atom_id for atom in rows if DreamTask._atom_entities_include(atom, user_id)][:50]
         except Exception as e:
-            logger.error(f"画像审计来源原子扫描失败 user={user_id}: {e}")
-        return atom_ids[:50]
+            logger.error(f"画像审计来源原子扫描失败 profile={profile}: {e}")
+            return []
 
     @staticmethod
     def _atom_entities_include(atom_model: MemoryAtomModel, entity: str) -> bool:

@@ -1,11 +1,15 @@
 import datetime
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from src.memory import prompt_integration
 from src.memory.atom import AtomType, MemoryAtom
 from src.memory.feedback import ReinforcementTracker, _char_bigram_jaccard
+from src.memory.schema import configure_memory_database, initialize_database, memory_db
+from src.memory.user_profile import ProfileStore, UserProfile
 
 
 def make_atom(atom_id: str, content: str, *, weight: float = 0.5) -> MemoryAtom:
@@ -178,6 +182,7 @@ class MemoryFeedbackTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(atom.entities, ["小明", "猫"])
         self.assertEqual(updates["weight"], 0.9)
         self.assertEqual(updates["reinforcement_count"], 3)
+
         self.assertEqual(updates["last_reinforced_at"], datetime.datetime.fromtimestamp(10.0))
         self.assertEqual(updates["last_accessed_at"], datetime.datetime.fromtimestamp(11.0))
 
@@ -228,6 +233,63 @@ class MemoryFeedbackTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(atom_id, "atom-1")
         self.assertIn("weight", updates)
         store.qdrant.set_atom_payload.assert_awaited_once()
+
+
+class MemoryPromptProfileIntegrationTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.original_path = memory_db.database
+        configure_memory_database(str(Path(self.tmpdir.name) / "memory.db"))
+        initialize_database()
+
+    def tearDown(self) -> None:
+        if not memory_db.is_closed():
+            memory_db.close()
+        configure_memory_database(str(self.original_path))
+        self.tmpdir.cleanup()
+
+    async def test_regular_reply_context_includes_verified_profile_and_expression_without_memory_query(self) -> None:
+        store = ProfileStore()
+        store.save_profile(
+            UserProfile(
+                user_id="42",
+                platform="qq",
+                nickname="小明",
+                impression="喜欢爵士乐",
+                expression_style="简洁",
+                expression_patterns={"favorite_expressions": ["好耶"]},
+            )
+        )
+        stream = SimpleNamespace(
+            stream_id="qq:42",
+            platform="qq",
+            group_info=None,
+            user_info=SimpleNamespace(user_id="42", platform="qq"),
+        )
+
+        block, atom_ids = await prompt_integration.build_memory_retrieval_prompt(
+            target="你好",
+            chat_stream=stream,
+            allow_llm_question=False,
+        )
+
+        self.assertEqual(atom_ids, [])
+        self.assertIn("<profile>", block)
+        self.assertIn("喜欢爵士乐", block)
+        self.assertIn("表达:简洁", block)
+
+        other_platform = SimpleNamespace(
+            stream_id="discord:42",
+            platform="discord",
+            group_info=None,
+            user_info=SimpleNamespace(user_id="42", platform="discord"),
+        )
+        other_block, _ = await prompt_integration.build_memory_retrieval_prompt(
+            target="你好",
+            chat_stream=other_platform,
+            allow_llm_question=False,
+        )
+        self.assertEqual(other_block, "")
 
 
 if __name__ == "__main__":

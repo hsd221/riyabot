@@ -444,10 +444,7 @@ export function SetupPage() {
             </div>
             <div className="w-full">
               <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                <div
-                  className="h-full w-full animate-pulse bg-primary"
-                  style={{ animation: 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite' }}
-                />
+                <div className="h-full w-full animate-pulse bg-primary" />
               </div>
             </div>
             <p className="text-sm text-muted-foreground">请稍候，这可能需要一分钟...</p>
@@ -532,7 +529,7 @@ export function SetupPage() {
                         )}
                         <div
                           className={cn(
-                            'grid h-9 w-9 shrink-0 place-items-center rounded-[10px] transition-all duration-[280ms] ease-[cubic-bezier(0.2,0,0,1)]',
+                            'grid h-9 w-9 shrink-0 place-items-center rounded-[10px] transition-all duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)]',
                             isActive
                               ? 'bg-primary text-primary-foreground shadow-[0_5px_12px_hsl(var(--primary)_/_0.24)]'
                               : isDone
@@ -620,7 +617,7 @@ export function SetupPage() {
                                       setStepDialogOpen(false)
                                     }
                                   }}
-                                  className="ios-row min-h-[62px] w-full text-left transition-colors duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent/50 focus-visible:outline-none active:bg-accent/70 disabled:opacity-55"
+                                  className="ios-row min-h-[62px] w-full text-left transition-colors duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)] hover:bg-accent/50 focus-visible:outline-none active:bg-accent/70 disabled:opacity-55"
                                 >
                                   <span className="flex min-w-0 items-center gap-3">
                                     <span

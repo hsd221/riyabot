@@ -793,6 +793,10 @@ function PersonDetailDialog({
             <InfoItem icon={Hash} label="用户ID" value={person.user_id} mono />
             <InfoItem icon={Hash} label="画像ID" value={person.person_id} mono />
             <InfoItem label="平台" value={person.platform} />
+            <InfoItem label="群名片" value={person.cardname} />
+            <InfoItem label="人物类型" value={person.person_type} />
+            <InfoItem label="身份来源" value={person.identity_source} />
+            <InfoItem label="验证状态" value={person.verification_status} />
             <InfoItem label="状态" value={person.is_known ? '可用于回复' : '隐藏画像'} />
           </div>
 

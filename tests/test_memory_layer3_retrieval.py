@@ -547,13 +547,27 @@ class MemoryWriterLayer3Test(MemoryDatabaseFixtureMixin, unittest.IsolatedAsynci
                 evidence_counter=2,
             ),
         )
+        await writer._write_semantic_detail(
+            "semantic-1",
+            SemanticDetail(
+                atom_id="semantic-1",
+                attr_category="interest",
+                attr_name="music",
+                attr_value="jazz",
+                subject_key="qq:user-1",
+                evidence_list=["msg-2"],
+                evidence_counter=1,
+            ),
+        )
 
         episode = EpisodicDetailModel.get_by_id("episode-1")
         semantic = SemanticDetailModel.get_by_id("semantic-1")
         self.assertEqual(json.loads(episode.participants), ["Alice"])
         self.assertEqual(episode.temporal_context, "夜晚")
         self.assertEqual(semantic.attr_value, "jazz")
-        self.assertEqual(json.loads(semantic.evidence_list), ["msg-1"])
+        self.assertEqual(semantic.subject_key, "qq:user-1")
+        self.assertEqual(json.loads(semantic.evidence_list), ["msg-1", "msg-2"])
+        self.assertEqual(semantic.evidence_counter, 2)
 
     async def test_write_batch_and_update_atom_paths_delegate_to_store_and_swallow_qdrant_failures(self) -> None:
         qdrant = SimpleNamespace(

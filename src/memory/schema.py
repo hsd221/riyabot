@@ -140,8 +140,9 @@ class SemanticDetail(BaseModel):
     attr_category = TextField()  # 属性分类
     attr_name = TextField()  # 属性名
     attr_value = TextField()  # 属性值
+    subject_key = TextField(null=True, index=True)  # 平台化人物画像 ID
     evidence_list = TextField(null=True)  # 证据列表 JSON
-    evidence_counter = IntegerField(default=0)  # 证据计数器
+    evidence_counter = IntegerField(default=1)  # 证据计数器
 
     class Meta:
         table_name = "semantic_details"
@@ -181,6 +182,11 @@ class RawMessageArchive(BaseModel):
     stream_id = TextField(index=True)  # 聊天流 ID
     message_id = TextField(index=True)  # 原始消息 ID
     user_id = TextField()  # 用户 ID
+    platform = TextField(default="legacy", index=True)  # 发送者平台
+    nickname = TextField(default="")  # 平台昵称
+    cardname = TextField(default="")  # 群名片
+    group_id = TextField(default="")  # 群 ID
+    group_name = TextField(default="")  # 群名称
     content = TextField()  # 消息内容
     timestamp = DoubleField()  # 消息时间戳
     chat_type = TextField()  # 聊天类型: group/private
@@ -394,6 +400,10 @@ def _ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_memory_atoms_source_scene_id ON memory_atoms(source_scene, source_id, status, weight)",
         ),
         (
+            "idx_semantic_details_subject_key",
+            "CREATE INDEX IF NOT EXISTS idx_semantic_details_subject_key ON semantic_details(subject_key)",
+        ),
+        (
             "idx_raw_archive_stream_ts",
             "CREATE INDEX IF NOT EXISTS idx_raw_archive_stream_ts ON raw_message_archive(stream_id, timestamp)",
         ),
@@ -484,10 +494,22 @@ def _ensure_columns():
             memory_db.execute_sql("ALTER TABLE memory_atoms ADD COLUMN source_id TEXT")
             logger.info("记忆表 memory_atoms 已补充 source_id 列")
 
+        if memory_db.table_exists(SemanticDetail):
+            semantic_rows = memory_db.execute_sql("PRAGMA table_info(semantic_details)").fetchall()
+            semantic_columns = {row[1] for row in semantic_rows}
+            if "subject_key" not in semantic_columns:
+                memory_db.execute_sql("ALTER TABLE semantic_details ADD COLUMN subject_key TEXT")
+                logger.info("语义明细表 semantic_details 已补充 subject_key 列")
+
         if memory_db.table_exists(RawMessageArchive):
             raw_rows = memory_db.execute_sql("PRAGMA table_info(raw_message_archive)").fetchall()
             raw_columns = {row[1] for row in raw_rows}
             raw_column_defs = {
+                "platform": "ALTER TABLE raw_message_archive ADD COLUMN platform TEXT DEFAULT 'legacy'",
+                "nickname": "ALTER TABLE raw_message_archive ADD COLUMN nickname TEXT DEFAULT ''",
+                "cardname": "ALTER TABLE raw_message_archive ADD COLUMN cardname TEXT DEFAULT ''",
+                "group_id": "ALTER TABLE raw_message_archive ADD COLUMN group_id TEXT DEFAULT ''",
+                "group_name": "ALTER TABLE raw_message_archive ADD COLUMN group_name TEXT DEFAULT ''",
                 "dream_status": "ALTER TABLE raw_message_archive ADD COLUMN dream_status TEXT DEFAULT 'pending'",
                 "dream_route": "ALTER TABLE raw_message_archive ADD COLUMN dream_route TEXT",
                 "dream_significance": "ALTER TABLE raw_message_archive ADD COLUMN dream_significance REAL",

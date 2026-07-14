@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from src.memory import layer2_encoder
 from src.memory.atom import AtomType
-from src.memory.layer2_encoder import BatchEncoder, EncodingBuffer, SOURCE_USER_IDS_DETAIL_KEY
+from src.memory.layer2_encoder import (
+    BatchEncoder,
+    EncodingBuffer,
+    SOURCE_IDENTITIES_DETAIL_KEY,
+    SOURCE_MESSAGE_IDS_DETAIL_KEY,
+    SOURCE_USER_IDS_DETAIL_KEY,
+)
 
 
 class FakeStore:
@@ -86,6 +92,33 @@ class BatchEncoderIngestAndTriggerTest(unittest.IsolatedAsyncioTestCase):
             timestamp=123.0,
         )
         self.assertEqual(encoder.buffers["private_private_user-1"].stream_type, "group_chat")
+
+    async def test_ingest_preserves_platform_identity_metadata_for_profile_scoping(self) -> None:
+        encoder = make_encoder()
+        await encoder.ingest_message(
+            "group-1",
+            "42",
+            "群昵称",
+            "我喜欢梦幻游戏",
+            datetime.fromtimestamp(123.0),
+            message_id="msg-42",
+            platform="qq",
+            nickname="QQ 昵称",
+            cardname="群名片",
+            group_id="g1",
+            group_name="测试群",
+        )
+
+        message = encoder.buffers["group-1"].messages[0]
+        self.assertEqual(message["platform"], "qq")
+        self.assertEqual(message["nickname"], "QQ 昵称")
+        self.assertEqual(message["cardname"], "群名片")
+        self.assertEqual(message["group_id"], "g1")
+
+        identities = BatchEncoder._source_identities([message])
+        self.assertEqual(identities[0]["platform"], "qq")
+        self.assertEqual(identities[0]["user_id"], "42")
+        self.assertEqual(BatchEncoder._source_message_ids([message]), ["msg-42"])
 
     def test_trigger_stats_and_stream_management_cover_buffer_lifecycle(self) -> None:
         encoder = make_encoder(trigger_count=2, trigger_seconds=10)
@@ -188,6 +221,8 @@ class BatchEncoderEncodeBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(extracted), 1)
         self.assertEqual(extracted[0][1], AtomType.PREFERENCE)
         self.assertEqual(extracted[0][2][SOURCE_USER_IDS_DETAIL_KEY], ["user-2"])
+        self.assertEqual(extracted[0][2][SOURCE_MESSAGE_IDS_DETAIL_KEY], [])
+        self.assertEqual(extracted[0][2][SOURCE_IDENTITIES_DETAIL_KEY][0]["platform"], "legacy")
         self.assertEqual(len(encoder.buffers["stream-1"]), 0)
 
     async def test_encode_all_ready_filters_empty_results(self) -> None:

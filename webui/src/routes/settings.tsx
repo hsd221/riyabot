@@ -185,7 +185,7 @@ export function SettingsPage() {
                           </span>
                         </span>
                         {selected ? (
-                          <Check className="h-4 w-4 shrink-0 text-primary" />
+                          <Check className="motion-selection h-4 w-4 shrink-0 text-primary" />
                         ) : (
                           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
                         )}
@@ -2162,7 +2162,10 @@ function ThemeListOption({
         </div>
       </div>
       {isSelected ? (
-        <Check className="h-4 w-4 shrink-0 text-primary" strokeWidth={2.6} />
+        <Check
+          className="motion-selection h-4 w-4 shrink-0 text-primary"
+          strokeWidth={2.6}
+        />
       ) : (
         <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       )}
@@ -2221,7 +2224,7 @@ function ColorSheetOption({
         onChange(value)
         onSelected?.()
       }}
-      className="ios-row min-h-[58px] w-full text-left transition-colors duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent/50 focus-visible:outline-none active:bg-accent/70"
+      className="ios-row min-h-[58px] w-full text-left transition-colors duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)] hover:bg-accent/50 focus-visible:outline-none active:bg-accent/70"
       aria-current={isSelected ? 'true' : undefined}
     >
       <span className="flex min-w-0 items-center gap-3">
@@ -2233,7 +2236,10 @@ function ColorSheetOption({
         <span className="truncate text-[16px] font-medium leading-6">{label}</span>
       </span>
       {isSelected ? (
-        <Check className="h-4 w-4 shrink-0 text-primary" strokeWidth={2.6} />
+        <Check
+          className="motion-selection h-4 w-4 shrink-0 text-primary"
+          strokeWidth={2.6}
+        />
       ) : (
         <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       )}

@@ -711,6 +711,29 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("music", insight.content)
         self.assertIn("atom-profile-supported", insight.source_atoms or "")
 
+    async def test_audit_profiles_preserves_profile_when_no_active_semantic_evidence_exists(self) -> None:
+        profile_store = ProfileStore()
+        profile_store.save_profile(
+            UserProfile(
+                user_id="recent-user",
+                preferences={"music": "jazz"},
+                facts={"city": "上海"},
+                interests=["jazz"],
+                impression="最近刚写入的画像",
+            )
+        )
+
+        task = DreamTask(FakeStore())
+        discrepancies = task._audit_profiles()
+
+        preserved = profile_store.get_profile("recent-user")
+        self.assertIsNotNone(preserved)
+        assert preserved is not None
+        self.assertEqual(discrepancies, 0)
+        self.assertEqual(preserved.preferences, {"music": "jazz"})
+        self.assertEqual(preserved.facts, {"city": "上海"})
+        self.assertEqual(preserved.interests, ["jazz"])
+
     async def test_monthly_cycle_persists_detailed_report_as_observable_insight(self) -> None:
         class MonthlyDreamTask(DreamTask):
             def _audit_atom_distribution(self) -> dict[str, Any]:

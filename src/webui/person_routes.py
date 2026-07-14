@@ -48,6 +48,10 @@ class PersonInfoResponse(BaseModel):
     profile_expression_patterns: Dict[str, Any] = Field(default_factory=dict)
     mood_history_count: int = 0
     last_extracted_at: Optional[float] = None
+    person_type: str = "person"
+    identity_source: str = "manual"
+    verification_status: str = "verified"
+    cardname: Optional[str] = None
 
 
 class PersonListResponse(BaseModel):
@@ -169,8 +173,11 @@ def _first_meta(profile: UserProfile, *keys: str) -> Optional[str]:
 
 
 def _profile_platform(profile: UserProfile) -> str:
-    """从画像事实中恢复平台，缺省使用 memory。"""
-    return _first_meta(profile, "platform") or _first_fact(profile, "platform", "平台", "source_platform") or "memory"
+    """直接返回身份层平台，只对老画像保留旧事实回退。"""
+    legacy_platform = _first_meta(profile, "platform") or _first_fact(profile, "platform", "平台")
+    if profile.platform == "legacy" and legacy_platform:
+        return legacy_platform
+    return profile.platform or legacy_platform or "legacy"
 
 
 def _profile_display_name(profile: UserProfile) -> str:
@@ -178,13 +185,24 @@ def _profile_display_name(profile: UserProfile) -> str:
     return (
         _first_meta(profile, "person_name", "display_name")
         or _first_fact(profile, "person_name", "display_name", "name", "username", "昵称", "姓名")
+        or profile.nickname
         or profile.user_id
     )
 
 
 def _profile_nickname(profile: UserProfile) -> Optional[str]:
     """从画像事实中恢复昵称。"""
-    return _first_meta(profile, "nickname") or _first_fact(profile, "nickname", "nick_name", "user_nickname", "群昵称")
+    return (
+        _first_meta(profile, "nickname")
+        or profile.nickname
+        or _first_fact(
+            profile,
+            "nickname",
+            "nick_name",
+            "user_nickname",
+            "群昵称",
+        )
+    )
 
 
 def _public_profile_stats(profile: UserProfile) -> Dict[str, Any]:
@@ -196,6 +214,8 @@ def _public_profile_stats(profile: UserProfile) -> Dict[str, Any]:
 
 def _group_nicknames(profile: UserProfile) -> Optional[List[Dict[str, str]]]:
     """读取 WebUI 兼容的群昵称列表。"""
+    if profile.group_nicknames:
+        return [dict(item) for item in profile.group_nicknames]
     raw = profile.facts.get("group_nick_name") or profile.facts.get("group_nicknames")
     if isinstance(raw, list):
         return raw
@@ -226,14 +246,15 @@ def _profile_search_text(person: Dict[str, Any]) -> str:
 def profile_to_person_dict(profile: UserProfile) -> Dict[str, Any]:
     """将新记忆画像转换成旧 WebUI PersonInfo 形状。"""
     meta = _profile_meta(profile)
-    is_known = meta.get("is_known", True)
+    default_known = profile.person_type == "person" and profile.verification_status == "verified"
+    is_known = default_known and bool(meta.get("is_known", True))
     name_reason = _first_meta(profile, "name_reason") or _first_fact(profile, "name_reason") or "来自新记忆系统用户画像"
     person_name = _profile_display_name(profile)
 
     return {
-        "id": _stable_int_id(profile.user_id),
+        "id": _stable_int_id(profile.profile_id),
         "is_known": bool(is_known),
-        "person_id": profile.user_id,
+        "person_id": profile.profile_id,
         "person_name": person_name,
         "name_reason": name_reason,
         "platform": _profile_platform(profile),
@@ -253,6 +274,10 @@ def profile_to_person_dict(profile: UserProfile) -> Dict[str, Any]:
         "profile_expression_patterns": dict(profile.expression_patterns or {}),
         "mood_history_count": len(profile.mood_history or []),
         "last_extracted_at": _to_timestamp(profile.last_extracted_at),
+        "person_type": profile.person_type,
+        "identity_source": profile.identity_source,
+        "verification_status": profile.verification_status,
+        "cardname": profile.cardname or None,
     }
 
 

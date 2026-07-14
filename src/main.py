@@ -4,7 +4,7 @@ from maim_message import MessageServer
 
 from src.common.remote import TelemetryHeartBeatTask
 from src.manager.async_task_manager import async_task_manager
-from src.chat.utils.statistic import OnlineTimeRecordTask, StatisticOutputTask
+from src.chat.utils.statistic import OnlineTimeRecordTask
 
 # from src.chat.utils.token_statistics import TokenStatisticsTask
 from src.chat.emoji_system.emoji_manager import get_emoji_manager
@@ -108,7 +108,8 @@ class MainSystem:
             bot_name=global_config.bot.nickname,
             docs_url="https://docs.mai-mai.org/",
             plugin_docs_url="https://docs.mai-mai.org/develop/",
-            statistics_file="riyabot_statistics.html",
+            statistics_database="data/RiyaBot.db",
+            statistics_page="/statistics",
         )
 
     async def _init_components(self):
@@ -120,9 +121,6 @@ class MainSystem:
 
         # 添加在线时间统计任务
         await async_task_manager.add_task(OnlineTimeRecordTask())
-
-        # 添加统计信息输出任务
-        await async_task_manager.add_task(StatisticOutputTask())
 
         # 添加遥测心跳任务
         await async_task_manager.add_task(TelemetryHeartBeatTask())

@@ -22,13 +22,14 @@ import {
   Hash,
   BrainCircuit,
   Activity,
+  BarChart3,
   LoaderCircle,
   MoreHorizontal,
   X,
   ChevronRight,
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
-import { Link, useMatchRoute } from '@tanstack/react-router'
+import { useState, useEffect, useRef } from 'react'
+import { Link, useMatchRoute, useRouterState } from '@tanstack/react-router'
 import { useTheme, toggleThemeWithTransition } from './use-theme'
 import { useAuthGuard } from '@/hooks/use-auth'
 import { logout } from '@/lib/fetch-with-auth'
@@ -62,6 +63,8 @@ interface MenuSection {
 
 type ThemeMode = 'light' | 'dark' | 'system'
 
+const DESKTOP_NAVIGATION_QUERY = '(min-width: 1024px)'
+
 const themeOptions: Array<{
   value: ThemeMode
   label: string
@@ -90,6 +93,7 @@ const themeOptions: Array<{
 
 const menuIconTileClasses: Record<string, string> = {
   '/': 'ios-symbol-blue',
+  '/statistics': 'ios-symbol-blue',
   '/config/bot': 'ios-symbol-purple',
   '/config/modelProvider': 'ios-symbol-green',
   '/config/model': 'ios-symbol-teal',
@@ -114,8 +118,74 @@ export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [isDesktopNavigation, setIsDesktopNavigation] = useState(
+    () => window.matchMedia(DESKTOP_NAVIGATION_QUERY).matches
+  )
+  const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null)
+  const mobileMenuCloseRef = useRef<HTMLButtonElement>(null)
   const { theme, resolvedTheme, setTheme } = useTheme()
   const matchRoute = useMatchRoute()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(DESKTOP_NAVIGATION_QUERY)
+    const handleChange = (event: MediaQueryListEvent) => setIsDesktopNavigation(event.matches)
+
+    setIsDesktopNavigation(mediaQuery.matches)
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
+  useEffect(() => {
+    if (isDesktopNavigation || !mobileMenuOpen) return
+
+    const trigger = mobileMenuTriggerRef.current
+    const focusFrame = window.requestAnimationFrame(() => mobileMenuCloseRef.current?.focus())
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMobileMenuOpen(false)
+        return
+      }
+
+      if (event.key !== 'Tab') return
+
+      const menu = document.getElementById('primary-navigation')
+      if (!menu) return
+
+      const focusableElements = Array.from(
+        menu.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute('hidden'))
+      const firstElement = focusableElements[0]
+      const lastElement = focusableElements.at(-1)
+
+      if (!firstElement || !lastElement) return
+
+      const activeElement = document.activeElement
+      if (event.shiftKey && (activeElement === firstElement || !menu.contains(activeElement))) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && (activeElement === lastElement || !menu.contains(activeElement))) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.requestAnimationFrame(() => {
+        if (!window.matchMedia(DESKTOP_NAVIGATION_QUERY).matches && trigger?.isConnected) {
+          trigger.focus()
+        }
+      })
+    }
+  }, [isDesktopNavigation, mobileMenuOpen])
 
   // 搜索快捷键监听（Cmd/Ctrl + K）
   useEffect(() => {
@@ -153,7 +223,10 @@ export function Layout({ children }: LayoutProps) {
   const menuSections: MenuSection[] = [
     {
       title: '概览',
-      items: [{ icon: Home, label: '首页', path: '/' }],
+      items: [
+        { icon: Home, label: '首页', path: '/' },
+        { icon: BarChart3, label: '统计数据', path: '/statistics' },
+      ],
     },
     {
       title: '配置编辑',
@@ -214,8 +287,15 @@ export function Layout({ children }: LayoutProps) {
       <div className="ios-app-shell flex h-screen overflow-hidden">
         {/* Sidebar */}
         <aside
+          id="primary-navigation"
+          data-mobile-state={mobileMenuOpen ? 'open' : 'closed'}
+          role={isDesktopNavigation ? undefined : 'dialog'}
+          aria-label={isDesktopNavigation ? undefined : '主导航菜单'}
+          aria-modal={isDesktopNavigation ? undefined : true}
+          aria-hidden={!isDesktopNavigation && !mobileMenuOpen}
+          inert={!isDesktopNavigation && !mobileMenuOpen}
           className={cn(
-            'fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] max-w-[22rem] flex-col overflow-hidden rounded-r-[28px] border-r border-white/70 bg-white/[0.9] shadow-[18px_0_48px_rgba(31,41,55,0.14)] backdrop-blur-2xl transition-all duration-[520ms] ease-[cubic-bezier(0.2,0,0,1)] dark:border-white/10 dark:bg-zinc-900/[0.78] dark:shadow-[18px_0_54px_rgba(0,0,0,0.38)] lg:relative lg:z-0 lg:w-auto lg:max-w-none lg:rounded-none lg:border-black/[0.035] lg:bg-white/[0.58] lg:shadow-none lg:backdrop-blur-2xl dark:lg:border-white/10 dark:lg:bg-white/[0.055]',
+            'motion-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(86vw,22rem)] max-w-[22rem] flex-col overflow-hidden rounded-r-[28px] border-r border-white/70 bg-white/[0.9] shadow-[18px_0_48px_rgba(31,41,55,0.14)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/[0.78] dark:shadow-[18px_0_54px_rgba(0,0,0,0.38)] lg:relative lg:z-0 lg:w-auto lg:max-w-none lg:rounded-none lg:border-black/[0.035] lg:bg-white/[0.58] lg:shadow-none lg:backdrop-blur-2xl dark:lg:border-white/10 dark:lg:bg-white/[0.055]',
             sidebarOpen ? 'lg:w-64' : 'lg:w-16',
             mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
           )}
@@ -224,7 +304,7 @@ export function Layout({ children }: LayoutProps) {
           <div className="flex min-h-[5rem] items-center justify-between border-b border-black/[0.035] bg-white/[0.48] px-6 pb-3 pt-[max(1rem,env(safe-area-inset-top))] dark:border-white/10 dark:bg-white/[0.035] lg:h-16 lg:min-h-0 lg:bg-transparent lg:px-4 lg:py-0">
             <div
               className={cn(
-                'relative flex min-w-0 flex-1 items-center justify-start overflow-hidden pr-4 transition-all duration-[420ms] ease-[cubic-bezier(0.2,0,0,1)] lg:justify-center lg:pr-0',
+                'relative flex min-w-0 flex-1 items-center justify-start overflow-hidden pr-4 transition-all duration-[var(--motion-duration-standard)] ease-[var(--motion-ease-standard)] lg:justify-center lg:pr-0',
                 // 移动端始终完整显示,桌面端根据 sidebarOpen 切换
                 'lg:flex-1',
                 !sidebarOpen && 'lg:w-8 lg:flex-none'
@@ -247,6 +327,7 @@ export function Layout({ children }: LayoutProps) {
               )}
             </div>
             <button
+              ref={mobileMenuCloseRef}
               type="button"
               onClick={() => setMobileMenuOpen(false)}
               className="ios-touch flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.56)_inset] hover:bg-muted dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset] lg:hidden"
@@ -276,7 +357,7 @@ export function Layout({ children }: LayoutProps) {
                         !sidebarOpen && 'lg:invisible lg:mb-1'
                       )}
                     >
-                      <h3 className="whitespace-nowrap text-[12px] font-medium leading-5 text-muted-foreground/72 lg:text-xs lg:font-semibold lg:uppercase lg:text-muted-foreground/70">
+                      <h3 className="text-muted-foreground/72 whitespace-nowrap text-[12px] font-medium leading-5 lg:text-xs lg:font-semibold lg:uppercase lg:text-muted-foreground/70">
                         {section.title}
                       </h3>
                     </div>
@@ -297,20 +378,15 @@ export function Layout({ children }: LayoutProps) {
                           <>
                             {/* 左侧高亮条 */}
                             {isActive && (
-                              <div className="absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-primary/95 transition-opacity duration-[360ms] lg:left-2 lg:h-5" />
+                              <div className="motion-selection absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-primary/95 lg:left-2 lg:h-5" />
                             )}
                             <div
                               className={cn(
-                                'flex items-center transition-all duration-[360ms] ease-[cubic-bezier(0.2,0,0,1)]',
+                                'flex items-center transition-all duration-[var(--motion-duration-standard)] ease-[var(--motion-ease-standard)]',
                                 sidebarOpen ? 'gap-3' : 'gap-3 lg:gap-0'
                               )}
                             >
-                              <span
-                                className={cn(
-                                  'ios-symbol ios-symbol-sm',
-                                  iconTileClass
-                                )}
-                              >
+                              <span className={cn('ios-symbol ios-symbol-sm', iconTileClass)}>
                                 <Icon
                                   className="h-[19px] w-[19px] flex-shrink-0"
                                   strokeWidth={2.75}
@@ -319,7 +395,7 @@ export function Layout({ children }: LayoutProps) {
                               </span>
                               <span
                                 className={cn(
-                                  'whitespace-nowrap text-[16px] font-medium leading-6 transition-all duration-[360ms] ease-[cubic-bezier(0.2,0,0,1)] lg:text-sm lg:leading-normal',
+                                  'whitespace-nowrap text-[16px] font-medium leading-6 transition-all duration-[var(--motion-duration-standard)] ease-[var(--motion-ease-standard)] lg:text-sm lg:leading-normal',
                                   isActive && 'font-semibold',
                                   sidebarOpen
                                     ? 'max-w-[200px] opacity-100'
@@ -340,7 +416,7 @@ export function Layout({ children }: LayoutProps) {
                                   to={item.path}
                                   data-tour={item.tourId}
                                   className={cn(
-                                    'group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[260ms] ease-[cubic-bezier(0.2,0,0,1)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-[14px] lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
+                                    'group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-[14px] lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
                                     'hover:bg-accent/45 hover:text-accent-foreground dark:hover:bg-white/[0.08] lg:hover:bg-white/55 lg:hover:shadow-[0_4px_14px_rgba(31,41,55,0.045)]',
                                     isActive
                                       ? 'bg-[rgb(120_120_128_/_0.12)] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.58)] dark:bg-white/[0.08] lg:bg-[rgb(120_120_128_/_0.11)] lg:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025),0_6px_18px_rgba(31,41,55,0.055)]'
@@ -373,12 +449,19 @@ export function Layout({ children }: LayoutProps) {
         </aside>
 
         {/* Mobile overlay */}
-        {mobileMenuOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[6px] lg:hidden"
-            onClick={() => setMobileMenuOpen(false)}
-          />
-        )}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="关闭导航菜单"
+          aria-hidden={!mobileMenuOpen}
+          className={cn(
+            'motion-overlay fixed inset-0 z-40 bg-black/20 lg:hidden',
+            mobileMenuOpen
+              ? 'opacity-100 backdrop-blur-[6px]'
+              : 'pointer-events-none opacity-0 backdrop-blur-0'
+          )}
+          onClick={() => setMobileMenuOpen(false)}
+        />
 
         {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -387,9 +470,12 @@ export function Layout({ children }: LayoutProps) {
             <div className="z-10 flex min-w-0 items-center gap-2 sm:gap-4">
               {/* 移动端菜单按钮 */}
               <button
+                ref={mobileMenuTriggerRef}
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="ios-touch flex h-11 w-11 items-center justify-center rounded-full bg-muted/70 text-foreground/85 hover:bg-muted lg:hidden"
                 aria-label={mobileMenuOpen ? '关闭菜单' : '打开菜单'}
+                aria-controls="primary-navigation"
+                aria-expanded={mobileMenuOpen}
               >
                 <Menu className="h-5 w-5" />
               </button>
@@ -401,7 +487,10 @@ export function Layout({ children }: LayoutProps) {
                 title={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}
               >
                 <ChevronLeft
-                  className={cn('h-5 w-5 transition-transform', !sidebarOpen && 'rotate-180')}
+                  className={cn(
+                    'h-5 w-5 transition-transform duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)]',
+                    !sidebarOpen && 'rotate-180'
+                  )}
                 />
               </button>
             </div>
@@ -471,7 +560,9 @@ export function Layout({ children }: LayoutProps) {
                           key={option.value}
                           type="button"
                           className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0"
-                          onClick={(event) => toggleThemeWithTransition(option.value, setTheme, event)}
+                          onClick={(event) =>
+                            toggleThemeWithTransition(option.value, setTheme, event)
+                          }
                         >
                           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-secondary text-muted-foreground">
                             <OptionIcon className="h-[18px] w-[18px]" />
@@ -484,7 +575,9 @@ export function Layout({ children }: LayoutProps) {
                               {option.description}
                             </span>
                           </span>
-                          {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                          {selected && (
+                            <Check className="motion-selection h-4 w-4 shrink-0 text-primary" />
+                          )}
                         </button>
                       )
                     })}
@@ -560,7 +653,9 @@ export function Layout({ children }: LayoutProps) {
                                 {option.label}
                               </span>
                             </span>
-                            {selected && <Check className="h-4 w-4 text-primary" />}
+                            {selected && (
+                              <Check className="motion-selection h-4 w-4 text-primary" />
+                            )}
                           </button>
                         )
                       })}
@@ -595,7 +690,11 @@ export function Layout({ children }: LayoutProps) {
           </header>
 
           {/* Page content */}
-          <main className="flex-1 overflow-hidden bg-background">{children}</main>
+          <main className="flex-1 overflow-hidden bg-background">
+            <div key={pathname} className="motion-page h-full min-w-0">
+              {children}
+            </div>
+          </main>
         </div>
       </div>
     </TooltipProvider>

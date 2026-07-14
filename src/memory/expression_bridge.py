@@ -114,13 +114,13 @@ class ExpressionBridge:
 
     # ── 公开接口 ─────────────────────────────────────────────────
 
-    def update_expression_profile(self, user_id: str, messages: list[str]) -> None:
+    def update_expression_profile(self, subject, messages: list[str]) -> None:
         """分析用户最近消息，更新表达画像
 
         fire-and-forget 调用，异常仅记日志不抛出。
 
         Args:
-            user_id: 用户 ID
+            subject: PersonIdentity 或兼容历史数据的画像 ID
             messages: 最近消息文本列表
         """
         if not messages:
@@ -154,14 +154,18 @@ class ExpressionBridge:
             )
 
             # Step 5: 通过 ProfileStore 持久化
-            profile = self._profile_store.get_profile(user_id)
+            from src.memory.user_profile import PersonIdentity
+
+            profile = (
+                self._profile_store.get_or_create_profile(subject)
+                if isinstance(subject, PersonIdentity)
+                else self._profile_store.get_profile(subject)
+            )
             if profile is None:
-                logger.debug(f"用户 {user_id} 尚无画像，跳过表达学习")
+                logger.debug(f"用户 {subject} 尚无画像，跳过表达学习")
                 return
 
-            # 存储到 stats 字典（使用 _ 前缀避免与业务 key 冲突）
-            profile.stats["_expression_style"] = style
-            profile.stats["_expression_patterns"] = {
+            patterns = {
                 "favorite_expressions": favorite_expressions,
                 "avg_message_length": round(avg_len, 1),
                 "emoji_preferences": list(set(emoji_list))[:5],
@@ -170,20 +174,26 @@ class ExpressionBridge:
                 "analyzed_message_count": len(messages),
                 "updated_at": time.time(),
             }
+            profile.expression_style = style
+            profile.expression_patterns = patterns
+            # 保留旧存储形状，供旧版虚拟 Store 和历史记录迁移。
+            if isinstance(getattr(profile, "stats", None), dict):
+                profile.stats["_expression_style"] = style
+                profile.stats["_expression_patterns"] = patterns
 
             self._profile_store.save_profile(profile)
 
             logger.debug(
                 "表达画像已更新",
-                user_id=user_id,
+                profile_id=getattr(profile, "profile_id", profile.user_id),
                 style=style,
                 expressions=len(favorite_expressions),
             )
 
         except Exception as e:
-            logger.warning(f"更新表达画像失败 ({user_id}): {e}")
+            logger.warning(f"更新表达画像失败 ({subject}): {e}")
 
-    def get_expression_context(self, user_id: str, max_chars: int = 200) -> str:
+    def get_expression_context(self, user_id: str, max_chars: int = 200, platform: str | None = None) -> str:
         """获取表达画像的 LLM 上下文文本
 
         Args:
@@ -193,12 +203,26 @@ class ExpressionBridge:
         Returns:
             格式化文本，最大 max_chars 字符
         """
-        profile = self._profile_store.get_profile(user_id)
+        profile = (
+            self._profile_store.get_profile(user_id, platform=platform)
+            if platform
+            else self._profile_store.get_profile(user_id)
+        )
         if profile is None:
             return ""
+        if (
+            getattr(profile, "person_type", "person") != "person"
+            or getattr(profile, "verification_status", "verified") != "verified"
+        ):
+            return ""
 
-        patterns = profile.stats.get("_expression_patterns", {})
-        style = profile.stats.get("_expression_style", "")
+        stats = getattr(profile, "stats", {})
+        if not isinstance(stats, dict):
+            stats = {}
+        patterns = getattr(profile, "expression_patterns", None) or stats.get("_expression_patterns", {})
+        if not isinstance(patterns, dict):
+            patterns = {}
+        style = getattr(profile, "expression_style", None) or stats.get("_expression_style", "")
 
         if not patterns and not style:
             return ""
@@ -207,11 +231,11 @@ class ExpressionBridge:
         if style:
             parts.append(f"表达风格: {style}")
 
-        fav = patterns.get("favorite_expressions", [])
+        fav = [str(item) for item in patterns.get("favorite_expressions", []) if str(item).strip()]
         if fav:
             parts.append(f"高频词: {'、'.join(fav[:4])}")
 
-        emoji = patterns.get("emoji_preferences", [])
+        emoji = [str(item) for item in patterns.get("emoji_preferences", []) if str(item).strip()]
         if emoji:
             parts.append(f"常用表情: {' '.join(emoji[:3])}")
 

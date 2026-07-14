@@ -65,6 +65,10 @@ class MessageArchiverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
             sender_id="user-1",
             text="群聊内容",
             created_at=datetime.datetime.fromtimestamp(10.0),
+            user_platform="qq",
+            user_nickname="小明",
+            user_cardname="群名片",
+            group_info=SimpleNamespace(group_id="group-1", group_name="测试群"),
         )
         private_message = SimpleNamespace(
             stream_id="private-1",
@@ -104,6 +108,10 @@ class MessageArchiverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
         self.assertEqual(fields["stream_id"], "group-1")
         self.assertEqual(fields["message_id"], "msg-1")
         self.assertEqual(fields["timestamp"], 10.0)
+        self.assertEqual(fields["platform"], "qq")
+        self.assertEqual(fields["nickname"], "小明")
+        self.assertEqual(fields["cardname"], "群名片")
+        self.assertEqual(fields["group_name"], "测试群")
         self.assertEqual(group_id, duplicate_group_id)
         self.assertNotEqual(group_id, private_id)
         self.assertEqual(len(batch_ids), 2)
@@ -113,6 +121,11 @@ class MessageArchiverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
         self.assertEqual(serialized["dream_status"], "triaged")
         self.assertEqual(serialized["dream_route"], "high")
         self.assertEqual(serialized["dream_significance"], 0.9)
+        self.assertEqual(serialized["platform"], "qq")
+        self.assertEqual(serialized["nickname"], "小明")
+        self.assertEqual(serialized["cardname"], "群名片")
+        self.assertEqual(serialized["group_id"], "group-1")
+        self.assertEqual(serialized["group_name"], "测试群")
 
     def test_insert_record_handles_integrity_race_or_reraises_when_record_is_still_missing(self) -> None:
         archiver = MessageArchiver()

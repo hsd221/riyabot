@@ -8,6 +8,8 @@
 export interface GroupNickName {
   group_id: string
   group_nick_name: string
+  platform?: string
+  group_name?: string
 }
 
 /**
@@ -36,6 +38,10 @@ export interface PersonInfo {
   profile_expression_patterns: Record<string, unknown>
   mood_history_count: number
   last_extracted_at: number | null
+  person_type: string
+  identity_source: string
+  verification_status: string
+  cardname: string | null
 }
 
 /**

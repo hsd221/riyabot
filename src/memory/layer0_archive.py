@@ -35,6 +35,12 @@ _FIELD_CANDIDATES: dict[str, list[str]] = {
     "timestamp": ["timestamp", "time", "created_at"],
 }
 
+_OPTIONAL_FIELD_CANDIDATES: dict[str, list[str]] = {
+    "platform": ["user_platform", "platform"],
+    "nickname": ["user_nickname", "nickname", "speaker"],
+    "cardname": ["user_cardname", "cardname"],
+}
+
 
 def _get_attr(obj: Any, candidates: list[str]) -> Any:
     """从对象中尝试获取属性，返回第一个非 None 的值。
@@ -89,6 +95,11 @@ def _model_to_dict(record: RawMessageArchive) -> dict[str, Any]:
         "stream_id": record.stream_id,
         "message_id": record.message_id,
         "user_id": record.user_id,
+        "platform": record.platform,
+        "nickname": record.nickname,
+        "cardname": record.cardname,
+        "group_id": record.group_id,
+        "group_name": record.group_name,
         "content": record.content,
         "timestamp": record.timestamp,
         "chat_type": record.chat_type,
@@ -132,6 +143,15 @@ class MessageArchiver:
         raw: dict[str, Any] = {}
         for field_name, candidates in _FIELD_CANDIDATES.items():
             raw[field_name] = _get_attr(message, candidates)
+
+        for field_name, candidates in _OPTIONAL_FIELD_CANDIDATES.items():
+            value = next((getattr(message, name, None) for name in candidates if getattr(message, name, None)), "")
+            raw[field_name] = str(value or "").strip()
+        raw["platform"] = raw["platform"].lower() or "legacy"
+
+        group_info = getattr(message, "group_info", None)
+        raw["group_id"] = str(getattr(group_info, "group_id", "") or "").strip()
+        raw["group_name"] = str(getattr(group_info, "group_name", "") or "").strip()
 
         raw["timestamp"] = _resolve_timestamp(raw["timestamp"])
         raw["chat_type"] = chat_type

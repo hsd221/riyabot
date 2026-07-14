@@ -263,6 +263,7 @@ async def build_memory_retrieval_prompt(
     unknown_words: Optional[list[str]] = None,
     question: Optional[str] = None,
     user_id: Optional[str] = None,
+    platform: Optional[str] = None,
     graph_store: Optional[Any] = None,
     max_atoms: int = 5,
     max_chars: int = 800,
@@ -300,6 +301,9 @@ async def build_memory_retrieval_prompt(
         resolved_user_id: Optional[str] = user_id
         if resolved_user_id is None and hasattr(chat_stream, "user_info") and chat_stream.user_info is not None:
             resolved_user_id = getattr(chat_stream.user_info, "user_id", None)
+        resolved_platform = platform or getattr(chat_stream, "platform", "") or ""
+        if not resolved_platform and hasattr(chat_stream, "user_info") and chat_stream.user_info is not None:
+            resolved_platform = getattr(chat_stream.user_info, "platform", "") or ""
 
         use_planner_question = True
         try:
@@ -313,8 +317,44 @@ async def build_memory_retrieval_prompt(
         effective_question = (
             provided_question if provided_question and (not question_from_planner or use_planner_question) else ""
         )
-        if not _should_run_memory_retrieval(chat_talking_prompt_short, target, unknown_words, effective_question):
-            return "", []
+        profile_text = ""
+        if resolved_user_id:
+            try:
+                from src.memory.user_profile import ProfileRetriever, ProfileStore
+
+                profile_store = ProfileStore()
+                profile_retriever = ProfileRetriever(profile_store)
+                if effective_question or think_level > 1:
+                    profile_text = profile_retriever.get_profile_context(
+                        resolved_user_id,
+                        max_chars=500,
+                        platform=resolved_platform or None,
+                    )
+                else:
+                    profile_text = profile_retriever.get_profile_summary(
+                        resolved_user_id,
+                        max_chars=220,
+                        platform=resolved_platform or None,
+                    )
+            except Exception:
+                pass
+
+        should_retrieve = _should_run_memory_retrieval(
+            chat_talking_prompt_short,
+            target,
+            unknown_words,
+            effective_question,
+        )
+        if not should_retrieve:
+            profile_only = _format_reference_block(
+                target=target,
+                sender=sender,
+                question=effective_question,
+                profile_text=profile_text,
+                memory_context="",
+                cross_scene_text="",
+            )
+            return profile_only, []
 
         if not effective_question and not _has_unknown_words(unknown_words) and allow_llm_question:
             if not unknown_words:
@@ -324,7 +364,15 @@ async def build_memory_retrieval_prompt(
                     target=target,
                 )
             if not effective_question and not unknown_words:
-                return "", []
+                profile_only = _format_reference_block(
+                    target=target,
+                    sender=sender,
+                    question=effective_question,
+                    profile_text=profile_text,
+                    memory_context="",
+                    cross_scene_text="",
+                )
+                return profile_only, []
 
         from src.memory import get_memory_store
         from src.memory.layer3_retrieval import MemoryRetriever
@@ -364,24 +412,6 @@ async def build_memory_retrieval_prompt(
                     cross_scene_atoms=3,
                     query_text=query_text,
                 )
-            except Exception:
-                pass
-
-        # 尝试添加用户 profile 上下文（模块不存在时静默跳过）
-        profile_text = ""
-        should_include_profile = bool(resolved_user_id) and bool(
-            effective_question or think_level > 1 or memory_context or cross_scene_text
-        )
-        if should_include_profile:
-            try:
-                from src.memory.user_profile import ProfileRetriever, ProfileStore
-
-                profile_store = ProfileStore()
-                profile_retriever = ProfileRetriever(profile_store)
-                if effective_question or think_level > 1:
-                    profile_text = profile_retriever.get_profile_context(resolved_user_id, max_chars=500)
-                else:
-                    profile_text = profile_retriever.get_profile_summary(resolved_user_id, max_chars=220)
             except Exception:
                 pass
 

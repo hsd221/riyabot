@@ -14,6 +14,7 @@ import {
   Hash,
   BrainCircuit,
   Activity,
+  BarChart3,
   Sliders,
   MessageCircle,
   Globe,
@@ -47,6 +48,7 @@ interface SearchItem {
 
 const searchIconTileClasses: Record<string, string> = {
   '/': 'ios-symbol-blue',
+  '/statistics': 'ios-symbol-blue',
   '/config/bot': 'ios-symbol-purple',
   '/config/modelProvider': 'ios-symbol-green',
   '/config/model': 'ios-symbol-teal',
@@ -71,6 +73,13 @@ const searchItems: SearchItem[] = [
     title: '首页',
     description: '查看仪表板概览',
     path: '/',
+    category: '概览',
+  },
+  {
+    icon: BarChart3,
+    title: '统计数据',
+    description: '查看模型、模块、请求与聊天统计',
+    path: '/statistics',
     category: '概览',
   },
   {

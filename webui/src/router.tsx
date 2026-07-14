@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/router-devtools'
 import { IndexPage } from './routes/index'
+import { StatisticsPage } from './routes/statistics'
 import { SettingsPage } from './routes/settings'
 import { AuthPage } from './routes/auth'
 import { SetupPage } from './routes/setup'
@@ -80,6 +81,12 @@ const indexRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/',
   component: IndexPage,
+})
+
+const statisticsRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/statistics',
+  component: StatisticsPage,
 })
 
 // 配置路由 - 主程序配置
@@ -221,6 +228,7 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   protectedRoute.addChildren([
     indexRoute,
+    statisticsRoute,
     botConfigRoute,
     modelProviderConfigRoute,
     modelConfigRoute,

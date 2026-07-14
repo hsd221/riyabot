@@ -54,6 +54,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 maibot_statistics.html
+riyabot_statistics.html
 mongodb
 napcat
 run_dev.bat
@@ -74,6 +75,10 @@ lib/
 webui/src/lib/*
 !webui/src/lib/behavior-api.ts
 !webui/src/lib/settings-manager.ts
+!webui/src/lib/log-websocket.ts
+!webui/src/lib/plugin-api.ts
+!webui/src/lib/statistics-api.ts
+!webui/src/lib/motion.ts
 lib64/
 parts/
 sdist/

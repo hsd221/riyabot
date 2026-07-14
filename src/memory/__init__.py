@@ -42,6 +42,7 @@ from src.memory.prompt_integration import build_memory_retrieval_prompt
 from src.memory.store import MemoryStore, MemoryStoreConfig, QdrantManager, QDRANT_AVAILABLE
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
 from src.memory.user_profile import (
+    PersonIdentity,
     ProfileBuilder,
     ProfileRetriever,
     ProfileStore,
@@ -82,6 +83,7 @@ __all__ = [
     "MessageArchiver",
     "ObjectivityChecker",
     "ProfileBuilder",
+    "PersonIdentity",
     "ProfileRetriever",
     "ProfileStore",
     "Resolution",

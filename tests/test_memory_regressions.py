@@ -18,6 +18,8 @@ from src.memory.layer0_archive import MessageArchiver
 from src.memory.layer2_encoder import (
     MAX_DETAIL_TEXT_LENGTH,
     MAX_ENTITIES_PER_ATOM,
+    SOURCE_IDENTITIES_DETAIL_KEY,
+    SOURCE_MESSAGE_IDS_DETAIL_KEY,
     SOURCE_USER_IDS_DETAIL_KEY,
     BatchEncoder,
 )
@@ -255,6 +257,47 @@ class MemoryRegressionTest(unittest.IsolatedAsyncioTestCase):
         detail = {SOURCE_USER_IDS_DETAIL_KEY: ["user-1"]}
 
         self.assertEqual(EncodingPipeline._profile_target_entities(atom, detail), ["user-1"])
+
+        identity_detail = {
+            SOURCE_IDENTITIES_DETAIL_KEY: [
+                {
+                    "platform": "qq",
+                    "user_id": "user-1",
+                    "nickname": "小明",
+                    "cardname": "群名片",
+                    "group_id": "g1",
+                    "group_name": "测试群",
+                }
+            ],
+            "subject_user_id": "user-1",
+        }
+        targets = EncodingPipeline._profile_target_identities(atom, identity_detail)
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0].profile_id, "qq:user-1")
+        self.assertEqual(targets[0].nickname, "小明")
+
+    def test_encoder_persists_only_a_unique_source_identity_as_semantic_subject(self) -> None:
+        pipeline = EncodingPipeline.__new__(EncodingPipeline)
+        atom, semantic, _ = pipeline._build_atom(
+            content="user-1 喜欢爵士乐",
+            atom_type=AtomType.PREFERENCE,
+            detail={
+                "entities": ["user-1", "爵士乐"],
+                SOURCE_IDENTITIES_DETAIL_KEY: [{"platform": "qq", "user_id": "user-1", "nickname": "小明"}],
+                SOURCE_MESSAGE_IDS_DETAIL_KEY: ["msg-1", "msg-2"],
+                "attr_name": "爵士乐",
+                "attr_value": "喜欢",
+            },
+            source_scene="group_chat",
+            source_id="g1",
+        )
+
+        self.assertEqual(atom.semantic_detail, semantic)
+        self.assertIsNotNone(semantic)
+        assert semantic is not None
+        self.assertEqual(semantic.subject_key, "qq:user-1")
+        self.assertEqual(semantic.evidence_list, ["msg-1", "msg-2"])
+        self.assertEqual(semantic.evidence_counter, 2)
 
     def test_llm_detail_fields_are_capped_and_scalar_lists_are_rejected(self) -> None:
         encoder = BatchEncoder(store=FakeStore())  # type: ignore[arg-type]

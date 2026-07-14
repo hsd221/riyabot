@@ -4,11 +4,11 @@ from unittest.mock import patch
 
 from peewee import SqliteDatabase
 
-from src.common.database.database_model import BaseModel, LLMUsage, Messages, OnlineTime
+from src.common.database.database_model import ActionRecords, BaseModel, LLMUsage, Messages, OnlineTime
 from src.webui import statistics_routes
 
 
-TEST_MODELS = [LLMUsage, OnlineTime, Messages]
+TEST_MODELS = [LLMUsage, OnlineTime, Messages, ActionRecords]
 
 
 class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +81,20 @@ class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
             display_message="hello",
         )
 
+    def create_reply_action(self, action_id: str, timestamp: datetime.datetime, *, done: bool = True) -> ActionRecords:
+        return ActionRecords.create(
+            action_id=action_id,
+            time=timestamp.timestamp(),
+            action_name="reply",
+            action_data="{}",
+            action_done=done,
+            action_build_into_prompt=False,
+            action_prompt_display="reply",
+            chat_id="stream-1",
+            chat_info_stream_id="stream-1",
+            chat_info_platform="qq",
+        )
+
     def seed_statistics_data(self) -> None:
         self.create_usage(
             self.now - datetime.timedelta(hours=1, minutes=20),
@@ -90,6 +104,7 @@ class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
             completion_tokens=5,
             cost=0.2,
             time_cost=0.5,
+            request_type="replyer.main",
         )
         self.create_usage(
             self.now - datetime.timedelta(minutes=25),
@@ -125,6 +140,9 @@ class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.create_message("m1", self.now - datetime.timedelta(hours=1), reply_to=None)
         self.create_message("m2", self.now - datetime.timedelta(minutes=20), reply_to="m1")
         self.create_message("old", self.now - datetime.timedelta(hours=5), reply_to=None)
+        self.create_reply_action("a1", self.now - datetime.timedelta(minutes=15))
+        self.create_reply_action("a2", self.now - datetime.timedelta(minutes=10), done=False)
+        self.create_reply_action("old-action", self.now - datetime.timedelta(hours=5))
 
     async def test_summary_statistics_aggregate_usage_online_time_messages_and_derived_rates(self) -> None:
         self.seed_statistics_data()
@@ -141,13 +159,33 @@ class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(summary.cost_per_hour, 0.5 / 0.75)
         self.assertAlmostEqual(summary.tokens_per_hour, 22 / 0.75)
 
+    async def test_empty_database_report_returns_zero_summary_and_empty_breakdowns(self) -> None:
+        class FixedDateTime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return self.now
+
+        with patch.object(statistics_routes, "datetime", FixedDateTime):
+            report = await statistics_routes.get_statistics_report(hours=2, recent_limit=10, _auth=True)
+
+        self.assertEqual(report.summary.total_requests, 0)
+        self.assertEqual(report.summary.total_messages, 0)
+        self.assertEqual(report.summary.total_replies, 0)
+        self.assertEqual(report.model_stats, [])
+        self.assertEqual(report.module_stats, [])
+        self.assertEqual(report.request_type_stats, [])
+        self.assertEqual(report.chat_stats, [])
+        self.assertEqual(report.recent_activity, [])
+        self.assertEqual(report.time_series_granularity, "hour")
+        self.assertGreaterEqual(len(report.time_series), 3)
+
     async def test_model_time_series_and_recent_activity_statistics_use_database_ordering(self) -> None:
         self.seed_statistics_data()
 
-        model_stats = await statistics_routes._get_model_statistics(self.start)
+        model_stats = await statistics_routes._get_model_statistics(self.start, self.now)
         hourly = await statistics_routes._get_hourly_statistics(self.start, self.now)
         daily = await statistics_routes._get_daily_statistics(self.now - datetime.timedelta(days=1), self.now)
-        recent = await statistics_routes._get_recent_activity(limit=2)
+        recent = await statistics_routes._get_recent_activity(self.start, self.now, limit=2)
 
         stats_by_name = {item.model_name: item for item in model_stats}
         self.assertEqual(stats_by_name["replyer"].request_count, 1)
@@ -169,6 +207,50 @@ class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recent[0]["request_type"], "embedding")
         self.assertEqual(recent[0]["tokens"], 7)
 
+    async def test_report_statistics_include_database_breakdowns_and_chat_counts(self) -> None:
+        self.seed_statistics_data()
+
+        module_stats = await statistics_routes._get_llm_breakdown_statistics(
+            self.start,
+            self.now,
+            group_by="module",
+        )
+        request_type_stats = await statistics_routes._get_llm_breakdown_statistics(
+            self.start,
+            self.now,
+            group_by="request_type",
+        )
+        chat_stats = await statistics_routes._get_chat_statistics(self.start, self.now, limit=10)
+
+        self.assertEqual({item.name for item in module_stats}, {"replyer", "embedding"})
+        replyer = next(item for item in module_stats if item.name == "replyer")
+        self.assertEqual(replyer.request_count, 1)
+        self.assertEqual(replyer.prompt_tokens, 10)
+        self.assertEqual(replyer.completion_tokens, 5)
+        self.assertAlmostEqual(replyer.total_cost, 0.2)
+        self.assertEqual({item.name for item in request_type_stats}, {"replyer.main", "embedding"})
+        self.assertEqual(len(chat_stats), 1)
+        self.assertEqual(chat_stats[0].chat_id, "ggroup-1")
+        self.assertEqual(chat_stats[0].chat_name, "群")
+        self.assertEqual(chat_stats[0].message_count, 2)
+
+    async def test_report_route_filters_recent_activity_to_selected_period(self) -> None:
+        self.seed_statistics_data()
+
+        class FixedDateTime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return self.now
+
+        with patch.object(statistics_routes, "datetime", FixedDateTime):
+            report = await statistics_routes.get_statistics_report(hours=2, recent_limit=10, _auth=True)
+
+        self.assertEqual(report.period.hours, 2)
+        self.assertEqual(report.time_series_granularity, "hour")
+        self.assertEqual({item.name for item in report.module_stats}, {"replyer", "embedding"})
+        self.assertEqual([item.model for item in report.recent_activity], ["gpt-3.5", "replyer"])
+        self.assertEqual(report.summary.total_replies, 1)
+
     async def test_route_wrappers_use_current_time_and_return_dashboard_summary_and_model_stats(self) -> None:
         self.seed_statistics_data()
 
@@ -185,7 +267,7 @@ class WebUIStatisticsRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary.total_requests, 2)
         self.assertEqual({item.model_name for item in model_stats}, {"replyer", "gpt-3.5"})
         self.assertEqual(dashboard.summary.total_messages, 2)
-        self.assertEqual(len(dashboard.recent_activity), 3)
+        self.assertEqual(len(dashboard.recent_activity), 2)
         self.assertGreaterEqual(len(dashboard.hourly_data), 3)
         self.assertGreaterEqual(len(dashboard.daily_data), 7)
 

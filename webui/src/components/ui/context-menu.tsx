@@ -16,10 +16,10 @@ const ContextMenuSub = ContextMenuPrimitive.Sub
 const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup
 
 const contextMenuContentClass =
-  'z-50 origin-[--radix-context-menu-content-transform-origin] overflow-hidden rounded-[18px] border border-black/[0.035] bg-white/[0.88] p-1.5 text-card-foreground shadow-[0_1px_0_rgba(255,255,255,0.74)_inset,0_18px_48px_rgba(31,41,55,0.14),0_4px_12px_rgba(0,0,0,0.055)] backdrop-blur-2xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:border-white/10 dark:bg-zinc-950/[0.88] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_48px_rgba(0,0,0,0.42)]'
+  'motion-layer z-50 origin-[--radix-context-menu-content-transform-origin] overflow-hidden rounded-[18px] border border-black/[0.035] bg-white/[0.88] p-1.5 text-card-foreground shadow-[0_1px_0_rgba(255,255,255,0.74)_inset,0_18px_48px_rgba(31,41,55,0.14),0_4px_12px_rgba(0,0,0,0.055)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-950/[0.88] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_18px_48px_rgba(0,0,0,0.42)]'
 
 const contextMenuItemClass =
-  'relative flex min-h-11 cursor-default select-none items-center rounded-[13px] px-3 py-2.5 text-[15px] leading-5 outline-none transition-[background-color,transform] duration-[220ms] ease-[cubic-bezier(0.2,0,0,1)] focus:bg-[rgb(120_120_128_/_0.12)] focus:text-accent-foreground active:scale-[0.99] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 dark:focus:bg-white/[0.08]'
+  'relative flex min-h-11 cursor-default select-none items-center rounded-[13px] px-3 py-2.5 text-[15px] leading-5 outline-none transition-[background-color,transform] duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)] focus:bg-[rgb(120_120_128_/_0.12)] focus:text-accent-foreground active:scale-[0.99] data-[disabled]:pointer-events-none data-[disabled]:opacity-50 dark:focus:bg-white/[0.08]'
 
 const ContextMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,

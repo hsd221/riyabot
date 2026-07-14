@@ -114,6 +114,37 @@ class PersonRouteHelpersTest(unittest.TestCase):
         self.assertEqual(person["profile_expression_style"], "短句")
         self.assertIsInstance(person["know_since"], float)
 
+    def test_profile_conversion_exposes_platform_identity_and_verification_fields(self) -> None:
+        profile = UserProfile(
+            user_id="42",
+            platform="qq",
+            nickname="QQ 昵称",
+            cardname="群名片",
+            group_nicknames=[
+                {
+                    "platform": "qq",
+                    "group_id": "g1",
+                    "group_name": "测试群",
+                    "group_nick_name": "群名片",
+                }
+            ],
+            person_type="person",
+            identity_source="message_sender",
+            verification_status="verified",
+        )
+
+        person = person_routes.profile_to_person_dict(profile)
+
+        self.assertEqual(person["person_id"], "qq:42")
+        self.assertEqual(person["id"], person_routes._stable_int_id("qq:42"))
+        self.assertEqual(person["platform"], "qq")
+        self.assertEqual(person["nickname"], "QQ 昵称")
+        self.assertEqual(person["cardname"], "群名片")
+        self.assertEqual(person["person_type"], "person")
+        self.assertEqual(person["identity_source"], "message_sender")
+        self.assertEqual(person["verification_status"], "verified")
+        self.assertTrue(person["is_known"])
+
     def test_parse_and_timestamp_helpers_handle_invalid_values(self) -> None:
         self.assertEqual(person_routes.parse_group_nick_name('[{"group_id": "1"}]'), [{"group_id": "1"}])
         self.assertIsNone(person_routes.parse_group_nick_name("not json"))

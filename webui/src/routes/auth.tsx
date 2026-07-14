@@ -195,7 +195,7 @@ export function AuthPage() {
                       {option.description}
                     </span>
                   </span>
-                  {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                  {selected && <Check className="motion-selection h-4 w-4 shrink-0 text-primary" />}
                 </button>
               )
             })}

@@ -38,8 +38,8 @@
 
 detail 规则：
 - episodic：{{"participants":["用户ID"], "emotion_tags":["情绪标签"], "sensory_tags":["emotional:joy"], "temporal_context":"明确时间线索或空字符串"}}
-- factual：{{"attr_category":"interest|personality|habit|skill", "attr_name":"属性名", "attr_value":"属性值"}}
+- factual：{{"subject_user_id":"属性所属说话人的稳定 user_id", "attr_category":"interest|personality|habit|skill", "attr_name":"属性名", "attr_value":"属性值"}}
 - relational：{{}}，关系写在 content 中。
-- preference：{{"attr_category":"preference", "attr_name":"偏好对象", "attr_value":"喜欢|不喜欢|中立"}}
+- preference：{{"subject_user_id":"偏好所属说话人的稳定 user_id", "attr_category":"preference", "attr_name":"偏好对象", "attr_value":"喜欢|不喜欢|中立"}}
 
 没有任何充分、可复用的记忆时只输出 []。

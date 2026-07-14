@@ -320,11 +320,12 @@ export function PluginsPage() {
   // 统一管理 WebSocket 和数据加载
   useEffect(() => {
     let ws: WebSocket | null = null
+    let disconnectWs: (() => void) | null = null
     let isUnmounted = false
 
     const init = async () => {
       // 1. 先连接 WebSocket
-      ws = connectPluginProgressWebSocket(
+      const progressConnection = connectPluginProgressWebSocket(
         (progress) => {
           if (isUnmounted) return
 
@@ -353,6 +354,8 @@ export function PluginsPage() {
           }
         }
       )
+      ws = progressConnection.socket
+      disconnectWs = progressConnection.disconnect
 
       // 2. 等待 WebSocket 连接建立
       await new Promise<void>((resolve) => {
@@ -362,7 +365,9 @@ export function PluginsPage() {
         }
 
         const checkConnection = () => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
+          if (isUnmounted) {
+            resolve()
+          } else if (ws && ws.readyState === WebSocket.OPEN) {
             resolve()
           } else if (ws && ws.readyState === WebSocket.CLOSED) {
             resolve()
@@ -478,9 +483,7 @@ export function PluginsPage() {
 
     return () => {
       isUnmounted = true
-      if (ws) {
-        ws.close()
-      }
+      disconnectWs?.()
     }
   }, [toast])
 

@@ -47,6 +47,22 @@ def make_stats() -> dict:
 
 
 class StatisticFormattingTest(unittest.TestCase):
+    def test_statistics_task_outputs_console_without_generating_html(self) -> None:
+        task = make_task()
+        collected = {"last_hour": make_stats()}
+
+        with (
+            patch.object(task, "_collect_all_statistics", return_value=collected),
+            patch.object(task, "_statistic_console_output") as console_output,
+            patch.object(task, "_generate_html_report") as html_output,
+        ):
+            import asyncio
+
+            asyncio.run(task.run())
+
+        console_output.assert_called_once()
+        html_output.assert_not_called()
+
     def test_online_time_large_number_and_stat_formatters_cover_non_empty_and_empty_paths(self) -> None:
         self.assertEqual(statistic._format_online_time(59), "0分钟59秒")
         self.assertEqual(statistic._format_online_time(3661), "1小时1分钟1秒")

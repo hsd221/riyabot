@@ -939,19 +939,42 @@ class MemoryWriter:
 
     async def _write_semantic_detail(self, atom_id: str, detail: SemanticDetail) -> None:
         """写入语义记忆扩展详情"""
-        SemanticDetailModel.get_or_create(
+        values = {
+            "atom": atom_id,
+            "attr_category": detail.attr_category,
+            "attr_name": detail.attr_name,
+            "attr_value": detail.attr_value,
+            "subject_key": detail.subject_key or None,
+            "evidence_list": (json.dumps(detail.evidence_list, ensure_ascii=False) if detail.evidence_list else None),
+            "evidence_counter": max(1, detail.evidence_counter),
+        }
+        row, created = SemanticDetailModel.get_or_create(
             id=atom_id,
-            defaults={
-                "atom": atom_id,
-                "attr_category": detail.attr_category,
-                "attr_name": detail.attr_name,
-                "attr_value": detail.attr_value,
-                "evidence_list": (
-                    json.dumps(detail.evidence_list, ensure_ascii=False) if detail.evidence_list else None
-                ),
-                "evidence_counter": detail.evidence_counter,
-            },
+            defaults=values,
         )
+        if created:
+            return
+
+        updates: dict[str, Any] = {}
+        if not row.subject_key and detail.subject_key:
+            updates["subject_key"] = detail.subject_key
+        existing_evidence: list[str] = []
+        if row.evidence_list:
+            try:
+                parsed_evidence = json.loads(row.evidence_list)
+                if isinstance(parsed_evidence, list):
+                    existing_evidence = [str(item) for item in parsed_evidence if str(item).strip()]
+            except (TypeError, json.JSONDecodeError):
+                pass
+        incoming_evidence = [str(item) for item in detail.evidence_list if str(item).strip()]
+        merged_evidence = list(dict.fromkeys([*existing_evidence, *incoming_evidence]))
+        desired_counter = max(1, int(row.evidence_counter or 0), detail.evidence_counter, len(merged_evidence))
+        if int(row.evidence_counter or 0) < desired_counter:
+            updates["evidence_counter"] = desired_counter
+        if merged_evidence != existing_evidence:
+            updates["evidence_list"] = json.dumps(merged_evidence, ensure_ascii=False)
+        if updates:
+            SemanticDetailModel.update(**updates).where(SemanticDetailModel.id == atom_id).execute()
 
 
 # ---------------------------------------------------------------------------

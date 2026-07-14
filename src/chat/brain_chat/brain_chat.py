@@ -583,6 +583,9 @@ class BrainChatting:
                             timestamp=msg.time,
                             stream_type="private_chat",
                             message_id=msg.message_id,
+                            platform=msg.user_platform,
+                            nickname=msg.user_nickname,
+                            cardname=msg.user_cardname or "",
                         )
                     except Exception:
                         continue
@@ -624,17 +627,25 @@ class BrainChatting:
         # ── 表达学习桥接（异步更新用户表达画像）──
         try:
             from src.memory.expression_bridge import ExpressionBridge
-            from src.memory.user_profile import ProfileStore
+            from src.memory.user_profile import PersonIdentity, ProfileStore
 
             _expr_bridge = ExpressionBridge(ProfileStore())
-            _user_msgs: dict[str, list[str]] = {}
+            _user_msgs: dict[str, tuple[PersonIdentity, list[str]]] = {}
             for _msg in messages:
                 _uid = _msg.user_id
                 _txt = _msg.processed_plain_text or ""
                 if _uid and _txt.strip():
-                    _user_msgs.setdefault(_uid, []).append(_txt)
-            for _uid, _txts in _user_msgs.items():
-                _expr_bridge.update_expression_profile(_uid, _txts)
+                    _identity = PersonIdentity(
+                        platform=_msg.user_platform or getattr(self.chat_stream, "platform", "") or "legacy",
+                        user_id=_uid,
+                        nickname=_msg.user_nickname,
+                        cardname=_msg.user_cardname or "",
+                    )
+                    _stored_identity, _txts = _user_msgs.get(_identity.profile_id, (_identity, []))
+                    _txts.append(_txt)
+                    _user_msgs[_identity.profile_id] = (_stored_identity.merged_with(_identity), _txts)
+            for _identity, _txts in _user_msgs.values():
+                _expr_bridge.update_expression_profile(_identity, _txts)
         except Exception:
             pass
 
