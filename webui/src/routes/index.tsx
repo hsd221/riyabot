@@ -177,9 +177,8 @@ export function IndexPage() {
   // 获取机器人状态
   const fetchBotStatus = useCallback(async () => {
     try {
-      const token = localStorage.getItem('access-token')
       const response = await axios.get('/api/webui/system/status', {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       })
       setBotStatus(response.data)
     } catch (error) {
@@ -194,12 +193,11 @@ export function IndexPage() {
 
     try {
       setRestarting(true)
-      const token = localStorage.getItem('access-token')
       await axios.post(
         '/api/webui/system/restart',
         {},
         {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         }
       )
       toast({
@@ -224,9 +222,8 @@ export function IndexPage() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      const token = localStorage.getItem('access-token')
       const response = await axios.get(`/api/webui/statistics/dashboard?hours=${timeRange}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       })
       setDashboardData(response.data)
       setLoading(false)
@@ -753,7 +750,6 @@ export function IndexPage() {
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
               </Link>
             </div>
-
           </div>
 
           {/* 机器人状态和快捷入口 */}
@@ -850,7 +846,6 @@ export function IndexPage() {
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
               </Link>
             </div>
-
           </div>
 
           {/* 核心指标 */}

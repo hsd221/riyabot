@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   Sparkles,
@@ -14,6 +14,7 @@ import {
   Loader2,
   ShieldCheck,
   Server,
+  LockKeyhole,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -55,6 +56,7 @@ import {
   PersonalityForm,
   EmojiForm,
   OtherBasicForm,
+  PasswordSetupForm,
 } from './setup/StepForms'
 import {
   loadAgreementStatus,
@@ -68,8 +70,11 @@ import {
   saveOtherBasicConfig,
   confirmAgreement,
   completeSetup,
+  setupInitialPassword,
 } from './setup/api'
 import { restartRiyaBot, getRiyaBotStatus } from '@/lib/system-api'
+import { getAuthStatus } from '@/lib/fetch-with-auth'
+import { validatePassword } from '@/lib/password-validator'
 
 export function SetupPage() {
   const navigate = useNavigate()
@@ -79,6 +84,10 @@ export function SetupPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [stepDialogOpen, setStepDialogOpen] = useState(false)
+  const [includePasswordStep, setIncludePasswordStep] = useState(false)
+  const [initialPasswordConfigured, setInitialPasswordConfigured] = useState(false)
+  const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
 
   const [agreementStatus, setAgreementStatus] = useState<AgreementStatus | null>(null)
   const [acceptedEula, setAcceptedEula] = useState(false)
@@ -122,6 +131,16 @@ export function SetupPage() {
   const [restartProgress, setRestartProgress] = useState('')
 
   const steps: SetupStep[] = [
+    ...(includePasswordStep
+      ? [
+          {
+            id: 'security',
+            title: '设置密码',
+            description: '创建 WebUI 登录密码',
+            icon: LockKeyhole,
+          },
+        ]
+      : []),
     {
       id: 'agreement',
       title: '协议确认',
@@ -163,41 +182,62 @@ export function SetupPage() {
   const progress = ((currentStep + 1) / steps.length) * 100
   const currentStepInfo = steps[currentStep]
 
-  // 加载现有配置
+  const loadProtectedConfigs = useCallback(async () => {
+    const [agreement, bot, personality, emojiConfig, other] = await Promise.all([
+      loadAgreementStatus(),
+      loadBotBasicConfig(),
+      loadPersonalityConfig(),
+      loadEmojiConfig(),
+      loadOtherBasicConfig(),
+    ])
+
+    setAgreementStatus(agreement)
+    setAcceptedEula(false)
+    setAcceptedPrivacy(false)
+    setBotBasic(bot)
+    setPersonality(personality)
+    setEmoji(emojiConfig)
+    setOtherBasic(other)
+  }, [])
+
   useEffect(() => {
-    const loadConfigs = async () => {
+    let cancelled = false
+
+    const bootstrapSetup = async () => {
+      setIsLoading(true)
       try {
-        setIsLoading(true)
+        const authStatus = await getAuthStatus()
+        if (cancelled) return
 
-        // 并行加载所有配置
-        const [agreement, bot, personality, emoji, other] = await Promise.all([
-          loadAgreementStatus(),
-          loadBotBasicConfig(),
-          loadPersonalityConfig(),
-          loadEmojiConfig(),
-          loadOtherBasicConfig(),
-        ])
+        if (!authStatus.passwordConfigured) {
+          setIncludePasswordStep(true)
+          return
+        }
 
-        setAgreementStatus(agreement)
-        setAcceptedEula(false)
-        setAcceptedPrivacy(false)
-        setBotBasic(bot)
-        setPersonality(personality)
-        setEmoji(emoji)
-        setOtherBasic(other)
+        if (!authStatus.authenticated) {
+          navigate({ to: '/auth' })
+          return
+        }
+
+        await loadProtectedConfigs()
       } catch (error) {
-        toast({
-          title: '加载配置失败',
-          description: error instanceof Error ? error.message : '无法加载现有配置，将使用默认值',
-          variant: 'destructive',
-        })
+        if (!cancelled) {
+          toast({
+            title: '加载配置失败',
+            description: error instanceof Error ? error.message : '无法加载现有配置',
+            variant: 'destructive',
+          })
+        }
       } finally {
-        setIsLoading(false)
+        if (!cancelled) setIsLoading(false)
       }
     }
 
-    loadConfigs()
-  }, [toast])
+    bootstrapSetup()
+    return () => {
+      cancelled = true
+    }
+  }, [loadProtectedConfigs, navigate, toast])
 
   // 保存当前步骤配置
   const saveCurrentStep = async () => {
@@ -206,6 +246,25 @@ export function SetupPage() {
       const step = steps[currentStep]
 
       switch (step.id) {
+        case 'security': {
+          if (!initialPasswordConfigured) {
+            const passwordValidation = validatePassword(password)
+            if (!passwordValidation.isValid) {
+              throw new Error('密码必须为 8-16 位，并同时包含英文字母和数字')
+            }
+            if (password !== passwordConfirm) {
+              throw new Error('两次输入的密码不一致')
+            }
+
+            await setupInitialPassword(password)
+            setInitialPasswordConfigured(true)
+          }
+
+          await loadProtectedConfigs()
+          setPassword('')
+          setPasswordConfirm('')
+          break
+        }
         case 'agreement':
           if (!agreementStatus) {
             throw new Error('协议状态尚未加载')
@@ -260,11 +319,16 @@ export function SetupPage() {
   }
 
   const handleNext = async () => {
-    // 保存当前步骤
+    const stepId = steps[currentStep].id
     const saved = await saveCurrentStep()
     if (!saved) return
 
-    // 进入下一步
+    if (stepId === 'security') {
+      setIncludePasswordStep(false)
+      setCurrentStep(0)
+      return
+    }
+
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1)
     }
@@ -346,8 +410,18 @@ export function SetupPage() {
 
   const handleSkip = async () => {
     try {
+      if (steps[currentStep].id === 'security') {
+        toast({
+          title: '请先设置密码',
+          description: 'WebUI 登录密码是必须完成的安全配置',
+          variant: 'destructive',
+        })
+        return
+      }
+
       if (agreementStatus?.agreement_required) {
-        setCurrentStep(0)
+        const agreementStep = steps.findIndex((step) => step.id === 'agreement')
+        setCurrentStep(Math.max(agreementStep, 0))
         toast({
           title: '请先确认协议',
           description: '协议确认完成后才可以跳过配置向导',
@@ -370,6 +444,15 @@ export function SetupPage() {
   // 渲染当前步骤的表单
   const renderStepForm = () => {
     switch (steps[currentStep].id) {
+      case 'security':
+        return (
+          <PasswordSetupForm
+            password={password}
+            passwordConfirm={passwordConfirm}
+            onPasswordChange={setPassword}
+            onPasswordConfirmChange={setPasswordConfirm}
+          />
+        )
       case 'agreement':
         return (
           <AgreementForm
@@ -708,7 +791,9 @@ export function SetupPage() {
                             <Button
                               variant="ghost"
                               className="h-12 w-12 shrink-0 gap-2 px-0 sm:w-auto sm:px-5"
-                              disabled={isSaving || isCompleting}
+                              disabled={
+                                isSaving || isCompleting || steps[currentStep].id === 'security'
+                              }
                               aria-label="跳过向导"
                               title="跳过向导"
                             >

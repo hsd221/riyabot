@@ -3,7 +3,6 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
-  Copy,
   Download,
   Eye,
   EyeOff,
@@ -24,7 +23,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { toggleThemeWithTransition, useTheme } from '@/components/use-theme'
 import { useAnimation } from '@/hooks/use-animation'
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
@@ -35,7 +34,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
-import { validateToken } from '@/lib/token-validator'
+import { validatePassword } from '@/lib/password-validator'
 import { APP_VERSION, APP_NAME } from '@/lib/version'
 import {
   getSetting,
@@ -54,7 +53,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -92,7 +90,7 @@ const SETTINGS_TABS: SettingsTabItem[] = [
   {
     value: 'security',
     label: '安全',
-    description: '访问令牌与登录状态',
+    description: '密码与登录会话',
     Icon: Shield,
     symbolClass: 'ios-symbol-green',
   },
@@ -764,9 +762,7 @@ function AppearanceTab() {
           {/* 全局动画开关 */}
           <label htmlFor="animations" className="ios-row ios-touch cursor-pointer">
             <div className="min-w-0 flex-1 space-y-0.5">
-              <span className="block text-base font-medium">
-                启用动画效果
-              </span>
+              <span className="block text-base font-medium">启用动画效果</span>
               <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
                 关闭后将禁用所有过渡动画和特效，提升性能
               </p>
@@ -781,9 +777,7 @@ function AppearanceTab() {
           {/* 波浪背景开关 */}
           <label htmlFor="waves-background" className="ios-row ios-touch cursor-pointer">
             <div className="min-w-0 flex-1 space-y-0.5">
-              <span className="block text-base font-medium">
-                登录页波浪背景
-              </span>
+              <span className="block text-base font-medium">登录页波浪背景</span>
               <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
                 关闭后登录页将使用纯色背景，适合低性能设备
               </p>
@@ -801,118 +795,135 @@ function AppearanceTab() {
 }
 
 // 安全设置标签页
+type PasswordFieldProps = {
+  id: string
+  label: string
+  value: string
+  visible: boolean
+  onChange: (value: string) => void
+  onToggleVisibility: () => void
+  autoComplete: 'current-password' | 'new-password'
+  placeholder: string
+  maxLength?: number
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  visible,
+  onChange,
+  onToggleVisibility,
+  autoComplete,
+  placeholder,
+  maxLength,
+}: PasswordFieldProps) {
+  return (
+    <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch gap-2 sm:flex-row sm:!items-center">
+      <Label htmlFor={id} className="shrink-0 text-[15px] font-normal sm:w-28">
+        {label}
+      </Label>
+      <div className="relative min-w-0 flex-1">
+        <Input
+          id={id}
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-11 rounded-[12px] bg-muted/60 pr-11 shadow-none"
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+          maxLength={maxLength}
+        />
+        <button
+          type="button"
+          className="ios-touch absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
+          onClick={onToggleVisibility}
+          aria-label={(visible ? '隐藏' : '显示') + label}
+          title={(visible ? '隐藏' : '显示') + label}
+        >
+          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// 安全设置标签页
 function SecurityTab() {
-  const navigate = useNavigate()
-  const [currentToken, setCurrentToken] = useState('')
-  const [newToken, setNewToken] = useState('')
-  const [showCurrentToken, setShowCurrentToken] = useState(false)
-  const [showNewToken, setShowNewToken] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [showTokenDialog, setShowTokenDialog] = useState(false)
-  const [generatedToken, setGeneratedToken] = useState('')
-  const [tokenCopied, setTokenCopied] = useState(false)
   const { toast } = useToast()
 
-  // 实时验证新 Token
-  const tokenValidation = useMemo(() => validateToken(newToken), [newToken])
+  const validation = validatePassword(newPassword)
+  const passwordsMatch = passwordConfirm.length > 0 && newPassword === passwordConfirm
 
-  // 复制 token 到剪贴板
-  const copyToClipboard = async (text: string) => {
-    if (!currentToken) {
+  const handleUpdatePassword = async () => {
+    if (!currentPassword) {
       toast({
-        title: '无法复制',
-        description: 'Token 存储在安全 Cookie 中，请重新生成以获取新 Token',
-        variant: 'destructive',
-      })
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      toast({
-        title: '复制成功',
-        description: 'Token 已复制到剪贴板',
-      })
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      toast({
-        title: '复制失败',
-        description: '请手动复制 Token',
-        variant: 'destructive',
-      })
-    }
-  }
-
-  // 更新 token
-  const handleUpdateToken = async () => {
-    if (!newToken.trim()) {
-      toast({
-        title: '输入错误',
-        description: '请输入新的 Token',
+        title: '请输入当前密码',
+        description: '修改密码前需要验证当前登录密码',
         variant: 'destructive',
       })
       return
     }
 
-    // 验证 Token 格式
-    if (!tokenValidation.isValid) {
-      const failedRules = tokenValidation.rules
-        .filter((rule) => !rule.passed)
-        .map((rule) => rule.label)
-        .join(', ')
-
+    if (!validation.isValid) {
       toast({
-        title: '格式错误',
-        description: `Token 不符合要求: ${failedRules}`,
+        title: '密码格式不符合要求',
+        description: '新密码必须为 8-16 位，并同时包含英文字母和数字',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (!passwordsMatch) {
+      toast({
+        title: '两次输入不一致',
+        description: '请重新确认新密码',
         variant: 'destructive',
       })
       return
     }
 
     setIsUpdating(true)
-
     try {
-      const response = await fetch('/api/webui/auth/update', {
+      const response = await fetch('/api/webui/auth/password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include', // 使用 Cookie 认证
-        body: JSON.stringify({ new_token: newToken.trim() }),
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
       })
+      const data = await response.json().catch(() => null)
 
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        // 清空输入框
-        setNewToken('')
-
-        // 更新当前显示的 Token
-        setCurrentToken(newToken.trim())
-
-        toast({
-          title: '更新成功',
-          description: 'Access Token 已更新，即将跳转到登录页',
-        })
-
-        // 延迟跳转到登录页
-        setTimeout(() => {
-          navigate({ to: '/auth' })
-        }, 1500)
-      } else {
-        toast({
-          title: '更新失败',
-          description: data.message || '无法更新 Token',
-          variant: 'destructive',
-        })
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.detail || data?.message || '无法修改密码')
       }
-    } catch (err) {
-      console.error('更新 Token 错误:', err)
+
+      setCurrentPassword('')
+      setNewPassword('')
+      setPasswordConfirm('')
       toast({
-        title: '更新失败',
-        description: '连接服务器失败',
+        title: '密码已修改',
+        description: '所有登录会话已失效，请使用新密码重新登录',
+      })
+      window.setTimeout(() => {
+        window.location.href = '/auth'
+      }, 1000)
+    } catch (error) {
+      toast({
+        title: '修改失败',
+        description: error instanceof Error ? error.message : '连接服务器失败',
         variant: 'destructive',
       })
     } finally {
@@ -920,350 +931,102 @@ function SecurityTab() {
     }
   }
 
-  // 重新生成 token (实际执行函数)
-  const executeRegenerateToken = async () => {
-    setIsRegenerating(true)
-
-    try {
-      const response = await fetch('/api/webui/auth/regenerate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // 使用 Cookie 认证
-      })
-
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        // 更新当前显示的 Token
-        setCurrentToken(data.token)
-
-        // 显示弹窗展示新 Token
-        setGeneratedToken(data.token)
-        setShowTokenDialog(true)
-        setTokenCopied(false)
-
-        toast({
-          title: '生成成功',
-          description: '新的 Access Token 已生成，请及时保存',
-        })
-      } else {
-        toast({
-          title: '生成失败',
-          description: data.message || '无法生成新 Token',
-          variant: 'destructive',
-        })
-      }
-    } catch (err) {
-      console.error('生成 Token 错误:', err)
-      toast({
-        title: '生成失败',
-        description: '连接服务器失败',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsRegenerating(false)
-    }
-  }
-
-  // 复制生成的 Token
-  const copyGeneratedToken = async () => {
-    try {
-      await navigator.clipboard.writeText(generatedToken)
-      setTokenCopied(true)
-      toast({
-        title: '复制成功',
-        description: 'Token 已复制到剪贴板',
-      })
-    } catch {
-      toast({
-        title: '复制失败',
-        description: '请手动复制 Token',
-        variant: 'destructive',
-      })
-    }
-  }
-
-  // 关闭弹窗
-  const handleCloseDialog = () => {
-    setShowTokenDialog(false)
-    // 延迟清空 token，避免用户看到内容消失
-    setTimeout(() => {
-      setGeneratedToken('')
-      setTokenCopied(false)
-    }, 300)
-
-    // 跳转到登录页
-    setTimeout(() => {
-      navigate({ to: '/auth' })
-    }, 500)
-  }
-
-  // 处理对话框状态变化（包括点击外部、ESC 等关闭方式）
-  const handleDialogOpenChange = (open: boolean) => {
-    if (!open) {
-      handleCloseDialog()
-    }
-  }
-
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Token 生成成功弹窗 */}
-      <Dialog open={showTokenDialog} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="ios-sheet w-[calc(100vw-2rem)] rounded-[26px] p-5 sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-[rgb(255_149_0)]" />
-              新的 Access Token
-            </DialogTitle>
-            <DialogDescription>
-              这是您的新 Token，请立即保存。关闭此窗口后将跳转到登录页面。
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Token 显示区域 */}
-            <div className="ios-group border-primary/20 bg-primary/5 p-4">
-              <Label className="mb-2 block text-xs text-muted-foreground">
-                您的新 Token (64位安全令牌)
-              </Label>
-              <div className="select-all break-all rounded-[12px] bg-muted/70 p-3 font-mono text-sm">
-                {generatedToken}
-              </div>
-            </div>
-
-            {/* 警告提示 */}
-            <div className="ios-group border-[rgb(255_149_0_/_0.18)] bg-[rgb(255_149_0_/_0.08)] p-3 dark:border-[rgb(255_189_94_/_0.22)] dark:bg-[rgb(255_149_0_/_0.1)]">
-              <div className="flex gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(178_92_0)] dark:text-[rgb(255_189_94)]" />
-                <div className="space-y-1 text-sm text-[rgb(128_72_0)] dark:text-[rgb(255_210_145)]">
-                  <p className="font-semibold">重要提示</p>
-                  <ul className="list-inside list-disc space-y-0.5 text-xs">
-                    <li>此 Token 仅显示一次，关闭后无法再查看</li>
-                    <li>请立即复制并保存到安全的位置</li>
-                    <li>关闭窗口后将自动跳转到登录页面</li>
-                    <li>请使用新 Token 重新登录系统</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={copyGeneratedToken} className="gap-2 rounded-full">
-              {tokenCopied ? (
-                <>
-                  <Check className="h-4 w-4 text-[rgb(52_199_89)]" />
-                  已复制
-                </>
-              ) : (
-                <>
-                  <Copy className="h-4 w-4" />
-                  复制 Token
-                </>
-              )}
-            </Button>
-            <Button onClick={handleCloseDialog} className="rounded-full">
-              我已保存，关闭
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 当前 Token */}
       <div className="ios-group overflow-hidden">
-        <div className="ios-row ios-row-plain min-h-[60px]">
-          <div>
+        <div className="ios-row ios-row-plain items-start gap-3 py-4">
+          <span className="ios-symbol ios-symbol-md ios-symbol-green mt-0.5">
+            <Shield className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
             <h3 className="text-[15px] font-semibold leading-5 text-foreground sm:text-base">
-              当前 Access Token
+              修改 WebUI 密码
             </h3>
-            <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">由安全 Cookie 保存</p>
-          </div>
-        </div>
-        <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
-          <Label htmlFor="current-token" className="text-[15px] font-normal leading-5">
-            访问令牌
-          </Label>
-          <div className="relative w-full sm:max-w-xl">
-            <Input
-              id="current-token"
-              type={showCurrentToken ? 'text' : 'password'}
-              value={currentToken || '••••••••••••••••••••••••••••••••'}
-              readOnly
-              className="h-11 rounded-[12px] border-0 bg-muted/70 pr-10 font-mono text-sm shadow-none focus-visible:ring-0"
-              placeholder="Token 存储在安全 Cookie 中"
-            />
-            <button
-              onClick={() => {
-                if (currentToken) {
-                  setShowCurrentToken(!showCurrentToken)
-                } else {
-                  toast({
-                    title: '无法查看',
-                    description: 'Token 存储在安全 Cookie 中，如需新 Token 请点击"重新生成"',
-                  })
-                }
-              }}
-              className="ios-touch absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 hover:bg-accent"
-              title={showCurrentToken ? '隐藏' : '显示'}
-            >
-              {showCurrentToken ? (
-                <EyeOff className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <Eye className="h-4 w-4 text-muted-foreground" />
-              )}
-            </button>
-          </div>
-        </div>
-        <div className="ios-row ios-row-plain min-h-[62px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
-          <div>
-            <p className="text-[15px] leading-5 text-foreground">Token 操作</p>
-            <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
-              重新生成后旧令牌立即失效
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              密码只以加盐哈希保存。修改后，当前及其他设备上的登录会话都会失效。
             </p>
           </div>
-          <div className="flex w-full gap-2 sm:w-auto">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => copyToClipboard(currentToken)}
-              title="复制到剪贴板"
-              className="h-10 w-10 flex-shrink-0 rounded-full"
-              disabled={!currentToken}
-            >
-              {copied ? (
-                <Check className="h-4 w-4 text-[rgb(52_199_89)]" />
-              ) : (
-                <Copy className="h-4 w-4" />
-              )}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  disabled={isRegenerating}
-                  className="h-10 flex-1 gap-2 rounded-full px-5 sm:flex-none"
-                >
-                  <RefreshCw className={cn('h-4 w-4', isRegenerating && 'animate-spin')} />
-                  <span>重新生成</span>
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>确认重新生成 Token</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    这将生成一个新的 64 位安全令牌，并使当前 Token 立即失效。 您需要使用新 Token
-                    重新登录系统。此操作不可撤销，确定要继续吗？
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel className="rounded-full">取消</AlertDialogCancel>
-                  <AlertDialogAction onClick={executeRegenerateToken} className="rounded-full">
-                    确认生成
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
         </div>
+
+        <PasswordField
+          id="current-password"
+          label="当前密码"
+          value={currentPassword}
+          visible={showCurrentPassword}
+          onChange={setCurrentPassword}
+          onToggleVisibility={() => setShowCurrentPassword((visible) => !visible)}
+          autoComplete="current-password"
+          placeholder="输入当前密码"
+        />
+        <PasswordField
+          id="new-password"
+          label="新密码"
+          value={newPassword}
+          visible={showNewPassword}
+          onChange={setNewPassword}
+          onToggleVisibility={() => setShowNewPassword((visible) => !visible)}
+          autoComplete="new-password"
+          placeholder="8-16 位字母与数字"
+          maxLength={16}
+        />
+        <PasswordField
+          id="password-confirm"
+          label="确认新密码"
+          value={passwordConfirm}
+          visible={showPasswordConfirm}
+          onChange={setPasswordConfirm}
+          onToggleVisibility={() => setShowPasswordConfirm((visible) => !visible)}
+          autoComplete="new-password"
+          placeholder="再次输入新密码"
+          maxLength={16}
+        />
       </div>
 
-      {/* 更新 Token */}
-      <div className="ios-group overflow-hidden">
-        <div className="ios-row ios-row-plain min-h-[60px]">
-          <div>
-            <h3 className="text-[15px] font-semibold leading-5 text-foreground sm:text-base">
-              自定义 Access Token
-            </h3>
-            <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
-              使用自定义令牌登录 WebUI
-            </p>
-          </div>
-        </div>
-        <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch !justify-start gap-3 sm:flex-row sm:!items-center sm:!justify-between">
-          <Label htmlFor="new-token" className="text-[15px] font-normal leading-5">
-            新令牌
-          </Label>
-          <div className="relative w-full sm:max-w-xl">
-            <Input
-              id="new-token"
-              type={showNewToken ? 'text' : 'password'}
-              value={newToken}
-              onChange={(e) => setNewToken(e.target.value)}
-              className="h-11 rounded-[12px] border-0 bg-muted/70 pr-10 font-mono text-sm shadow-none focus-visible:ring-0"
-              placeholder="输入自定义 Token"
-            />
-            <button
-              onClick={() => setShowNewToken(!showNewToken)}
-              className="ios-touch absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 hover:bg-accent"
-              title={showNewToken ? '隐藏' : '显示'}
-            >
-              {showNewToken ? (
-                <EyeOff className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <Eye className="h-4 w-4 text-muted-foreground" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Token 验证规则显示 */}
-        {newToken && (
-          <div className="ios-row ios-row-plain min-h-[58px] flex-col !items-stretch !justify-start gap-2">
-            <p className="text-[15px] leading-5 text-foreground">安全要求</p>
-            <div className="grid gap-2 pt-1 sm:grid-cols-2">
-              {tokenValidation.rules.map((rule) => (
-                <div key={rule.id} className="flex items-center gap-2 text-sm">
-                  {rule.passed ? (
-                    <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[rgb(52_199_89)]" />
-                  ) : (
-                    <XCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                  )}
-                  <span
-                    className={cn(
-                      rule.passed
-                        ? 'text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]'
-                        : 'text-muted-foreground'
-                    )}
-                  >
-                    {rule.label}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {tokenValidation.isValid && (
-              <div className="mt-1 flex items-center gap-2 text-sm text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]">
-                <Check className="h-4 w-4" />
-                <span className="font-medium">Token 格式正确，可以使用</span>
-              </div>
+      <div className="ios-group grid gap-3 p-4 sm:grid-cols-2">
+        {validation.rules.map((rule) => (
+          <div key={rule.id} className="flex min-w-0 items-center gap-2 text-sm">
+            {rule.passed ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]" />
+            ) : (
+              <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
+            <span
+              className={cn(
+                rule.passed
+                  ? 'text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]'
+                  : 'text-muted-foreground'
+              )}
+            >
+              {rule.label}
+            </span>
           </div>
-        )}
-        <div className="ios-row ios-row-plain min-h-[62px] !items-stretch sm:!items-center">
-          <Button
-            onClick={handleUpdateToken}
-            disabled={isUpdating || !tokenValidation.isValid || !newToken}
-            className="ml-auto h-10 w-full rounded-full sm:w-auto sm:px-5"
+        ))}
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          {passwordsMatch ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]" />
+          ) : (
+            <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+          <span
+            className={cn(
+              passwordsMatch
+                ? 'text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]'
+                : 'text-muted-foreground'
+            )}
           >
-            {isUpdating ? '更新中...' : '更新自定义 Token'}
-          </Button>
+            两次输入一致
+          </span>
         </div>
       </div>
 
-      {/* 安全提示 */}
-      <div className="px-1 text-[13px] leading-6 text-muted-foreground sm:px-2">
-        <h4 className="mb-1 text-sm font-semibold text-[rgb(128_72_0)] dark:text-[rgb(255_210_145)]">
-          安全提示
-        </h4>
-        <ul className="list-disc space-y-1 pl-4">
-          <li>重新生成 Token 会创建系统随机生成的 64 位安全令牌</li>
-          <li>自定义 Token 必须满足所有安全要求才能使用</li>
-          <li>更新 Token 后，旧的 Token 将立即失效</li>
-          <li>请在安全的环境下查看和复制 Token</li>
-          <li>如果怀疑 Token 泄露，请立即重新生成或更新</li>
-          <li>建议使用系统生成的 Token 以获得最高安全性</li>
-        </ul>
+      <div className="flex justify-end">
+        <Button
+          onClick={handleUpdatePassword}
+          disabled={isUpdating || !currentPassword || !validation.isValid || !passwordsMatch}
+          className="h-11 w-full rounded-full px-6 sm:w-auto"
+        >
+          {isUpdating ? '修改中...' : '修改密码'}
+        </Button>
       </div>
     </div>
   )
@@ -1465,14 +1228,10 @@ function OtherTab() {
     setIsResetting(true)
 
     try {
-      const token = localStorage.getItem('access-token')
-
       // 调用后端API重置首次配置状态
       const response = await fetch('/api/webui/setup/reset', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
       })
 
       const data = await response.json()
@@ -2157,15 +1916,10 @@ function ThemeListOption({
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[16px] font-medium leading-6">{label}</div>
-        <div className="truncate text-[13px] leading-5 text-muted-foreground">
-          {description}
-        </div>
+        <div className="truncate text-[13px] leading-5 text-muted-foreground">{description}</div>
       </div>
       {isSelected ? (
-        <Check
-          className="motion-selection h-4 w-4 shrink-0 text-primary"
-          strokeWidth={2.6}
-        />
+        <Check className="motion-selection h-4 w-4 shrink-0 text-primary" strokeWidth={2.6} />
       ) : (
         <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       )}
@@ -2236,10 +1990,7 @@ function ColorSheetOption({
         <span className="truncate text-[16px] font-medium leading-6">{label}</span>
       </span>
       {isSelected ? (
-        <Check
-          className="motion-selection h-4 w-4 shrink-0 text-primary"
-          strokeWidth={2.6}
-        />
+        <Check className="motion-selection h-4 w-4 shrink-0 text-primary" strokeWidth={2.6} />
       ) : (
         <span className="h-4 w-4 shrink-0" aria-hidden="true" />
       )}

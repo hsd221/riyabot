@@ -5,11 +5,39 @@ import mimetypes
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from uvicorn import Config, Server as UvicornServer
-from src.common.logger import get_logger, hash_id, redact_secret
+from src.common.logger import get_logger
+from src.webui.auth import request_uses_https
 
 logger = get_logger("webui_server")
+
+
+def apply_security_headers(response: Response, is_https: bool) -> None:
+    """为 WebUI 页面和 API 响应设置统一安全头。"""
+    response.headers["Content-Security-Policy"] = "; ".join(
+        (
+            "default-src 'self'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+            "object-src 'none'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob: https:",
+            "font-src 'self' data:",
+            "connect-src 'self' ws: wss: http://localhost:8001 http://127.0.0.1:8001",
+            "worker-src 'self' blob:",
+        )
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    if is_https:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
 
 class WebUIServer:
@@ -27,8 +55,11 @@ class WebUIServer:
         # 配置 CORS（支持开发环境跨域请求）
         self._setup_cors()
 
-        # 显示 Access Token
-        self._show_access_token()
+        # 为所有正常响应设置浏览器安全策略
+        self._setup_security_headers()
+
+        # 只显示认证状态，不输出任何凭据
+        self._show_auth_status()
 
         # 重要：先注册 API 路由，再设置静态文件
         self._register_api_routes()
@@ -63,21 +94,25 @@ class WebUIServer:
         )
         logger.debug("CORS 中间件已配置", event_code="webui.cors.configured")
 
-    def _show_access_token(self):
-        """显示 WebUI Access Token"""
+    def _setup_security_headers(self) -> None:
+        @self.app.middleware("http")
+        async def security_headers(request, call_next):
+            response = await call_next(request)
+            apply_security_headers(response, is_https=request_uses_https(request))
+            return response
+
+    def _show_auth_status(self):
+        """记录 WebUI 是否等待用户设置密码。"""
         try:
             from src.webui.token_manager import get_token_manager
 
             token_manager = get_token_manager()
-            current_token = token_manager.get_token()
-            logger.info(
-                "WebUI Access Token 已加载",
-                event_code="webui.access_token.loaded",
-                token_preview=redact_secret(current_token),
-                token_hash=hash_id(current_token),
-            )
+            if token_manager.is_password_configured():
+                logger.info("WebUI 密码已配置", event_code="webui.password.configured")
+            else:
+                logger.warning("WebUI 等待在首次配置页面设置密码", event_code="webui.password.setup_required")
         except Exception:
-            logger.exception("WebUI Access Token 获取失败", event_code="webui.access_token.load_failed")
+            logger.exception("WebUI 认证状态获取失败", event_code="webui.password.status_failed")
 
     def _setup_static_files(self):
         """设置静态文件服务"""

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Header, Response, Request, Cookie, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
+from urllib.parse import urlsplit
 from src.common.logger import get_logger
 from src.common.agreement import are_agreements_confirmed, confirm_agreements, get_agreement_status
 from .token_manager import get_token_manager
@@ -58,10 +59,16 @@ router.include_router(memory_router)
 router.include_router(behavior_router)
 
 
-class TokenVerifyRequest(BaseModel):
-    """Token 验证请求"""
+class PasswordLoginRequest(BaseModel):
+    """密码登录请求。"""
 
-    token: str = Field(..., description="访问令牌")
+    password: str = Field(..., min_length=1, max_length=1024, description="WebUI 密码")
+
+
+class TokenVerifyRequest(BaseModel):
+    """旧版登录请求，保留一个迁移周期。"""
+
+    token: str = Field(..., min_length=1, max_length=1024, description="旧版访问令牌或 WebUI 密码")
 
 
 class TokenVerifyResponse(BaseModel):
@@ -72,14 +79,27 @@ class TokenVerifyResponse(BaseModel):
     is_first_setup: bool = Field(False, description="是否为首次设置")
 
 
-class TokenUpdateRequest(BaseModel):
-    """Token 更新请求"""
+class PasswordSetupRequest(BaseModel):
+    """首次设置密码请求。"""
 
-    new_token: str = Field(..., description="新的访问令牌", min_length=10)
+    password: str = Field(..., min_length=1, max_length=16, description="8-16 位数字和字母组合")
+
+
+class PasswordChangeRequest(BaseModel):
+    """修改密码请求。"""
+
+    current_password: str = Field(..., min_length=1, max_length=1024, description="当前密码")
+    new_password: str = Field(..., min_length=1, max_length=16, description="8-16 位数字和字母组合")
+
+
+class TokenUpdateRequest(BaseModel):
+    """旧版 Token 更新请求。"""
+
+    new_token: str = Field(..., min_length=1, max_length=1024, description="旧版新访问令牌")
 
 
 class TokenUpdateResponse(BaseModel):
-    """Token 更新响应"""
+    """密码操作响应。"""
 
     success: bool = Field(..., description="是否更新成功")
     message: str = Field(..., description="更新结果消息")
@@ -192,78 +212,182 @@ def _get_model_config_readiness_error() -> str:
         return f"模型配置文件解析失败: {e}"
 
 
-@router.post("/auth/verify", response_model=TokenVerifyResponse)
+def require_same_site_request(request: Request) -> None:
+    """拒绝浏览器发起的跨站状态修改请求。"""
+    headers = getattr(request, "headers", {})
+    if headers.get("sec-fetch-site", "").lower() == "cross-site":
+        raise HTTPException(status_code=403, detail="不允许跨站请求")
+
+    # Sec-Fetch-Site 在旧浏览器和非浏览器客户端中可能缺失。对带 Origin 的
+    # 浏览器请求再做一次明确来源校验，避免首次设置密码被跨站表单抢先提交。
+    origin = headers.get("origin", "").strip()
+    if not origin:
+        return
+    try:
+        origin_url = urlsplit(origin)
+        origin_host = origin_url.hostname
+        request_url = getattr(request, "url", None)
+        request_host = getattr(request_url, "hostname", None)
+        if origin_url.scheme not in {"http", "https"} or not origin_host or not request_host:
+            raise ValueError
+
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+        local_dev_ports = {5173, 7999, 8001}
+        origin_port = origin_url.port or (443 if origin_url.scheme == "https" else 80)
+        request_port = getattr(request_url, "port", None) or (
+            443 if getattr(request_url, "scheme", "") == "https" else 80
+        )
+        same_host = origin_host.lower() == request_host.lower() and origin_port == request_port
+        local_dev = (
+            origin_host.lower() in local_hosts
+            and request_host.lower() in local_hosts
+            and origin_port in local_dev_ports
+        )
+        if not (same_host or local_dev):
+            raise HTTPException(status_code=403, detail="不允许跨站请求")
+    except HTTPException:
+        raise
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="不允许的请求来源") from None
+
+
+def _get_session_token(maibot_session: Optional[str], authorization: Optional[str]) -> Optional[str]:
+    if isinstance(maibot_session, str) and maibot_session:
+        return maibot_session
+    if isinstance(authorization, str) and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+        return token or None
+    return None
+
+
+def _require_authenticated_session(maibot_session: Optional[str], authorization: Optional[str]) -> tuple[object, str]:
+    token = _get_session_token(maibot_session, authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="未提供有效的认证信息")
+    token_manager = get_token_manager()
+    if not token_manager.verify_token(token):
+        raise HTTPException(status_code=401, detail="认证无效或已过期")
+    return token_manager, token
+
+
+def _needs_initial_setup(token_manager) -> bool:
+    return token_manager.is_first_setup() or not are_agreements_confirmed() or bool(_get_model_config_readiness_error())
+
+
+def _complete_password_login(password: str, request: Request, response: Response) -> TokenVerifyResponse:
+    if not isinstance(password, str) or not password or len(password) > 1024:
+        return TokenVerifyResponse(valid=False, message="密码错误")
+
+    token_manager = get_token_manager()
+    if not token_manager.is_password_configured():
+        raise HTTPException(status_code=409, detail="WebUI 密码尚未设置")
+
+    rate_limiter = get_rate_limiter()
+    if token_manager.authenticate(password):
+        session_token = token_manager.create_session()
+        if not session_token:
+            raise HTTPException(status_code=500, detail="无法创建登录会话")
+        rate_limiter.reset_failures(request)
+        set_auth_cookie(response, session_token, request)
+        response.headers["Cache-Control"] = "no-store"
+        return TokenVerifyResponse(
+            valid=True,
+            message="密码验证成功",
+            is_first_setup=_needs_initial_setup(token_manager),
+        )
+
+    blocked, remaining = rate_limiter.record_failed_attempt(
+        request,
+        max_failures=5,
+        window_seconds=300,
+        block_duration=600,
+    )
+    if blocked:
+        raise HTTPException(
+            status_code=429,
+            detail="认证失败次数过多，请在 10 分钟后重试",
+            headers={"Retry-After": "600"},
+        )
+    message = "密码错误"
+    if remaining <= 2:
+        message += f"（剩余 {remaining} 次尝试机会）"
+    return TokenVerifyResponse(valid=False, message=message)
+
+
+@router.post("/auth/setup", response_model=TokenUpdateResponse)
+async def setup_password(
+    request_body: PasswordSetupRequest,
+    request: Request,
+    response: Response,
+    _rate_limit: None = Depends(check_auth_rate_limit),
+):
+    """首次运行时设置密码；该操作只能成功一次。"""
+    require_same_site_request(request)
+    token_manager = get_token_manager()
+    valid, message = token_manager.validate_password(request_body.password)
+    if not valid:
+        raise HTTPException(status_code=422, detail=message)
+
+    success, message = token_manager.set_initial_password(request_body.password)
+    if not success:
+        status_code = 409 if token_manager.is_password_configured() else 422
+        raise HTTPException(status_code=status_code, detail=message)
+
+    session_token = token_manager.create_session()
+    if not session_token:
+        raise HTTPException(status_code=500, detail="无法创建登录会话")
+    get_rate_limiter().reset_failures(request)
+    set_auth_cookie(response, session_token, request)
+    response.headers["Cache-Control"] = "no-store"
+    return TokenUpdateResponse(success=True, message="密码设置成功")
+
+
+@router.post("/auth/login", response_model=TokenVerifyResponse)
+async def login(
+    request_body: PasswordLoginRequest,
+    request: Request,
+    response: Response,
+    _rate_limit: None = Depends(check_auth_rate_limit),
+):
+    """使用密码登录并签发 HttpOnly 会话 Cookie。"""
+    require_same_site_request(request)
+    try:
+        return _complete_password_login(request_body.password, request, response)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("WebUI 密码验证失败", event_code="webui.auth.login_failed")
+        raise HTTPException(status_code=500, detail="登录失败") from None
+
+
+@router.post("/auth/verify", response_model=TokenVerifyResponse, deprecated=True)
 async def verify_token(
     request_body: TokenVerifyRequest,
     request: Request,
     response: Response,
     _rate_limit: None = Depends(check_auth_rate_limit),
 ):
-    """
-    验证访问令牌，验证成功后设置 HttpOnly Cookie
-
-    Args:
-        request_body: 包含 token 的验证请求
-        request: FastAPI Request 对象（用于获取客户端 IP）
-        response: FastAPI Response 对象
-
-    Returns:
-        验证结果（包含首次配置状态）
-    """
+    """兼容旧前端的登录入口。"""
+    require_same_site_request(request)
     try:
-        token_manager = get_token_manager()
-        rate_limiter = get_rate_limiter()
-
-        is_valid = token_manager.verify_token(request_body.token)
-
-        if is_valid:
-            # 认证成功，重置失败计数
-            rate_limiter.reset_failures(request)
-            # 设置 HttpOnly Cookie（传入 request 以检测协议）
-            set_auth_cookie(response, request_body.token, request)
-            # 同时返回首次配置状态，避免额外请求
-            is_first_setup = (
-                token_manager.is_first_setup()
-                or not are_agreements_confirmed()
-                or bool(_get_model_config_readiness_error())
-            )
-            return TokenVerifyResponse(valid=True, message="Token 验证成功", is_first_setup=is_first_setup)
-        else:
-            # 记录失败尝试
-            blocked, remaining = rate_limiter.record_failed_attempt(
-                request,
-                max_failures=5,  # 5 次失败
-                window_seconds=300,  # 5 分钟窗口
-                block_duration=600,  # 封禁 10 分钟
-            )
-
-            if blocked:
-                raise HTTPException(status_code=429, detail="认证失败次数过多，您的 IP 已被临时封禁 10 分钟")
-
-            message = "Token 无效或已过期"
-            if remaining <= 2:
-                message += f"（剩余 {remaining} 次尝试机会）"
-
-            return TokenVerifyResponse(valid=False, message=message)
+        return _complete_password_login(request_body.token, request, response)
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Token 验证失败: {e}")
-        raise HTTPException(status_code=500, detail="Token 验证失败") from e
+    except Exception:
+        logger.exception("旧版 WebUI 登录失败", event_code="webui.auth.legacy_login_failed")
+        raise HTTPException(status_code=500, detail="登录失败") from None
 
 
 @router.post("/auth/logout")
-async def logout(response: Response):
-    """
-    登出并清除认证 Cookie
-
-    Args:
-        response: FastAPI Response 对象
-
-    Returns:
-        登出结果
-    """
-    clear_auth_cookie(response)
+async def logout(response: Response, request: Request = None):
+    """登出并清除认证 Cookie。"""
+    if request is not None:
+        require_same_site_request(request)
+        clear_auth_cookie(response, request)
+    else:
+        # 兼容内部脚本直接传入 Response 的旧调用方式；浏览器路由始终会注入 Request。
+        clear_auth_cookie(response)
+    response.headers["Cache-Control"] = "no-store"
     return {"success": True, "message": "已成功登出"}
 
 
@@ -273,143 +397,71 @@ async def check_auth_status(
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
 ):
-    """
-    检查当前认证状态（用于前端判断是否已登录）
-
-    Returns:
-        认证状态
-    """
+    """返回登录状态以及是否需要先设置密码。"""
     try:
-        token = None
-
-        # 记录请求信息用于调试
-        logger.debug(
-            f"检查认证状态 - Cookie: {maibot_session[:20] if maibot_session else 'None'}..., Authorization: {'Present' if authorization else 'None'}"
-        )
-
-        # 优先从 Cookie 获取
-        if maibot_session:
-            token = maibot_session
-            logger.debug("使用 Cookie 中的 token")
-        # 其次从 Header 获取
-        elif authorization and authorization.startswith("Bearer "):
-            token = authorization.replace("Bearer ", "")
-            logger.debug("使用 Header 中的 token")
-
-        if not token:
-            logger.debug("未找到 token，返回未认证")
-            return {"authenticated": False}
-
         token_manager = get_token_manager()
-        is_valid = token_manager.verify_token(token)
-        logger.debug(f"Token 验证结果: {is_valid}")
+        password_configured = token_manager.is_password_configured()
+        token = _get_session_token(maibot_session, authorization)
+        if not token:
+            return {"authenticated": False, "password_configured": password_configured}
+        return {
+            "authenticated": token_manager.verify_token(token),
+            "password_configured": password_configured,
+        }
+    except Exception:
+        logger.exception("WebUI 认证状态检查失败", event_code="webui.auth.status_failed")
+        return {"authenticated": False, "password_configured": True}
 
-        if is_valid:
-            return {"authenticated": True}
-        else:
-            return {"authenticated": False}
-    except Exception as e:
-        logger.error(f"认证检查失败: {e}", exc_info=True)
-        return {"authenticated": False}
 
-
-@router.post("/auth/update", response_model=TokenUpdateResponse)
-async def update_token(
-    request: TokenUpdateRequest,
+@router.post("/auth/password", response_model=TokenUpdateResponse)
+async def change_password(
+    request_body: PasswordChangeRequest,
     response: Response,
-    req: Request,
+    request: Request,
+    maibot_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+    _rate_limit: None = Depends(check_auth_rate_limit),
+):
+    """验证当前密码后修改密码，并撤销已有会话。"""
+    require_same_site_request(request)
+    token_manager, _ = _require_authenticated_session(maibot_session, authorization)
+    valid, message = token_manager.validate_password(request_body.new_password)
+    if not valid:
+        raise HTTPException(status_code=422, detail=message)
+    success, message = token_manager.update_password(request_body.current_password, request_body.new_password)
+    if not success:
+        get_rate_limiter().record_failed_attempt(request)
+        raise HTTPException(status_code=400, detail=message)
+    clear_auth_cookie(response, request)
+    response.headers["Cache-Control"] = "no-store"
+    return TokenUpdateResponse(success=True, message=message)
+
+
+@router.post("/auth/update", response_model=TokenUpdateResponse, deprecated=True)
+async def update_token(
+    request_body: TokenUpdateRequest,
+    response: Response,
+    request: Request,
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
 ):
-    """
-    更新访问令牌（需要当前有效的 token）
-
-    Args:
-        request: 包含新 token 的更新请求
-        response: FastAPI Response 对象
-        maibot_session: Cookie 中的 token
-        authorization: Authorization header (Bearer token)
-
-    Returns:
-        更新结果
-    """
-    try:
-        # 验证当前 token（优先 Cookie，其次 Header）
-        current_token = None
-        if maibot_session:
-            current_token = maibot_session
-        elif authorization and authorization.startswith("Bearer "):
-            current_token = authorization.replace("Bearer ", "")
-
-        if not current_token:
-            raise HTTPException(status_code=401, detail="未提供有效的认证信息")
-
-        token_manager = get_token_manager()
-
-        if not token_manager.verify_token(current_token):
-            raise HTTPException(status_code=401, detail="当前 Token 无效")
-
-        # 更新 token
-        success, message = token_manager.update_token(request.new_token)
-
-        # 如果更新成功，清除 Cookie，要求用户重新登录
-        if success:
-            clear_auth_cookie(response)
-
-        return TokenUpdateResponse(success=success, message=message)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Token 更新失败: {e}")
-        raise HTTPException(status_code=500, detail="Token 更新失败") from e
+    """旧版无当前密码的修改接口已停用。"""
+    require_same_site_request(request)
+    _require_authenticated_session(maibot_session, authorization)
+    raise HTTPException(status_code=410, detail="旧版 Token 接口已停用，请使用密码修改接口")
 
 
-@router.post("/auth/regenerate", response_model=TokenRegenerateResponse)
+@router.post("/auth/regenerate", response_model=TokenRegenerateResponse, deprecated=True)
 async def regenerate_token(
     response: Response,
     request: Request,
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
 ):
-    """
-    重新生成访问令牌（需要当前有效的 token）
-
-    Args:
-        response: FastAPI Response 对象
-        maibot_session: Cookie 中的 token
-        authorization: Authorization header (Bearer token)
-
-    Returns:
-        新生成的 token
-    """
-    try:
-        # 验证当前 token（优先 Cookie，其次 Header）
-        current_token = None
-        if maibot_session:
-            current_token = maibot_session
-        elif authorization and authorization.startswith("Bearer "):
-            current_token = authorization.replace("Bearer ", "")
-
-        if not current_token:
-            raise HTTPException(status_code=401, detail="未提供有效的认证信息")
-
-        token_manager = get_token_manager()
-
-        if not token_manager.verify_token(current_token):
-            raise HTTPException(status_code=401, detail="当前 Token 无效")
-
-        # 重新生成 token
-        new_token = token_manager.regenerate_token()
-
-        # 清除 Cookie，要求用户重新登录
-        clear_auth_cookie(response)
-
-        return TokenRegenerateResponse(success=True, token=new_token, message="Token 已重新生成")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Token 重新生成失败: {e}")
-        raise HTTPException(status_code=500, detail="Token 重新生成失败") from e
+    """旧版明文令牌生成接口已停用。"""
+    require_same_site_request(request)
+    _require_authenticated_session(maibot_session, authorization)
+    raise HTTPException(status_code=410, detail="不再生成访问令牌，请使用自定义密码")
 
 
 @router.get("/setup/status", response_model=FirstSetupStatusResponse)
@@ -451,7 +503,9 @@ async def get_setup_status(
         created_config_files = get_created_config_files()
         model_config_message = _get_model_config_readiness_error()
         model_config_required = bool(model_config_message)
-        is_first = token_manager.is_first_setup() or agreement_required or bool(created_config_files) or model_config_required
+        is_first = (
+            token_manager.is_first_setup() or agreement_required or bool(created_config_files) or model_config_required
+        )
 
         return FirstSetupStatusResponse(
             is_first_setup=is_first,
@@ -506,6 +560,7 @@ async def confirm_setup_agreement(
 ):
     """确认当前 EULA 和隐私条款。"""
     try:
+        require_same_site_request(request)
         current_token = None
         if maibot_session:
             current_token = maibot_session
@@ -551,6 +606,7 @@ async def complete_setup(
         完成结果
     """
     try:
+        require_same_site_request(request)
         # 验证 token（优先 Cookie，其次 Header）
         current_token = None
         if maibot_session:
@@ -602,6 +658,7 @@ async def reset_setup(
         重置结果
     """
     try:
+        require_same_site_request(request)
         # 验证 token（优先 Cookie，其次 Header）
         current_token = None
         if maibot_session:

@@ -8,6 +8,7 @@ from fastapi import HTTPException, Cookie, Header, Response, Request
 from src.common.logger import get_logger, hash_id
 from src.config.config import global_config
 from .token_manager import get_token_manager
+from .rate_limiter import is_trusted_proxy
 
 logger = get_logger("webui.auth")
 
@@ -35,6 +36,39 @@ def _is_secure_environment() -> bool:
 
     # 默认：开发环境不启用（因为通常是 HTTP）
     logger.debug("WebUI运行在开发模式，禁用 secure cookie")
+    return False
+
+
+def request_uses_https(request: Optional[Request] = None) -> bool:
+    """根据直连协议或可信代理转发头判断当前请求是否使用 HTTPS。"""
+    if request is None:
+        return False
+    request_scheme = getattr(getattr(request, "url", None), "scheme", "").lower()
+    if request_scheme == "https":
+        return True
+    peer_ip = getattr(getattr(request, "client", None), "host", "")
+    if not is_trusted_proxy(peer_ip, global_config):
+        return False
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", maxsplit=1)[0].strip().lower()
+    return forwarded_proto == "https"
+
+
+def _should_use_secure_cookie(request: Optional[Request] = None) -> bool:
+    """根据实际传输协议和显式配置决定是否设置 Secure。"""
+    configured_secure = _is_secure_environment()
+    if request is None:
+        return configured_secure
+
+    request_scheme = getattr(getattr(request, "url", None), "scheme", "").lower()
+    is_https = request_uses_https(request)
+    if is_https:
+        return True
+    if configured_secure:
+        logger.warning(
+            "当前连接不是 HTTPS，认证 Cookie 无法启用 Secure",
+            event_code="webui.auth.insecure_transport",
+            scheme=request_scheme or "unknown",
+        )
     return False
 
 
@@ -86,29 +120,7 @@ def set_auth_cookie(response: Response, token: str, request: Optional[Request] =
         token: 要设置的 token
         request: FastAPI Request 对象（可选，用于检测协议）
     """
-    # 根据环境和实际请求协议决定安全设置
-    is_secure = _is_secure_environment()
-
-    # 如果提供了 request，检测实际使用的协议
-    if request:
-        # 检查 X-Forwarded-Proto header（代理/负载均衡器）
-        forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
-        if forwarded_proto:
-            is_https = forwarded_proto == "https"
-            logger.debug(f"检测到 X-Forwarded-Proto: {forwarded_proto}, is_https={is_https}")
-        else:
-            # 检查 request.url.scheme
-            is_https = request.url.scheme == "https"
-            logger.debug(f"检测到 scheme: {request.url.scheme}, is_https={is_https}")
-
-        # 如果是 HTTP 连接，强制禁用 secure 标志
-        if not is_https and is_secure:
-            logger.warning(
-                "HTTP 连接下禁用 secure cookie",
-                configured_secure_cookie=True,
-                scheme=request.url.scheme,
-            )
-            is_secure = False
+    is_secure = _should_use_secure_cookie(request)
 
     # 设置 Cookie
     response.set_cookie(
@@ -116,7 +128,7 @@ def set_auth_cookie(response: Response, token: str, request: Optional[Request] =
         value=token,
         max_age=COOKIE_MAX_AGE,
         httponly=True,  # 防止 JS 读取，阻止 XSS 窃取
-        samesite="lax",  # 使用 lax 以兼容更多场景（开发和生产）
+        samesite="strict",
         secure=is_secure,  # 根据实际协议决定
         path="/",  # 确保 Cookie 在所有路径下可用
     )
@@ -125,27 +137,26 @@ def set_auth_cookie(response: Response, token: str, request: Optional[Request] =
         "已设置认证 Cookie",
         token_hash=hash_id(token),
         secure=is_secure,
-        samesite="lax",
+        samesite="strict",
         httponly=True,
         path="/",
         max_age=COOKIE_MAX_AGE,
     )
 
 
-def clear_auth_cookie(response: Response) -> None:
+def clear_auth_cookie(response: Response, request: Optional[Request] = None) -> None:
     """
     清除认证 Cookie
 
     Args:
         response: FastAPI Response 对象
     """
-    # 保持与 set_auth_cookie 相同的安全设置
-    is_secure = _is_secure_environment()
+    is_secure = _should_use_secure_cookie(request)
 
     response.delete_cookie(
         key=COOKIE_NAME,
         httponly=True,
-        samesite="strict" if is_secure else "lax",
+        samesite="strict",
         secure=is_secure,
         path="/",
     )

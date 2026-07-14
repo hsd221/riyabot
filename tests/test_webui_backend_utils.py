@@ -158,8 +158,12 @@ class RateLimiterTest(unittest.TestCase):
     def test_client_ip_prefers_forwarded_for_then_real_ip_then_client_host(self) -> None:
         limiter = RateLimiter()
 
-        self.assertEqual(limiter._get_client_ip(fake_request({"X-Forwarded-For": "1.1.1.1, 2.2.2.2"})), "1.1.1.1")
-        self.assertEqual(limiter._get_client_ip(fake_request({"X-Real-IP": "3.3.3.3"})), "3.3.3.3")
+        with patch(
+            "src.webui.rate_limiter.global_config",
+            SimpleNamespace(webui=SimpleNamespace(trust_xff=True, trusted_proxies="127.0.0.1")),
+        ):
+            self.assertEqual(limiter._get_client_ip(fake_request({"X-Forwarded-For": "1.1.1.1, 2.2.2.2"})), "1.1.1.1")
+            self.assertEqual(limiter._get_client_ip(fake_request({"X-Real-IP": "3.3.3.3"})), "3.3.3.3")
         self.assertEqual(limiter._get_client_ip(fake_request(host="4.4.4.4")), "4.4.4.4")
         self.assertEqual(limiter._get_client_ip(SimpleNamespace(headers={}, client=None)), "unknown")
 
@@ -223,57 +227,44 @@ class RateLimiterTest(unittest.TestCase):
 
 
 class TokenManagerTest(unittest.TestCase):
-    def test_token_manager_creates_verifies_updates_regenerates_and_tracks_setup_status(self) -> None:
+    def test_token_manager_creates_verifies_updates_and_tracks_setup_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "webui.json"
-            with (
-                patch.object(token_manager.secrets, "token_hex", side_effect=["a" * 64, "b" * 64]),
-                patch.object(token_manager.TokenManager, "_get_current_timestamp", return_value="2026-07-08T00:00:00"),
-            ):
-                manager = token_manager.TokenManager(config_path)
-                self.assertEqual(manager.get_token(), "a" * 64)
-                self.assertTrue(manager.verify_token("a" * 64))
-                self.assertFalse(manager.verify_token("wrong"))
-                self.assertTrue(manager._validate_token_format("a" * 64))
-                self.assertFalse(manager._validate_token_format("z" * 64))
-
-                invalid_cases = ["", "short", "lowercaseonly!", "UPPERCASEONLY!", "NoSpecial123"]
-                for token_value in invalid_cases:
-                    with self.subTest(token_value=token_value):
-                        self.assertFalse(manager._validate_custom_token(token_value)[0])
-
-                self.assertEqual(manager.update_token("StrongToken!1"), (True, "Token 更新成功"))
-                self.assertEqual(manager.get_token(), "StrongToken!1")
-                self.assertTrue(manager.is_first_setup())
-                self.assertTrue(manager.mark_setup_completed())
-                self.assertFalse(manager.is_first_setup())
-
-                regenerated = manager.regenerate_token()
-                self.assertEqual(regenerated, "b" * 64)
-                self.assertEqual(manager.get_token(), "b" * 64)
-                self.assertFalse(manager.is_first_setup())
-
-                self.assertTrue(manager.reset_setup_status())
-                self.assertTrue(manager.is_first_setup())
+            manager = token_manager.TokenManager(config_path)
+            self.assertEqual(manager.get_token(), "")
+            self.assertFalse(manager.is_password_configured())
+            self.assertTrue(manager.is_first_setup())
+            self.assertTrue(manager.set_initial_password("abc12345")[0])
+            self.assertTrue(manager.verify_token(manager.create_session()))
+            self.assertFalse(manager.verify_password("wrong123"))
+            self.assertEqual(manager.update_password("abc12345", "def45678"), (True, "密码更新成功"))
+            self.assertTrue(manager.verify_password("def45678"))
+            self.assertFalse(manager.verify_password("abc12345"))
+            self.assertTrue(manager.is_first_setup())
+            self.assertTrue(manager.mark_setup_completed())
+            self.assertFalse(manager.is_first_setup())
+            self.assertTrue(manager.reset_setup_status())
+            self.assertTrue(manager.is_first_setup())
 
             saved = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["access_token"], "b" * 64)
+            self.assertIn("password_hash", saved)
+            self.assertNotIn("access_token", saved)
             self.assertFalse(saved["first_setup_completed"])
             self.assertNotIn("setup_completed_at", saved)
 
-    def test_token_manager_recovers_missing_or_invalid_config_and_singleton_is_cached(self) -> None:
+    def test_token_manager_keeps_empty_config_unconfigured_and_fails_closed_on_invalid_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            missing_token_path = Path(tmp_dir) / "missing_token.json"
-            missing_token_path.write_text("{}", encoding="utf-8")
+            empty_path = Path(tmp_dir) / "empty.json"
+            empty_path.write_text("{}", encoding="utf-8")
             invalid_path = Path(tmp_dir) / "invalid.json"
             invalid_path.write_text("{not json", encoding="utf-8")
 
-            with (
-                patch.object(token_manager.secrets, "token_hex", side_effect=["c" * 64, "d" * 64]),
-                patch.object(token_manager.TokenManager, "_get_current_timestamp", return_value="2026-07-08T00:00:00"),
-            ):
-                self.assertEqual(token_manager.TokenManager(missing_token_path).get_token(), "c" * 64)
-                self.assertEqual(token_manager.TokenManager(invalid_path).get_token(), "d" * 64)
+            manager = token_manager.TokenManager(empty_path)
+            self.assertEqual(manager.get_token(), "")
+            self.assertFalse(manager.is_password_configured())
+            with self.assertRaises(RuntimeError):
+                token_manager.TokenManager(invalid_path)
+            self.assertEqual(invalid_path.read_text(encoding="utf-8"), "{not json")
 
         original_instance = token_manager._token_manager_instance
         try:
@@ -322,7 +313,7 @@ class AuthAndWsAuthTest(unittest.IsolatedAsyncioTestCase):
         cookie_header = response.headers["set-cookie"]
         self.assertIn("maibot_session=token-value", cookie_header)
         self.assertIn("HttpOnly", cookie_header)
-        self.assertIn("SameSite=lax", cookie_header)
+        self.assertIn("SameSite=strict", cookie_header)
         self.assertNotIn("Secure", cookie_header)
 
         clear_response = Response()
@@ -1136,35 +1127,36 @@ class WebUIRoutesTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await webui_routes.logout(response), {"success": True, "message": "已成功登出"})
         clear_cookie.assert_called_once_with(response)
 
-        token_manager_stub = SimpleNamespace(verify_token=Mock(side_effect=lambda token: token == "valid"))
+        token_manager_stub = SimpleNamespace(
+            verify_token=Mock(side_effect=lambda token: token == "valid"),
+            is_password_configured=Mock(return_value=True),
+        )
         with patch.object(webui_routes, "get_token_manager", return_value=token_manager_stub):
             self.assertEqual(
                 await webui_routes.check_auth_status(SimpleNamespace(), maibot_session=None, authorization=None),
-                {"authenticated": False},
+                {"authenticated": False, "password_configured": True},
             )
             self.assertEqual(
                 await webui_routes.check_auth_status(SimpleNamespace(), maibot_session="valid"),
-                {"authenticated": True},
+                {"authenticated": True, "password_configured": True},
             )
             self.assertEqual(
                 await webui_routes.check_auth_status(
                     SimpleNamespace(), maibot_session=None, authorization="Bearer invalid"
                 ),
-                {"authenticated": False},
+                {"authenticated": False, "password_configured": True},
             )
 
         with patch.object(webui_routes, "get_token_manager", side_effect=RuntimeError("token db down")):
             self.assertEqual(
                 await webui_routes.check_auth_status(SimpleNamespace(), maibot_session="valid"),
-                {"authenticated": False},
+                {"authenticated": False, "password_configured": True},
             )
 
-    async def test_update_and_regenerate_token_validate_current_token_and_clear_cookie_on_success(self) -> None:
+    async def test_update_and_regenerate_token_are_disabled(self) -> None:
         response = Response()
         token_manager_stub = SimpleNamespace(
             verify_token=Mock(side_effect=lambda token: token == "current"),
-            update_token=Mock(return_value=(True, "updated")),
-            regenerate_token=Mock(return_value="new-token"),
         )
 
         with patch.object(webui_routes, "get_token_manager", return_value=token_manager_stub):
@@ -1184,29 +1176,23 @@ class WebUIRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing.exception.status_code, 401)
         self.assertEqual(invalid.exception.status_code, 401)
 
-        with (
-            patch.object(webui_routes, "get_token_manager", return_value=token_manager_stub),
-            patch.object(webui_routes, "clear_auth_cookie") as clear_cookie,
-        ):
-            updated = await webui_routes.update_token(
-                webui_routes.TokenUpdateRequest(new_token="new-token-123"),
-                response,
-                SimpleNamespace(),
-                maibot_session="current",
-            )
-            regenerated = await webui_routes.regenerate_token(
-                response,
-                SimpleNamespace(),
-                maibot_session=None,
-                authorization="Bearer current",
-            )
+        with patch.object(webui_routes, "get_token_manager", return_value=token_manager_stub):
+            with self.assertRaises(HTTPException) as update_disabled:
+                await webui_routes.update_token(
+                    webui_routes.TokenUpdateRequest(new_token="new-token-123"),
+                    response,
+                    SimpleNamespace(),
+                    maibot_session="current",
+                )
+            with self.assertRaises(HTTPException) as regenerate_disabled:
+                await webui_routes.regenerate_token(
+                    response,
+                    SimpleNamespace(),
+                    maibot_session="current",
+                )
 
-        self.assertEqual(updated, webui_routes.TokenUpdateResponse(success=True, message="updated"))
-        self.assertEqual(
-            regenerated,
-            webui_routes.TokenRegenerateResponse(success=True, token="new-token", message="Token 已重新生成"),
-        )
-        self.assertEqual(clear_cookie.call_count, 2)
+        self.assertEqual(update_disabled.exception.status_code, 410)
+        self.assertEqual(regenerate_disabled.exception.status_code, 410)
 
     async def test_setup_status_complete_reset_and_agreement_routes_map_auth_and_state_errors(self) -> None:
         token_manager_stub = SimpleNamespace(

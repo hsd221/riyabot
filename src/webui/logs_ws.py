@@ -79,10 +79,9 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
     """WebSocket 日志推送端点
 
     客户端连接后会持续接收服务器端的日志消息
-    支持三种认证方式（按优先级）：
+    支持两种认证方式（按优先级）：
     1. query 参数 token（推荐，通过 /api/webui/ws-token 获取临时 token）
     2. Cookie 中的 maibot_session
-    3. 直接使用 session token（兼容）
 
     示例：ws://host/ws/logs?token=xxx
     """
@@ -103,17 +102,6 @@ async def websocket_logs(websocket: WebSocket, token: Optional[str] = Query(None
                 logger.debug(
                     "日志 WebSocket Cookie 认证成功", event_code="webui.logs_ws.auth_success", auth_method="cookie"
                 )
-
-    # 方式 3: 尝试直接验证 query 参数作为 session token（兼容旧方式）
-    if not is_authenticated and token:
-        token_manager = get_token_manager()
-        if token_manager.verify_token(token):
-            is_authenticated = True
-            logger.debug(
-                "日志 WebSocket session token 认证成功",
-                event_code="webui.logs_ws.auth_success",
-                auth_method="session_token",
-            )
 
     if not is_authenticated:
         logger.warning("日志 WebSocket 连接被拒绝", event_code="webui.logs_ws.auth_failed")

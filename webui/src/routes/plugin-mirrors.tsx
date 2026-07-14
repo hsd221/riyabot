@@ -72,11 +72,8 @@ export function PluginMirrorsPage() {
       setLoading(true)
       setError(null)
 
-      const token = localStorage.getItem('access-token')
       const response = await fetch('/api/webui/plugins/mirrors', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
       })
 
       if (!response.ok) {
@@ -121,11 +118,10 @@ export function PluginMirrorsPage() {
   // 添加镜像源
   const handleAddMirror = async () => {
     try {
-      const token = localStorage.getItem('access-token')
       const response = await fetch('/api/webui/plugins/mirrors', {
         method: 'POST',
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(formData),
@@ -158,11 +154,10 @@ export function PluginMirrorsPage() {
     if (!editingMirror) return
 
     try {
-      const token = localStorage.getItem('access-token')
       const response = await fetch(`/api/webui/plugins/mirrors/${editingMirror.id}`, {
         method: 'PUT',
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -200,12 +195,9 @@ export function PluginMirrorsPage() {
     if (!confirm('确定要删除这个镜像源吗？')) return false
 
     try {
-      const token = localStorage.getItem('access-token')
       const response = await fetch(`/api/webui/plugins/mirrors/${id}`, {
         method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
       })
 
       if (!response.ok) {
@@ -232,11 +224,10 @@ export function PluginMirrorsPage() {
   // 切换启用状态
   const handleToggleEnabled = async (mirror: MirrorConfig) => {
     try {
-      const token = localStorage.getItem('access-token')
       const response = await fetch(`/api/webui/plugins/mirrors/${mirror.id}`, {
         method: 'PUT',
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -299,11 +290,10 @@ export function PluginMirrorsPage() {
     if (newPriority < 1) return
 
     try {
-      const token = localStorage.getItem('access-token')
       const response = await fetch(`/api/webui/plugins/mirrors/${mirror.id}`, {
         method: 'PUT',
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

@@ -2,31 +2,21 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   AlertCircle,
-  ChevronRight,
-  FileText,
-  HelpCircle,
-  Key,
+  Check,
+  Eye,
+  EyeOff,
+  KeyRound,
   LoaderCircle,
   Lock,
   Monitor,
   Moon,
   Sun,
-  Terminal,
-  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
 import { toggleThemeWithTransition, useTheme } from '@/components/use-theme'
-import { checkAuthStatus } from '@/lib/fetch-with-auth'
+import { getAuthStatus } from '@/lib/fetch-with-auth'
 import { checkFirstSetup } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
 import { APP_FULL_NAME, APP_NAME } from '@/lib/version'
@@ -66,81 +56,84 @@ const authThemeOptions: Array<{
 ]
 
 export function AuthPage() {
-  const [token, setToken] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState('')
   const [checkingAuth, setCheckingAuth] = useState(true)
   const navigate = useNavigate()
   const { theme, resolvedTheme, setTheme } = useTheme()
 
-  // 如果已经认证，直接跳转到首页
   useEffect(() => {
+    let cancelled = false
+
     const verifyAuth = async () => {
       try {
-        const isAuth = await checkAuthStatus()
-        if (isAuth) {
-          const needsSetup = await checkFirstSetup()
-          navigate({ to: needsSetup ? '/setup' : '/' })
+        const status = await getAuthStatus()
+        if (cancelled) return
+
+        if (!status.passwordConfigured) {
+          navigate({ to: '/setup' })
+          return
         }
-      } catch {
-        // 忽略错误，保持在登录页
+
+        if (status.authenticated) {
+          const needsSetup = await checkFirstSetup()
+          if (!cancelled) {
+            navigate({ to: needsSetup ? '/setup' : '/' })
+          }
+        }
       } finally {
-        setCheckingAuth(false)
+        if (!cancelled) setCheckingAuth(false)
       }
     }
+
     verifyAuth()
+    return () => {
+      cancelled = true
+    }
   }, [navigate])
 
   const CurrentThemeIcon = theme === 'system' ? Monitor : resolvedTheme === 'dark' ? Moon : Sun
   const themeLabel =
     theme === 'system' ? '跟随系统' : resolvedTheme === 'dark' ? '深色模式' : '浅色模式'
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
     setError('')
 
-    if (!token.trim()) {
-      setError('请输入 Access Token')
+    if (!password) {
+      setError('请输入 WebUI 密码')
       return
     }
 
     setIsValidating(true)
-
     try {
-      // 向后端发送请求验证 token（后端会设置 HttpOnly Cookie）
-      const response = await fetch('/api/webui/auth/verify', {
+      const response = await fetch('/api/webui/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include', // 确保接收并存储 Cookie
-        body: JSON.stringify({ token: token.trim() }),
+        credentials: 'include',
+        cache: 'no-store',
+        body: JSON.stringify({ password }),
       })
+      const data = await response.json().catch(() => null)
 
-      const data = await response.json()
-
-      if (response.ok && data.valid) {
-        // Token 验证成功，Cookie 已由后端设置
-        // 直接使用验证响应中的 is_first_setup 字段，避免额外请求
-        if (data.is_first_setup) {
-          // 需要首次配置，跳转到配置向导
-          navigate({ to: '/setup' })
-        } else {
-          // 不需要配置或配置已完成，跳转到首页
-          navigate({ to: '/' })
-        }
-      } else {
-        setError(data.message || 'Token 验证失败，请检查后重试')
+      if (response.ok && data?.valid) {
+        navigate({ to: data.is_first_setup ? '/setup' : '/' })
+        return
       }
-    } catch (err) {
-      console.error('Token 验证错误:', err)
+
+      setError(data?.detail || data?.message || '密码验证失败，请检查后重试')
+    } catch (requestError) {
+      console.error('WebUI 登录失败:', requestError)
       setError('连接服务器失败，请检查网络连接')
     } finally {
       setIsValidating(false)
     }
   }
 
-  // 正在检查认证状态时显示加载
   if (checkingAuth) {
     return (
       <div className="ios-page flex min-h-screen items-center justify-center overflow-hidden">
@@ -208,47 +201,52 @@ export function AuthPage() {
           <div className="flex h-14 w-14 items-center justify-center rounded-[18px] bg-primary text-primary-foreground shadow-[0_10px_24px_hsl(var(--primary)_/_0.22)] sm:mx-auto">
             <Lock className="h-7 w-7" strokeWidth={2.2} fill="none" />
           </div>
-
           <div className="space-y-3">
             <h1 className="text-[32px] font-semibold leading-[1.14] tracking-normal text-foreground">
               {APP_NAME}
             </h1>
             <p className="max-w-sm text-[17px] leading-[1.45] text-muted-foreground sm:mx-auto">
-              输入 Access Token 继续访问控制台。
+              输入初始配置时设置的密码继续访问控制台。
             </p>
           </div>
         </header>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="ios-group overflow-hidden">
-            <label htmlFor="token" className="ios-row min-h-[64px] gap-3 px-4 py-2">
-              <Key
-                className="h-5 w-5 flex-shrink-0 text-muted-foreground"
-                strokeWidth={2}
-                fill="none"
-              />
+            <label htmlFor="password" className="ios-row min-h-[64px] gap-3 px-4 py-2">
+              <KeyRound className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2} />
               <span className="shrink-0 text-[17px] font-medium leading-snug text-foreground">
-                Access Token
+                密码
               </span>
               <Input
-                id="token"
-                type="password"
-                placeholder="请输入 Token"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="请输入密码"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
                 className={cn(
                   'h-10 min-w-0 flex-1 border-0 bg-transparent px-0 text-right text-[17px] shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:ring-offset-0',
                   error &&
                     'text-[rgb(174_37_31)] placeholder:text-[rgb(215_0_21_/_0.62)] dark:text-[rgb(255_105_97)]'
                 )}
                 disabled={isValidating}
-                autoComplete="off"
+                autoComplete="current-password"
+                autoFocus
               />
+              <button
+                type="button"
+                className="ios-touch grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted/70"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                title={showPassword ? '隐藏密码' : '显示密码'}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </label>
 
             {error && (
               <div className="ios-row flex items-start gap-3 bg-[rgb(255_59_48_/_0.06)] px-4 py-3 text-sm leading-relaxed text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)]">
-                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={2} fill="none" />
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2} />
                 <span className="min-w-0">{error}</span>
               </div>
             )}
@@ -261,100 +259,13 @@ export function AuthPage() {
           >
             {isValidating ? (
               <>
-                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                验证中...
+                <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                登录中...
               </>
             ) : (
-              '验证并进入'
+              '登录'
             )}
           </Button>
-
-          <Dialog>
-            <DialogTrigger asChild>
-              <button
-                type="button"
-                className="ios-group ios-touch flex min-h-[54px] w-full items-center justify-between gap-3 px-4 py-3 text-left text-[15px] font-medium text-primary"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <HelpCircle className="h-5 w-5 flex-shrink-0" strokeWidth={2.2} fill="none" />
-                  <span className="min-w-0 leading-snug">如何获取 Access Token</span>
-                </span>
-                <ChevronRight
-                  className="h-5 w-5 flex-shrink-0 text-primary/70"
-                  strokeWidth={2.2}
-                  fill="none"
-                />
-              </button>
-            </DialogTrigger>
-            <DialogContent className="bottom-0 left-0 top-auto flex max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1rem,env(safe-area-inset-bottom))] sm:bottom-auto sm:left-[50%] sm:top-[50%] sm:max-h-[80vh] sm:max-w-md sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-[22px] sm:border sm:p-5 [&>button:last-child]:right-4 [&>button:last-child]:top-4">
-              <DialogHeader className="px-5 pb-1 pt-5 sm:px-0 sm:pt-0">
-                <DialogTitle className="flex items-center gap-2">
-                  <Lock className="h-5 w-5 text-primary" strokeWidth={2} fill="none" />
-                  如何获取 Access Token
-                </DialogTitle>
-                <DialogDescription>
-                  Access Token 是访问 {APP_NAME} 的唯一凭证，请按以下方式获取
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="ios-scrollbar-none max-h-[calc(86vh-8rem)] space-y-4 overflow-y-auto px-5 pb-5 sm:max-h-[60vh] sm:px-0 sm:pb-0">
-                <div className="overflow-hidden rounded-[18px] border border-border/60 bg-card/80">
-                  <div className="flex items-start gap-3 border-b border-border/60 px-4 py-4">
-                    <Terminal
-                      className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary"
-                      strokeWidth={2}
-                      fill="none"
-                    />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <h4 className="text-sm font-semibold leading-snug">查看启动日志</h4>
-                      <p className="text-sm leading-relaxed text-muted-foreground">
-                        主程序启动时，控制台会显示 WebUI Access Token。
-                      </p>
-                      <div className="rounded-[12px] bg-muted/70 p-2.5 font-mono text-xs leading-relaxed">
-                        <p className="text-muted-foreground">WebUI Access Token: abc123...</p>
-                        <p className="text-muted-foreground">请使用此 Token 登录 WebUI</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 px-4 py-4">
-                    <FileText
-                      className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary"
-                      strokeWidth={2}
-                      fill="none"
-                    />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <h4 className="text-sm font-semibold leading-snug">查看配置文件</h4>
-                      <p className="text-sm leading-relaxed text-muted-foreground">
-                        Token 保存在项目根目录的配置文件中：
-                      </p>
-                      <div className="break-all rounded-[12px] bg-muted/70 p-2.5 font-mono text-xs leading-relaxed">
-                        <code className="text-primary">data/webui.json</code>
-                      </div>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        打开此文件，复制{' '}
-                        <code className="rounded bg-muted px-1 py-0.5">access_token</code> 字段的值
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-[18px] border border-border/60 bg-card/80">
-                  <div className="flex items-start gap-3 px-4 py-3">
-                    <AlertCircle
-                      className="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(178_93_0)] dark:text-[rgb(255_159_10)]"
-                      strokeWidth={2}
-                      fill="none"
-                    />
-                    <div className="space-y-1 text-sm leading-relaxed text-muted-foreground">
-                      <p className="font-semibold text-foreground">安全提示</p>
-                      <p>请妥善保管您的 Token。需要重置时，可在登录后前往系统设置。</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
         </form>
       </main>
 

@@ -47,6 +47,7 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
                 self.assertFalse(marked["first_setup_completed"])
                 self.assertEqual(marked["setup_required_reason"], "created")
                 self.assertNotIn("setup_completed_at", marked)
+                self.assertEqual(webui_path.stat().st_mode & 0o777, 0o600)
 
                 webui_path.write_text("{bad json", encoding="utf-8")
                 with patch.object(config_module, "PROJECT_ROOT", str(root)):

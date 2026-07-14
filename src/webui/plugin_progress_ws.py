@@ -102,10 +102,9 @@ async def websocket_plugin_progress(websocket: WebSocket, token: Optional[str] =
     """WebSocket 插件加载进度推送端点
 
     客户端连接后会立即收到当前进度状态
-    支持三种认证方式（按优先级）：
+    支持两种认证方式（按优先级）：
     1. query 参数 token（推荐，通过 /api/webui/ws-token 获取临时 token）
     2. Cookie 中的 maibot_session
-    3. 直接使用 session token（兼容）
 
     示例：ws://host/ws/plugin-progress?token=xxx
     """
@@ -132,17 +131,6 @@ async def websocket_plugin_progress(websocket: WebSocket, token: Optional[str] =
                     event_code="webui.plugin_progress_ws.auth_success",
                     auth_method="cookie",
                 )
-
-    # 方式 3: 尝试直接验证 query 参数作为 session token（兼容旧方式）
-    if not is_authenticated and token:
-        token_manager = get_token_manager()
-        if token_manager.verify_token(token):
-            is_authenticated = True
-            logger.debug(
-                "插件进度 WebSocket 认证成功",
-                event_code="webui.plugin_progress_ws.auth_success",
-                auth_method="session_token",
-            )
 
     if not is_authenticated:
         logger.warning("插件进度 WebSocket 连接被拒绝", event_code="webui.plugin_progress_ws.auth_failed")

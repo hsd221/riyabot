@@ -630,7 +630,6 @@ async def ban_emoji(
 @router.get("/{emoji_id}/thumbnail")
 async def get_emoji_thumbnail(
     emoji_id: int,
-    token: Optional[str] = Query(None, description="访问令牌"),
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
     original: bool = Query(False, description="是否返回原图"),
@@ -640,7 +639,6 @@ async def get_emoji_thumbnail(
 
     Args:
         emoji_id: 表情包ID
-        token: 访问令牌（通过 query parameter，用于向后兼容）
         maibot_session: Cookie 中的 token
         authorization: Authorization header
         original: 是否返回原图（用于详情页查看原图）
@@ -661,10 +659,8 @@ async def get_emoji_thumbnail(
         # 1. 优先使用 Cookie
         if maibot_session and token_manager.verify_token(maibot_session):
             is_valid = True
-        # 2. 其次使用 query parameter（用于向后兼容 img 标签）
-        elif token and token_manager.verify_token(token):
-            is_valid = True
-        # 3. 最后使用 Authorization header
+        # 2. 其次使用 Authorization header。完整会话令牌不接受 query
+        # 参数，避免凭据泄露到浏览历史、代理日志和 Referer 中。
         elif authorization and authorization.startswith("Bearer "):
             auth_token = authorization.replace("Bearer ", "")
             if token_manager.verify_token(auth_token):

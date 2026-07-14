@@ -11,7 +11,19 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Markdown } from '@/components/ui/markdown'
-import { X, FileText, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  FileText,
+  KeyRound,
+  ShieldCheck,
+  X,
+  XCircle,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { validatePassword } from '@/lib/password-validator'
 import type {
   AgreementStatus,
   BotBasicConfig,
@@ -20,7 +32,143 @@ import type {
   OtherBasicConfig,
 } from './types'
 
-// ====== 步骤0：协议确认 ======
+interface PasswordSetupFormProps {
+  password: string
+  passwordConfirm: string
+  onPasswordChange: (password: string) => void
+  onPasswordConfirmChange: (password: string) => void
+}
+
+export function PasswordSetupForm({
+  password,
+  passwordConfirm,
+  onPasswordChange,
+  onPasswordConfirmChange,
+}: PasswordSetupFormProps) {
+  const [showPassword, setShowPassword] = useState(false)
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false)
+  const validation = validatePassword(password)
+  const passwordsMatch = passwordConfirm.length > 0 && password === passwordConfirm
+
+  return (
+    <div className="space-y-5">
+      <div className="ios-group overflow-hidden">
+        <div className="ios-row ios-row-plain items-start gap-3 py-4">
+          <span className="ios-symbol ios-symbol-md ios-symbol-green mt-0.5">
+            <ShieldCheck className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[15px] font-semibold leading-5 text-foreground">保护 WebUI</p>
+            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              密码只会以加盐哈希保存，设置完成后将用于登录控制台。
+            </p>
+          </div>
+        </div>
+
+        <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch gap-2 sm:flex-row sm:!items-center">
+          <Label htmlFor="setup-password" className="shrink-0 text-[15px] font-normal sm:w-24">
+            设置密码
+          </Label>
+          <div className="relative min-w-0 flex-1">
+            <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="setup-password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              className="h-11 rounded-[12px] bg-muted/60 pl-10 pr-11 shadow-none"
+              placeholder="8-16 位字母与数字"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={16}
+              aria-describedby="setup-password-rules"
+              autoFocus
+            />
+            <button
+              type="button"
+              className="ios-touch absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
+              onClick={() => setShowPassword((visible) => !visible)}
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+              title={showPassword ? '隐藏密码' : '显示密码'}
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="ios-row ios-row-plain min-h-[76px] flex-col !items-stretch gap-2 sm:flex-row sm:!items-center">
+          <Label
+            htmlFor="setup-password-confirm"
+            className="shrink-0 text-[15px] font-normal sm:w-24"
+          >
+            确认密码
+          </Label>
+          <div className="relative min-w-0 flex-1">
+            <Input
+              id="setup-password-confirm"
+              type={showPasswordConfirm ? 'text' : 'password'}
+              value={passwordConfirm}
+              onChange={(event) => onPasswordConfirmChange(event.target.value)}
+              className="h-11 rounded-[12px] bg-muted/60 pr-11 shadow-none"
+              placeholder="再次输入密码"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={16}
+            />
+            <button
+              type="button"
+              className="ios-touch absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
+              onClick={() => setShowPasswordConfirm((visible) => !visible)}
+              aria-label={showPasswordConfirm ? '隐藏确认密码' : '显示确认密码'}
+              title={showPasswordConfirm ? '隐藏确认密码' : '显示确认密码'}
+            >
+              {showPasswordConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="setup-password-rules" className="ios-group grid gap-3 p-4 sm:grid-cols-2">
+        {validation.rules.map((rule) => (
+          <div key={rule.id} className="flex min-w-0 items-center gap-2 text-sm">
+            {rule.passed ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]" />
+            ) : (
+              <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span
+              className={cn(
+                rule.passed
+                  ? 'text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]'
+                  : 'text-muted-foreground'
+              )}
+            >
+              {rule.label}
+            </span>
+          </div>
+        ))}
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          {passwordsMatch ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]" />
+          ) : (
+            <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+          <span
+            className={cn(
+              passwordsMatch
+                ? 'text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]'
+                : 'text-muted-foreground'
+            )}
+          >
+            两次输入一致
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ====== 协议确认 ======
 interface AgreementFormProps {
   status: AgreementStatus | null
   acceptedEula: boolean
@@ -66,11 +214,7 @@ export function AgreementForm({
               : 'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-[#007AFF] text-white shadow-[0_4px_10px_rgba(0,122,255,0.2)]'
           }
         >
-          {readyToContinue ? (
-            <ShieldCheck className="h-4 w-4" />
-          ) : (
-            <FileText className="h-4 w-4" />
-          )}
+          {readyToContinue ? <ShieldCheck className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
         </span>
         <span className="min-w-0">
           <span className="block text-[15px] font-medium leading-5">
@@ -86,32 +230,22 @@ export function AgreementForm({
         </span>
       </div>
 
-      <Tabs defaultValue="eula" className="min-w-0 w-full">
+      <Tabs defaultValue="eula" className="w-full min-w-0">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="eula">许可协议</TabsTrigger>
           <TabsTrigger value="privacy">隐私条款</TabsTrigger>
         </TabsList>
         <TabsContent value="eula" className="mt-3 sm:mt-4">
-          <div
-            data-setup-panel="agreement-document"
-            className="ios-group min-w-0 overflow-hidden"
-          >
+          <div data-setup-panel="agreement-document" className="ios-group min-w-0 overflow-hidden">
             <ScrollArea className="h-[clamp(128px,16svh,320px)] min-w-0 p-4 sm:h-[clamp(240px,31svh,460px)] sm:p-6">
-              <Markdown className={agreementMarkdownClass}>
-                {status.eula.content}
-              </Markdown>
+              <Markdown className={agreementMarkdownClass}>{status.eula.content}</Markdown>
             </ScrollArea>
           </div>
         </TabsContent>
         <TabsContent value="privacy" className="mt-3 sm:mt-4">
-          <div
-            data-setup-panel="agreement-document"
-            className="ios-group min-w-0 overflow-hidden"
-          >
+          <div data-setup-panel="agreement-document" className="ios-group min-w-0 overflow-hidden">
             <ScrollArea className="h-[clamp(128px,16svh,320px)] min-w-0 p-4 sm:h-[clamp(240px,31svh,460px)] sm:p-6">
-              <Markdown className={agreementMarkdownClass}>
-                {status.privacy.content}
-              </Markdown>
+              <Markdown className={agreementMarkdownClass}>{status.privacy.content}</Markdown>
             </ScrollArea>
           </div>
         </TabsContent>
@@ -184,13 +318,9 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
           type="number"
           placeholder="请输入机器人的QQ账号"
           value={config.qq_account || ''}
-          onChange={(e) =>
-            onChange({ ...config, qq_account: Number(e.target.value) })
-          }
+          onChange={(e) => onChange({ ...config, qq_account: Number(e.target.value) })}
         />
-        <p className="text-xs text-muted-foreground">
-          机器人登录使用的QQ账号
-        </p>
+        <p className="text-xs text-muted-foreground">机器人登录使用的QQ账号</p>
       </div>
 
       <div className="ios-group space-y-3 p-5">
@@ -201,21 +331,19 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
           value={config.nickname}
           onChange={(e) => onChange({ ...config, nickname: e.target.value })}
         />
-        <p className="text-xs text-muted-foreground">
-          机器人的主要称呼名称
-        </p>
+        <p className="text-xs text-muted-foreground">机器人的主要称呼名称</p>
       </div>
 
       <div className="ios-group space-y-3 p-5">
         <Label>别名</Label>
-        <div className="flex flex-wrap gap-2 mb-2">
+        <div className="mb-2 flex flex-wrap gap-2">
           {config.alias_names.map((alias, index) => (
             <Badge key={index} variant="secondary" className="gap-1">
               {alias}
               <button
                 type="button"
                 onClick={() => handleRemoveAlias(index)}
-                className="ml-1 hover:text-destructive"
+                className="hover:text-destructive ml-1"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -237,9 +365,7 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
             type="button"
             variant="outline"
             onClick={() => {
-              const input = document.getElementById(
-                'alias_input'
-              ) as HTMLInputElement
+              const input = document.getElementById('alias_input') as HTMLInputElement
               if (input) {
                 handleAddAlias(input.value)
                 input.value = ''
@@ -249,9 +375,7 @@ export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
             添加
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
-          机器人的其他称呼，可以添加多个
-        </p>
+        <p className="text-xs text-muted-foreground">机器人的其他称呼，可以添加多个</p>
       </div>
     </div>
   )
@@ -335,13 +459,9 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           step="0.1"
           value={config.emoji_chance}
           className="h-2 cursor-pointer bg-transparent p-0 shadow-none"
-          onChange={(e) =>
-            onChange({ ...config, emoji_chance: Number(e.target.value) })
-          }
+          onChange={(e) => onChange({ ...config, emoji_chance: Number(e.target.value) })}
         />
-        <p className="text-xs text-muted-foreground">
-          机器人发送表情包的概率
-        </p>
+        <p className="text-xs text-muted-foreground">机器人发送表情包的概率</p>
       </div>
 
       <div className="ios-group space-y-3 p-5">
@@ -352,31 +472,25 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           min="1"
           max="200"
           value={config.max_reg_num}
-          onChange={(e) =>
-            onChange({ ...config, max_reg_num: Number(e.target.value) })
-          }
+          onChange={(e) => onChange({ ...config, max_reg_num: Number(e.target.value) })}
         />
-        <p className="text-xs text-muted-foreground">
-          机器人最多保存的表情包数量
-        </p>
+        <p className="text-xs text-muted-foreground">机器人最多保存的表情包数量</p>
       </div>
 
       <div className="ios-group">
         <div className="ios-row">
-        <div className="space-y-1">
-          <Label htmlFor="do_replace">达到最大数量时替换</Label>
-          <p className="text-xs text-muted-foreground">
-            开启后会删除旧表情包，关闭则不再收集新表情包
-          </p>
+          <div className="space-y-1">
+            <Label htmlFor="do_replace">达到最大数量时替换</Label>
+            <p className="text-xs text-muted-foreground">
+              开启后会删除旧表情包，关闭则不再收集新表情包
+            </p>
+          </div>
+          <Switch
+            id="do_replace"
+            checked={config.do_replace}
+            onCheckedChange={(checked) => onChange({ ...config, do_replace: checked })}
+          />
         </div>
-        <Switch
-          id="do_replace"
-          checked={config.do_replace}
-          onCheckedChange={(checked) =>
-            onChange({ ...config, do_replace: checked })
-          }
-        />
-      </div>
       </div>
 
       <div className="ios-group space-y-3 p-5">
@@ -387,49 +501,36 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
           min="1"
           max="120"
           value={config.check_interval}
-          onChange={(e) =>
-            onChange({ ...config, check_interval: Number(e.target.value) })
-          }
+          onChange={(e) => onChange({ ...config, check_interval: Number(e.target.value) })}
         />
-        <p className="text-xs text-muted-foreground">
-          检查表情包注册、破损、删除的时间间隔
-        </p>
+        <p className="text-xs text-muted-foreground">检查表情包注册、破损、删除的时间间隔</p>
       </div>
 
       <Separator className="hidden" />
 
       <div className="ios-group">
-      <div className="ios-row">
-        <div className="space-y-1">
-          <Label htmlFor="steal_emoji">偷取表情包</Label>
-          <p className="text-xs text-muted-foreground">
-            允许机器人将一些表情包据为己有
-          </p>
+        <div className="ios-row">
+          <div className="space-y-1">
+            <Label htmlFor="steal_emoji">偷取表情包</Label>
+            <p className="text-xs text-muted-foreground">允许机器人将一些表情包据为己有</p>
+          </div>
+          <Switch
+            id="steal_emoji"
+            checked={config.steal_emoji}
+            onCheckedChange={(checked) => onChange({ ...config, steal_emoji: checked })}
+          />
         </div>
-        <Switch
-          id="steal_emoji"
-          checked={config.steal_emoji}
-          onCheckedChange={(checked) =>
-            onChange({ ...config, steal_emoji: checked })
-          }
-        />
-      </div>
-      <div className="ios-row">
-
-        <div className="space-y-1">
-          <Label htmlFor="content_filtration">启用表情包过滤</Label>
-          <p className="text-xs text-muted-foreground">
-            只保存符合要求的表情包
-          </p>
+        <div className="ios-row">
+          <div className="space-y-1">
+            <Label htmlFor="content_filtration">启用表情包过滤</Label>
+            <p className="text-xs text-muted-foreground">只保存符合要求的表情包</p>
+          </div>
+          <Switch
+            id="content_filtration"
+            checked={config.content_filtration}
+            onCheckedChange={(checked) => onChange({ ...config, content_filtration: checked })}
+          />
         </div>
-        <Switch
-          id="content_filtration"
-          checked={config.content_filtration}
-          onCheckedChange={(checked) =>
-            onChange({ ...config, content_filtration: checked })
-          }
-        />
-      </div>
       </div>
 
       {config.content_filtration && (
@@ -439,13 +540,9 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
             id="filtration_prompt"
             placeholder="例如：符合公序良俗"
             value={config.filtration_prompt}
-            onChange={(e) =>
-              onChange({ ...config, filtration_prompt: e.target.value })
-            }
+            onChange={(e) => onChange({ ...config, filtration_prompt: e.target.value })}
           />
-          <p className="text-xs text-muted-foreground">
-            描述表情包应该符合的要求
-          </p>
+          <p className="text-xs text-muted-foreground">描述表情包应该符合的要求</p>
         </div>
       )}
     </div>
@@ -464,32 +561,24 @@ export function OtherBasicForm({ config, onChange }: OtherBasicFormProps) {
       <div className="ios-row">
         <div className="space-y-1">
           <Label htmlFor="enable_tool">启用工具系统</Label>
-          <p className="text-xs text-muted-foreground">
-            允许机器人使用各种工具增强功能
-          </p>
+          <p className="text-xs text-muted-foreground">允许机器人使用各种工具增强功能</p>
         </div>
         <Switch
           id="enable_tool"
           checked={config.enable_tool}
-          onCheckedChange={(checked) =>
-            onChange({ ...config, enable_tool: checked })
-          }
+          onCheckedChange={(checked) => onChange({ ...config, enable_tool: checked })}
         />
       </div>
 
       <div className="ios-row">
         <div className="space-y-1">
           <Label htmlFor="all_global_jargon">启用全局黑话模式</Label>
-          <p className="text-xs text-muted-foreground">
-            允许机器人学习和使用群组黑话
-          </p>
+          <p className="text-xs text-muted-foreground">允许机器人学习和使用群组黑话</p>
         </div>
         <Switch
           id="all_global_jargon"
           checked={config.all_global_jargon}
-          onCheckedChange={(checked) =>
-            onChange({ ...config, all_global_jargon: checked })
-          }
+          onCheckedChange={(checked) => onChange({ ...config, all_global_jargon: checked })}
         />
       </div>
     </div>

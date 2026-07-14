@@ -1,303 +1,429 @@
-"""
-WebUI Token 管理模块
-负责生成、保存、验证和更新访问令牌
+"""WebUI 密码和会话管理。
+
+历史版本把访问令牌当作密码，并将其明文写入 ``data/webui.json``。新版本只
+持久化密码哈希，登录后使用独立的、带签名和过期时间的会话令牌。
 """
 
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import hmac
 import json
+import os
+import re
 import secrets
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
-from src.common.logger import get_logger, hash_id, redact_secret
+from src.common.logger import get_logger
 
 logger = get_logger("webui")
 
 
 class TokenManager:
-    """Token 管理器"""
+    """管理 WebUI 密码、初始化状态和签名会话。"""
+
+    PASSWORD_MIN_LENGTH = 8
+    PASSWORD_MAX_LENGTH = 16
+    SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+    SCRYPT_N = 2**14
+    SCRYPT_R = 8
+    SCRYPT_P = 1
+    SCRYPT_DKLEN = 32
+    _PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
+    _SESSION_NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+    _SESSION_SIGNATURE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
     def __init__(self, config_path: Optional[Path] = None):
-        """
-        初始化 Token 管理器
-
-        Args:
-            config_path: 配置文件路径，默认为项目根目录的 data/webui.json
-        """
         if config_path is None:
-            # 获取项目根目录 (src/webui -> src -> 根目录)
             project_root = Path(__file__).parent.parent.parent
             config_path = project_root / "data" / "webui.json"
 
-        self.config_path = config_path
+        self.config_path = Path(config_path)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # 确保配置文件存在并包含有效的 token
+        self._lock = threading.RLock()
         self._ensure_config()
 
-    def _ensure_config(self):
-        """确保配置文件存在且包含有效的 token"""
-        if not self.config_path.exists():
-            logger.info(
-                "WebUI 配置文件不存在，开始创建", event_code="webui.config.create_started", path=str(self.config_path)
-            )
-            self._create_new_token()
-        else:
-            # 验证配置文件格式
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        """在多个 worker 进程之间串行化初始化和配置更新。"""
+        lock_path = self.config_path.with_name(f"{self.config_path.name}.lock")
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
             try:
-                config = self._load_config()
-                if not config.get("access_token"):
-                    logger.warning(
-                        "WebUI 配置缺少访问令牌，开始重新生成",
-                        event_code="webui.config.access_token_missing",
-                        path=str(self.config_path),
-                    )
-                    self._create_new_token()
-                else:
-                    logger.info(
-                        "WebUI 访问令牌已加载",
-                        event_code="webui.token.loaded",
-                        token_preview=redact_secret(config["access_token"]),
-                        token_hash=hash_id(config["access_token"]),
-                    )
-            except Exception:
-                logger.exception("WebUI 配置文件读取失败，开始重新创建", event_code="webui.config.load_failed")
-                self._create_new_token()
+                import fcntl
 
-    def _load_config(self) -> dict:
-        """加载配置文件"""
-        try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            logger.exception("WebUI 配置加载失败", event_code="webui.config.load_failed", path=str(self.config_path))
-            return {}
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except (ImportError, AttributeError):
+                # Windows 没有 fcntl；进程内锁仍能保护常规开发环境。
+                pass
+            yield
+        finally:
+            try:
+                import fcntl
 
-    def _save_config(self, config: dict):
-        """保存配置文件"""
-        try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
-            logger.info("WebUI 配置已保存", event_code="webui.config.saved", path=str(self.config_path))
-        except Exception:
-            logger.exception("WebUI 配置保存失败", event_code="webui.config.save_failed", path=str(self.config_path))
-            raise
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except (ImportError, AttributeError):
+                pass
+            os.close(fd)
 
-    def _create_new_token(self) -> str:
-        """生成新的 64 位随机 token"""
-        # 生成 64 位十六进制字符串 (32 字节 = 64 hex 字符)
-        token = secrets.token_hex(32)
-
-        config = {
-            "access_token": token,
-            "created_at": self._get_current_timestamp(),
-            "updated_at": self._get_current_timestamp(),
-            "first_setup_completed": False,  # 标记首次配置未完成
+    def _default_config(self) -> dict:
+        now = self._get_current_timestamp()
+        return {
+            "created_at": now,
+            "updated_at": now,
+            "first_setup_completed": False,
         }
 
-        self._save_config(config)
-        logger.info(
-            "WebUI 访问令牌已生成",
-            event_code="webui.token.generated",
-            token_preview=redact_secret(token),
-            token_hash=hash_id(token),
-        )
+    def _ensure_config(self) -> None:
+        """创建最小配置，不生成密码或可登录令牌。"""
+        with self._lock, self._file_lock():
+            if not self.config_path.exists():
+                logger.info(
+                    "WebUI 配置文件不存在，创建待初始化状态",
+                    event_code="webui.config.create_started",
+                    path=str(self.config_path),
+                )
+                self._write_config_unlocked(self._default_config())
+                return
 
-        return token
+            try:
+                config = self._load_config()
+            except (OSError, ValueError, TypeError) as error:
+                logger.exception(
+                    "WebUI 配置文件读取失败，已拒绝进入未初始化状态",
+                    event_code="webui.config.load_failed",
+                    path=str(self.config_path),
+                )
+                raise RuntimeError(
+                    f"WebUI 配置文件损坏或不可读：{self.config_path}。请修复该文件，或确认无需保留后再手动删除"
+                ) from error
+
+            changed = False
+            if not config.get("created_at"):
+                config["created_at"] = self._get_current_timestamp()
+                changed = True
+            if not config.get("updated_at"):
+                config["updated_at"] = config["created_at"]
+                changed = True
+            if not isinstance(config.get("first_setup_completed"), bool):
+                config["first_setup_completed"] = False
+                changed = True
+            # 旧版本可能写入空 access_token；它不应被视为密码。
+            if "access_token" in config and not isinstance(config["access_token"], str):
+                config.pop("access_token", None)
+                changed = True
+            if changed:
+                config["updated_at"] = self._get_current_timestamp()
+                self._write_config_unlocked(config)
+            else:
+                try:
+                    os.chmod(self.config_path, 0o600)
+                except OSError:
+                    logger.warning("无法限制 WebUI 配置文件权限", event_code="webui.config.chmod_failed")
+
+    def _load_config(self) -> dict:
+        with self.config_path.open("r", encoding="utf-8") as file:
+            value = json.load(file)
+        if not isinstance(value, dict):
+            raise ValueError("WebUI 配置必须是 JSON 对象")
+        return value
+
+    def _write_config_unlocked(self, config: dict) -> None:
+        """原子写入配置，并将配置文件限制为仅所有者可读写。"""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=".webui-", suffix=".tmp", dir=self.config_path.parent)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(config, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_name, self.config_path)
+            try:
+                os.chmod(self.config_path, 0o600)
+            except OSError:
+                logger.warning("无法限制 WebUI 配置文件权限", event_code="webui.config.chmod_failed")
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
+
+    def _save_config(self, config: dict) -> None:
+        with self._lock, self._file_lock():
+            self._write_config_unlocked(config)
+        logger.info("WebUI 配置已保存", event_code="webui.config.saved", path=str(self.config_path))
 
     def _get_current_timestamp(self) -> str:
-        """获取当前时间戳字符串"""
-        from datetime import datetime
+        return datetime.now(timezone.utc).isoformat()
 
-        return datetime.now().isoformat()
+    @classmethod
+    def validate_password(cls, password: str) -> tuple[bool, str]:
+        """验证初始化和改密使用的密码策略。"""
+        if not isinstance(password, str) or not password:
+            return False, "密码不能为空"
+        if len(password) < cls.PASSWORD_MIN_LENGTH:
+            return False, f"密码长度至少为 {cls.PASSWORD_MIN_LENGTH} 位"
+        if len(password) > cls.PASSWORD_MAX_LENGTH:
+            return False, f"密码长度不能超过 {cls.PASSWORD_MAX_LENGTH} 位"
+        if not cls._PASSWORD_PATTERN.fullmatch(password):
+            return False, "密码只能包含数字和英文字母"
+        if not re.search(r"[A-Za-z]", password):
+            return False, "密码必须包含英文字母"
+        if not re.search(r"[0-9]", password):
+            return False, "密码必须包含数字"
+        return True, "密码格式正确"
 
-    def get_token(self) -> str:
-        """获取当前有效的 token"""
-        config = self._load_config()
-        return config.get("access_token", "")
-
-    def verify_token(self, token: str) -> bool:
-        """
-        验证 token 是否有效
-
-        Args:
-            token: 待验证的 token
-
-        Returns:
-            bool: token 是否有效
-        """
-        if not token:
-            return False
-
-        current_token = self.get_token()
-        if not current_token:
-            logger.error("系统中没有有效的访问令牌", event_code="webui.token.unavailable")
-            return False
-
-        # 使用 secrets.compare_digest 防止时序攻击
-        is_valid = secrets.compare_digest(token, current_token)
-
-        if is_valid:
-            logger.debug("WebUI 访问令牌验证成功", event_code="webui.token.verify_success", token_hash=hash_id(token))
-        else:
-            logger.warning("WebUI 访问令牌验证失败", event_code="webui.token.verify_failed", token_hash=hash_id(token))
-
-        return is_valid
-
-    def update_token(self, new_token: str) -> tuple[bool, str]:
-        """
-        更新 token
-
-        Args:
-            new_token: 新的 token (最少 10 位，必须包含大小写字母和特殊符号)
-
-        Returns:
-            tuple[bool, str]: (是否更新成功, 错误消息)
-        """
-        # 验证新 token 格式
-        is_valid, error_msg = self._validate_custom_token(new_token)
-        if not is_valid:
-            logger.error("WebUI 访问令牌格式无效", event_code="webui.token.invalid_format", reason=error_msg)
-            return False, error_msg
-
-        try:
-            config = self._load_config()
-            old_token = config.get("access_token", "")
-
-            config["access_token"] = new_token
-            config["updated_at"] = self._get_current_timestamp()
-
-            self._save_config(config)
-            logger.info(
-                "WebUI 访问令牌已更新",
-                event_code="webui.token.updated",
-                old_token_hash=hash_id(old_token),
-                new_token_hash=hash_id(new_token),
-            )
-
-            return True, "Token 更新成功"
-        except Exception as e:
-            logger.exception("WebUI 访问令牌更新失败", event_code="webui.token.update_failed")
-            return False, f"更新失败: {str(e)}"
-
-    def regenerate_token(self) -> str:
-        """
-        重新生成 token（保留 first_setup_completed 状态）
-
-        Returns:
-            str: 新生成的 token
-        """
-        logger.info("WebUI 访问令牌开始重新生成", event_code="webui.token.regenerate_started")
-
-        # 生成新的 64 位十六进制字符串
-        new_token = secrets.token_hex(32)
-
-        # 加载现有配置，保留 first_setup_completed 状态
-        config = self._load_config()
-        old_token = config.get("access_token", "")
-        first_setup_completed = config.get("first_setup_completed", True)  # 默认为 True，表示已完成配置
-
-        config["access_token"] = new_token
-        config["updated_at"] = self._get_current_timestamp()
-        config["first_setup_completed"] = first_setup_completed  # 保留原来的状态
-
-        self._save_config(config)
-        logger.info(
-            "WebUI 访问令牌已重新生成",
-            event_code="webui.token.regenerated",
-            old_token_hash=hash_id(old_token),
-            new_token_hash=hash_id(new_token),
+    @classmethod
+    def _hash_password(cls, password: str) -> str:
+        salt = secrets.token_bytes(16)
+        digest = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=cls.SCRYPT_N,
+            r=cls.SCRYPT_R,
+            p=cls.SCRYPT_P,
+            dklen=cls.SCRYPT_DKLEN,
         )
 
-        return new_token
+        def encode(value: bytes) -> str:
+            return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
-    def _validate_token_format(self, token: str) -> bool:
-        """
-        验证 token 格式是否正确（旧的 64 位十六进制验证，保留用于系统生成的 token）
+        return f"scrypt${cls.SCRYPT_N}${cls.SCRYPT_R}${cls.SCRYPT_P}${encode(salt)}${encode(digest)}"
 
-        Args:
-            token: 待验证的 token
+    @staticmethod
+    def _decode_b64(value: str) -> bytes:
+        return base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
 
-        Returns:
-            bool: 格式是否正确
-        """
-        if not token or not isinstance(token, str):
-            return False
-
-        # 必须是 64 位十六进制字符串
-        if len(token) != 64:
-            return False
-
-        # 验证是否为有效的十六进制字符串
+    @classmethod
+    def _verify_password_hash(cls, password: str, encoded: str) -> bool:
         try:
-            int(token, 16)
-            return True
-        except ValueError:
+            scheme, n_text, r_text, p_text, salt_text, digest_text = encoded.split("$")
+            if scheme != "scrypt":
+                return False
+            n, r, p = int(n_text), int(r_text), int(p_text)
+            # 参数来自磁盘配置，必须在进入高成本计算前固定到受支持值，
+            # 避免损坏或被篡改的配置触发内存/CPU 资源耗尽。
+            if (n, r, p) != (cls.SCRYPT_N, cls.SCRYPT_R, cls.SCRYPT_P):
+                return False
+            salt = cls._decode_b64(salt_text)
+            expected = cls._decode_b64(digest_text)
+            if len(salt) != 16 or len(expected) != cls.SCRYPT_DKLEN:
+                return False
+            actual = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=len(expected))
+            return secrets.compare_digest(actual, expected)
+        except (binascii.Error, ValueError, TypeError, UnicodeError, OverflowError):
             return False
 
-    def _validate_custom_token(self, token: str) -> tuple[bool, str]:
-        """
-        验证自定义 token 格式
-
-        要求:
-        - 最少 10 位
-        - 包含大写字母
-        - 包含小写字母
-        - 包含特殊符号
-
-        Args:
-            token: 待验证的 token
-
-        Returns:
-            tuple[bool, str]: (是否有效, 错误消息)
-        """
-        if not token or not isinstance(token, str):
-            return False, "Token 不能为空"
-
-        # 检查长度
-        if len(token) < 10:
-            return False, "Token 长度至少为 10 位"
-
-        # 检查是否包含大写字母
-        has_upper = any(c.isupper() for c in token)
-        if not has_upper:
-            return False, "Token 必须包含大写字母"
-
-        # 检查是否包含小写字母
-        has_lower = any(c.islower() for c in token)
-        if not has_lower:
-            return False, "Token 必须包含小写字母"
-
-        # 检查是否包含特殊符号
-        special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?/"
-        has_special = any(c in special_chars for c in token)
-        if not has_special:
-            return False, f"Token 必须包含特殊符号 ({special_chars})"
-
-        return True, "Token 格式正确"
-
-    def is_first_setup(self) -> bool:
-        """
-        检查是否为首次配置
-
-        Returns:
-            bool: 是否为首次配置
-        """
+    def is_password_configured(self) -> bool:
         config = self._load_config()
-        return not config.get("first_setup_completed", False)
+        return bool(config.get("password_hash") or config.get("access_token"))
 
-    def mark_setup_completed(self) -> bool:
-        """
-        标记首次配置已完成
+    # 兼容调用方使用的命名。
+    has_password = is_password_configured
 
-        Returns:
-            bool: 是否标记成功
-        """
+    def get_token(self) -> str:
+        """兼容旧调用但不再暴露任何明文凭据。"""
+        return ""
+
+    def set_initial_password(self, password: str) -> tuple[bool, str]:
+        """在未初始化状态下设置密码，成功后仍需完成其余向导步骤。"""
+        valid, message = self.validate_password(password)
+        if not valid:
+            return False, message
+
+        with self._lock, self._file_lock():
+            config = self._load_config()
+            if config.get("password_hash") or config.get("access_token"):
+                return False, "密码已经设置"
+            config["password_hash"] = self._hash_password(password)
+            config["session_secret"] = secrets.token_urlsafe(32)
+            config["session_version"] = 1
+            config["password_configured_at"] = self._get_current_timestamp()
+            config["updated_at"] = self._get_current_timestamp()
+            config.pop("access_token", None)
+            self._write_config_unlocked(config)
+        logger.info("WebUI 初始密码已设置", event_code="webui.password.initialized")
+        return True, "密码设置成功"
+
+    def _migrate_legacy_password_unlocked(self, password: str, config: dict) -> None:
+        config["password_hash"] = self._hash_password(password)
+        config["session_secret"] = secrets.token_urlsafe(32)
+        config["session_version"] = 1
+        config["password_migrated_at"] = self._get_current_timestamp()
+        config.pop("access_token", None)
+        config["updated_at"] = self._get_current_timestamp()
+        self._write_config_unlocked(config)
+        logger.info("旧版 WebUI 令牌已迁移为密码哈希", event_code="webui.password.legacy_migrated")
+
+    def authenticate(self, password: str) -> bool:
+        """验证密码；旧版明文令牌只在首次成功验证时用于迁移。"""
+        if not isinstance(password, str) or not password:
+            return False
+        try:
+            with self._lock, self._file_lock():
+                config = self._load_config()
+                encoded = config.get("password_hash")
+                if isinstance(encoded, str) and encoded:
+                    return self._verify_password_hash(password, encoded)
+
+                legacy = config.get("access_token")
+                if not isinstance(legacy, str) or not legacy:
+                    return False
+                if not secrets.compare_digest(password, legacy):
+                    return False
+                self._migrate_legacy_password_unlocked(password, config)
+                return True
+        except (OSError, ValueError, TypeError, UnicodeError):
+            logger.exception("WebUI 密码配置读取失败", event_code="webui.password.authenticate_failed")
+            return False
+
+    def verify_password(self, password: str) -> bool:
+        return self.authenticate(password)
+
+    def create_session(self) -> str:
+        """创建带版本、过期时间和随机 nonce 的签名会话。"""
+        with self._lock, self._file_lock():
+            config = self._load_config()
+            if not config.get("password_hash"):
+                return ""
+            secret = config.get("session_secret")
+            try:
+                version = int(config.get("session_version", 0))
+            except (TypeError, ValueError):
+                version = 0
+            changed = False
+            if not isinstance(secret, str) or not secret:
+                secret = secrets.token_urlsafe(32)
+                config["session_secret"] = secret
+                version = max(version, 0) + 1
+                config["session_version"] = version
+                changed = True
+            if version < 1:
+                version = 1
+                config["session_version"] = version
+                changed = True
+            if changed:
+                config["updated_at"] = self._get_current_timestamp()
+                self._write_config_unlocked(config)
+
+        expires_at = int(time.time()) + self.SESSION_TTL_SECONDS
+        payload = f"{version}.{expires_at}.{secrets.token_urlsafe(24)}"
+        signature = hmac.new(secret.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).hexdigest()
+        return f"{payload}.{signature}"
+
+    def verify_session(self, token: str) -> bool:
+        if not isinstance(token, str) or len(token) > 512 or not token.isascii():
+            return False
+        try:
+            version_text, expires_text, nonce, signature = token.split(".")
+            if (
+                not version_text.isdigit()
+                or not expires_text.isdigit()
+                or not self._SESSION_NONCE_PATTERN.fullmatch(nonce)
+                or not self._SESSION_SIGNATURE_PATTERN.fullmatch(signature)
+            ):
+                return False
+            version = int(version_text)
+            expires_at = int(expires_text)
+            if version < 1 or expires_at <= int(time.time()):
+                return False
+        except (ValueError, AttributeError, OverflowError):
+            return False
+
         try:
             config = self._load_config()
-            config["first_setup_completed"] = True
-            config["setup_completed_at"] = self._get_current_timestamp()
-            config.pop("setup_required_reason", None)
-            self._save_config(config)
+        except (OSError, ValueError, TypeError):
+            return False
+        secret = config.get("session_secret")
+        current_version = config.get("session_version")
+        if not isinstance(secret, str) or type(current_version) is not int or version != current_version:
+            return False
+        payload = f"{version}.{expires_text}.{nonce}"
+        try:
+            expected = hmac.new(secret.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).hexdigest()
+            return secrets.compare_digest(signature, expected)
+        except (UnicodeError, TypeError, ValueError):
+            return False
+
+    def verify_token(self, token: str) -> bool:
+        """验证会话令牌，并短期兼容尚未迁移的旧版令牌。"""
+        if not isinstance(token, str) or not token or len(token) > 512:
+            return False
+        if self.verify_session(token):
+            return True
+        try:
+            config = self._load_config()
+        except (OSError, ValueError, TypeError):
+            return False
+        legacy = config.get("access_token")
+        if isinstance(legacy, str) and legacy and not config.get("password_hash"):
+            if secrets.compare_digest(token, legacy):
+                # 旧客户端可能直接携带 Bearer/query 令牌；首次成功认证也必须
+                # 立即完成迁移，避免明文令牌长期留在配置文件中。
+                return self.authenticate(token)
+        return False
+
+    def update_password(self, current_password: str, new_password: str) -> tuple[bool, str]:
+        valid, message = self.validate_password(new_password)
+        if not valid:
+            return False, message
+        if not self.authenticate(current_password):
+            return False, "当前密码不正确"
+
+        with self._lock, self._file_lock():
+            config = self._load_config()
+            encoded = config.get("password_hash")
+            if not isinstance(encoded, str) or not self._verify_password_hash(current_password, encoded):
+                return False, "当前密码不正确"
+            try:
+                current_version = int(config.get("session_version", 0))
+            except (TypeError, ValueError, OverflowError):
+                return False, "WebUI 会话配置无效"
+            if current_version < 0:
+                return False, "WebUI 会话配置无效"
+            config["password_hash"] = self._hash_password(new_password)
+            config["session_secret"] = secrets.token_urlsafe(32)
+            config["session_version"] = current_version + 1
+            config["password_updated_at"] = self._get_current_timestamp()
+            config["updated_at"] = self._get_current_timestamp()
+            self._write_config_unlocked(config)
+        logger.info("WebUI 密码已更新", event_code="webui.password.updated")
+        return True, "密码更新成功"
+
+    def update_token(self, new_token: str) -> tuple[bool, str]:
+        """拒绝旧版无当前密码校验的更新调用。"""
+        del new_token
+        return False, "旧版 Token 接口已停用，请使用密码修改接口"
+
+    def regenerate_token(self) -> str:
+        """旧版令牌生成接口已移除，避免重新引入可复制的明文凭证。"""
+        raise ValueError("不再支持生成访问令牌，请在安全设置中修改密码")
+
+    def is_first_setup(self) -> bool:
+        config = self._load_config()
+        return not bool(config.get("password_hash") or config.get("access_token")) or not bool(
+            config.get("first_setup_completed", False)
+        )
+
+    def mark_setup_completed(self) -> bool:
+        try:
+            with self._lock, self._file_lock():
+                config = self._load_config()
+                if not config.get("password_hash"):
+                    return False
+                config["first_setup_completed"] = True
+                config["setup_completed_at"] = self._get_current_timestamp()
+                config.pop("setup_required_reason", None)
+                config["updated_at"] = self._get_current_timestamp()
+                self._write_config_unlocked(config)
             logger.info("WebUI 首次配置已标记为完成", event_code="webui.setup.completed")
             return True
         except Exception:
@@ -305,18 +431,13 @@ class TokenManager:
             return False
 
     def reset_setup_status(self) -> bool:
-        """
-        重置首次配置状态，允许重新进入配置向导
-
-        Returns:
-            bool: 是否重置成功
-        """
         try:
-            config = self._load_config()
-            config["first_setup_completed"] = False
-            if "setup_completed_at" in config:
-                del config["setup_completed_at"]
-            self._save_config(config)
+            with self._lock, self._file_lock():
+                config = self._load_config()
+                config["first_setup_completed"] = False
+                config.pop("setup_completed_at", None)
+                config["updated_at"] = self._get_current_timestamp()
+                self._write_config_unlocked(config)
             logger.info("WebUI 首次配置状态已重置", event_code="webui.setup.reset")
             return True
         except Exception:
@@ -324,13 +445,15 @@ class TokenManager:
             return False
 
 
-# 全局单例
 _token_manager_instance: Optional[TokenManager] = None
+_token_manager_lock = threading.Lock()
 
 
 def get_token_manager() -> TokenManager:
-    """获取 TokenManager 单例"""
+    """获取 TokenManager 单例。"""
     global _token_manager_instance
     if _token_manager_instance is None:
-        _token_manager_instance = TokenManager()
+        with _token_manager_lock:
+            if _token_manager_instance is None:
+                _token_manager_instance = TokenManager()
     return _token_manager_instance

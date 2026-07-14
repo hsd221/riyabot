@@ -119,8 +119,7 @@ const softRedBadgeClass =
 const emojiCardActionClass =
   'ios-touch flex min-h-[50px] w-full items-center gap-3 border-b border-border/45 px-3.5 py-2.5 text-left text-[15px] font-medium leading-5 last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0'
 
-const emojiCardActionIconClass =
-  'ios-symbol ios-symbol-sm'
+const emojiCardActionIconClass = 'ios-symbol ios-symbol-sm'
 
 export function EmojiManagementPage() {
   const [emojiList, setEmojiList] = useState<Emoji[]>([])
@@ -361,9 +360,14 @@ export function EmojiManagementPage() {
     CARD_SIZE_OPTIONS.find((option) => option.value === cardSize)?.label ?? '中'
   const currentRegisteredLabel =
     REGISTER_OPTIONS.find((option) => option.value === registeredFilter)?.label ?? '全部'
-  const currentBannedLabel = BAN_OPTIONS.find((option) => option.value === bannedFilter)?.label ?? '全部'
+  const currentBannedLabel =
+    BAN_OPTIONS.find((option) => option.value === bannedFilter)?.label ?? '全部'
   const currentFormatLabel = formatFilter === 'all' ? '全部格式' : formatFilter.toUpperCase()
-  const activeFilterCount = [registeredFilter !== 'all', bannedFilter !== 'all', formatFilter !== 'all'].filter(Boolean).length
+  const activeFilterCount = [
+    registeredFilter !== 'all',
+    bannedFilter !== 'all',
+    formatFilter !== 'all',
+  ].filter(Boolean).length
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const emojiStatItems = stats
     ? [
@@ -459,23 +463,23 @@ export function EmojiManagementPage() {
               <div className="hidden sm:grid sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
                 {emojiStatItems.map(({ label, value, detail, Icon, symbolClassName }) => (
                   <div key={label} className="ios-stat-card">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium leading-5 text-muted-foreground">
-                        {label}
-                      </p>
-                      <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
-                        {detail}
-                      </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                          {label}
+                        </p>
+                        <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                          {detail}
+                        </p>
+                      </div>
+                      <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
+                        <Icon className="h-4 w-4" />
+                      </span>
                     </div>
-                    <span className={`ios-symbol ios-symbol-sm ${symbolClassName}`}>
-                      <Icon className="h-4 w-4" />
-                    </span>
+                    <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
+                      {value}
+                    </p>
                   </div>
-                  <p className="mt-5 truncate text-[28px] font-semibold tabular-nums leading-none tracking-normal">
-                    {value}
-                  </p>
-                </div>
                 ))}
               </div>
             </>
@@ -508,7 +512,8 @@ export function EmojiManagementPage() {
                 <span className="min-w-0">
                   <span className="block text-[16px] font-normal leading-6">筛选与显示</span>
                   <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                    {currentSortLabel} · {currentRegisteredLabel} · {currentBannedLabel} · {currentFormatLabel}
+                    {currentSortLabel} · {currentRegisteredLabel} · {currentBannedLabel} ·{' '}
+                    {currentFormatLabel}
                     {activeFilterCount > 0 ? ` · ${activeFilterCount} 个筛选` : ''}
                   </span>
                 </span>
@@ -1046,7 +1051,9 @@ export function EmojiManagementPage() {
                                       handleEdit(emoji)
                                     }}
                                   >
-                                    <span className={cn(emojiCardActionIconClass, 'ios-symbol-blue')}>
+                                    <span
+                                      className={cn(emojiCardActionIconClass, 'ios-symbol-blue')}
+                                    >
                                       <Edit className="h-[18px] w-[18px]" />
                                     </span>
                                     编辑
@@ -1059,7 +1066,9 @@ export function EmojiManagementPage() {
                                       handleViewDetail(emoji)
                                     }}
                                   >
-                                    <span className={cn(emojiCardActionIconClass, 'ios-symbol-gray')}>
+                                    <span
+                                      className={cn(emojiCardActionIconClass, 'ios-symbol-gray')}
+                                    >
                                       <Info className="h-[18px] w-[18px]" />
                                     </span>
                                     详情
@@ -1073,7 +1082,9 @@ export function EmojiManagementPage() {
                                         handleRegister(emoji)
                                       }}
                                     >
-                                      <span className={cn(emojiCardActionIconClass, 'ios-symbol-green')}>
+                                      <span
+                                        className={cn(emojiCardActionIconClass, 'ios-symbol-green')}
+                                      >
                                         <CheckCircle2 className="h-[18px] w-[18px]" />
                                       </span>
                                       注册
@@ -1088,7 +1099,12 @@ export function EmojiManagementPage() {
                                         handleBan(emoji)
                                       }}
                                     >
-                                      <span className={cn(emojiCardActionIconClass, 'ios-symbol-orange')}>
+                                      <span
+                                        className={cn(
+                                          emojiCardActionIconClass,
+                                          'ios-symbol-orange'
+                                        )}
+                                      >
                                         <Ban className="h-[18px] w-[18px]" />
                                       </span>
                                       封禁
@@ -1102,7 +1118,9 @@ export function EmojiManagementPage() {
                                       handleDelete(emoji)
                                     }}
                                   >
-                                    <span className={cn(emojiCardActionIconClass, 'ios-symbol-red')}>
+                                    <span
+                                      className={cn(emojiCardActionIconClass, 'ios-symbol-red')}
+                                    >
                                       <Trash2 className="h-[18px] w-[18px]" />
                                     </span>
                                     删除
@@ -1790,7 +1808,6 @@ function EmojiUploadDialog({
     }
 
     setUploading(true)
-    const token = localStorage.getItem('access-token') || ''
     let successCount = 0
     let failedCount = 0
 
@@ -1805,9 +1822,7 @@ function EmojiUploadDialog({
         try {
           const response = await fetch(getEmojiUploadUrl(), {
             method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+            credentials: 'include',
             body: formData,
           })
 
@@ -2075,9 +2090,7 @@ function EmojiUploadDialog({
                       updateFileInfo(selectedFile.id, { isRegistered: checked === true })
                     }
                   />
-                  <span className="text-[15px] leading-5 text-foreground">
-                    上传后立即注册
-                  </span>
+                  <span className="text-[15px] leading-5 text-foreground">上传后立即注册</span>
                 </label>
               </div>
             ) : (

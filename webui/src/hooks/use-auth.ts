@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { checkAuthStatus } from '@/lib/fetch-with-auth'
+import { checkAuthStatus, getAuthStatus } from '@/lib/fetch-with-auth'
 
 export function useAuthGuard() {
   const navigate = useNavigate()
@@ -8,16 +8,21 @@ export function useAuthGuard() {
 
   useEffect(() => {
     let cancelled = false
-    
+
     const verifyAuth = async () => {
       try {
-        const isAuth = await checkAuthStatus()
-        if (!cancelled && !isAuth) {
+        const authStatus = await getAuthStatus()
+        if (!cancelled && !authStatus.passwordConfigured) {
+          navigate({ to: '/setup' })
+          return
+        }
+
+        if (!cancelled && !authStatus.authenticated) {
           navigate({ to: '/auth' })
           return
         }
 
-        if (!cancelled && isAuth) {
+        if (!cancelled && authStatus.authenticated) {
           const needsSetup = await checkFirstSetup()
           const setupAllowedPaths = [
             '/setup',
@@ -40,14 +45,14 @@ export function useAuthGuard() {
         }
       }
     }
-    
+
     verifyAuth()
-    
+
     return () => {
       cancelled = true
     }
   }, [navigate])
-  
+
   return { checking }
 }
 

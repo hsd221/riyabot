@@ -86,6 +86,7 @@ def _mark_webui_setup_required(reason: str) -> None:
 
         with open(webui_config_path, "w", encoding="utf-8") as f:
             json.dump(webui_config, f, ensure_ascii=False, indent=2)
+        os.chmod(webui_config_path, 0o600)
 
         logger.info("已标记 WebUI 需要重新进行首次配置", event_code="webui.setup.required", reason=reason)
     except Exception:

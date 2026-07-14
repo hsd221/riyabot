@@ -271,7 +271,7 @@ class EmojiThumbnailRoutesTest(EmojiRoutesTestCase):
         token_manager = SimpleNamespace(verify_token=Mock(side_effect=lambda token: token == "valid"))
 
         with patch.object(emoji_routes, "get_token_manager", return_value=token_manager):
-            original = await emoji_routes.get_emoji_thumbnail(emoji.id, token="valid", original=True)
+            original = await emoji_routes.get_emoji_thumbnail(emoji.id, maibot_session="valid", original=True)
         self.assertEqual(original.path, emoji.full_path)
         self.assertEqual(original.media_type, "image/png")
 
@@ -299,7 +299,6 @@ class EmojiThumbnailRoutesTest(EmojiRoutesTestCase):
             with self.assertRaises(HTTPException) as invalid_token:
                 await emoji_routes.get_emoji_thumbnail(
                     emoji.id,
-                    token="bad",
                     maibot_session=None,
                     authorization=None,
                     original=False,
@@ -309,7 +308,7 @@ class EmojiThumbnailRoutesTest(EmojiRoutesTestCase):
         Path(emoji.full_path).unlink()
         with patch.object(emoji_routes, "get_token_manager", return_value=token_manager):
             with self.assertRaises(HTTPException) as missing_file:
-                await emoji_routes.get_emoji_thumbnail(emoji.id, token="valid", original=False)
+                await emoji_routes.get_emoji_thumbnail(emoji.id, maibot_session="valid", original=False)
         self.assertEqual(missing_file.exception.status_code, 404)
 
 

@@ -6,27 +6,7 @@
     <meta http-equiv="content-language" content="zh-CN" />
     <link rel="icon" type="image/x-icon" href="/maimai.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script>
-      ;(function () {
-        try {
-          var storedTheme = localStorage.getItem('ui-theme') || localStorage.getItem('riyabot-ui-theme')
-          var theme =
-            storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system'
-              ? storedTheme
-              : 'system'
-          var resolvedTheme =
-            theme === 'system'
-              ? window.matchMedia('(prefers-color-scheme: dark)').matches
-                ? 'dark'
-                : 'light'
-              : theme
-          var root = document.documentElement
-          root.classList.remove('light', 'dark')
-          root.classList.add(resolvedTheme)
-          root.style.colorScheme = resolvedTheme
-        } catch (_) {}
-      })()
-    </script>
+    <script type="module" src="/src/theme-init.ts"></script>
     <title>RiyaBot Console</title>
   </head>
   <body>

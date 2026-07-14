@@ -9,6 +9,23 @@ import type {
   OtherBasicConfig,
 } from './types'
 
+export async function setupInitialPassword(password: string): Promise<void> {
+  const response = await fetch('/api/webui/auth/setup', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    cache: 'no-store',
+    body: JSON.stringify({ password }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.detail || '设置 WebUI 密码失败')
+  }
+}
+
 // ===== 协议确认 =====
 
 export async function loadAgreementStatus(): Promise<AgreementStatus> {

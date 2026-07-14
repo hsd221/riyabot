@@ -29,7 +29,7 @@ import { PluginMirrorsPage } from './routes/plugin-mirrors'
 import { ChatPage } from './routes/chat'
 import { WebUIFeedbackSurveyPage, RiyaBotFeedbackSurveyPage } from './routes/survey'
 import { Layout } from './components/layout'
-import { checkAuth } from './hooks/use-auth'
+import { getAuthStatus } from './lib/fetch-with-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
 
 const showRouterDevtools = import.meta.env.DEV && import.meta.env.VITE_ROUTER_DEVTOOLS === 'true'
@@ -42,12 +42,6 @@ const rootRoute = createRootRoute({
       {showRouterDevtools && <TanStackRouterDevtools />}
     </>
   ),
-  beforeLoad: () => {
-    // 如果访问根路径且未认证，重定向到认证页面
-    if (window.location.pathname === '/' && !checkAuth()) {
-      throw redirect({ to: '/auth' })
-    }
-  },
 })
 
 // 认证路由（无 Layout）
@@ -74,6 +68,15 @@ const protectedRoute = createRoute({
     </Layout>
   ),
   errorComponent: ({ error }) => <RouteErrorBoundary error={error} />,
+  beforeLoad: async () => {
+    const authStatus = await getAuthStatus()
+    if (!authStatus.passwordConfigured) {
+      throw redirect({ to: '/setup' })
+    }
+    if (!authStatus.authenticated) {
+      throw redirect({ to: '/auth' })
+    }
+  },
 })
 
 // 首页路由

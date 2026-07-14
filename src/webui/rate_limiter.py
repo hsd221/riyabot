@@ -3,13 +3,39 @@ WebUI 请求频率限制模块
 防止暴力破解和 API 滥用
 """
 
+import fnmatch
+import ipaddress
 import time
 from collections import defaultdict
 from typing import Dict, Tuple, Optional
 from fastapi import Request, HTTPException
 from src.common.logger import get_logger
+from src.config.config import global_config
 
 logger = get_logger("webui.rate_limiter")
+
+
+def is_trusted_proxy(peer_ip: str, config=None) -> bool:
+    """判断直连对端是否在显式信任的代理列表中。"""
+    webui_config = (config or global_config).webui
+    if not getattr(webui_config, "trust_xff", False) or not peer_ip:
+        return False
+    try:
+        peer = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return False
+
+    for raw_entry in str(getattr(webui_config, "trusted_proxies", "")).split(","):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        try:
+            if peer in ipaddress.ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            if "*" in entry and fnmatch.fnmatchcase(peer_ip, entry):
+                return True
+    return False
 
 
 class RateLimiter:
@@ -24,24 +50,42 @@ class RateLimiter:
         self._requests: Dict[str, list] = defaultdict(list)
         # 被封禁的 IP: {ip: unblock_timestamp}
         self._blocked: Dict[str, float] = {}
+        self._max_tracked_keys = 10_000
+
+    @staticmethod
+    def _is_valid_ip(value: str) -> bool:
+        try:
+            ipaddress.ip_address(value)
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _is_trusted_proxy(peer_ip: str) -> bool:
+        return is_trusted_proxy(peer_ip)
 
     def _get_client_ip(self, request: Request) -> str:
         """获取客户端 IP 地址"""
-        # 检查代理头
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            # 取第一个 IP（最原始的客户端）
-            return forwarded.split(",")[0].strip()
+        peer_ip = request.client.host if request.client else ""
+        if self._is_trusted_proxy(peer_ip):
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                client_ip = forwarded.split(",", maxsplit=1)[0].strip()
+                if self._is_valid_ip(client_ip):
+                    return client_ip
+            real_ip = request.headers.get("X-Real-IP", "").strip()
+            if self._is_valid_ip(real_ip):
+                return real_ip
+        return peer_ip if self._is_valid_ip(peer_ip) else "unknown"
 
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-
-        # 直接连接的客户端
-        if request.client:
-            return request.client.host
-
-        return "unknown"
+    def _ensure_tracking_capacity(self, key: str) -> None:
+        if key in self._requests or len(self._requests) < self._max_tracked_keys:
+            return
+        oldest_key = min(
+            self._requests,
+            key=lambda item: self._requests[item][0][0] if self._requests[item] else float("-inf"),
+        )
+        self._requests.pop(oldest_key, None)
 
     def _cleanup_old_requests(self, key: str, window_seconds: int):
         """清理过期的请求记录"""
@@ -90,6 +134,7 @@ class RateLimiter:
         """
         ip = self._get_client_ip(request)
         key = f"{ip}:{key_suffix}" if key_suffix else ip
+        self._ensure_tracking_capacity(key)
 
         # 清理过期记录
         self._cleanup_old_requests(key, window_seconds)
@@ -138,6 +183,7 @@ class RateLimiter:
         """
         ip = self._get_client_ip(request)
         key = f"{ip}:auth_failures"
+        self._ensure_tracking_capacity(key)
 
         # 清理过期记录
         self._cleanup_old_requests(key, window_seconds)

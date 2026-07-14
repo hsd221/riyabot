@@ -9,6 +9,9 @@ import { TourProvider, TourRenderer } from './components/tour'
 import { Toaster } from './components/ui/toaster'
 import { ErrorBoundary } from './components/error-boundary'
 
+// 旧版本曾把访问令牌保存在 localStorage；升级后它等同于登录密码，必须立即清除。
+localStorage.removeItem('access-token')
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>

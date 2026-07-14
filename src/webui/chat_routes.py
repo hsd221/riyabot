@@ -358,10 +358,9 @@ async def websocket_chat(
 
     虚拟身份模式可通过 URL 参数直接配置，或通过消息中的 set_virtual_identity 配置
 
-    支持三种认证方式（按优先级）：
+    支持两种认证方式（按优先级）：
     1. query 参数 token（推荐，通过 /api/webui/ws-token 获取临时 token）
     2. Cookie 中的 maibot_session
-    3. 直接使用 session token（兼容）
 
     示例：ws://host/api/chat/ws?token=xxx
     """
@@ -380,13 +379,6 @@ async def websocket_chat(
             if token_manager.verify_token(cookie_token):
                 is_authenticated = True
                 logger.debug("聊天 WebSocket 使用 Cookie 认证成功")
-
-    # 方式 3: 尝试直接验证 query 参数作为 session token（兼容旧方式）
-    if not is_authenticated and token:
-        token_manager = get_token_manager()
-        if token_manager.verify_token(token):
-            is_authenticated = True
-            logger.debug("聊天 WebSocket 使用 session token 认证成功")
 
     if not is_authenticated:
         logger.warning("聊天 WebSocket 连接被拒绝：认证失败")
