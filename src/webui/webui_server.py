@@ -109,6 +109,8 @@ class WebUIServer:
             )
             return
 
+        static_root = static_path.resolve()
+
         # 处理 SPA 路由 - 注意：这个路由优先级最低
         @self.app.get("/{full_path:path}", include_in_schema=False)
         async def serve_spa(full_path: str):
@@ -120,8 +122,13 @@ class WebUIServer:
                 return response
 
             # 检查是否是静态文件
-            file_path = static_path / full_path
-            if file_path.is_file() and file_path.exists():
+            try:
+                file_path = (static_path / full_path).resolve()
+                is_safe_static_file = file_path.is_relative_to(static_root) and file_path.is_file()
+            except (OSError, RuntimeError):
+                is_safe_static_file = False
+
+            if is_safe_static_file:
                 # 自动检测 MIME 类型
                 media_type = mimetypes.guess_type(str(file_path))[0]
                 response = FileResponse(file_path, media_type=media_type)
