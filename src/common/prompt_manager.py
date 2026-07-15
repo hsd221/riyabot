@@ -14,11 +14,12 @@ from typing import Mapping
 
 from src.common.logger import get_logger
 from src.common.prompt_loader import (
-    load_prompt_template,
-    get_prompt_cache_revision,
-    list_prompt_templates,
+    PromptDocument,
+    PromptMetadata,
     clear_prompt_cache,
-    parse_prompt_sections,
+    get_prompt_cache_revision,
+    load_prompt_document,
+    list_prompt_templates,
 )
 
 logger = get_logger("prompt_mgr")
@@ -112,6 +113,31 @@ class PromptSource:
     section_name: str | None = None
 
 
+def _build_document_entries(
+    file_name: str,
+    document: PromptDocument,
+) -> tuple[dict[str, str], dict[str, PromptSource], dict[str, PromptMetadata]]:
+    """将一个提示词文件展开为运行时 ID、来源和元数据。"""
+    prompts: dict[str, str] = {}
+    sources: dict[str, PromptSource] = {}
+    metadata: dict[str, PromptMetadata] = {}
+
+    if document.sections:
+        for section_name, section_template in document.sections.items():
+            prompt_id = f"{file_name}.{section_name}"
+            prompts[prompt_id] = section_template
+            sources[prompt_id] = PromptSource(file_name, section_name)
+            if document.metadata is not None:
+                metadata[prompt_id] = document.metadata
+    else:
+        prompts[file_name] = document.template
+        sources[file_name] = PromptSource(file_name)
+        if document.metadata is not None:
+            metadata[file_name] = document.metadata
+
+    return prompts, sources, metadata
+
+
 def format_prompt_template(template: str, /, **kwargs) -> str:
     """格式化模板，同时兼容旧动态模板使用的反斜杠转义花括号。"""
     escaped_template = template.replace("\\{", _ESCAPED_LEFT_BRACE).replace("\\}", _ESCAPED_RIGHT_BRACE)
@@ -124,6 +150,7 @@ class PromptManager:
     def __init__(self, aliases: Mapping[str, str] | None = None):
         self._prompts: dict[str, str] = {}  # name → template string
         self._sources: dict[str, PromptSource] = {}
+        self._metadata: dict[str, PromptMetadata] = {}
         self._aliases = dict(aliases or {})
         self._context_prompts: dict[str, dict[str, str]] = {}
         self._current_context = contextvars.ContextVar[str | None]("prompt_context", default=None)
@@ -136,20 +163,26 @@ class PromptManager:
 
         扫描 prompts/ 目录，加载每个 .prompt 文件，建立名称→模板的映射。
         """
-        self._prompts.clear()
-        self._sources.clear()
-        names = list_prompt_templates()
-        for name in names:
-            template = load_prompt_template(name)
-            sections = parse_prompt_sections(template)
-            if sections:
-                for section_name, section_template in sections.items():
-                    prompt_id = f"{name}.{section_name}"
-                    self._prompts[prompt_id] = section_template
-                    self._sources[prompt_id] = PromptSource(name, section_name)
-            else:
-                self._prompts[name] = template
-                self._sources[name] = PromptSource(name)
+        prompts: dict[str, str] = {}
+        sources: dict[str, PromptSource] = {}
+        metadata: dict[str, PromptMetadata] = {}
+
+        for file_name in list_prompt_templates():
+            entries, entry_sources, entry_metadata = _build_document_entries(
+                file_name,
+                load_prompt_document(file_name),
+            )
+            duplicate_ids = prompts.keys() & entries.keys()
+            if duplicate_ids:
+                duplicates = ", ".join(sorted(duplicate_ids))
+                raise ValueError(f"提示词运行时 ID 冲突：{duplicates}")
+            prompts.update(entries)
+            sources.update(entry_sources)
+            metadata.update(entry_metadata)
+
+        self._prompts = prompts
+        self._sources = sources
+        self._metadata = metadata
         self._cache_revision = get_prompt_cache_revision()
         self._loaded = True
         logger.debug(f"已加载 {len(self._prompts)} 个提示词模板")
@@ -191,6 +224,7 @@ class PromptManager:
         resolved_name = self._resolve_name(name)
         self._prompts[resolved_name] = str(template)
         self._sources.pop(resolved_name, None)
+        self._metadata.pop(resolved_name, None)
         return resolved_name
 
     def add_prompt(self, name: str, template: str) -> str:
@@ -258,6 +292,20 @@ class PromptManager:
         template = self.get_prompt(name)
         return format_prompt_template(template, **kwargs)
 
+    def get_prompt_metadata(self, name: str, /) -> PromptMetadata:
+        """返回规范文件来源的职责、阶段和生命周期元数据。
+
+        上下文覆盖只替换运行时模板，不会替换或隐藏其规范文件元数据。
+        """
+        self._reload_if_changed()
+        resolved_name = self._resolve_name(name)
+        if not self._loaded and not self._prompts:
+            self.load_prompts()
+        self._reload_prompt_if_changed(resolved_name)
+        if resolved_name not in self._metadata:
+            raise KeyError(f"提示词 '{name}' 没有规范文件元数据；纯动态提示词不提供该信息")
+        return self._metadata[resolved_name]
+
     async def get_prompt_async(self, name: str) -> str:
         """兼容旧异步调用；模板读取本身不执行异步 I/O。"""
         return self.get_prompt(name)
@@ -272,29 +320,73 @@ class PromptManager:
             self.load_prompts()
 
     def _reload_prompt_if_changed(self, name: str) -> None:
-        """从带文件签名的 LRU 缓存中获取最新的单个模板。"""
+        """按文件原子重建目标提示词及其全部分段。"""
         source = self._sources.get(name)
-        if source is None:
+        if source is None and name in self._prompts:
+            return
+        file_name = source.file_name if source is not None else self._find_source_file(name)
+        if file_name is None:
             return
 
         try:
-            template = load_prompt_template(source.file_name)
+            document = load_prompt_document(file_name)
         except FileNotFoundError:
-            self._prompts.pop(name, None)
-            self._sources.pop(name, None)
+            self._replace_file_entries(file_name, {}, {}, {})
             return
 
-        if source.section_name is not None:
-            sections = parse_prompt_sections(template)
-            if source.section_name not in sections:
-                self._prompts.pop(name, None)
-                self._sources.pop(name, None)
-                return
-            template = sections[source.section_name]
+        entries, entry_sources, entry_metadata = _build_document_entries(file_name, document)
+        self._replace_file_entries(file_name, entries, entry_sources, entry_metadata)
 
-        if self._prompts.get(name) != template:
-            self._prompts[name] = template
-            logger.info(f"检测到提示词文件变化，已热重载: {name}")
+    def _find_source_file(self, name: str) -> str | None:
+        """为尚未注册的分段或新文件定位规范文件 ID。"""
+        known_files = {source.file_name for source in self._sources.values()}
+        candidate_files = known_files | set(list_prompt_templates())
+        matches = [file_name for file_name in candidate_files if name == file_name or name.startswith(f"{file_name}.")]
+        return max(matches, key=len, default=None)
+
+    def _replace_file_entries(
+        self,
+        file_name: str,
+        entries: dict[str, str],
+        sources: dict[str, PromptSource],
+        metadata: dict[str, PromptMetadata],
+    ) -> None:
+        """在完整解析成功后一次替换同一文件导出的所有运行时 ID。"""
+        dynamic_override_ids = {
+            prompt_id for prompt_id in entries if prompt_id in self._prompts and prompt_id not in self._sources
+        }
+        if dynamic_override_ids:
+            entries = {prompt_id: value for prompt_id, value in entries.items() if prompt_id not in dynamic_override_ids}
+            sources = {prompt_id: value for prompt_id, value in sources.items() if prompt_id not in dynamic_override_ids}
+            metadata = {prompt_id: value for prompt_id, value in metadata.items() if prompt_id not in dynamic_override_ids}
+
+        old_ids = {prompt_id for prompt_id, source in self._sources.items() if source.file_name == file_name}
+        duplicate_ids = (self._prompts.keys() - old_ids) & entries.keys()
+        if duplicate_ids:
+            duplicates = ", ".join(sorted(duplicate_ids))
+            raise ValueError(f"提示词运行时 ID 冲突：{duplicates}")
+
+        current_entries = {prompt_id: self._prompts[prompt_id] for prompt_id in old_ids}
+        current_sources = {prompt_id: self._sources[prompt_id] for prompt_id in old_ids}
+        current_metadata = {
+            prompt_id: self._metadata[prompt_id] for prompt_id in old_ids if prompt_id in self._metadata
+        }
+        if current_entries == entries and current_sources == sources and current_metadata == metadata:
+            return
+
+        next_prompts = {
+            prompt_id: template for prompt_id, template in self._prompts.items() if prompt_id not in old_ids
+        }
+        next_sources = {prompt_id: source for prompt_id, source in self._sources.items() if prompt_id not in old_ids}
+        next_metadata = {prompt_id: value for prompt_id, value in self._metadata.items() if prompt_id not in old_ids}
+        next_prompts.update(entries)
+        next_sources.update(sources)
+        next_metadata.update(metadata)
+
+        self._prompts = next_prompts
+        self._sources = next_sources
+        self._metadata = next_metadata
+        logger.info(f"检测到提示词文件变化，已热重载: {file_name}")
 
 
 # 全局单例

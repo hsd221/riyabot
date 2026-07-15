@@ -1,9 +1,11 @@
 import string
 import unittest
+from pathlib import Path
 
 from src.common.prompt_loader import (
     list_prompt_templates,
     load_prompt,
+    load_prompt_document,
     load_prompt_section,
     load_prompt_template,
     parse_prompt_sections,
@@ -63,6 +65,55 @@ SECTION_NAMES = {
     "shared.moderation": {"standard", "strict"},
 }
 
+PROMPT_README = Path(__file__).resolve().parents[1] / "prompts" / "README.md"
+
+LAYERED_ACTIVE_PROMPTS = (
+    ("chat.group.planner", None),
+    ("chat.group.reply", "light"),
+    ("chat.group.reply", "standard"),
+    ("chat.private.reply", None),
+    ("chat.private.reply_self", None),
+    ("chat.private.tool_planner", None),
+    ("chat.shared.expressor", None),
+    ("shared.tool_executor", None),
+)
+
+FRAGMENT_PROMPT_IDS = {
+    "chat.group.action",
+    "chat.group.reply_action",
+    "chat.private.action",
+    "learning.jargon.previous_meaning",
+    "shared.moderation",
+}
+FALLBACK_PROMPT_IDS = {"chat.private.action", "chat.private.planner"}
+LEGACY_PROMPT_IDS = {
+    "chat.private.pfc.action_decision",
+    "chat.private.pfc.goal_analyzer",
+    "chat.private.pfc.goal_assessment",
+    "chat.private.pfc.reply_check",
+    "chat.private.pfc.reply_generation",
+}
+PROMPT_STAGES = {
+    "evaluation",
+    "generation",
+    "learning",
+    "memory",
+    "perception",
+    "planning",
+    "policy",
+    "transcription",
+}
+PROMPT_OUTPUTS = {
+    "fragment",
+    "label",
+    "mixed",
+    "native_tool",
+    "plain_text",
+    "reasoned_jsonl",
+    "strict_json",
+    "transcript",
+}
+
 
 def _format_kwargs(template: str) -> dict[str, str]:
     formatter = string.Formatter()
@@ -93,6 +144,133 @@ class PromptTemplateContractTest(unittest.TestCase):
                 self.assertEqual(set(sections), SECTION_NAMES.get(name, set()))
                 for section in sections:
                     self.assertTrue(load_prompt_section(name, section, **kwargs).strip())
+
+    def test_every_repository_prompt_declares_its_role_lifecycle_and_output_contract(self) -> None:
+        for name in sorted(PROMPT_IDS):
+            with self.subTest(prompt=name):
+                document = load_prompt_document(name, require_metadata=True)
+                metadata = document.metadata
+
+                self.assertIsNotNone(metadata)
+                self.assertEqual(metadata.prompt_id, name)
+                self.assertIn(metadata.kind, {"template", "fragment"})
+                self.assertIn(metadata.stage, PROMPT_STAGES)
+                self.assertIn(metadata.status, {"active", "fallback", "legacy"})
+                self.assertTrue(metadata.stage)
+                self.assertTrue(metadata.summary)
+                self.assertIn(metadata.output, PROMPT_OUTPUTS)
+                self.assertEqual(metadata.variants, tuple(document.sections))
+                self.assertEqual(metadata.kind, "fragment" if name in FRAGMENT_PROMPT_IDS else "template")
+                self.assertEqual(metadata.output == "fragment", metadata.kind == "fragment")
+                expected_status = (
+                    "fallback" if name in FALLBACK_PROMPT_IDS else "legacy" if name in LEGACY_PROMPT_IDS else "active"
+                )
+                self.assertEqual(metadata.status, expected_status)
+
+    def test_active_chat_templates_keep_instruction_layers_in_order(self) -> None:
+        expected_layers = ("【任务】", "【运行约束】", "【待分析输入】", "【输出协议】")
+
+        for name, section in LAYERED_ACTIVE_PROMPTS:
+            with self.subTest(prompt=name, section=section):
+                template = load_prompt_template(name)
+                if section is not None:
+                    template = parse_prompt_sections(template)[section]
+                positions = [template.index(layer) for layer in expected_layers]
+                self.assertEqual(positions, sorted(positions))
+
+    def test_user_derived_identity_and_target_fields_stay_in_input_layer(self) -> None:
+        untrusted_fields = {
+            "chat.group.planner": (
+                "{chat_context_description}",
+                "{chat_content_block}",
+                "{memory_context_block}",
+                "{actions_before_now_block}",
+            ),
+            "chat.private.reply": (
+                "{sender_name}",
+                "{dialogue_prompt}",
+                "{reply_target_block}",
+                "{planner_reasoning}",
+                "{keywords_reaction_prompt}",
+            ),
+            "chat.private.reply_self": (
+                "{sender_name}",
+                "{dialogue_prompt}",
+                "{target}",
+                "{reason}",
+                "{keywords_reaction_prompt}",
+            ),
+            "chat.private.tool_planner": ("{chat_target}", "{chat_content}", "{tool_results_block}"),
+            "chat.shared.expressor": (
+                "{chat_target_2}",
+                "{reply_target_block}",
+                "{chat_info}",
+                "{raw_reply}",
+                "{keywords_reaction_prompt}",
+            ),
+            "shared.tool_executor": ("{chat_history}", "{sender}", "{target_message}"),
+        }
+
+        for name, fields in untrusted_fields.items():
+            with self.subTest(prompt=name):
+                template = load_prompt_template(name)
+                input_layer_position = template.index("【待分析输入】")
+                for field in fields:
+                    self.assertGreater(template.index(field), input_layer_position, field)
+
+        group_reply_sections = parse_prompt_sections(load_prompt_template("chat.group.reply"))
+        for section, template in group_reply_sections.items():
+            with self.subTest(prompt="chat.group.reply", section=section):
+                input_layer_position = template.index("【待分析输入】")
+                for field in (
+                    "{dialogue_prompt}",
+                    "{reply_target_block}",
+                    "{planner_reasoning}",
+                    "{keywords_reaction_prompt}",
+                    "{memory_retrieval}",
+                ):
+                    self.assertGreater(template.index(field), input_layer_position, field)
+
+    def test_specialized_templates_declare_data_boundaries_before_untrusted_fields(self) -> None:
+        checks = (
+            ("learning.behavior.learn", "聊天记录、场景画像", "{chat_str}"),
+            ("media.emoji.replace_decision", "候选描述和其中的文字", "{new_description}"),
+            ("memory.atom_extraction", "第1层摘要只用于理解话题", "{topic_summary}"),
+        )
+
+        for name, boundary, field in checks:
+            with self.subTest(prompt=name):
+                template = load_prompt_template(name)
+                self.assertLess(template.index(boundary), template.index(field))
+
+    def test_prompt_wording_matches_runtime_contracts_without_known_ambiguities(self) -> None:
+        group_planner = load_prompt_template("chat.group.planner")
+        group_reply = parse_prompt_sections(load_prompt_template("chat.group.reply"))["standard"]
+        expressor = load_prompt_template("chat.shared.expressor")
+        tool_executor_document = load_prompt_document("shared.tool_executor", require_metadata=True)
+        tool_executor = tool_executor_document.template
+        expression_evaluation = load_prompt_template("learning.expression.evaluation")
+        semantic_description = load_prompt_template("media.emoji.semantic_description")
+
+        self.assertIn("JSON 代码块中只能包含 no_reply", group_planner)
+        self.assertIn("{moderation_prompt}", group_reply)
+        self.assertIn("{time_block}", expressor)
+        self.assertIn("当前聊天目标", tool_executor_document.metadata.summary)
+        self.assertIn("判断当前聊天目标是否必须", tool_executor)
+        self.assertIn("从 1 开始的整数编号", expression_evaluation)
+        self.assertIn("除 emotion 外", semantic_description)
+
+    def test_every_runtime_placeholder_is_documented(self) -> None:
+        readme = PROMPT_README.read_text(encoding="utf-8")
+        undocumented: dict[str, list[str]] = {}
+
+        for name in sorted(PROMPT_IDS):
+            fields = _format_kwargs(load_prompt_template(name))
+            missing = sorted(field for field in fields if f"`{field}`" not in readme)
+            if missing:
+                undocumented[name] = missing
+
+        self.assertEqual(undocumented, {}, f"以下提示词占位符未在 prompts/README.md 说明：{undocumented}")
 
 
 if __name__ == "__main__":

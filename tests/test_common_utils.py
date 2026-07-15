@@ -174,19 +174,147 @@ class PromptLoaderTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             prompt_loader.normalize_prompt_name("../secret")
 
-    def test_parse_prompt_sections_keeps_named_sections_and_closes_implicit_tail(self) -> None:
+    def test_parse_prompt_sections_keeps_explicit_named_sections(self) -> None:
         template = """
-outside
 ###SECTION: greeting
 hello {name}
 ###END_SECTION###
 ###SECTION: farewell
 bye {name}
+###END_SECTION###
 """.strip()
 
         sections = prompt_loader.parse_prompt_sections(template)
 
         self.assertEqual(sections, {"greeting": "hello {name}", "farewell": "bye {name}"})
+
+    def test_parse_prompt_sections_rejects_ambiguous_or_malformed_structure(self) -> None:
+        malformed_templates = {
+            "段外正文": "outside\n###SECTION: only\ninside\n###END_SECTION###",
+            "未闭合分段": "###SECTION: only\ninside",
+            "重复分段": ("###SECTION: same\none\n###END_SECTION###\n###SECTION: same\ntwo\n###END_SECTION###"),
+            "嵌套分段": "###SECTION: outer\n###SECTION: inner\ninside\n###END_SECTION###",
+            "孤立结束标记": "###END_SECTION###",
+            "非法结束标记": "###SECTION: only\ninside\n###END_SECTION###suffix",
+            "非法分段名": "###SECTION: bad.name\ninside\n###END_SECTION###",
+            "空分段": "###SECTION: empty\n\n###END_SECTION###",
+        }
+
+        for case, template in malformed_templates.items():
+            with self.subTest(case=case), self.assertRaisesRegex(ValueError, case):
+                prompt_loader.parse_prompt_sections(template)
+
+        with self.assertRaisesRegex(ValueError, "非法分段名"):
+            prompt_loader.parse_prompt_sections("###SECTION only\ninside\n###END_SECTION###")
+        with self.assertRaisesRegex(ValueError, "非法结束标记"):
+            prompt_loader.parse_prompt_sections("###SECTION: only\ninside\n###END_SECTION##")
+
+    def test_parse_prompt_document_separates_metadata_from_runtime_template(self) -> None:
+        raw_document = """###PROMPT_META###
+id: chat.group.reply
+kind: template
+stage: generation
+status: active
+summary: 根据当前目标生成群聊回复
+output: plain_text
+variants: light, standard
+###END_PROMPT_META###
+###SECTION: light
+short {name}
+###END_SECTION###
+###SECTION: standard
+normal {name}
+###END_SECTION###
+"""
+
+        document = prompt_loader.parse_prompt_document(raw_document, expected_id="chat.group.reply")
+
+        self.assertIsNotNone(document.metadata)
+        self.assertEqual(document.metadata.prompt_id, "chat.group.reply")
+        self.assertEqual(document.metadata.variants, ("light", "standard"))
+        self.assertNotIn("PROMPT_META", document.template)
+        self.assertTrue(document.template.endswith("\n"))
+        self.assertEqual(document.sections, {"light": "short {name}", "standard": "normal {name}"})
+
+    def test_parse_prompt_document_rejects_metadata_drift(self) -> None:
+        base = """###PROMPT_META###
+id: {prompt_id}
+kind: {kind}
+stage: generation
+status: {status}
+summary: summary
+output: plain_text
+{variants}###END_PROMPT_META###
+{body}
+"""
+        malformed_documents = {
+            "ID 不匹配": base.format(
+                prompt_id="chat.private.reply",
+                kind="template",
+                status="active",
+                variants="",
+                body="hello",
+            ),
+            "ID 必须使用不含 .prompt 后缀的规范点分 ID": base.format(
+                prompt_id="chat.group.reply.prompt",
+                kind="template",
+                status="active",
+                variants="",
+                body="hello",
+            ),
+            "未知 kind": base.format(
+                prompt_id="chat.group.reply",
+                kind="partial",
+                status="active",
+                variants="",
+                body="hello",
+            ),
+            "未知 status": base.format(
+                prompt_id="chat.group.reply",
+                kind="template",
+                status="deprecated",
+                variants="",
+                body="hello",
+            ),
+            "分段声明不一致": base.format(
+                prompt_id="chat.group.reply",
+                kind="template",
+                status="active",
+                variants="variants: light\n",
+                body=("###SECTION: light\nshort\n###END_SECTION###\n###SECTION: standard\nnormal\n###END_SECTION###"),
+            ),
+            "variants 包含空分段名": base.format(
+                prompt_id="chat.group.reply",
+                kind="template",
+                status="active",
+                variants="variants: light,\n",
+                body="###SECTION: light\nshort\n###END_SECTION###",
+            ),
+        }
+
+        for case, document in malformed_documents.items():
+            with self.subTest(case=case), self.assertRaisesRegex(ValueError, case):
+                prompt_loader.parse_prompt_document(document, expected_id="chat.group.reply")
+
+    def test_parse_prompt_document_rejects_reserved_metadata_markers_in_runtime_body(self) -> None:
+        malformed_documents = {
+            "多余提示词元数据结束标记": """###PROMPT_META###
+id: chat.group.reply
+kind: template
+stage: generation
+status: active
+summary: summary
+output: plain_text
+###END_PROMPT_META###
+hello
+###END_PROMPT_META###
+""",
+            "非法提示词元数据标记": "###PROMPT_META###suffix\nhello\n",
+        }
+
+        for case, document in malformed_documents.items():
+            with self.subTest(case=case), self.assertRaisesRegex(ValueError, case):
+                prompt_loader.parse_prompt_document(document, expected_id="chat.group.reply")
 
     def test_load_prompt_formats_template_and_lists_existing_or_missing_prompt_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -221,7 +349,7 @@ bye {name}
         with tempfile.TemporaryDirectory() as tmpdir:
             prompt_path = Path(tmpdir) / "sample.prompt"
             prompt_path.write_text(
-                "###SECTION: header\nhi\n###SECTION: body\nhello {name}\n###END_SECTION###\n",
+                "###SECTION: header\nhi\n###END_SECTION###\n###SECTION: body\nhello {name}\n###END_SECTION###\n",
                 encoding="utf-8",
             )
 

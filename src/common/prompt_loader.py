@@ -5,12 +5,21 @@
 """
 
 import re
-from pathlib import Path
+from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 # 项目 prompts 目录根路径
 PROMPTS_ROOT = Path(__file__).resolve().parents[2] / "prompts"
 PROMPT_EXTENSION = ".prompt"
+
+PROMPT_META_START = "###PROMPT_META###"
+PROMPT_META_END = "###END_PROMPT_META###"
+PROMPT_META_MARKER_PREFIXES = ("###PROMPT_META", "###END_PROMPT_META")
+PROMPT_META_REQUIRED_KEYS = {"id", "kind", "stage", "status", "summary", "output"}
+PROMPT_META_ALLOWED_KEYS = PROMPT_META_REQUIRED_KEYS | {"variants"}
+PROMPT_KINDS = {"template", "fragment"}
+PROMPT_STATUSES = {"active", "fallback", "legacy"}
 
 # 安全名称段模式：仅允许字母、数字、下划线和连字符
 SAFE_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -18,6 +27,28 @@ SAFE_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 # 缓存修订号：每次 clear_prompt_cache() 调用时递增，
 # prompt_manager 通过轮询此值感知缓存变化并触发重载
 _PROMPT_CACHE_REVISION = 0
+
+
+@dataclass(frozen=True)
+class PromptMetadata:
+    """提示词文件的维护元数据，不会进入运行时提示词正文。"""
+
+    prompt_id: str
+    kind: str
+    stage: str
+    status: str
+    summary: str
+    output: str
+    variants: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PromptDocument:
+    """解析后的提示词文档。"""
+
+    template: str
+    sections: dict[str, str]
+    metadata: PromptMetadata | None = None
 
 
 def normalize_prompt_name(name: str) -> str:
@@ -70,25 +101,40 @@ def _read_prompt_file(filepath: Path, file_signature: tuple[int, int], cache_rev
     return filepath.read_text(encoding="utf-8")
 
 
-def load_prompt_template(name: str) -> str:
-    """加载指定名称的提示词模板
+def _load_raw_prompt_template(name: str) -> str:
+    """加载未经文档解析的 .prompt 文件内容。"""
+    safe_name = normalize_prompt_name(name)
+    filepath = _prompt_path(safe_name)
+    file_signature = get_prompt_file_signature(safe_name)
+    return _read_prompt_file(filepath, file_signature, _PROMPT_CACHE_REVISION)
 
-    构建文件路径为 PROMPTS_ROOT / f"{name}.prompt"，读取并返回原始模板字符串。
+
+def load_prompt_document(name: str, *, require_metadata: bool = False) -> PromptDocument:
+    """加载并解析一个提示词文档。"""
+    safe_name = normalize_prompt_name(name)
+    return parse_prompt_document(
+        _load_raw_prompt_template(safe_name),
+        expected_id=safe_name,
+        require_metadata=require_metadata,
+    )
+
+
+def load_prompt_template(name: str) -> str:
+    """加载指定名称的运行时提示词模板
+
+    文件顶部的维护元数据会被解析并剥离，不会发送给模型。
 
     Args:
         name: 提示词名称（不含 .prompt 后缀）
 
     Returns:
-        模板原始字符串
+        不含维护元数据的模板字符串
 
     Raises:
         ValueError: 名称校验失败
         FileNotFoundError: 提示词文件不存在
     """
-    safe_name = normalize_prompt_name(name)
-    filepath = _prompt_path(safe_name)
-    file_signature = get_prompt_file_signature(safe_name)
-    return _read_prompt_file(filepath, file_signature, _PROMPT_CACHE_REVISION)
+    return load_prompt_document(name).template
 
 
 def get_prompt_file_signature(name: str) -> tuple[int, int]:
@@ -141,8 +187,10 @@ def list_prompt_templates() -> list[str]:
 
 
 # 多段模板解析：用于合并 prompt 文件中的分节标记
-SECTION_MARKER = re.compile(r"^###SECTION:\s*(\S+)\s*$")
+SECTION_MARKER = re.compile(r"^###SECTION:\s*([A-Za-z0-9_-]+)\s*$")
+SECTION_MARKER_PREFIX = "###SECTION"
 END_SECTION_MARKER = "###END_SECTION###"
+END_SECTION_MARKER_PREFIX = "###END_SECTION"
 
 
 def parse_prompt_sections(template: str) -> dict[str, str]:
@@ -162,28 +210,165 @@ def parse_prompt_sections(template: str) -> dict[str, str]:
     sections: dict[str, str] = {}
     current_name: str | None = None
     current_lines: list[str] = []
+    outside_lines: list[tuple[int, str]] = []
 
-    for line in template.split("\n"):
-        m = SECTION_MARKER.match(line)
+    for line_number, line in enumerate(template.split("\n"), start=1):
+        stripped_line = line.strip()
+        m = SECTION_MARKER.fullmatch(stripped_line)
         if m:
             if current_name is not None:
-                sections[current_name] = "\n".join(current_lines).strip()
-            current_name = m.group(1)
+                raise ValueError(f"嵌套分段：第 {line_number} 行在分段 '{current_name}' 未结束时开启了新分段")
+            section_name = m.group(1)
+            if section_name in sections:
+                raise ValueError(f"重复分段：'{section_name}'")
+            current_name = section_name
             current_lines = []
             continue
-        if line.strip() == END_SECTION_MARKER:
-            if current_name is not None:
-                sections[current_name] = "\n".join(current_lines).strip()
+        if stripped_line.startswith(SECTION_MARKER_PREFIX):
+            raise ValueError(f"非法分段名：第 {line_number} 行必须使用字母、数字、下划线或连字符")
+        if stripped_line == END_SECTION_MARKER:
+            if current_name is None:
+                raise ValueError(f"孤立结束标记：第 {line_number} 行没有对应的 SECTION")
+            section_template = "\n".join(current_lines).strip()
+            if not section_template:
+                raise ValueError(f"空分段：'{current_name}' 没有正文")
+            sections[current_name] = section_template
             current_name = None
             current_lines = []
             continue
+        if stripped_line.startswith(END_SECTION_MARKER_PREFIX):
+            raise ValueError(f"非法结束标记：第 {line_number} 行必须精确使用 {END_SECTION_MARKER}")
         if current_name is not None:
             current_lines.append(line)
+        elif stripped_line:
+            outside_lines.append((line_number, line))
 
     if current_name is not None:
-        sections[current_name] = "\n".join(current_lines).strip()
+        raise ValueError(f"未闭合分段：'{current_name}' 缺少 {END_SECTION_MARKER}")
+
+    if sections and outside_lines:
+        line_numbers = ", ".join(str(line_number) for line_number, _ in outside_lines[:3])
+        raise ValueError(f"段外正文：分段文件的非空正文必须位于 SECTION 内（第 {line_numbers} 行）")
 
     return sections
+
+
+def _parse_prompt_metadata(template: str, expected_id: str | None = None) -> tuple[PromptMetadata | None, str]:
+    """解析并移除文件顶部的维护元数据。"""
+    lines = template.split("\n")
+    first_content_line = next((index for index, line in enumerate(lines) if line.strip()), None)
+    if first_content_line is None:
+        return None, template
+
+    first_marker = lines[first_content_line].strip()
+    if first_marker != PROMPT_META_START:
+        for line_number, line in enumerate(lines, start=1):
+            stripped_line = line.strip()
+            if stripped_line in {PROMPT_META_START, PROMPT_META_END}:
+                raise ValueError("提示词元数据必须位于文件正文之前，且开始/结束标记必须成对出现")
+            if stripped_line.startswith(PROMPT_META_MARKER_PREFIXES):
+                raise ValueError(f"非法提示词元数据标记：第 {line_number} 行必须精确使用保留标记")
+        return None, template
+
+    end_line = next(
+        (index for index in range(first_content_line + 1, len(lines)) if lines[index].strip() == PROMPT_META_END),
+        None,
+    )
+    if end_line is None:
+        for line_number, line in enumerate(lines[first_content_line + 1 :], start=first_content_line + 2):
+            stripped_line = line.strip()
+            if stripped_line == PROMPT_META_START:
+                raise ValueError(f"多余提示词元数据开始标记：第 {line_number} 行")
+            if stripped_line.startswith(PROMPT_META_MARKER_PREFIXES):
+                raise ValueError(f"非法提示词元数据标记：第 {line_number} 行必须精确使用保留标记")
+        raise ValueError(f"提示词元数据缺少结束标记 {PROMPT_META_END}")
+
+    for line_number, line in enumerate(lines, start=1):
+        if line_number in {first_content_line + 1, end_line + 1}:
+            continue
+        stripped_line = line.strip()
+        if stripped_line == PROMPT_META_START:
+            raise ValueError(f"多余提示词元数据开始标记：第 {line_number} 行")
+        if stripped_line == PROMPT_META_END:
+            raise ValueError(f"多余提示词元数据结束标记：第 {line_number} 行")
+        if stripped_line.startswith(PROMPT_META_MARKER_PREFIXES):
+            raise ValueError(f"非法提示词元数据标记：第 {line_number} 行必须精确使用保留标记")
+
+    values: dict[str, str] = {}
+    for line_number, line in enumerate(lines[first_content_line + 1 : end_line], start=first_content_line + 2):
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+        if ":" not in stripped_line:
+            raise ValueError(f"提示词元数据第 {line_number} 行必须使用 'key: value' 格式")
+        key, value = (part.strip() for part in stripped_line.split(":", maxsplit=1))
+        if key not in PROMPT_META_ALLOWED_KEYS:
+            raise ValueError(f"未知提示词元数据字段：{key}")
+        if key in values:
+            raise ValueError(f"重复提示词元数据字段：{key}")
+        if not value:
+            raise ValueError(f"提示词元数据字段 '{key}' 不能为空")
+        values[key] = value
+
+    missing_keys = sorted(PROMPT_META_REQUIRED_KEYS - values.keys())
+    if missing_keys:
+        raise ValueError(f"提示词元数据缺少字段：{', '.join(missing_keys)}")
+
+    raw_prompt_id = values["id"]
+    prompt_id = normalize_prompt_name(raw_prompt_id)
+    if raw_prompt_id != prompt_id:
+        raise ValueError("提示词元数据 ID 必须使用不含 .prompt 后缀的规范点分 ID")
+    if expected_id is not None and prompt_id != normalize_prompt_name(expected_id):
+        raise ValueError(f"ID 不匹配：元数据为 '{prompt_id}'，文件路径对应 '{expected_id}'")
+    if values["kind"] not in PROMPT_KINDS:
+        raise ValueError(f"未知 kind：{values['kind']}，可选值为 {sorted(PROMPT_KINDS)}")
+    if values["status"] not in PROMPT_STATUSES:
+        raise ValueError(f"未知 status：{values['status']}，可选值为 {sorted(PROMPT_STATUSES)}")
+    for field_name in ("stage", "output"):
+        if not SAFE_SEGMENT_PATTERN.fullmatch(values[field_name]):
+            raise ValueError(f"提示词元数据字段 '{field_name}' 只能使用字母、数字、下划线或连字符")
+
+    variants: tuple[str, ...] = ()
+    if "variants" in values:
+        variant_parts = tuple(part.strip() for part in values["variants"].split(","))
+        if any(not variant for variant in variant_parts):
+            raise ValueError("提示词元数据 variants 包含空分段名")
+        variants = variant_parts
+    if len(variants) != len(set(variants)):
+        raise ValueError("提示词元数据 variants 存在重复分段")
+    if any(not SAFE_SEGMENT_PATTERN.fullmatch(variant) for variant in variants):
+        raise ValueError("提示词元数据 variants 只能使用合法分段名")
+
+    body = "\n".join(lines[end_line + 1 :])
+    metadata = PromptMetadata(
+        prompt_id=prompt_id,
+        kind=values["kind"],
+        stage=values["stage"],
+        status=values["status"],
+        summary=values["summary"],
+        output=values["output"],
+        variants=variants,
+    )
+    return metadata, body
+
+
+def parse_prompt_document(
+    template: str,
+    *,
+    expected_id: str | None = None,
+    require_metadata: bool = False,
+) -> PromptDocument:
+    """解析提示词维护元数据、运行时正文和命名分段。"""
+    metadata, runtime_template = _parse_prompt_metadata(template, expected_id=expected_id)
+    if require_metadata and metadata is None:
+        raise ValueError("提示词缺少 PROMPT_META 维护元数据")
+    if not runtime_template.strip():
+        raise ValueError("提示词正文为空")
+
+    sections = parse_prompt_sections(runtime_template)
+    if metadata is not None and metadata.variants != tuple(sections):
+        raise ValueError(f"分段声明不一致：元数据 variants={list(metadata.variants)}，实际 sections={list(sections)}")
+    return PromptDocument(template=runtime_template, sections=sections, metadata=metadata)
 
 
 def load_prompt_section(name: str, section: str, /, **kwargs) -> str:
@@ -202,8 +387,7 @@ def load_prompt_section(name: str, section: str, /, **kwargs) -> str:
     Raises:
         KeyError: 指定段不存在
     """
-    template = load_prompt_template(name)
-    sections = parse_prompt_sections(template)
+    sections = load_prompt_document(name).sections
     if section not in sections:
         raise KeyError(f"段 '{section}' 不存在于提示词 '{name}' 中（可用段: {list(sections.keys())}）")
     return sections[section].format(**kwargs)

@@ -11,8 +11,8 @@ common/
 ├── message_repository.py  # Message storage abstraction
 ├── logger.py              # structlog setup (994 lines), get_logger(), initialize_logging()
 ├── toml_utils.py          # TOML read/write helpers
-├── prompt_loader.py       # Layer 1: 递归文件 I/O + LRU 缓存 + ###SECTION 分节解析
-├── prompt_manager.py      # Layer 2: 单例管理器、命名空间、上下文覆盖与热重载
+├── prompt_loader.py       # Layer 1: 文件 I/O、PROMPT_META 契约、严格 ###SECTION 解析 + LRU 缓存
+├── prompt_manager.py      # Layer 2: 单例管理器、命名空间、元数据查询、上下文覆盖与热重载
 ├── message/
 │   └── api.py             # MessageServer (maim_message wrapper) — QQ msg broker
 ├── database/
@@ -35,8 +35,8 @@ common/
 | Internal API server | `server.py` — add routes here (NOT WebUI routes) |
 | Message broker | `message/api.py` — MessageServer, message handler registration |
 | Telemetry | `remote.py` — TelemetryHeartBeatTask |
-| Prompt file I/O | `prompt_loader.py` — `load_prompt_template()`, `clear_prompt_cache()`, `parse_prompt_sections()` |
-| Prompt manager | `prompt_manager.py` — `load_prompts()`, `get_prompt()`, `format_prompt()`, `async_message_scope()` |
+| Prompt file I/O | `prompt_loader.py` — `load_prompt_document()`, `load_prompt_template()`, `parse_prompt_document()`, `parse_prompt_sections()` |
+| Prompt manager | `prompt_manager.py` — `load_prompts()`, `get_prompt()`, `get_prompt_metadata()`, `format_prompt()`, `async_message_scope()` |
 
 ## CONVENTIONS
 - **Logger**: structlog-based. Get via `from src.common.logger import get_logger; logger = get_logger("prefix")`.

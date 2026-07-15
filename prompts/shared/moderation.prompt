@@ -1,3 +1,12 @@
+###PROMPT_META###
+id: shared.moderation
+kind: fragment
+stage: policy
+status: active
+summary: 向规划或生成模板注入标准与严格内容边界
+output: fragment
+variants: standard, strict
+###END_PROMPT_META###
 ###SECTION: standard
 内容边界：不要生成违法违规、露骨色情、剥削性内容、血腥暴力、仇恨攻击、危险违法指导、政治敏感或泄露个人隐私的内容。若当前话题涉及这些内容，保持简短、克制，不扩展细节，并自然转向安全表达。
 ###END_SECTION###

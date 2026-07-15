@@ -1,3 +1,12 @@
+###PROMPT_META###
+id: chat.private.pfc.action_decision
+kind: template
+stage: planning
+status: legacy
+summary: 为旧 PFC 私聊状态机决定首次、后续或结束动作
+output: strict_json
+variants: initial_reply, follow_up, end_decision
+###END_PROMPT_META###
 ###SECTION: initial_reply
 {persona_text}
 

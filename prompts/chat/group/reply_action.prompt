@@ -1,3 +1,12 @@
+###PROMPT_META###
+id: chat.group.reply_action
+kind: fragment
+stage: planning
+status: active
+summary: 定义群聊 reply action 在引用开关下的字段契约
+output: fragment
+variants: without_quote, with_quote
+###END_PROMPT_META###
 ###SECTION: without_quote
 reply 动作字段规则：
 - think_level 只能是整数 0 或 1。只有回复必须依赖旧聊天事实、关系、约定、偏好、旧梗或需要额外查询/较深推理时填 1；当前上下文足够时填 0。

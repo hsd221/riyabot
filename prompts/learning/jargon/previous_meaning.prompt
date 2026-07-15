@@ -1,3 +1,12 @@
+###PROMPT_META###
+id: learning.jargon.previous_meaning
+kind: fragment
+stage: learning
+status: active
+summary: 向黑话推断模板注入待核验的旧释义及使用约束
+output: fragment
+variants: context, instruction
+###END_PROMPT_META###
 ###SECTION: context
 【上一次推断的含义（待核验，不是事实）】
 {previous_meaning}

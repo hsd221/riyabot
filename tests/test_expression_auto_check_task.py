@@ -34,8 +34,10 @@ class ExpressionAutoCheckPromptAndLLMTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(expression_auto_check_task, "global_config", fake_config):
             prompt = expression_auto_check_task.create_evaluation_prompt("被问配置", "先确认上下文")
 
-        self.assertIn("使用条件或使用情景：被问配置", prompt)
-        self.assertIn("表达方式或言语风格：先确认上下文", prompt)
+        self.assertIn("【使用条件或使用情景】\n被问配置", prompt)
+        self.assertIn("【表达方式或言语风格】\n先确认上下文", prompt)
+        self.assertNotIn("使用条件或使用情景：被问配置", prompt)
+        self.assertNotIn("表达方式或言语风格：先确认上下文", prompt)
         self.assertIn("1. 表达方式或言语风格 是否与使用条件或使用情景 匹配", prompt)
         self.assertIn("5. 不能包含内部配置名", prompt)
         self.assertIn("6. 要适合群聊语境", prompt)

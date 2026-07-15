@@ -1,3 +1,11 @@
+###PROMPT_META###
+id: chat.group.action
+kind: fragment
+stage: planning
+status: active
+summary: 描述单个群聊插件 action 的选择条件与参数结构
+output: fragment
+###END_PROMPT_META###
 【动作】{action_name}
 【动作描述】{action_description}
 【使用条件】{parallel_text}

@@ -1,3 +1,11 @@
+###PROMPT_META###
+id: chat.private.planner
+kind: template
+stage: planning
+status: fallback
+summary: 为旧私聊 Action 回退链路选择下一步 action
+output: reasoned_jsonl
+###END_PROMPT_META###
 {time_block}
 {name_block}
 

@@ -1,3 +1,12 @@
+###PROMPT_META###
+id: chat.private.pfc.reply_generation
+kind: template
+stage: generation
+status: legacy
+summary: 为旧 PFC 私聊状态机生成直接回复、追加消息或告别语
+output: plain_text
+variants: direct_reply, send_new_message, farewell
+###END_PROMPT_META###
 ###SECTION: direct_reply
 {persona_text}
 

@@ -1,3 +1,12 @@
+###PROMPT_META###
+id: media.emoji.vision_description
+kind: template
+stage: perception
+status: active
+summary: 描述静态或动态表情包的可见内容、情感与适用语境
+output: plain_text
+variants: gif, gif_batch, gif_overall, static, static_detailed
+###END_PROMPT_META###
 ###SECTION: gif
 这是一个包含 {frame_count} 帧的动态表情包。下面的 PNG 图片从第 1 帧到第 {frame_count} 帧按 GIF 播放顺序提供；透明区域是原图背景。
 
