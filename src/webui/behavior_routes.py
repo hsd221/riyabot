@@ -15,7 +15,8 @@ from src.bw_learner.behavior_store import (
     normalize_source_ids,
 )
 from src.common.database.database_model import BehaviorPattern, ChatStreams
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
+from src.webui.error_utils import internal_server_error, log_exception_type
 
 from .auth import verify_auth_token_from_cookie_or_header
 
@@ -195,7 +196,7 @@ def get_chat_names_batch(chat_ids: list[str]) -> dict[str, str]:
             elif chat_stream.user_nickname:
                 result[chat_stream.stream_id] = chat_stream.user_nickname
     except Exception as e:
-        logger.warning(f"批量获取聊天名称失败: {e}")
+        log_exception_type(logger, "批量获取聊天名称失败", e, level="warning")
     return result
 
 
@@ -288,8 +289,7 @@ async def get_chat_list(maibot_session: Optional[str] = Cookie(None), authorizat
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取聊天列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取聊天列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取聊天列表失败", e) from None
 
 
 @router.get("/list", response_model=BehaviorListResponse)
@@ -338,8 +338,7 @@ async def get_behavior_list(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取行为模式列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取行为模式列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取行为模式列表失败", e) from None
 
 
 @router.get("/stats/summary", response_model=BehaviorStatsResponse)
@@ -351,8 +350,7 @@ async def get_behavior_stats(maibot_session: Optional[str] = Cookie(None), autho
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取行为模式统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取行为模式统计失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取行为模式统计失败", e) from None
 
 
 @router.get("/{behavior_id}", response_model=BehaviorDetailResponse)
@@ -371,8 +369,7 @@ async def get_behavior_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取行为模式详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取行为模式详情失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取行为模式详情失败", e) from None
 
 
 @router.post("/", response_model=BehaviorCreateResponse)
@@ -392,14 +389,13 @@ async def create_behavior(
         create_data["selected_count"] = 0
 
         pattern = BehaviorPattern.create(**create_data)
-        logger.info(f"行为模式已创建: ID={pattern.id}, action={pattern.action}")
+        logger.info("行为模式已创建", behavior_id=pattern.id, action_hash=hash_id(pattern.action))
 
         return BehaviorCreateResponse(success=True, message="行为模式创建成功", data=behavior_to_response(pattern))
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"创建行为模式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"创建行为模式失败: {str(e)}") from e
+        raise internal_server_error(logger, "创建行为模式失败", e) from None
 
 
 @router.patch("/{behavior_id}", response_model=BehaviorUpdateResponse)
@@ -426,7 +422,7 @@ async def update_behavior(
             setattr(pattern, field_name, value)
         pattern.save()
 
-        logger.info(f"行为模式已更新: ID={behavior_id}, 字段: {list(update_data.keys())}")
+        logger.info("行为模式已更新", behavior_id=behavior_id, fields=list(update_data.keys()))
         return BehaviorUpdateResponse(
             success=True,
             message=f"成功更新 {len(update_data)} 个字段",
@@ -435,8 +431,7 @@ async def update_behavior(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"更新行为模式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新行为模式失败: {str(e)}") from e
+        raise internal_server_error(logger, "更新行为模式失败", e) from None
 
 
 @router.delete("/{behavior_id}", response_model=BehaviorDeleteResponse)
@@ -453,14 +448,13 @@ async def delete_behavior(
 
         action = pattern.action
         pattern.delete_instance()
-        logger.info(f"行为模式已删除: ID={behavior_id}, action={action}")
+        logger.info("行为模式已删除", behavior_id=behavior_id, action_hash=hash_id(action))
 
         return BehaviorDeleteResponse(success=True, message=f"成功删除行为模式: {action}")
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"删除行为模式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除行为模式失败: {str(e)}") from e
+        raise internal_server_error(logger, "删除行为模式失败", e) from None
 
 
 @router.post("/batch/delete", response_model=BehaviorDeleteResponse)
@@ -478,11 +472,10 @@ async def batch_delete_behaviors(
 
         found_ids = [pattern.id for pattern in BehaviorPattern.select().where(BehaviorPattern.id.in_(request.ids))]
         deleted_count = BehaviorPattern.delete().where(BehaviorPattern.id.in_(found_ids)).execute()
-        logger.info(f"批量删除了 {deleted_count} 个行为模式")
+        logger.info("批量删除行为模式完成", deleted_count=deleted_count)
 
         return BehaviorDeleteResponse(success=True, message=f"成功删除 {deleted_count} 个行为模式")
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"批量删除行为模式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除行为模式失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量删除行为模式失败", e) from None

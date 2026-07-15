@@ -24,8 +24,23 @@ class FakeUploadFile:
         self.content_type = content_type
         self._content = content
 
-    async def read(self) -> bytes:
-        return self._content
+    async def read(self, size: int = -1) -> bytes:
+        return self._content if size < 0 else self._content[:size]
+
+
+class FakeImage:
+    def __init__(self, size: tuple[int, int], image_format: str = "PNG") -> None:
+        self.size = size
+        self.format = image_format
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def verify(self) -> None:
+        return None
 
 
 def png_bytes(color: tuple[int, int, int] = (255, 0, 0)) -> bytes:
@@ -217,6 +232,29 @@ class EmojiCrudRoutesTest(EmojiRoutesTestCase):
             await emoji_routes.batch_delete_emojis(emoji_routes.BatchDeleteRequest(emoji_ids=[]))
         self.assertEqual(empty_batch.exception.status_code, 400)
 
+    async def test_internal_failures_do_not_expose_database_details(self) -> None:
+        secret = 'database error at /private/emoji.db: token="super-secret"'
+        with (
+            patch.object(emoji_routes.Emoji, "select", side_effect=RuntimeError(secret)),
+            patch.object(emoji_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as failure,
+        ):
+            await emoji_routes.get_emoji_list(
+                page=1,
+                page_size=20,
+                search=None,
+                is_registered=None,
+                is_banned=None,
+                format=None,
+                sort_by="usage_count",
+                sort_order="desc",
+            )
+
+        self.assertEqual(failure.exception.status_code, 500)
+        self.assertEqual(failure.exception.detail, "获取表情包列表失败")
+        logged.assert_called_once()
+        self.assertNotIn(secret, repr(logged.call_args))
+
 
 class EmojiThumbnailRoutesTest(EmojiRoutesTestCase):
     async def test_thumbnail_helpers_generate_cleanup_stats_preheat_and_clear_cache(self) -> None:
@@ -387,6 +425,61 @@ class EmojiUploadRoutesTest(EmojiRoutesTestCase):
         self.assertEqual([detail["success"] for detail in result["details"]], [True, False, False, False, True])
         self.assertIn("已存在相同的表情包", result["details"][1]["error"])
         self.assertEqual(Emoji.select().first().emotion, "fun,nice")
+
+    async def test_upload_rejects_oversized_files_before_image_decode(self) -> None:
+        oversized = b"x" * (emoji_routes.MAX_EMOJI_FILE_BYTES + 1)
+
+        with patch.object(emoji_routes.Image, "open") as image_open:
+            with self.assertRaises(HTTPException) as blocked:
+                await emoji_routes.upload_emoji(
+                    FakeUploadFile("huge.png", "image/png", oversized),
+                    description="",
+                    emotion="",
+                    is_registered=False,
+                )
+
+        self.assertEqual(blocked.exception.status_code, 413)
+        image_open.assert_not_called()
+
+    async def test_upload_rejects_excessive_image_dimensions(self) -> None:
+        too_wide = FakeImage((emoji_routes.MAX_EMOJI_DIMENSION + 1, 1))
+
+        with patch.object(emoji_routes.Image, "open", return_value=too_wide):
+            with self.assertRaises(HTTPException) as blocked:
+                await emoji_routes.upload_emoji(
+                    FakeUploadFile("wide.png", "image/png", b"fake-image"),
+                    description="",
+                    emotion="",
+                    is_registered=False,
+                )
+
+        self.assertEqual(blocked.exception.status_code, 413)
+        self.assertFalse(list(self.registered_dir.glob("*")))
+
+    async def test_batch_upload_rejects_more_than_supported_file_count(self) -> None:
+        files = [FakeUploadFile(f"{index}.png", "image/png", png_bytes()) for index in range(21)]
+
+        with self.assertRaises(HTTPException) as blocked:
+            await emoji_routes.batch_upload_emoji(files, emotion="", is_registered=False)
+
+        self.assertEqual(blocked.exception.status_code, 413)
+
+    async def test_batch_upload_hides_internal_per_file_errors(self) -> None:
+        with (
+            patch.object(emoji_routes.Emoji, "get_or_none", side_effect=RuntimeError("database at /secret/path.db")),
+            patch.object(emoji_routes.logger, "error") as logged,
+        ):
+            result = await emoji_routes.batch_upload_emoji(
+                [FakeUploadFile("first.png", "image/png", png_bytes())],
+                emotion="",
+                is_registered=False,
+            )
+
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["details"][0]["error"], "上传失败")
+        self.assertNotIn("secret", str(result))
+        logged.assert_called_once()
+        self.assertNotIn("secret", repr(logged.call_args))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 import datetime
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from peewee import SqliteDatabase
 
 from src.common.database.database_model import (
@@ -417,6 +418,38 @@ class AnnualReportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brain_power.total_cost, 0.7)
         self.assertEqual(expression_vibe.favorite_reply["count"], 2)
         self.assertEqual(achievements.new_jargon_count, 2)
+
+    async def test_dimension_failures_return_defaults_without_logging_exception_text(self) -> None:
+        secret = 'database error at /private/report.db: token="super-secret"'
+
+        with (
+            patch.object(annual_report_routes.OnlineTime, "select", side_effect=RuntimeError(secret)),
+            patch.object(annual_report_routes.logger, "error") as logged,
+        ):
+            data = await annual_report_routes.get_time_footprint(2025)
+
+        self.assertEqual(data, annual_report_routes.TimeFootprintData())
+        logged.assert_called_once()
+        self.assertNotIn(secret, repr(logged.call_args))
+
+    async def test_api_failures_use_fixed_details_without_logging_exception_text(self) -> None:
+        secret = 'database error at /private/report.db: token="super-secret"'
+
+        with (
+            patch.object(
+                annual_report_routes,
+                "get_time_footprint",
+                new=AsyncMock(side_effect=RuntimeError(secret)),
+            ),
+            patch.object(annual_report_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as failure,
+        ):
+            await annual_report_routes.get_time_footprint_api(year=2025, _auth=True)
+
+        self.assertEqual(failure.exception.status_code, 500)
+        self.assertEqual(failure.exception.detail, "获取时光足迹数据失败")
+        logged.assert_called_once()
+        self.assertNotIn(secret, repr(logged.call_args))
 
     def test_require_auth_delegates_to_shared_auth_checker(self) -> None:
         with patch.object(annual_report_routes, "verify_auth_token_from_cookie_or_header", return_value=True) as verify:

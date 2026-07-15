@@ -401,6 +401,7 @@ class E2EOrchestrator:
             env = os.environ.copy()
             env["MAIBOT_WORKER_PROCESS"] = "1"
             env["MAIBOT_ENABLE_INJECT_ENDPOINT"] = "1"
+            env["HOST"] = "127.0.0.1"
 
             self._bot_process = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -485,10 +486,14 @@ class E2EOrchestrator:
                 def _probe():
                     import urllib.request
 
+                    headers = {"Content-Type": "application/json"}
+                    inject_token = os.environ.get("MAIBOT_INJECT_TOKEN")
+                    if inject_token:
+                        headers["X-MaiBot-Inject-Token"] = inject_token
                     req = urllib.request.Request(
                         url + "/message/inject",
                         data=b'{"_probe": true}',
-                        headers={"Content-Type": "application/json"},
+                        headers=headers,
                         method="POST",
                     )
                     with urllib.request.urlopen(req, timeout=2):

@@ -63,10 +63,20 @@ os.environ.setdefault("MAIBOT_WORKER_PROCESS", "1")
 _REPLY_PREFIX_RE = re.compile(r"\[回复[^\]]*\]\s*")
 _TAG_PATTERN = re.compile(r"\[(?:图片|视频|合并转发|文件|卡片消息|表情):[^\]]*\]")
 _EMOJI_TAG = re.compile(r"\[\[?(?:图片|视频|表情|动画表情)\]?\]")
-_SPECIAL_TEXTS = frozenset({
-    "[动画表情]", "[语音]", "[分享]", "[红包]", "[音乐]", "[视频]",
-    "[图片]", "[文件]", "[合并转发]", "[QQ红包]",
-})
+_SPECIAL_TEXTS = frozenset(
+    {
+        "[动画表情]",
+        "[语音]",
+        "[分享]",
+        "[红包]",
+        "[音乐]",
+        "[视频]",
+        "[图片]",
+        "[文件]",
+        "[合并转发]",
+        "[QQ红包]",
+    }
+)
 
 
 def _clean_reply_prefix(text: str) -> str:
@@ -75,7 +85,7 @@ def _clean_reply_prefix(text: str) -> str:
     if text.startswith("[回复"):
         idx = text.find("]")
         if idx != -1:
-            text = text[idx + 1:].lstrip("\n").lstrip()
+            text = text[idx + 1 :].lstrip("\n").lstrip()
     return text.strip()
 
 
@@ -91,6 +101,7 @@ def _clean_message_text(raw_text: str) -> Optional[str]:
     if cleaned in _SPECIAL_TEXTS:
         return None
     return _clean_reply_prefix(cleaned)
+
 
 # ---------------------------------------------------------------------------
 # 聊天导出数据加载
@@ -154,14 +165,16 @@ def load_chat_messages(export_dir: str | Path = _CHAT_EXPORT_DIR) -> list[dict]:
             if not cleaned:
                 continue
 
-            results.append({
-                "text": cleaned,
-                "name": sender.get("name", "unknown"),
-                "uid": sender_uid,
-                "timestamp": msg.get("timestamp", 0) / 1000.0,  # ms→s
-                "group_id": group_id,
-                "group_name": group_name,
-            })
+            results.append(
+                {
+                    "text": cleaned,
+                    "name": sender.get("name", "unknown"),
+                    "uid": sender_uid,
+                    "timestamp": msg.get("timestamp", 0) / 1000.0,  # ms→s
+                    "group_id": group_id,
+                    "group_name": group_name,
+                }
+            )
             file_count += 1
 
         print(f"  [加载] {fpath.name}: {file_count} 条有效消息", file=sys.stderr)
@@ -222,6 +235,7 @@ def _get_rss_mib() -> float:
     except (FileNotFoundError, OSError, IndexError, ValueError):
         pass
     import resource as _r
+
     try:
         usage = _r.getrusage(_r.RUSAGE_SELF)
         return usage.ru_maxrss / 1024.0
@@ -238,8 +252,8 @@ def _get_rss_mib() -> float:
 # ---------------------------------------------------------------------------
 
 _message_queue: list[dict] = []  # 按 ts 排序的消息列表
-_message_cursor: int = 0         # 当前回放位置
-_message_loop: bool = False       # 播完后是否从头循环
+_message_cursor: int = 0  # 当前回放位置
+_message_loop: bool = False  # 播完后是否从头循环
 
 
 def init_message_pool(chat_dir: str | Path | None = None) -> int:
@@ -256,16 +270,25 @@ def init_message_pool(chat_dir: str | Path | None = None) -> int:
 
     if loaded:
         _message_queue = loaded
-        print(f"  [消息队列] {len(_message_queue)} 条, "
-              f"跨度 {_message_queue[0]['timestamp']:.0f} ~ {_message_queue[-1]['timestamp']:.0f} "
-              f"({(loaded[-1]['timestamp']-loaded[0]['timestamp'])/86400:.0f} 天)",
-              file=sys.stderr)
+        print(
+            f"  [消息队列] {len(_message_queue)} 条, "
+            f"跨度 {_message_queue[0]['timestamp']:.0f} ~ {_message_queue[-1]['timestamp']:.0f} "
+            f"({(loaded[-1]['timestamp'] - loaded[0]['timestamp']) / 86400:.0f} 天)",
+            file=sys.stderr,
+        )
     else:
         print("  [消息队列] 无真实数据，使用内置模板", file=sys.stderr)
-        _message_queue = [{"text": t, "name": random.choice(_FALLBACK_NAMES),
-                           "uid": f"u_fallback_{i}", "timestamp": time.time() + i,
-                           "group_id": "g_fallback", "group_name": "回退群"}
-                          for i, t in enumerate(_FALLBACK_MESSAGES)]
+        _message_queue = [
+            {
+                "text": t,
+                "name": random.choice(_FALLBACK_NAMES),
+                "uid": f"u_fallback_{i}",
+                "timestamp": time.time() + i,
+                "group_id": "g_fallback",
+                "group_name": "回退群",
+            }
+            for i, t in enumerate(_FALLBACK_MESSAGES)
+        ]
 
     _message_cursor = 0
     return len(_message_queue)
@@ -492,7 +515,9 @@ def _finalize_llm_bucket(bucket: dict[str, Any]) -> dict[str, Any]:
     return finalized
 
 
-def summarize_llm_usage(rows: list[dict[str, Any]], start_id: int, start_time: float, end_time: float) -> dict[str, Any]:
+def summarize_llm_usage(
+    rows: list[dict[str, Any]], start_id: int, start_time: float, end_time: float
+) -> dict[str, Any]:
     """生成模型调用明细的聚合摘要。"""
     totals = _blank_llm_bucket()
     by_request_type: dict[str, dict[str, Any]] = {}
@@ -648,6 +673,7 @@ class AdapterSimulator:
     ):
         self.api_url = (api_url or _default_api_url()).rstrip("/")
         self.inject_url = f"{self.api_url}/message/inject"
+        self.inject_token = os.environ.get("MAIBOT_INJECT_TOKEN")
         self.batch_size = batch_size
         self.batches = batches
         self.message_interval = message_interval
@@ -695,10 +721,13 @@ class AdapterSimulator:
     def _kill_existing_bots() -> None:
         """杀掉所有已存在的 bot.py 进程。"""
         import subprocess
+
         try:
             result = subprocess.run(
                 ["pgrep", "-f", "python.*bot\\.py"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
                 pids = [int(p) for p in result.stdout.strip().split()]
@@ -722,6 +751,7 @@ class AdapterSimulator:
         env = os.environ.copy()
         env["MAIBOT_WORKER_PROCESS"] = "1"
         env["MAIBOT_ENABLE_INJECT_ENDPOINT"] = "1"
+        env["HOST"] = "127.0.0.1"
 
         self._bot_proc = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -785,10 +815,13 @@ class AdapterSimulator:
             def _probe():
                 import urllib.request
 
+                headers = {"Content-Type": "application/json"}
+                if self.inject_token:
+                    headers["X-MaiBot-Inject-Token"] = self.inject_token
                 req = urllib.request.Request(
                     self.inject_url,
                     data=json.dumps({"_probe": True}).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=2):
@@ -820,10 +853,13 @@ class AdapterSimulator:
             def _post():
                 import urllib.request
 
+                headers = {"Content-Type": "application/json"}
+                if self.inject_token:
+                    headers["X-MaiBot-Inject-Token"] = self.inject_token
                 req = urllib.request.Request(
                     self.inject_url,
                     data=data,
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
@@ -924,9 +960,11 @@ class AdapterSimulator:
         # ── 首次 DB 快照 ──────────────────────────────────────
         if self.enable_db_monitor:
             before = await self._db_snapshot("initial")
-            print(f"\n[DB] 初始: atoms={before.get('atom_count', '?')} "
-                  f"archive={before.get('archive_count', '?')} "
-                  f"size={before.get('db_size_mb', '?')}MB")
+            print(
+                f"\n[DB] 初始: atoms={before.get('atom_count', '?')} "
+                f"archive={before.get('archive_count', '?')} "
+                f"size={before.get('db_size_mb', '?')}MB"
+            )
 
         rss_baseline = _get_rss_mib()
         msg_num = 0
@@ -935,8 +973,7 @@ class AdapterSimulator:
         bucket_results: list[float | None] = []
         bucket_t0 = time.monotonic()
 
-        print(f"\n[开始] 模拟真实适配器: 每条间隔 {self.message_interval}s, "
-              f"每 {self.batch_size} 条报告一次")
+        print(f"\n[开始] 模拟真实适配器: 每条间隔 {self.message_interval}s, 每 {self.batch_size} 条报告一次")
 
         while not self._shutdown:
             if max_total is not None and msg_num >= max_total:
@@ -976,9 +1013,11 @@ class AdapterSimulator:
                 else:
                     atoms, archive = "?", "?"
 
-                print(f"  [第{batch_num}批] {len(bucket_results)}条 ok={ok} fail={fail} "
-                      f"{bucket_time:.1f}s{lat_str} | "
-                      f"atoms={atoms} archive={archive}")
+                print(
+                    f"  [第{batch_num}批] {len(bucket_results)}条 ok={ok} fail={fail} "
+                    f"{bucket_time:.1f}s{lat_str} | "
+                    f"atoms={atoms} archive={archive}"
+                )
                 bucket_results = []
                 bucket_t0 = time.monotonic()
 
@@ -1030,18 +1069,18 @@ class AdapterSimulator:
         print(f"    总发送:    {self.total_sent} 条")
         print(f"    成功:      {ok} 条")
         print(f"    失败:      {fail} 条")
-        print(f"    成功率:    {(ok/max(self.total_sent,1)*100):.1f}%")
-        print(f"    耗时:      {elapsed:.0f}s ({elapsed/60:.1f}min)")
-        print(f"    平均速率:  {ok/max(elapsed/60,0.001):.1f} 条/min")
+        print(f"    成功率:    {(ok / max(self.total_sent, 1) * 100):.1f}%")
+        print(f"    耗时:      {elapsed:.0f}s ({elapsed / 60:.1f}min)")
+        print(f"    平均速率:  {ok / max(elapsed / 60, 0.001):.1f} 条/min")
 
         if self.latencies:
             sorted_lat = sorted(self.latencies)
             print("\n  [注入延迟]")
-            print(f"    P50:       {sorted_lat[len(sorted_lat)//2]:.1f}ms")
-            print(f"    P95:       {sorted_lat[int(len(sorted_lat)*0.95)]:.1f}ms")
-            print(f"    P99:       {sorted_lat[int(len(sorted_lat)*0.99)]:.1f}ms")
+            print(f"    P50:       {sorted_lat[len(sorted_lat) // 2]:.1f}ms")
+            print(f"    P95:       {sorted_lat[int(len(sorted_lat) * 0.95)]:.1f}ms")
+            print(f"    P99:       {sorted_lat[int(len(sorted_lat) * 0.99)]:.1f}ms")
             print(f"    MAX:       {max(sorted_lat):.1f}ms")
-            print(f"    AVG:       {sum(sorted_lat)/len(sorted_lat):.1f}ms")
+            print(f"    AVG:       {sum(sorted_lat) / len(sorted_lat):.1f}ms")
 
         # DB 状态
         if self.enable_db_monitor and self.db_snapshots:
@@ -1050,10 +1089,14 @@ class AdapterSimulator:
 
             print("\n  [memory.db 状态]")
             print(f"    文件大小:  {final_db.get('db_size_mb', 0):.2f} MB")
-            print(f"    原子:      {first.get('atom_count', 0)} → {last.get('atom_count', 0)} "
-                  f"(+{last.get('atom_count', 0) - first.get('atom_count', 0)})")
-            print(f"    归档:      {first.get('archive_count', 0)} → {last.get('archive_count', 0)} "
-                  f"(+{last.get('archive_count', 0) - first.get('archive_count', 0)})")
+            print(
+                f"    原子:      {first.get('atom_count', 0)} → {last.get('atom_count', 0)} "
+                f"(+{last.get('atom_count', 0) - first.get('atom_count', 0)})"
+            )
+            print(
+                f"    归档:      {first.get('archive_count', 0)} → {last.get('archive_count', 0)} "
+                f"(+{last.get('archive_count', 0) - first.get('archive_count', 0)})"
+            )
             print(f"    噪声池:    {last.get('noise_count', 0)}")
             print(f"    梦境:      {last.get('dream_count', 0)}")
             print(f"    洞见:      {last.get('insight_count', 0)}")
@@ -1073,8 +1116,10 @@ class AdapterSimulator:
             totals = self.llm_summary.get("totals", {})
             print("\n  [模型调用]")
             print(f"    请求数:    {totals.get('requests', 0)}")
-            print(f"    Tokens:    {totals.get('total_tokens', 0)} "
-                  f"(in={totals.get('prompt_tokens', 0)}, out={totals.get('completion_tokens', 0)})")
+            print(
+                f"    Tokens:    {totals.get('total_tokens', 0)} "
+                f"(in={totals.get('prompt_tokens', 0)}, out={totals.get('completion_tokens', 0)})"
+            )
             print(f"    费用:      {totals.get('cost', 0.0):.6f}")
             print(f"    平均耗时:  {totals.get('avg_time_cost', 0.0):.3f}s")
 
@@ -1124,30 +1169,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="适配器模拟器 — 从聊天导出按时间序回放消息",
     )
-    parser.add_argument("--api-url", default=_default_api_url(),
-                        help="bot 内网 API 地址 (默认读取 MAIBOT_API_URL 或 .env 的 HOST/PORT)")
-    parser.add_argument("--batch-size", type=int, default=30,
-                        help="报告/统计桶大小 (默认 30)")
-    parser.add_argument("--batches", type=int, default=0,
-                        help="发送总批次数 (0=播完整个消息队列为止)")
-    parser.add_argument("--message-interval", type=float, default=2.0,
-                        help="相邻两条消息的发送间隔 (秒，默认 2.0，模拟真实适配器)")
-    parser.add_argument("--db-interval", type=float, default=30.0,
-                        help="DB 快照间隔 (秒，默认 30)")
-    parser.add_argument("--start-bot", action="store_true",
-                        help="自动启动 bot.py 子进程")
-    parser.add_argument("--quick", "-q", action="store_true",
-                        help="快速模式: batch-size=30 batches=3 message-interval=0.5")
-    parser.add_argument("--no-db-monitor", action="store_true",
-                        help="禁用 DB 监控")
-    parser.add_argument("--no-llm-monitor", action="store_true",
-                        help="禁用模型调用记录导出")
-    parser.add_argument("--llm-report-dir", type=str, default=str(_DEFAULT_ARTIFACT_DIR),
-                        help="模型调用报告输出目录 (默认: tests/artifacts)")
-    parser.add_argument("--settle-seconds", type=float, default=10.0,
-                        help="停止注入后等待 bot 处理剩余消息的秒数 (默认 10)")
-    parser.add_argument("--chat-dir", type=str, default=None,
-                        help="聊天导出目录 (默认: tests/data/chat_exports)")
+    parser.add_argument(
+        "--api-url", default=_default_api_url(), help="bot 内网 API 地址 (默认读取 MAIBOT_API_URL 或 .env 的 HOST/PORT)"
+    )
+    parser.add_argument("--batch-size", type=int, default=30, help="报告/统计桶大小 (默认 30)")
+    parser.add_argument("--batches", type=int, default=0, help="发送总批次数 (0=播完整个消息队列为止)")
+    parser.add_argument(
+        "--message-interval", type=float, default=2.0, help="相邻两条消息的发送间隔 (秒，默认 2.0，模拟真实适配器)"
+    )
+    parser.add_argument("--db-interval", type=float, default=30.0, help="DB 快照间隔 (秒，默认 30)")
+    parser.add_argument("--start-bot", action="store_true", help="自动启动 bot.py 子进程")
+    parser.add_argument(
+        "--quick", "-q", action="store_true", help="快速模式: batch-size=30 batches=3 message-interval=0.5"
+    )
+    parser.add_argument("--no-db-monitor", action="store_true", help="禁用 DB 监控")
+    parser.add_argument("--no-llm-monitor", action="store_true", help="禁用模型调用记录导出")
+    parser.add_argument(
+        "--llm-report-dir",
+        type=str,
+        default=str(_DEFAULT_ARTIFACT_DIR),
+        help="模型调用报告输出目录 (默认: tests/artifacts)",
+    )
+    parser.add_argument(
+        "--settle-seconds", type=float, default=10.0, help="停止注入后等待 bot 处理剩余消息的秒数 (默认 10)"
+    )
+    parser.add_argument("--chat-dir", type=str, default=None, help="聊天导出目录 (默认: tests/data/chat_exports)")
     return parser.parse_args(argv)
 
 

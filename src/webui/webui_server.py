@@ -3,14 +3,20 @@
 import asyncio
 import mimetypes
 from pathlib import Path
-from fastapi import FastAPI
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from uvicorn import Config, Server as UvicornServer
 from src.common.logger import get_logger
-from src.webui.auth import request_uses_https
+from src.webui.auth import request_uses_https, require_same_site_request
+from src.webui.error_utils import log_exception_type
+from src.webui.request_limits import RequestBodyLimitMiddleware
 
 logger = get_logger("webui_server")
+MAX_WEBUI_WS_MESSAGE_BYTES = 256 * 1024
 
 
 def apply_security_headers(response: Response, is_https: bool) -> None:
@@ -43,11 +49,25 @@ def apply_security_headers(response: Response, is_https: bool) -> None:
 class WebUIServer:
     """独立的 WebUI 服务器"""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8001):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8001):
         self.host = host
         self.port = port
-        self.app = FastAPI(title="RiyaBot WebUI")
+        self.app = FastAPI(
+            title="RiyaBot WebUI",
+            openapi_url=None,
+            docs_url=None,
+            redoc_url=None,
+        )
         self._server = None
+
+        # 统一隐藏服务端异常细节，避免路径、SQL 和上游响应泄露给客户端
+        self._setup_exception_handlers()
+
+        # 在 FastAPI 解析请求体前限制实际接收字节数，包含无 Content-Length 的流式请求。
+        self._setup_request_limits()
+
+        # 所有状态修改请求统一执行同源检查，避免单个路由遗漏 CSRF 防护。
+        self._setup_same_site_protection()
 
         # 配置防爬虫中间件（需要在CORS之前注册）
         self._setup_anti_crawler()
@@ -67,6 +87,51 @@ class WebUIServer:
 
         # 注册robots.txt路由
         self._setup_robots_txt()
+
+    def _setup_exception_handlers(self) -> None:
+        @self.app.exception_handler(RequestValidationError)
+        async def sanitized_request_validation_error(request: Request, exc: RequestValidationError):
+            safe_errors = []
+            for error in exc.errors():
+                safe_location = []
+                for item in error.get("loc", ())[:16]:
+                    if isinstance(item, int):
+                        safe_location.append(item)
+                    else:
+                        safe_location.append(str(item)[:128])
+                safe_errors.append(
+                    {
+                        "type": str(error.get("type", "validation_error"))[:128],
+                        "loc": safe_location,
+                        "msg": str(error.get("msg", "请求参数无效"))[:256],
+                    }
+                )
+
+            logger.info(
+                "WebUI 请求参数校验失败",
+                event_code="webui.request.validation_failed",
+                path=request.url.path,
+                error_count=len(safe_errors),
+            )
+            return JSONResponse(status_code=422, content={"detail": safe_errors})
+
+        @self.app.exception_handler(HTTPException)
+        async def sanitized_http_exception(request: Request, exc: HTTPException):
+            if exc.status_code >= 500:
+                logger.warning(
+                    "WebUI 请求返回服务端错误",
+                    event_code="webui.http.server_error",
+                    status_code=exc.status_code,
+                    path=request.url.path,
+                )
+                if exc.status_code == 502:
+                    detail = "上游服务请求失败"
+                elif exc.status_code == 503:
+                    detail = "服务暂时不可用"
+                else:
+                    detail = "服务器内部错误"
+                exc = HTTPException(status_code=exc.status_code, detail=detail, headers=exc.headers)
+            return await http_exception_handler(request, exc)
 
     def _setup_cors(self):
         """配置 CORS 中间件"""
@@ -94,6 +159,19 @@ class WebUIServer:
         )
         logger.debug("CORS 中间件已配置", event_code="webui.cors.configured")
 
+    def _setup_request_limits(self) -> None:
+        self.app.add_middleware(RequestBodyLimitMiddleware)
+
+    def _setup_same_site_protection(self) -> None:
+        @self.app.middleware("http")
+        async def same_site_protection(request: Request, call_next):
+            if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+                try:
+                    require_same_site_request(request)
+                except HTTPException as exc:
+                    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            return await call_next(request)
+
     def _setup_security_headers(self) -> None:
         @self.app.middleware("http")
         async def security_headers(request, call_next):
@@ -111,8 +189,8 @@ class WebUIServer:
                 logger.info("WebUI 密码已配置", event_code="webui.password.configured")
             else:
                 logger.warning("WebUI 等待在首次配置页面设置密码", event_code="webui.password.setup_required")
-        except Exception:
-            logger.exception("WebUI 认证状态获取失败", event_code="webui.password.status_failed")
+        except Exception as e:
+            log_exception_type(logger, "WebUI 认证状态获取失败", e, event_code="webui.password.status_failed")
 
     def _setup_static_files(self):
         """设置静态文件服务"""
@@ -200,8 +278,8 @@ class WebUIServer:
                 mode=anti_crawler_mode,
                 mode_description=mode_desc,
             )
-        except Exception:
-            logger.exception("防爬虫中间件配置失败", event_code="webui.anti_crawler.configure_failed")
+        except Exception as e:
+            log_exception_type(logger, "防爬虫中间件配置失败", e, event_code="webui.anti_crawler.configure_failed")
 
     def _setup_robots_txt(self):
         """设置robots.txt路由"""
@@ -214,8 +292,8 @@ class WebUIServer:
                 return create_robots_txt_response()
 
             logger.debug("robots.txt 路由已注册", event_code="webui.robots.registered")
-        except Exception:
-            logger.exception("robots.txt 路由注册失败", event_code="webui.robots.register_failed")
+        except Exception as e:
+            log_exception_type(logger, "robots.txt 路由注册失败", e, event_code="webui.robots.register_failed")
 
     def _register_api_routes(self):
         """注册所有 WebUI API 路由"""
@@ -243,8 +321,8 @@ class WebUIServer:
             self.app.include_router(replier_router)
 
             logger.info("WebUI API 路由已注册", event_code="webui.routes.registered")
-        except Exception:
-            logger.exception("WebUI API 路由注册失败", event_code="webui.routes.register_failed")
+        except Exception as e:
+            log_exception_type(logger, "WebUI API 路由注册失败", e, event_code="webui.routes.register_failed")
 
     async def start(self):
         """启动服务器"""
@@ -265,6 +343,9 @@ class WebUIServer:
             port=self.port,
             log_config=None,
             access_log=False,
+            ws_max_size=MAX_WEBUI_WS_MESSAGE_BYTES,
+            ws_max_queue=4,
+            ws_per_message_deflate=False,
         )
         self._server = UvicornServer(config=config)
 
@@ -309,10 +390,17 @@ class WebUIServer:
                     remediation="检查端口占用或通过 WEBUI_PORT 修改端口",
                 )
             else:
-                logger.error("WebUI 服务器网络错误", event_code="webui.server.network_error", error=str(e))
+                log_exception_type(
+                    logger,
+                    "WebUI 服务器网络错误",
+                    e,
+                    event_code="webui.server.network_error",
+                    host=self.host,
+                    port=self.port,
+                )
             raise
-        except Exception:
-            logger.exception("WebUI 服务器运行失败", event_code="webui.server.run_failed")
+        except Exception as e:
+            log_exception_type(logger, "WebUI 服务器运行失败", e, event_code="webui.server.run_failed")
             raise
 
     def _check_port_available(self) -> bool:
@@ -350,8 +438,8 @@ class WebUIServer:
                 logger.info("WebUI 服务器已关闭", event_code="webui.server.shutdown_completed")
             except asyncio.TimeoutError:
                 logger.warning("WebUI 服务器关闭超时", event_code="webui.server.shutdown_timeout", timeout_seconds=3.0)
-            except Exception:
-                logger.exception("WebUI 服务器关闭失败", event_code="webui.server.shutdown_failed")
+            except Exception as e:
+                log_exception_type(logger, "WebUI 服务器关闭失败", e, event_code="webui.server.shutdown_failed")
             finally:
                 self._server = None
 

@@ -79,10 +79,20 @@ def _suppress_logging() -> None:
 _REPLY_PREFIX_RE = re.compile(r"\[回复:[^\]]*\]\s*")
 
 # 特殊消息文本 — 无实质内容的文本应被过滤
-_SPECIAL_TEXTS = frozenset({
-    "[动画表情]", "[语音]", "[分享]", "[红包]", "[音乐]", "[视频]",
-    "[图片]", "[文件]", "[合并转发]", "[QQ红包]",
-})
+_SPECIAL_TEXTS = frozenset(
+    {
+        "[动画表情]",
+        "[语音]",
+        "[分享]",
+        "[红包]",
+        "[音乐]",
+        "[视频]",
+        "[图片]",
+        "[文件]",
+        "[合并转发]",
+        "[QQ红包]",
+    }
+)
 
 # 附件/卡片标签正则 — 移除内嵌标签如 [图片: xxx.jpg]
 _TAG_PATTERN = re.compile(r"\[(?:图片|视频|合并转发|文件|卡片消息|表情):[^\]]*\]")
@@ -93,6 +103,7 @@ _EMOJI_TAG = re.compile(r"\[\[?(?:图片|视频|表情|动画表情)\]?\]")
 @dataclass
 class ParsedMessage:
     """从 QQChatExporter JSON 解析出的单条消息"""
+
     text: str
     timestamp_ms: int
     sender_uid: str
@@ -104,6 +115,7 @@ class ParsedMessage:
 @dataclass
 class ChatExport:
     """单个聊天导出文件的元数据和消息列表"""
+
     file_path: str
     self_uid: str
     self_name: str
@@ -124,6 +136,7 @@ class ChatExport:
 # ---------------------------------------------------------------------------
 # 聊天数据加载与清洗
 # ---------------------------------------------------------------------------
+
 
 def _clean_reply_prefix(text: str) -> str:
     """清洗回复前缀，保留实际聊天内容。
@@ -246,6 +259,7 @@ def load_chat_export(file_path: str) -> ChatExport:
 # 消息构造
 # ---------------------------------------------------------------------------
 
+
 def build_message_dict(
     parsed: ParsedMessage,
     mode: str,
@@ -298,9 +312,11 @@ def build_message_dict(
 # 速率控制
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class InjectionStats:
     """注入统计"""
+
     total: int = 0
     failed: int = 0
     start_time: float = field(default_factory=time.time)
@@ -329,10 +345,7 @@ class InjectionStats:
         if self.total > 0 and self.total % every == 0:
             now = time.time()
             span = now - self.last_report_time
-            curr_rate = (
-                (self.total - self.last_report_count) / (span / 60.0)
-                if span > 0 else 0.0
-            )
+            curr_rate = (self.total - self.last_report_count) / (span / 60.0) if span > 0 else 0.0
             print(
                 f"[进度] 已注入 {self.total} 条 | "
                 f"当前速率 {curr_rate:.1f} msg/min | "
@@ -376,6 +389,7 @@ class MessageInjector:
         self.override_group_id = override_group_id
         self.stats = InjectionStats()
         self.api_url = api_url.rstrip("/")
+        self.inject_token = os.environ.get("MAIBOT_INJECT_TOKEN")
 
         if seed is not None:
             random.seed(seed)
@@ -407,10 +421,13 @@ class MessageInjector:
             def _post():
                 import urllib.request
 
+                headers = {"Content-Type": "application/json"}
+                if self.inject_token:
+                    headers["X-MaiBot-Inject-Token"] = self.inject_token
                 req = urllib.request.Request(
                     f"{self.api_url}/message/inject",
                     data=data,
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
@@ -528,6 +545,7 @@ class MessageInjector:
 # 入口
 # ---------------------------------------------------------------------------
 
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="QQ聊天导出消息注入模拟器 — 通过 global_api.process_message() 注入 E2E 流水线",
@@ -623,11 +641,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
 
     total_messages = sum(e.total_count for e in exports)
     total_senders = len(set().union(*[e.unique_senders for e in exports]))
-    print(
-        f"[摘要] 共 {len(exports)} 个导出文件 | "
-        f"{total_messages} 条消息 | "
-        f"{total_senders} 个独立发送者"
-    )
+    print(f"[摘要] 共 {len(exports)} 个导出文件 | {total_messages} 条消息 | {total_senders} 个独立发送者")
     for export in exports:
         print(
             f"  ├ {Path(export.file_path).name}: "
@@ -668,7 +682,7 @@ async def amain(argv: Optional[list[str]] = None) -> int:
     print(f"  总注入: {stats.total} 条")
     print(f"  失败:   {stats.failed} 条")
     print(f"  耗时:   {elapsed:.1f}s")
-    print(f"  平均速率: {stats.rate:.1f} msg/min ({stats.rate/60:.2f} msg/s)")
+    print(f"  平均速率: {stats.rate:.1f} msg/min ({stats.rate / 60:.2f} msg/s)")
     if stats.total > 0:
         print(f"  成功率:  {((stats.total - stats.failed) / stats.total * 100):.1f}%")
     print("=" * 60)

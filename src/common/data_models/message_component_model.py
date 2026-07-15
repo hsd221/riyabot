@@ -14,7 +14,7 @@ def _hash_base64_data(data: str | None) -> str | None:
         raw_data = base64.b64decode(normalized_data)
     except Exception:
         raw_data = normalized_data.encode("utf-8", errors="ignore")
-    return hashlib.md5(raw_data).hexdigest()
+    return hashlib.md5(raw_data, usedforsecurity=False).hexdigest()
 
 
 @dataclass
@@ -161,8 +161,12 @@ def from_seg_to_components(seg: Seg | None) -> MessageComponentSequence:
                     message = MessageBase.from_dict(node_dict)
                     nodes.append(from_seg_to_components(message.message_segment))
                 except Exception:
-                    nodes.append(MessageComponentSequence([UnknownComponent(segment_type="forward_node", data=node_dict)]))
-        return MessageComponentSequence([ForwardComponent(nodes=nodes, raw_data=data if isinstance(data, list) else None)])
+                    nodes.append(
+                        MessageComponentSequence([UnknownComponent(segment_type="forward_node", data=node_dict)])
+                    )
+        return MessageComponentSequence(
+            [ForwardComponent(nodes=nodes, raw_data=data if isinstance(data, list) else None)]
+        )
 
     return MessageComponentSequence([UnknownComponent(segment_type=segment_type, data=data)])
 

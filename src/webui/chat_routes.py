@@ -5,24 +5,26 @@
 2. 虚拟身份模式：使用真实平台用户的身份，在虚拟群聊中与璃夜对话
 """
 
+import asyncio
 import time
 import uuid
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, Cookie, Header
 from pydantic import BaseModel
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.common.database.database_model import Messages
 from src.config.config import global_config
 from src.chat.message_receive.bot import chat_bot
 from src.webui.auth import verify_auth_token_from_cookie_or_header
+from src.webui.error_utils import log_exception_type
 from src.webui.person_routes import (
     get_profile_person_dict,
     get_profile_person_stats,
     list_profile_person_dicts,
 )
 from src.webui.token_manager import get_token_manager
-from src.webui.ws_auth import verify_ws_token
+from src.webui.ws_auth import is_websocket_origin_allowed, verify_ws_token
 
 logger = get_logger("webui.chat")
 
@@ -46,6 +48,20 @@ VIRTUAL_GROUP_ID_PREFIX = "webui_virtual_group_"
 
 # 固定的 WebUI 用户 ID 前缀
 WEBUI_USER_ID_PREFIX = "webui_user_"
+MAX_CHAT_WS_CONNECTIONS = 32
+MAX_CHAT_MESSAGE_CHARS = 20_000
+MAX_CHAT_IDENTITY_CHARS = 256
+MAX_CHAT_PLATFORM_CHARS = 64
+_chat_connection_lock = asyncio.Lock()
+
+
+def _bounded_chat_text(value: Any, max_chars: int) -> Optional[str]:
+    if not isinstance(value, str) or len(value) > max_chars:
+        return None
+    value = value.strip()
+    if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return None
+    return value
 
 
 class VirtualIdentityConfig(BaseModel):
@@ -130,10 +146,14 @@ class ChatHistoryManager:
             result = [self._message_to_dict(msg, target_group_id) for msg in messages]
             result.reverse()
 
-            logger.debug(f"从数据库加载了 {len(result)} 条聊天记录 (group_id={target_group_id})")
+            logger.debug(
+                "从数据库加载聊天记录",
+                record_count=len(result),
+                group_id_hash=hash_id(target_group_id),
+            )
             return result
         except Exception as e:
-            logger.error(f"从数据库加载聊天记录失败: {e}")
+            log_exception_type(logger, "从数据库加载聊天记录失败", e)
             return []
 
     def clear_history(self, group_id: Optional[str] = None) -> int:
@@ -145,10 +165,10 @@ class ChatHistoryManager:
         target_group_id = group_id if group_id else WEBUI_CHAT_GROUP_ID
         try:
             deleted = Messages.delete().where(Messages.chat_info_group_id == target_group_id).execute()
-            logger.info(f"已清空 {deleted} 条聊天记录 (group_id={target_group_id})")
+            logger.info("已清空聊天记录", deleted_count=deleted, group_id_hash=hash_id(target_group_id))
             return deleted
         except Exception as e:
-            logger.error(f"清空聊天记录失败: {e}")
+            log_exception_type(logger, "清空聊天记录失败", e)
             return 0
 
 
@@ -168,21 +188,25 @@ class ChatConnectionManager:
         await websocket.accept()
         self.active_connections[session_id] = websocket
         self.user_sessions[user_id] = session_id
-        logger.info(f"WebUI 聊天会话已连接: session={session_id}, user={user_id}")
+        logger.info(
+            "WebUI 聊天会话已连接",
+            session_id_hash=hash_id(session_id),
+            user_id_hash=hash_id(user_id),
+        )
 
     def disconnect(self, session_id: str, user_id: str):
         if session_id in self.active_connections:
             del self.active_connections[session_id]
         if user_id in self.user_sessions and self.user_sessions[user_id] == session_id:
             del self.user_sessions[user_id]
-        logger.info(f"WebUI 聊天会话已断开: session={session_id}")
+        logger.info("WebUI 聊天会话已断开", session_id_hash=hash_id(session_id))
 
     async def send_message(self, session_id: str, message: dict):
         if session_id in self.active_connections:
             try:
                 await self.active_connections[session_id].send_json(message)
             except Exception as e:
-                logger.error(f"发送消息失败: {e}")
+                log_exception_type(logger, "发送消息失败", e)
 
     async def broadcast(self, message: dict):
         """广播消息给所有连接"""
@@ -272,7 +296,7 @@ def create_message_data(
 async def get_chat_history(
     limit: int = Query(default=50, ge=1, le=200),
     user_id: Optional[str] = Query(default=None),  # 保留参数兼容性，但不用于过滤
-    group_id: Optional[str] = Query(default=None),  # 可选：指定群 ID 获取历史
+    group_id: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS),  # 可选：指定群 ID 获取历史
     _auth: bool = Depends(require_auth),
 ):
     """获取聊天历史记录
@@ -299,8 +323,8 @@ async def get_available_platforms(_auth: bool = Depends(require_auth)):
 
 @router.get("/persons")
 async def get_persons_by_platform(
-    platform: str = Query(..., description="平台名称"),
-    search: Optional[str] = Query(default=None, description="搜索关键词"),
+    platform: str = Query(..., max_length=MAX_CHAT_PLATFORM_CHARS, description="平台名称"),
+    search: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS, description="搜索关键词"),
     limit: int = Query(default=50, ge=1, le=200),
     _auth: bool = Depends(require_auth),
 ):
@@ -321,7 +345,10 @@ async def get_persons_by_platform(
 
 
 @router.delete("/history")
-async def clear_chat_history(group_id: Optional[str] = Query(default=None), _auth: bool = Depends(require_auth)):
+async def clear_chat_history(
+    group_id: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS),
+    _auth: bool = Depends(require_auth),
+):
     """清空聊天历史记录
 
     Args:
@@ -337,13 +364,13 @@ async def clear_chat_history(group_id: Optional[str] = Query(default=None), _aut
 @router.websocket("/ws")
 async def websocket_chat(
     websocket: WebSocket,
-    user_id: Optional[str] = Query(default=None),
-    user_name: Optional[str] = Query(default="WebUI用户"),
-    platform: Optional[str] = Query(default=None),
-    person_id: Optional[str] = Query(default=None),
-    group_name: Optional[str] = Query(default=None),
-    group_id: Optional[str] = Query(default=None),  # 前端传递的稳定 group_id
-    token: Optional[str] = Query(default=None),  # 认证 token
+    user_id: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS),
+    user_name: Optional[str] = Query(default="WebUI用户", max_length=MAX_CHAT_IDENTITY_CHARS),
+    platform: Optional[str] = Query(default=None, max_length=MAX_CHAT_PLATFORM_CHARS),
+    person_id: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS),
+    group_name: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS),
+    group_id: Optional[str] = Query(default=None, max_length=MAX_CHAT_IDENTITY_CHARS),  # 前端传递的稳定 group_id
+    token: Optional[str] = Query(default=None, max_length=512),  # 认证 token
 ):
     """WebSocket 聊天端点
 
@@ -364,6 +391,11 @@ async def websocket_chat(
 
     示例：ws://host/api/chat/ws?token=xxx
     """
+    if not is_websocket_origin_allowed(websocket):
+        logger.warning("聊天 WebSocket 连接被拒绝：Origin 不允许")
+        await websocket.close(code=4003, reason="不允许的请求来源")
+        return
+
     is_authenticated = False
 
     # 方式 1: 尝试验证临时 WebSocket token（推荐方式）
@@ -389,16 +421,22 @@ async def websocket_chat(
     session_id = str(uuid.uuid4())
 
     # 如果没有提供 user_id，生成一个新的
+    user_id = _bounded_chat_text(user_id, MAX_CHAT_IDENTITY_CHARS)
     if not user_id:
         user_id = f"{WEBUI_USER_ID_PREFIX}{uuid.uuid4().hex[:16]}"
     elif not user_id.startswith(WEBUI_USER_ID_PREFIX):
         # 确保 user_id 有正确的前缀
         user_id = f"{WEBUI_USER_ID_PREFIX}{user_id}"
+    current_user_name = _bounded_chat_text(user_name, MAX_CHAT_IDENTITY_CHARS) or "WebUI用户"
 
     # 当前会话的虚拟身份配置（可通过消息动态更新）
     current_virtual_config: Optional[VirtualIdentityConfig] = None
 
     # 如果 URL 参数中提供了虚拟身份信息，自动配置
+    platform = _bounded_chat_text(platform, MAX_CHAT_PLATFORM_CHARS)
+    person_id = _bounded_chat_text(person_id, MAX_CHAT_IDENTITY_CHARS)
+    group_name = _bounded_chat_text(group_name, MAX_CHAT_IDENTITY_CHARS)
+    group_id = _bounded_chat_text(group_id, MAX_CHAT_IDENTITY_CHARS)
     if platform and person_id:
         person = get_profile_person_dict(person_id)
         if person and person["platform"] == platform:
@@ -415,7 +453,12 @@ async def websocket_chat(
         else:
             logger.warning("URL 参数虚拟身份配置失败：未找到匹配用户画像 platform=%s person_id=%s", platform, person_id)
 
-    await chat_manager.connect(websocket, session_id, user_id)
+    async with _chat_connection_lock:
+        if len(chat_manager.active_connections) >= MAX_CHAT_WS_CONNECTIONS:
+            logger.warning("聊天 WebSocket 连接数已达上限")
+            await websocket.close(code=1013, reason="连接数过多，请稍后重试")
+            return
+        await chat_manager.connect(websocket, session_id, user_id)
 
     try:
         # 构建会话信息
@@ -423,7 +466,7 @@ async def websocket_chat(
             "type": "session_info",
             "session_id": session_id,
             "user_id": user_id,
-            "user_name": user_name,
+            "user_name": current_user_name,
             "bot_name": global_config.bot.nickname,
         }
 
@@ -473,13 +516,35 @@ async def websocket_chat(
         while True:
             data = await websocket.receive_json()
 
+            if not isinstance(data, dict):
+                await chat_manager.send_message(
+                    session_id,
+                    {"type": "error", "content": "消息格式无效", "timestamp": time.time()},
+                )
+                continue
+
             if data.get("type") == "message":
-                content = data.get("content", "").strip()
+                raw_content = data.get("content", "")
+                if not isinstance(raw_content, str):
+                    await chat_manager.send_message(
+                        session_id,
+                        {"type": "error", "content": "消息内容格式无效", "timestamp": time.time()},
+                    )
+                    continue
+                if len(raw_content) > MAX_CHAT_MESSAGE_CHARS:
+                    await chat_manager.send_message(
+                        session_id,
+                        {"type": "error", "content": "消息内容过长", "timestamp": time.time()},
+                    )
+                    continue
+                content = raw_content.strip()
                 if not content:
                     continue
 
                 # 用户可以更新昵称
-                current_user_name = data.get("user_name", user_name)
+                candidate_name = _bounded_chat_text(data.get("user_name"), MAX_CHAT_IDENTITY_CHARS)
+                if candidate_name:
+                    current_user_name = candidate_name
 
                 message_id = str(uuid.uuid4())
                 timestamp = time.time()
@@ -532,12 +597,12 @@ async def websocket_chat(
                     await chat_bot.message_process(message_data)
 
                 except Exception as e:
-                    logger.error(f"处理消息时出错: {e}")
+                    log_exception_type(logger, "处理 WebUI 聊天消息失败", e)
                     await chat_manager.send_message(
                         session_id,
                         {
                             "type": "error",
-                            "content": f"处理消息时出错: {str(e)}",
+                            "content": "处理消息时出错，请稍后重试",
                             "timestamp": time.time(),
                         },
                     )
@@ -560,7 +625,7 @@ async def websocket_chat(
 
             elif data.get("type") == "update_nickname":
                 # 允许用户更新昵称
-                if new_name := data.get("user_name", "").strip():
+                if new_name := _bounded_chat_text(data.get("user_name"), MAX_CHAT_IDENTITY_CHARS):
                     current_user_name = new_name
                     await chat_manager.send_message(
                         session_id,
@@ -574,6 +639,12 @@ async def websocket_chat(
             elif data.get("type") == "set_virtual_identity":
                 # 设置或更新虚拟身份配置
                 virtual_data = data.get("config", {})
+                if not isinstance(virtual_data, dict):
+                    await chat_manager.send_message(
+                        session_id,
+                        {"type": "error", "content": "虚拟身份配置格式无效", "timestamp": time.time()},
+                    )
+                    continue
                 if virtual_data.get("enabled"):
                     # 验证必要字段
                     if not virtual_data.get("platform") or not virtual_data.get("person_id"):
@@ -590,20 +661,30 @@ async def websocket_chat(
                     # 使用请求中的用户数据（用户画像功能已迁移，不再查询 DB）
                     # 前端需提供完整的 person_id, platform, user_nickname 等信息
                     try:
-                        virtual_person_id = virtual_data.get("person_id", "")
-                        virtual_platform = virtual_data.get("platform", "")
-                        virtual_user_id = virtual_data.get("user_id", virtual_person_id)
-                        virtual_nickname = virtual_data.get(
-                            "user_nickname",
-                            virtual_data.get("nickname", virtual_person_id),
+                        virtual_person_id = _bounded_chat_text(virtual_data.get("person_id"), MAX_CHAT_IDENTITY_CHARS)
+                        virtual_platform = _bounded_chat_text(virtual_data.get("platform"), MAX_CHAT_PLATFORM_CHARS)
+                        virtual_user_id = _bounded_chat_text(
+                            virtual_data.get("user_id", virtual_person_id), MAX_CHAT_IDENTITY_CHARS
                         )
+                        virtual_nickname = _bounded_chat_text(
+                            virtual_data.get("user_nickname", virtual_data.get("nickname", virtual_person_id)),
+                            MAX_CHAT_IDENTITY_CHARS,
+                        )
+                        if not all((virtual_person_id, virtual_platform, virtual_user_id, virtual_nickname)):
+                            raise ValueError("invalid virtual identity fields")
 
                         # 生成虚拟群 ID
-                        custom_group_id = virtual_data.get("group_id")
+                        custom_group_id = _bounded_chat_text(virtual_data.get("group_id"), MAX_CHAT_IDENTITY_CHARS)
                         if custom_group_id:
                             group_id = f"{VIRTUAL_GROUP_ID_PREFIX}{custom_group_id}"
                         else:
                             group_id = f"{VIRTUAL_GROUP_ID_PREFIX}{session_id[:8]}"
+
+                        virtual_group_name = _bounded_chat_text(
+                            virtual_data.get("group_name", "WebUI虚拟群聊"), MAX_CHAT_IDENTITY_CHARS
+                        )
+                        if not virtual_group_name:
+                            raise ValueError("invalid virtual group name")
 
                         current_virtual_config = VirtualIdentityConfig(
                             enabled=True,
@@ -612,7 +693,7 @@ async def websocket_chat(
                             user_id=virtual_user_id,
                             user_nickname=virtual_nickname,
                             group_id=group_id,
-                            group_name=virtual_data.get("group_name", "WebUI虚拟群聊"),
+                            group_name=virtual_group_name,
                         )
 
                         # 发送虚拟身份已激活的消息
@@ -654,12 +735,12 @@ async def websocket_chat(
                         )
 
                     except Exception as e:
-                        logger.error(f"设置虚拟身份失败: {e}")
+                        log_exception_type(logger, "设置 WebUI 虚拟身份失败", e)
                         await chat_manager.send_message(
                             session_id,
                             {
                                 "type": "error",
-                                "content": f"设置虚拟身份失败: {str(e)}",
+                                "content": "设置虚拟身份失败，请检查配置",
                                 "timestamp": time.time(),
                             },
                         )
@@ -696,9 +777,13 @@ async def websocket_chat(
                     )
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket 断开: session={session_id}, user={user_id}")
+        logger.info(
+            "WebSocket 断开",
+            session_id_hash=hash_id(session_id),
+            user_id_hash=hash_id(user_id),
+        )
     except Exception as e:
-        logger.error(f"WebSocket 错误: {e}")
+        log_exception_type(logger, "WebUI 聊天 WebSocket 异常", e)
     finally:
         chat_manager.disconnect(session_id, user_id)
 

@@ -46,6 +46,9 @@ class RiyaBotServerConfig(ConfigBase):
     port: int = 8000
     """RiyaBot的端口号"""
 
+    auth_token: str = ""
+    """旧版 WebSocket 消息服务器令牌；需与 RiyaBot 的 maim_message.auth_token 一致"""
+
     enable_api_server: bool = False
     """是否启用API-Server模式连接"""
 

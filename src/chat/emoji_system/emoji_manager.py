@@ -86,7 +86,7 @@ class MaiEmoji:
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
             image_bytes = base64.b64decode(image_base64)
-            self.hash = hashlib.md5(image_bytes).hexdigest()
+            self.hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
             logger.debug(f"[初始化] 哈希计算成功: {self.hash}")
 
             # 获取图片格式
@@ -918,7 +918,7 @@ class EmojiManager:
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
             image_bytes = base64.b64decode(image_base64)
-            image_hash = hashlib.md5(image_bytes).hexdigest()
+            image_hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
             image_format = Image.open(io.BytesIO(image_bytes)).format.lower()  # type: ignore
             is_gif = image_format == "gif"
 

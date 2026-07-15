@@ -1,9 +1,12 @@
-from fastapi import FastAPI, APIRouter, Body
-from typing import Annotated, Optional, Any
-from uvicorn import Config, Server as UvicornServer
 import asyncio
+import ipaddress
 import os
+import secrets
+from typing import Annotated, Any, Optional
+
+from fastapi import APIRouter, Body, FastAPI, Header, HTTPException
 from rich.traceback import install
+from uvicorn import Config, Server as UvicornServer
 
 install(extra_lines=3)
 
@@ -12,14 +15,40 @@ install(extra_lines=3)
 # 消息注入端点 — 供 E2E 测试模拟器使用，必须通过环境变量显式启用
 # ---------------------------------------------------------------------------
 
-def _register_inject_endpoint(app: FastAPI) -> None:
+
+def _is_loopback_host(host: str) -> bool:
+    """仅将明确的回环监听地址视为本机可访问。"""
+    normalized_host = host.strip().lower().rstrip(".")
+    if normalized_host == "localhost":
+        return True
+
+    if normalized_host.startswith("[") and normalized_host.endswith("]"):
+        normalized_host = normalized_host[1:-1]
+    normalized_host = normalized_host.split("%", maxsplit=1)[0]
+
+    try:
+        return ipaddress.ip_address(normalized_host).is_loopback
+    except ValueError:
+        return False
+
+
+def _register_inject_endpoint(app: FastAPI, required_token: Optional[str] = None) -> None:
     """向 FastAPI 实例注册 POST /message/inject 端点。"""
     if any(getattr(route, "path", None) == "/message/inject" for route in app.routes):
         return
 
     @app.post("/message/inject")
-    async def inject_message(message: Annotated[dict[str, Any], Body()]):
+    async def inject_message(
+        message: Annotated[dict[str, Any], Body()],
+        inject_token: Annotated[Optional[str], Header(alias="X-MaiBot-Inject-Token")] = None,
+    ):
         """接收模拟器发送的消息 JSON，注入 bot 消息处理管线。"""
+        if required_token is not None and (
+            inject_token is None
+            or not secrets.compare_digest(inject_token.encode("utf-8"), required_token.encode("utf-8"))
+        ):
+            raise HTTPException(status_code=401, detail="消息注入凭据无效")
+
         if message.get("_probe") is True:
             return {"status": "ok"}
 
@@ -34,13 +63,19 @@ def _register_inject_endpoint(app: FastAPI) -> None:
 
 class Server:
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None, app_name: str = "MaiMCore"):
-        self.app = FastAPI(title=app_name)
-        if os.environ.get("MAIBOT_ENABLE_INJECT_ENDPOINT") == "1":
-            _register_inject_endpoint(self.app)
+        self.app = FastAPI(title=app_name, openapi_url=None, docs_url=None, redoc_url=None)
         self._host: str = "127.0.0.1"
         self._port: int = 8080
         self._server: Optional[UvicornServer] = None
         self.set_address(host, port)
+
+        if os.environ.get("MAIBOT_ENABLE_INJECT_ENDPOINT") == "1":
+            inject_token = os.environ.get("MAIBOT_INJECT_TOKEN")
+            if inject_token is not None and not inject_token.strip():
+                inject_token = None
+            if not _is_loopback_host(self._host) and inject_token is None:
+                raise RuntimeError("非回环地址启用消息注入端点时必须设置 MAIBOT_INJECT_TOKEN")
+            _register_inject_endpoint(self.app, required_token=inject_token)
 
     def register_router(self, router: APIRouter, prefix: str = ""):
         """注册路由

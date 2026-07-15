@@ -1,17 +1,44 @@
-from fastapi import APIRouter, HTTPException, Header, Cookie
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, get_origin
-from pathlib import Path
+import datetime
 import json
-from src.common.logger import get_logger
+import os
+import shutil
+import stat
+import tempfile
+import time
+import unicodedata
+from pathlib import Path
+from typing import Any, Dict, List, Optional, get_origin
+
+from fastapi import APIRouter, Cookie, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from src.common.logger import get_logger, hash_id
 from src.common.toml_utils import save_toml_with_format
 from src.config.config import MMC_VERSION
 from src.plugin_system.base.config_types import ConfigField
-from .git_mirror_service import get_git_mirror_service, set_update_progress_callback
+from src.webui.error_utils import log_exception_type
+from src.webui.path_utils import resolve_path_within
+from .git_mirror_service import (
+    MAX_RAW_FILE_BYTES,
+    get_git_mirror_service,
+    parse_repository_url,
+    set_update_progress_callback,
+    validate_clone_url,
+    validate_raw_url,
+)
 from .token_manager import get_token_manager
 from .plugin_progress_ws import update_progress
 
 logger = get_logger("webui.plugin_routes")
+MAX_PLUGIN_ID_CHARS = 128
+MAX_PLUGIN_MANIFEST_BYTES = 256 * 1024
+MAX_PLUGIN_CONFIG_BYTES = 1024 * 1024
+MAX_PLUGIN_README_BYTES = 2 * 1024 * 1024
+MAX_PLUGIN_CONFIG_BACKUPS = 5
+MAX_PLUGIN_NAME_CHARS = 256
+MAX_PLUGIN_VERSION_CHARS = 128
+MAX_PLUGIN_AUTHOR_CHARS = 256
+MAX_PLUGIN_INDEX_ENTRIES = 10_000
 
 # 创建路由器
 router = APIRouter(prefix="/plugins", tags=["插件管理"])
@@ -54,12 +81,12 @@ def validate_safe_path(user_path: str, base_path: Path) -> Path:
     # 检查用户路径是否包含可疑字符
     # 禁止: .., 绝对路径开头, 空字节等
     if any(pattern in user_path for pattern in ["..", "\x00"]):
-        logger.warning(f"检测到可疑路径: {user_path}")
+        logger.warning("检测到包含非法字符的插件路径")
         raise HTTPException(status_code=400, detail="路径包含非法字符")
 
     # 检查是否为绝对路径（Windows 和 Unix）
     if user_path.startswith("/") or user_path.startswith("\\") or (len(user_path) > 1 and user_path[1] == ":"):
-        logger.warning(f"检测到绝对路径: {user_path}")
+        logger.warning("检测到绝对插件路径")
         raise HTTPException(status_code=400, detail="不允许使用绝对路径")
 
     # 构建目标路径并解析
@@ -69,7 +96,7 @@ def validate_safe_path(user_path: str, base_path: Path) -> Path:
     try:
         target_path.relative_to(base_resolved)
     except ValueError as e:
-        logger.warning(f"路径遍历攻击检测: {user_path} -> {target_path}")
+        logger.warning("检测到插件路径越界")
         raise HTTPException(status_code=400, detail="路径超出允许范围") from e
 
     return target_path
@@ -89,28 +116,446 @@ def validate_plugin_id(plugin_id: str) -> str:
         HTTPException: 如果插件 ID 格式不安全
     """
     # 禁止空字符串
-    if not plugin_id or not plugin_id.strip():
-        logger.warning("非法插件 ID: 空字符串")
-        raise HTTPException(status_code=400, detail="插件 ID 不能为空")
+    if (
+        not isinstance(plugin_id, str)
+        or not plugin_id
+        or plugin_id != plugin_id.strip()
+        or len(plugin_id) > MAX_PLUGIN_ID_CHARS
+    ):
+        logger.warning("非法插件 ID: 类型、长度或首尾空白无效")
+        raise HTTPException(status_code=400, detail="插件 ID 格式无效")
 
     # 禁止危险字符: 路径分隔符、空字节、控制字符等
-    dangerous_patterns = ["/", "\\", "\x00", "..", "\n", "\r", "\t"]
+    dangerous_patterns = ["/", "\\", "\x00", ".."]
     for pattern in dangerous_patterns:
         if pattern in plugin_id:
-            logger.warning(f"非法插件 ID 格式: {plugin_id} (包含危险字符)")
+            logger.warning("非法插件 ID 格式: 包含危险字符")
             raise HTTPException(status_code=400, detail="插件 ID 包含非法字符")
+    if any(unicodedata.category(character) in {"Cc", "Cf", "Cs"} for character in plugin_id):
+        logger.warning("非法插件 ID 格式: 包含控制字符")
+        raise HTTPException(status_code=400, detail="插件 ID 包含非法字符")
 
     # 禁止以点开头或结尾（防止隐藏文件和路径问题）
     if plugin_id.startswith(".") or plugin_id.endswith("."):
-        logger.warning(f"非法插件 ID: {plugin_id}")
+        logger.warning("非法插件 ID: 不能以点开头或结尾")
         raise HTTPException(status_code=400, detail="插件 ID 不能以点开头或结尾")
 
     # 禁止特殊名称
     if plugin_id in (".", ".."):
-        logger.warning(f"非法插件 ID: {plugin_id}")
+        logger.warning("非法插件 ID: 特殊目录名")
         raise HTTPException(status_code=400, detail="插件 ID 不能为特殊目录名")
 
     return plugin_id
+
+
+def _plugins_directory(*, create: bool = False) -> Optional[Path]:
+    plugins_dir = Path("plugins")
+    if plugins_dir.is_symlink():
+        raise HTTPException(status_code=400, detail="插件目录路径无效")
+    if not plugins_dir.exists():
+        if not create:
+            return None
+        plugins_dir.mkdir(exist_ok=True)
+    if not plugins_dir.is_dir():
+        raise HTTPException(status_code=400, detail="插件目录路径无效")
+    try:
+        return plugins_dir.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail="插件目录路径无效") from exc
+
+
+def _require_regular_file(path: Path, label: str) -> None:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise HTTPException(status_code=400, detail=f"{label}路径不是普通文件")
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"{label}路径无效") from exc
+
+
+def _read_limited_bytes(path: Path, max_bytes: int, label: str) -> bytes:
+    _require_regular_file(path, label)
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    file_descriptor = os.open(path, flags)
+    try:
+        file_stat = os.fstat(file_descriptor)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise HTTPException(status_code=400, detail=f"{label}路径不是普通文件")
+        with os.fdopen(file_descriptor, "rb") as file:
+            file_descriptor = -1
+            content = file.read(max_bytes + 1)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"{label}过大")
+    return content
+
+
+def _read_limited_utf8(path: Path, max_bytes: int, label: str) -> str:
+    content = _read_limited_bytes(path, max_bytes, label)
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"{label}必须使用 UTF-8 编码") from exc
+
+
+def _load_plugin_manifest(plugin_path: Path) -> Optional[Dict[str, Any]]:
+    manifest_path = _plugin_file_path(plugin_path, "_manifest.json")
+    if not manifest_path.exists():
+        return None
+    manifest_content = _read_limited_utf8(manifest_path, MAX_PLUGIN_MANIFEST_BYTES, "插件清单")
+    try:
+        manifest = json.loads(manifest_content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="插件清单格式无效") from exc
+    if not isinstance(manifest, dict):
+        raise HTTPException(status_code=400, detail="插件清单格式无效")
+    return manifest
+
+
+def _find_plugin_path(plugin_id: str) -> Optional[Path]:
+    """按 ID 查找插件，并拒绝逃逸到 plugins 目录外的符号链接。"""
+    plugin_id = validate_plugin_id(plugin_id)
+    plugins_dir = _plugins_directory()
+    if plugins_dir is None:
+        return None
+
+    for candidate in sorted(plugins_dir.iterdir(), key=lambda path: path.name):
+        try:
+            if candidate.is_symlink():
+                continue
+            plugin_path = candidate.resolve(strict=True)
+            if not plugin_path.is_relative_to(plugins_dir) or not plugin_path.is_dir():
+                continue
+            manifest = _load_plugin_manifest(plugin_path)
+            if manifest is None:
+                continue
+            if manifest.get("id") == plugin_id or candidate.name == plugin_id:
+                return plugin_path
+        except HTTPException:
+            if candidate.name == plugin_id:
+                raise
+        except (json.JSONDecodeError, OSError, RuntimeError, ValueError):
+            continue
+    return None
+
+
+def _plugin_file_path(plugin_path: Path, filename: str) -> Path:
+    if Path(filename).name != filename or Path(filename).is_absolute():
+        raise HTTPException(status_code=400, detail="插件文件路径无效")
+    candidate = plugin_path / filename
+    if candidate.is_symlink():
+        raise HTTPException(status_code=400, detail="插件文件路径不能是符号链接")
+    try:
+        return resolve_path_within(plugin_path, filename)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="插件文件路径无效") from exc
+
+
+def _atomic_write_bytes(path: Path, content: bytes, max_bytes: int, label: str) -> None:
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"{label}过大")
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise HTTPException(status_code=400, detail=f"{label}路径不是普通文件")
+
+    file_descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(file_descriptor, "wb") as file:
+            file_descriptor = -1
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        temp_path.unlink(missing_ok=True)
+
+
+def _safe_manifest_text(value: Any, label: str, max_chars: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > max_chars
+        or any(unicodedata.category(character) in {"Cc", "Cf", "Cs"} for character in value)
+    ):
+        raise HTTPException(status_code=400, detail=f"插件清单中的{label}格式无效")
+    return value
+
+
+def _count_raw_plugin_entries(data: Any) -> int:
+    """验证 Raw 响应体资源上限，并在 JSON 数组时返回条目数。"""
+    if not isinstance(data, str):
+        raise HTTPException(status_code=502, detail="Raw 文件服务响应无效")
+    try:
+        encoded_data = data.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise HTTPException(status_code=502, detail="Raw 文件服务响应无效") from exc
+    if len(encoded_data) > MAX_RAW_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Raw 文件过大")
+
+    try:
+        parsed_data = json.loads(data)
+    except (json.JSONDecodeError, RecursionError):
+        return 0
+    if not isinstance(parsed_data, list):
+        return 0
+    if len(parsed_data) > MAX_PLUGIN_INDEX_ENTRIES:
+        raise HTTPException(status_code=413, detail="插件列表条目过多")
+    return len(parsed_data)
+
+
+async def _report_raw_fetch_failure(detail: str) -> None:
+    """推送不含内部异常文本的 Raw 获取失败状态。"""
+    try:
+        await update_progress(
+            stage="error",
+            progress=0,
+            message="加载失败",
+            error=detail,
+            total_plugins=0,
+            loaded_plugins=0,
+        )
+    except Exception as exc:
+        logger.warning("推送 Raw 文件失败进度失败", error_type=type(exc).__name__)
+
+
+def _prepare_plugin_manifest(plugin_path: Path, plugin_id: str) -> Dict[str, Any]:
+    manifest = _load_plugin_manifest(plugin_path)
+    if manifest is None:
+        raise HTTPException(status_code=400, detail="无效的插件：缺少 _manifest.json")
+    if manifest.get("manifest_version") != 1:
+        raise HTTPException(status_code=400, detail="插件清单版本无效")
+
+    _safe_manifest_text(manifest.get("name"), "名称", MAX_PLUGIN_NAME_CHARS)
+    _safe_manifest_text(manifest.get("version"), "版本", MAX_PLUGIN_VERSION_CHARS)
+    author = manifest.get("author")
+    if isinstance(author, dict):
+        _safe_manifest_text(author.get("name"), "作者", MAX_PLUGIN_AUTHOR_CHARS)
+    else:
+        _safe_manifest_text(author, "作者", MAX_PLUGIN_AUTHOR_CHARS)
+
+    manifest["id"] = plugin_id
+    try:
+        manifest_content = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="插件清单格式无效") from exc
+    manifest_path = _plugin_file_path(plugin_path, "_manifest.json")
+    _atomic_write_bytes(manifest_path, manifest_content, MAX_PLUGIN_MANIFEST_BYTES, "插件清单")
+    return manifest
+
+
+def _existing_plugin_metadata(plugin_path: Path, plugin_id: str) -> tuple[str, str]:
+    try:
+        manifest = _load_plugin_manifest(plugin_path)
+        if manifest is None:
+            return plugin_id, "unknown"
+        name = _safe_manifest_text(manifest.get("name"), "名称", MAX_PLUGIN_NAME_CHARS)
+        version = _safe_manifest_text(manifest.get("version"), "版本", MAX_PLUGIN_VERSION_CHARS)
+        return name, version
+    except (HTTPException, OSError, RuntimeError, TypeError, ValueError):
+        return plugin_id, "unknown"
+
+
+def _lifecycle_plugin_path(plugin_id: str, plugins_dir: Path) -> Optional[Path]:
+    for folder_name in (plugin_id.replace(".", "_"), plugin_id):
+        candidate = plugins_dir / folder_name
+        if not os.path.lexists(candidate):
+            continue
+        if candidate.is_symlink():
+            raise HTTPException(status_code=400, detail="插件目录路径无效")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail="插件目录路径无效") from exc
+        if not resolved.is_relative_to(plugins_dir) or not resolved.is_dir():
+            raise HTTPException(status_code=400, detail="插件目录路径无效")
+        return resolved
+    return _find_plugin_path(plugin_id)
+
+
+def _remove_readonly(func, path: str, _error: Any) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+    except (NotImplementedError, TypeError):
+        if not os.path.islink(path):
+            os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _remove_plugin_tree(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        raise HTTPException(status_code=400, detail="插件目录路径无效")
+    shutil.rmtree(path, onerror=_remove_readonly)
+
+
+def _cleanup_staging_root(path: Optional[Path]) -> None:
+    if path is None or not os.path.lexists(path):
+        return
+    try:
+        if path.is_symlink():
+            path.unlink()
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        logger.warning("清理插件临时目录失败")
+
+
+def _reserve_hidden_path(parent: Path, prefix: str) -> Path:
+    reserved = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
+    reserved.rmdir()
+    return reserved
+
+
+def _directory_identity(path: Path) -> tuple[int, int]:
+    file_stat = os.lstat(path)
+    if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISDIR(file_stat.st_mode):
+        raise HTTPException(status_code=400, detail="插件目录路径无效")
+    return file_stat.st_dev, file_stat.st_ino
+
+
+def _staged_plugin_identity(staged_path: Path, staging_root: Path) -> tuple[int, int]:
+    if staging_root.is_symlink() or staged_path.is_symlink():
+        raise HTTPException(status_code=400, detail="插件临时目录路径无效")
+    try:
+        root_resolved = staging_root.resolve(strict=True)
+        staged_resolved = staged_path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail="插件临时目录路径无效") from exc
+    if not staged_resolved.is_relative_to(root_resolved) or not staged_resolved.is_dir():
+        raise HTTPException(status_code=400, detail="插件临时目录路径无效")
+    return _directory_identity(staged_resolved)
+
+
+def _require_directory_identity(path: Path, expected: tuple[int, int]) -> None:
+    try:
+        current = _directory_identity(path)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=409, detail="插件目录已发生变化，请重试") from exc
+    if current != expected:
+        raise HTTPException(status_code=409, detail="插件目录已发生变化，请重试")
+
+
+def _install_staged_plugin(staged_path: Path, target_path: Path, staged_identity: tuple[int, int]) -> None:
+    _require_directory_identity(staged_path, staged_identity)
+    if os.path.lexists(target_path):
+        raise HTTPException(status_code=409, detail="插件目录已存在")
+    try:
+        os.replace(staged_path, target_path)
+    except OSError as exc:
+        if os.path.lexists(target_path):
+            raise HTTPException(status_code=409, detail="插件目录已存在") from exc
+        raise
+
+
+def _replace_plugin_directory(
+    plugin_path: Path,
+    staged_path: Path,
+    plugins_dir: Path,
+    expected_identity: tuple[int, int],
+    staged_identity: tuple[int, int],
+) -> None:
+    _require_directory_identity(plugin_path, expected_identity)
+    _require_directory_identity(staged_path, staged_identity)
+    backup_path = _reserve_hidden_path(plugins_dir, ".plugin-backup-")
+    os.replace(plugin_path, backup_path)
+    try:
+        os.replace(staged_path, plugin_path)
+    except BaseException:
+        try:
+            os.replace(backup_path, plugin_path)
+        except OSError as rollback_error:
+            logger.critical("插件更新回滚失败", error_type=type(rollback_error).__name__)
+        raise
+
+    try:
+        _remove_plugin_tree(backup_path)
+    except Exception as cleanup_error:
+        logger.error("清理插件旧版本失败", error_type=type(cleanup_error).__name__)
+
+
+def _uninstall_plugin_directory(
+    plugin_path: Path,
+    plugins_dir: Path,
+    expected_identity: tuple[int, int],
+) -> None:
+    _require_directory_identity(plugin_path, expected_identity)
+    trash_path = _reserve_hidden_path(plugins_dir, ".plugin-uninstall-")
+    os.replace(plugin_path, trash_path)
+    try:
+        _remove_plugin_tree(trash_path)
+    except BaseException:
+        try:
+            os.replace(trash_path, plugin_path)
+        except OSError as rollback_error:
+            logger.critical("插件卸载回滚失败", error_type=type(rollback_error).__name__)
+        raise
+
+
+def _prune_config_backups(plugin_path: Path) -> None:
+    backups = [
+        path
+        for path in plugin_path.iterdir()
+        if path.name.startswith(("config.toml.backup.", "config.toml.reset.")) and (path.is_file() or path.is_symlink())
+    ]
+    backups.sort(key=lambda path: (path.name.rsplit(".", 1)[-1], path.name), reverse=True)
+    for obsolete_backup in backups[MAX_PLUGIN_CONFIG_BACKUPS:]:
+        try:
+            obsolete_backup.unlink()
+        except OSError as e:
+            log_exception_type(logger, "清理旧插件配置备份失败", e, level="warning")
+
+
+def _create_config_backup(plugin_path: Path, config_path: Path, kind: str) -> Path:
+    content = _read_limited_bytes(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
+    timestamp = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}.{time.time_ns()}"
+    backup_path = _plugin_file_path(plugin_path, f"config.toml.{kind}.{timestamp}")
+    _atomic_write_bytes(backup_path, content, MAX_PLUGIN_CONFIG_BYTES, "插件配置备份")
+    _prune_config_backups(plugin_path)
+    return backup_path
+
+
+def _move_config_to_reset_backup(plugin_path: Path, config_path: Path) -> Path:
+    _read_limited_bytes(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
+    timestamp = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}.{time.time_ns()}"
+    backup_path = _plugin_file_path(plugin_path, f"config.toml.reset.{timestamp}")
+    os.replace(config_path, backup_path)
+    _prune_config_backups(plugin_path)
+    return backup_path
+
+
+def _render_plugin_toml(config_path: Path, data: Any) -> bytes:
+    existing_content = ""
+    if config_path.exists():
+        existing_content = _read_limited_utf8(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
+        try:
+            import tomlkit
+
+            tomlkit.loads(existing_content)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="现有插件配置格式无效") from exc
+
+    file_descriptor, temp_name = tempfile.mkstemp(prefix=".config-render.", dir=config_path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(file_descriptor, "wb") as file:
+            file_descriptor = -1
+            file.write(existing_content.encode("utf-8"))
+        try:
+            save_toml_with_format(data, str(temp_path))
+        except OSError:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="插件配置格式无效") from exc
+        rendered = _read_limited_bytes(temp_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        temp_path.unlink(missing_ok=True)
+    return rendered
 
 
 def parse_version(version_str: str) -> tuple[int, int, int]:
@@ -141,7 +586,7 @@ def parse_version(version_str: str) -> tuple[int, int, int]:
         patch = int(parts[2])
         return (major, minor, patch)
     except (ValueError, IndexError):
-        logger.warning(f"无法解析版本号: {version_str}，返回默认值 (0, 0, 0)")
+        logger.warning("无法解析版本号，返回默认值 (0, 0, 0)")
         return (0, 0, 0)
 
 
@@ -177,17 +622,21 @@ def normalize_dotted_keys(obj: Dict[str, Any]) -> Dict[str, Any]:
         value = normalize_dotted_keys(v) if isinstance(v, dict) else v
         parts = dotted_key.split(".")
         if "" in parts:
-            logger.warning(f"键路径包含空段: '{dotted_key}'")
+            logger.warning("插件配置键路径包含空段", key_hash=hash_id(dotted_key))
             parts = [p for p in parts if p]
         if not parts:
-            logger.warning(f"忽略空键路径: '{dotted_key}'")
+            logger.warning("忽略空插件配置键路径", key_hash=hash_id(dotted_key))
             continue
         current = result
         # 中间层
         for idx, part in enumerate(parts[:-1]):
             if part in current and not isinstance(current[part], dict):
                 path_ctx = ".".join(parts[: idx + 1])
-                logger.warning(f"键冲突：{part} 已存在且非字典，覆盖为字典以展开 {dotted_key} (路径 {path_ctx})")
+                logger.warning(
+                    "插件配置键冲突，覆盖非字典中间节点",
+                    key_hash=hash_id(dotted_key),
+                    path_hash=hash_id(path_ctx),
+                )
                 current[part] = {}
             current = current.setdefault(part, {})
         # 最后一层
@@ -268,7 +717,7 @@ class CloneRepositoryRequest(BaseModel):
     branch: Optional[str] = Field(None, description="分支名称", example="main")
     mirror_id: Optional[str] = Field(None, description="指定镜像源 ID")
     custom_url: Optional[str] = Field(None, description="自定义克隆 URL")
-    depth: Optional[int] = Field(None, description="克隆深度（浅克隆）", ge=1)
+    depth: Optional[int] = Field(None, description="克隆深度（浅克隆）", ge=1, le=1000)
 
 
 class CloneRepositoryResponse(BaseModel):
@@ -380,12 +829,17 @@ async def get_maimai_version() -> VersionResponse:
 
 
 @router.get("/git-status", response_model=GitStatusResponse)
-async def check_git_status() -> GitStatusResponse:
+async def check_git_status(
+    maibot_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)
+) -> GitStatusResponse:
     """
     检查本机 Git 安装状态
-
-    此接口无需认证，用于前端快速检测是否可以使用插件安装功能
     """
+    token = get_token_from_cookie_or_header(maibot_session, authorization)
+    token_manager = get_token_manager()
+    if not token or not token_manager.verify_token(token):
+        raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
+
     service = get_git_mirror_service()
     result = service.check_git_installed()
 
@@ -438,6 +892,8 @@ async def add_mirror(
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
     try:
+        validate_raw_url(request.raw_prefix)
+        validate_clone_url(request.clone_prefix)
         service = get_git_mirror_service()
         config = service.get_mirror_config()
 
@@ -458,11 +914,11 @@ async def add_mirror(
             enabled=mirror["enabled"],
             priority=mirror["priority"],
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError:
+        raise HTTPException(status_code=400, detail="镜像源配置无效") from None
     except Exception as e:
-        logger.error(f"添加镜像源失败: {e}")
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        logger.error("添加镜像源失败", error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail="添加镜像源失败") from None
 
 
 @router.put("/mirrors/{mirror_id}", response_model=MirrorConfigResponse)
@@ -482,6 +938,10 @@ async def update_mirror(
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
     try:
+        if request.raw_prefix is not None:
+            validate_raw_url(request.raw_prefix)
+        if request.clone_prefix is not None:
+            validate_clone_url(request.clone_prefix)
         service = get_git_mirror_service()
         config = service.get_mirror_config()
 
@@ -495,7 +955,7 @@ async def update_mirror(
         )
 
         if not mirror:
-            raise HTTPException(status_code=404, detail=f"未找到镜像源: {mirror_id}")
+            raise HTTPException(status_code=404, detail="未找到指定镜像源")
 
         return MirrorConfigResponse(
             id=mirror["id"],
@@ -507,9 +967,11 @@ async def update_mirror(
         )
     except HTTPException:
         raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="镜像源配置无效") from None
     except Exception as e:
-        logger.error(f"更新镜像源失败: {e}")
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        logger.error("更新镜像源失败", error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail="更新镜像源失败") from None
 
 
 @router.delete("/mirrors/{mirror_id}")
@@ -531,9 +993,9 @@ async def delete_mirror(
     success = config.delete_mirror(mirror_id)
 
     if not success:
-        raise HTTPException(status_code=404, detail=f"未找到镜像源: {mirror_id}")
+        raise HTTPException(status_code=404, detail="未找到指定镜像源")
 
-    return {"success": True, "message": f"已删除镜像源: {mirror_id}"}
+    return {"success": True, "message": "镜像源已删除"}
 
 
 @router.post("/fetch-raw", response_model=FetchRawFileResponse)
@@ -555,18 +1017,23 @@ async def fetch_raw_file(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"收到获取 Raw 文件请求: {request.owner}/{request.repo}/{request.branch}/{request.file_path}")
-
-    # 发送开始加载进度
-    await update_progress(
-        stage="loading",
-        progress=10,
-        message=f"正在获取插件列表: {request.file_path}",
-        total_plugins=0,
-        loaded_plugins=0,
+    logger.info(
+        "收到获取 Raw 文件请求",
+        repository_hash=hash_id(f"{request.owner}/{request.repo}"),
+        branch_hash=hash_id(request.branch),
+        file_path_hash=hash_id(request.file_path),
     )
 
     try:
+        # 发送开始加载进度
+        await update_progress(
+            stage="loading",
+            progress=10,
+            message="正在获取插件列表",
+            total_plugins=0,
+            loaded_plugins=0,
+        )
+
         service = get_git_mirror_service()
 
         # git_mirror_service 会自动推送 30%-70% 的详细镜像源尝试进度
@@ -580,43 +1047,36 @@ async def fetch_raw_file(
         )
 
         if result.get("success"):
+            total = _count_raw_plugin_entries(result.get("data"))
+
             # 更新进度：成功获取
             await update_progress(
                 stage="loading", progress=70, message="正在解析插件数据...", total_plugins=0, loaded_plugins=0
             )
 
-            # 尝试解析插件数量
-            try:
-                import json
-
-                data = json.loads(result.get("data", "[]"))
-                total = len(data) if isinstance(data, list) else 0
-
-                # 发送成功状态
-                await update_progress(
-                    stage="success",
-                    progress=100,
-                    message=f"成功加载 {total} 个插件",
-                    total_plugins=total,
-                    loaded_plugins=total,
-                )
-            except Exception:
-                # 如果解析失败，仍然发送成功状态
-                await update_progress(
-                    stage="success", progress=100, message="加载完成", total_plugins=0, loaded_plugins=0
-                )
+            # 发送成功状态
+            await update_progress(
+                stage="success",
+                progress=100,
+                message=f"成功加载 {total} 个插件" if total else "加载完成",
+                total_plugins=total,
+                loaded_plugins=total,
+            )
 
         return FetchRawFileResponse(**result)
 
-    except Exception as e:
-        logger.error(f"获取 Raw 文件失败: {e}")
-
-        # 发送错误进度
-        await update_progress(
-            stage="error", progress=0, message="加载失败", error=str(e), total_plugins=0, loaded_plugins=0
+    except HTTPException as e:
+        safe_detail = (
+            e.detail
+            if isinstance(e.detail, str) and e.detail in {"Raw 文件过大", "插件列表条目过多", "Raw 文件服务响应无效"}
+            else "获取 Raw 文件失败"
         )
-
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        await _report_raw_fetch_failure(safe_detail)
+        raise HTTPException(status_code=e.status_code, detail=safe_detail) from None
+    except Exception as e:
+        logger.error("获取 Raw 文件失败", error_type=type(e).__name__)
+        await _report_raw_fetch_failure("获取 Raw 文件失败")
+        raise HTTPException(status_code=500, detail="获取 Raw 文件失败") from None
 
 
 @router.post("/clone", response_model=CloneRepositoryResponse)
@@ -636,7 +1096,11 @@ async def clone_repository(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"收到克隆仓库请求: {request.owner}/{request.repo} -> {request.target_path}")
+    logger.info(
+        "收到克隆仓库请求",
+        repository_hash=hash_id(f"{request.owner}/{request.repo}"),
+        target_path_hash=hash_id(request.target_path),
+    )
 
     try:
         # 验证 target_path 的安全性，防止路径遍历攻击
@@ -660,8 +1124,8 @@ async def clone_repository(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"克隆仓库失败: {e}")
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        logger.error("克隆仓库失败", error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail="克隆仓库失败") from None
 
 
 @router.post("/install")
@@ -681,13 +1145,11 @@ async def install_plugin(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"收到安装插件请求: {request.plugin_id}")
+    plugin_id = validate_plugin_id(request.plugin_id)
+    logger.info("收到安装插件请求", plugin_id=plugin_id)
+    staging_root: Optional[Path] = None
 
     try:
-        # 验证插件 ID 格式安全性
-        plugin_id = validate_plugin_id(request.plugin_id)
-
-        # 推送进度：开始安装
         await update_progress(
             stage="loading",
             progress=5,
@@ -696,18 +1158,10 @@ async def install_plugin(
             plugin_id=plugin_id,
         )
 
-        # 1. 解析仓库 URL
-        # repository_url 格式: https://github.com/owner/repo
-        repo_url = request.repository_url.rstrip("/")
-        if repo_url.endswith(".git"):
-            repo_url = repo_url[:-4]
-
-        parts = repo_url.split("/")
-        if len(parts) < 2:
-            raise HTTPException(status_code=400, detail="无效的仓库 URL")
-
-        owner = parts[-2]
-        repo = parts[-1]
+        try:
+            owner, repo, is_github, repo_url = parse_repository_url(request.repository_url)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="仓库 URL 不安全或无效") from None
 
         await update_progress(
             stage="loading",
@@ -717,19 +1171,13 @@ async def install_plugin(
             plugin_id=plugin_id,
         )
 
-        # 2. 确定插件安装路径
-        plugins_dir = Path("plugins").resolve()
-        plugins_dir.mkdir(exist_ok=True)
-
-        # 将插件 ID 中的点替换为下划线作为文件夹名称（避免文件系统问题）
-        # 例如: SengokuCola.Mute-Plugin -> SengokuCola_Mute-Plugin
+        plugins_dir = _plugins_directory(create=True)
+        if plugins_dir is None:
+            raise RuntimeError("插件目录创建失败")
         folder_name = plugin_id.replace(".", "_")
-        # 使用安全路径验证，防止路径遍历
-        target_path = validate_safe_path(folder_name, plugins_dir)
+        target_path = plugins_dir / folder_name
 
-        # 检查插件是否已安装（需要检查两种格式：新格式下划线和旧格式点）
-        old_format_path = plugins_dir / plugin_id
-        if target_path.exists() or old_format_path.exists():
+        if _lifecycle_plugin_path(plugin_id, plugins_dir) is not None:
             await update_progress(
                 stage="error",
                 progress=0,
@@ -743,104 +1191,67 @@ async def install_plugin(
         await update_progress(
             stage="loading",
             progress=15,
-            message=f"准备克隆到: {target_path}",
+            message="正在准备下载插件文件...",
             operation="install",
             plugin_id=plugin_id,
         )
 
-        # 3. 克隆仓库（这里会自动推送 20%-80% 的进度）
+        staging_root = Path(tempfile.mkdtemp(prefix=".plugin-install-", dir=plugins_dir))
+        staged_path = staging_root / "candidate"
         service = get_git_mirror_service()
 
-        # 如果是 GitHub 仓库，使用镜像源
-        if "github.com" in repo_url:
+        if is_github:
             result = await service.clone_repository(
                 owner=owner,
                 repo=repo,
-                target_path=target_path,
+                target_path=staged_path,
                 branch=request.branch,
                 mirror_id=request.mirror_id,
-                depth=1,  # 浅克隆，节省时间和空间
+                depth=1,
             )
         else:
-            # 自定义仓库，直接使用 URL
             result = await service.clone_repository(
-                owner=owner, repo=repo, target_path=target_path, branch=request.branch, custom_url=repo_url, depth=1
+                owner=owner,
+                repo=repo,
+                target_path=staged_path,
+                branch=request.branch,
+                custom_url=repo_url,
+                depth=1,
             )
 
         if not result.get("success"):
-            error_msg = result.get("error", "克隆失败")
             await update_progress(
                 stage="error",
                 progress=0,
                 message="克隆仓库失败",
                 operation="install",
                 plugin_id=plugin_id,
-                error=error_msg,
+                error="插件文件下载失败",
             )
-            raise HTTPException(status_code=500, detail=error_msg)
+            raise HTTPException(status_code=500, detail="插件安装失败")
 
-        # 4. 验证插件完整性
         await update_progress(
             stage="loading", progress=85, message="验证插件文件...", operation="install", plugin_id=plugin_id
         )
 
-        manifest_path = target_path / "_manifest.json"
-        if not manifest_path.exists():
-            # 清理失败的安装
-            import shutil
-
-            shutil.rmtree(target_path, ignore_errors=True)
-
+        staged_identity = _staged_plugin_identity(staged_path, staging_root)
+        try:
+            manifest = _prepare_plugin_manifest(staged_path, plugin_id)
+        except HTTPException:
             await update_progress(
                 stage="error",
                 progress=0,
-                message="插件缺少 _manifest.json",
+                message="插件清单校验失败",
                 operation="install",
                 plugin_id=plugin_id,
                 error="无效的插件格式",
             )
-            raise HTTPException(status_code=400, detail="无效的插件：缺少 _manifest.json")
+            raise
 
-        # 5. 读取并验证 manifest
-        await update_progress(
-            stage="loading", progress=90, message="读取插件配置...", operation="install", plugin_id=plugin_id
-        )
+        if _lifecycle_plugin_path(plugin_id, plugins_dir) is not None:
+            raise HTTPException(status_code=409, detail="插件目录已存在")
+        _install_staged_plugin(staged_path, target_path, staged_identity)
 
-        try:
-            import json as json_module
-
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json_module.load(f)
-
-            # 基本验证
-            required_fields = ["manifest_version", "name", "version", "author"]
-            for field in required_fields:
-                if field not in manifest:
-                    raise ValueError(f"缺少必需字段: {field}")
-
-            # 将插件 ID 写入 manifest（用于后续准确识别）
-            # 这样即使文件夹名称改变，也能通过 manifest 准确识别插件
-            manifest["id"] = plugin_id
-            with open(manifest_path, "w", encoding="utf-8") as f:
-                json_module.dump(manifest, f, ensure_ascii=False, indent=2)
-
-        except Exception as e:
-            # 清理失败的安装
-            import shutil
-
-            shutil.rmtree(target_path, ignore_errors=True)
-
-            await update_progress(
-                stage="error",
-                progress=0,
-                message="_manifest.json 无效",
-                operation="install",
-                plugin_id=plugin_id,
-                error=str(e),
-            )
-            raise HTTPException(status_code=400, detail=f"无效的 _manifest.json: {e}") from e
-
-        # 6. 安装成功
         await update_progress(
             stage="success",
             progress=100,
@@ -855,13 +1266,13 @@ async def install_plugin(
             "plugin_id": plugin_id,
             "plugin_name": manifest["name"],
             "version": manifest["version"],
-            "path": str(target_path),
+            "path": str(Path("plugins") / folder_name),
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"安装插件失败: {e}", exc_info=True)
+        logger.error("安装插件失败", error_type=type(e).__name__)
 
         await update_progress(
             stage="error",
@@ -869,10 +1280,12 @@ async def install_plugin(
             message="安装失败",
             operation="install",
             plugin_id=plugin_id,
-            error=str(e),
+            error="插件安装失败",
         )
 
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="插件安装失败") from e
+    finally:
+        _cleanup_staging_root(staging_root)
 
 
 @router.post("/uninstall")
@@ -892,13 +1305,10 @@ async def uninstall_plugin(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"收到卸载插件请求: {request.plugin_id}")
+    plugin_id = validate_plugin_id(request.plugin_id)
+    logger.info("收到卸载插件请求", plugin_id=plugin_id)
 
     try:
-        # 验证插件 ID 格式安全性
-        plugin_id = validate_plugin_id(request.plugin_id)
-
-        # 推送进度：开始卸载
         await update_progress(
             stage="loading",
             progress=10,
@@ -907,51 +1317,28 @@ async def uninstall_plugin(
             plugin_id=plugin_id,
         )
 
-        # 1. 检查插件是否存在（支持新旧两种格式）
-        plugins_dir = Path("plugins").resolve()
-        # 新格式：下划线
-        folder_name = plugin_id.replace(".", "_")
-        # 使用安全路径验证
-        plugin_path = validate_safe_path(folder_name, plugins_dir)
-        # 旧格式：点
-        old_format_path = validate_safe_path(plugin_id, plugins_dir)
-
-        # 优先使用新格式，如果不存在则尝试旧格式
-        if not plugin_path.exists():
-            if old_format_path.exists():
-                plugin_path = old_format_path
-            else:
-                await update_progress(
-                    stage="error",
-                    progress=0,
-                    message="插件不存在",
-                    operation="uninstall",
-                    plugin_id=plugin_id,
-                    error="插件未安装或已被删除",
-                )
-                raise HTTPException(status_code=404, detail="插件未安装")
+        plugins_dir = _plugins_directory()
+        plugin_path = _lifecycle_plugin_path(plugin_id, plugins_dir) if plugins_dir is not None else None
+        if plugin_path is None or plugins_dir is None:
+            await update_progress(
+                stage="error",
+                progress=0,
+                message="插件不存在",
+                operation="uninstall",
+                plugin_id=plugin_id,
+                error="插件未安装或已被删除",
+            )
+            raise HTTPException(status_code=404, detail="插件未安装")
 
         await update_progress(
             stage="loading",
             progress=30,
-            message=f"正在删除插件文件: {plugin_path}",
+            message="正在准备删除插件文件...",
             operation="uninstall",
             plugin_id=plugin_id,
         )
 
-        # 2. 读取插件信息（用于日志）
-        manifest_path = plugin_path / "_manifest.json"
-        plugin_name = plugin_id
-
-        if manifest_path.exists():
-            try:
-                import json as json_module
-
-                with open(manifest_path, "r", encoding="utf-8") as f:
-                    manifest = json_module.load(f)
-                plugin_name = manifest.get("name", plugin_id)
-            except Exception:
-                pass  # 如果读取失败，使用插件 ID 作为名称
+        plugin_name, _old_version = _existing_plugin_metadata(plugin_path, plugin_id)
 
         await update_progress(
             stage="loading",
@@ -961,22 +1348,11 @@ async def uninstall_plugin(
             plugin_id=plugin_id,
         )
 
-        # 3. 删除插件目录
-        import shutil
-        import stat
+        plugin_identity = _directory_identity(plugin_path)
+        _uninstall_plugin_directory(plugin_path, plugins_dir, plugin_identity)
 
-        def remove_readonly(func, path, _):
-            """清除只读属性并删除文件"""
-            import os
+        logger.info("成功卸载插件", plugin_id=plugin_id)
 
-            os.chmod(path, stat.S_IWRITE)
-            func(path)
-
-        shutil.rmtree(plugin_path, onerror=remove_readonly)
-
-        logger.info(f"成功卸载插件: {plugin_id} ({plugin_name})")
-
-        # 4. 推送成功状态
         await update_progress(
             stage="success",
             progress=100,
@@ -990,7 +1366,7 @@ async def uninstall_plugin(
     except HTTPException:
         raise
     except PermissionError as e:
-        logger.error(f"卸载插件失败（权限错误）: {e}")
+        logger.error("卸载插件失败（权限错误）", error_type=type(e).__name__)
 
         await update_progress(
             stage="error",
@@ -1003,7 +1379,7 @@ async def uninstall_plugin(
 
         raise HTTPException(status_code=500, detail="权限不足，无法删除插件文件") from e
     except Exception as e:
-        logger.error(f"卸载插件失败: {e}", exc_info=True)
+        logger.error("卸载插件失败", error_type=type(e).__name__)
 
         await update_progress(
             stage="error",
@@ -1011,10 +1387,10 @@ async def uninstall_plugin(
             message="卸载失败",
             operation="uninstall",
             plugin_id=plugin_id,
-            error=str(e),
+            error="插件卸载失败",
         )
 
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="插件卸载失败") from e
 
 
 @router.post("/update")
@@ -1034,11 +1410,15 @@ async def update_plugin(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"收到更新插件请求: {request.plugin_id}")
+    plugin_id = validate_plugin_id(request.plugin_id)
+    logger.info("收到更新插件请求", plugin_id=plugin_id)
+    staging_root: Optional[Path] = None
 
     try:
-        # 验证插件 ID 格式安全性
-        plugin_id = validate_plugin_id(request.plugin_id)
+        try:
+            owner, repo, is_github, repo_url = parse_repository_url(request.repository_url)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="仓库 URL 不安全或无效") from None
 
         # 推送进度：开始更新
         await update_progress(
@@ -1049,43 +1429,21 @@ async def update_plugin(
             plugin_id=plugin_id,
         )
 
-        # 1. 检查插件是否已安装（支持新旧两种格式）
-        plugins_dir = Path("plugins").resolve()
-        # 新格式：下划线
-        folder_name = plugin_id.replace(".", "_")
-        # 使用安全路径验证
-        plugin_path = validate_safe_path(folder_name, plugins_dir)
-        # 旧格式：点
-        old_format_path = validate_safe_path(plugin_id, plugins_dir)
+        plugins_dir = _plugins_directory()
+        plugin_path = _lifecycle_plugin_path(plugin_id, plugins_dir) if plugins_dir is not None else None
+        if plugin_path is None or plugins_dir is None:
+            await update_progress(
+                stage="error",
+                progress=0,
+                message="插件不存在",
+                operation="update",
+                plugin_id=plugin_id,
+                error="插件未安装，请先安装",
+            )
+            raise HTTPException(status_code=404, detail="插件未安装")
 
-        # 优先使用新格式，如果不存在则尝试旧格式
-        if not plugin_path.exists():
-            if old_format_path.exists():
-                plugin_path = old_format_path
-            else:
-                await update_progress(
-                    stage="error",
-                    progress=0,
-                    message="插件不存在",
-                    operation="update",
-                    plugin_id=plugin_id,
-                    error="插件未安装，请先安装",
-                )
-                raise HTTPException(status_code=404, detail="插件未安装")
-
-        # 2. 读取旧版本信息
-        manifest_path = plugin_path / "_manifest.json"
-        old_version = "unknown"
-
-        if manifest_path.exists():
-            try:
-                import json as json_module
-
-                with open(manifest_path, "r", encoding="utf-8") as f:
-                    manifest = json_module.load(f)
-                old_version = manifest.get("version", "unknown")
-            except Exception:
-                pass
+        plugin_identity = _directory_identity(plugin_path)
+        _old_name, old_version = _existing_plugin_metadata(plugin_path, plugin_id)
 
         await update_progress(
             stage="loading",
@@ -1095,153 +1453,101 @@ async def update_plugin(
             plugin_id=plugin_id,
         )
 
-        # 3. 删除旧版本
         await update_progress(
-            stage="loading", progress=20, message="正在删除旧版本...", operation="update", plugin_id=plugin_id
+            stage="loading", progress=20, message="正在下载并验证新版本...", operation="update", plugin_id=plugin_id
         )
 
-        import shutil
-        import stat
-
-        def remove_readonly(func, path, _):
-            """清除只读属性并删除文件"""
-            import os
-
-            os.chmod(path, stat.S_IWRITE)
-            func(path)
-
-        shutil.rmtree(plugin_path, onerror=remove_readonly)
-
-        logger.info(f"已删除旧版本: {plugin_id} v{old_version}")
-
-        # 4. 解析仓库 URL
-        await update_progress(
-            stage="loading",
-            progress=30,
-            message="正在准备下载新版本...",
-            operation="update",
-            plugin_id=plugin_id,
-        )
-
-        repo_url = request.repository_url.rstrip("/")
-        if repo_url.endswith(".git"):
-            repo_url = repo_url[:-4]
-
-        parts = repo_url.split("/")
-        if len(parts) < 2:
-            raise HTTPException(status_code=400, detail="无效的仓库 URL")
-
-        owner = parts[-2]
-        repo = parts[-1]
-
-        # 5. 克隆新版本（这里会推送 35%-85% 的进度）
+        staging_root = Path(tempfile.mkdtemp(prefix=".plugin-update-", dir=plugins_dir))
+        staged_path = staging_root / "candidate"
         service = get_git_mirror_service()
 
-        if "github.com" in repo_url:
+        if is_github:
             result = await service.clone_repository(
                 owner=owner,
                 repo=repo,
-                target_path=plugin_path,
+                target_path=staged_path,
                 branch=request.branch,
                 mirror_id=request.mirror_id,
                 depth=1,
             )
         else:
             result = await service.clone_repository(
-                owner=owner, repo=repo, target_path=plugin_path, branch=request.branch, custom_url=repo_url, depth=1
+                owner=owner,
+                repo=repo,
+                target_path=staged_path,
+                branch=request.branch,
+                custom_url=repo_url,
+                depth=1,
             )
 
         if not result.get("success"):
-            error_msg = result.get("error", "克隆失败")
             await update_progress(
                 stage="error",
                 progress=0,
                 message="下载新版本失败",
                 operation="update",
                 plugin_id=plugin_id,
-                error=error_msg,
+                error="插件新版本下载失败",
             )
-            raise HTTPException(status_code=500, detail=error_msg)
+            raise HTTPException(status_code=500, detail="插件更新失败")
 
-        # 6. 验证新版本
         await update_progress(
             stage="loading", progress=90, message="验证新版本...", operation="update", plugin_id=plugin_id
         )
 
-        new_manifest_path = plugin_path / "_manifest.json"
-        if not new_manifest_path.exists():
-            # 清理失败的更新
-            def remove_readonly(func, path, _):
-                """清除只读属性并删除文件"""
-                import os
-
-                os.chmod(path, stat.S_IWRITE)
-                func(path)
-
-            shutil.rmtree(plugin_path, onerror=remove_readonly)
-
+        staged_identity = _staged_plugin_identity(staged_path, staging_root)
+        try:
+            new_manifest = _prepare_plugin_manifest(staged_path, plugin_id)
+        except HTTPException:
             await update_progress(
                 stage="error",
                 progress=0,
-                message="新版本缺少 _manifest.json",
+                message="新版本插件清单校验失败",
                 operation="update",
                 plugin_id=plugin_id,
                 error="无效的插件格式",
             )
-            raise HTTPException(status_code=400, detail="无效的插件：缺少 _manifest.json")
+            raise
 
-        # 7. 读取新版本信息
-        try:
-            with open(new_manifest_path, "r", encoding="utf-8") as f:
-                new_manifest = json_module.load(f)
+        new_version = new_manifest["version"]
+        new_name = new_manifest["name"]
+        _replace_plugin_directory(plugin_path, staged_path, plugins_dir, plugin_identity, staged_identity)
 
-            new_version = new_manifest.get("version", "unknown")
-            new_name = new_manifest.get("name", plugin_id)
+        logger.info("成功更新插件", plugin_id=plugin_id)
+        await update_progress(
+            stage="success",
+            progress=100,
+            message=f"成功更新 {new_name}: {old_version} → {new_version}",
+            operation="update",
+            plugin_id=plugin_id,
+        )
 
-            logger.info(f"成功更新插件: {plugin_id} {old_version} → {new_version}")
-
-            # 8. 推送成功状态
-            await update_progress(
-                stage="success",
-                progress=100,
-                message=f"成功更新 {new_name}: {old_version} → {new_version}",
-                operation="update",
-                plugin_id=plugin_id,
-            )
-
-            return {
-                "success": True,
-                "message": "插件更新成功",
-                "plugin_id": plugin_id,
-                "plugin_name": new_name,
-                "old_version": old_version,
-                "new_version": new_version,
-            }
-
-        except Exception as e:
-            # 清理失败的更新
-            shutil.rmtree(plugin_path, ignore_errors=True)
-
-            await update_progress(
-                stage="error",
-                progress=0,
-                message="_manifest.json 无效",
-                operation="update",
-                plugin_id=plugin_id,
-                error=str(e),
-            )
-            raise HTTPException(status_code=400, detail=f"无效的 _manifest.json: {e}") from e
+        return {
+            "success": True,
+            "message": "插件更新成功",
+            "plugin_id": plugin_id,
+            "plugin_name": new_name,
+            "old_version": old_version,
+            "new_version": new_version,
+        }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新插件失败: {e}", exc_info=True)
+        logger.error("更新插件失败", error_type=type(e).__name__)
 
         await update_progress(
-            stage="error", progress=0, message="更新失败", operation="update", plugin_id=plugin_id, error=str(e)
+            stage="error",
+            progress=0,
+            message="更新失败",
+            operation="update",
+            plugin_id=plugin_id,
+            error="插件更新失败",
         )
 
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="插件更新失败") from e
+    finally:
+        _cleanup_staging_root(staging_root)
 
 
 @router.get("/installed")
@@ -1262,110 +1568,95 @@ async def get_installed_plugins(
     logger.info("收到获取已安装插件列表请求")
 
     try:
-        plugins_dir = Path("plugins")
-
-        # 如果插件目录不存在，返回空列表
-        if not plugins_dir.exists():
+        plugins_dir = _plugins_directory()
+        if plugins_dir is None:
             logger.info("插件目录不存在，创建目录")
-            plugins_dir.mkdir(exist_ok=True)
+            _plugins_directory(create=True)
             return {"success": True, "plugins": []}
 
         installed_plugins = []
 
-        # 遍历插件目录
-        for plugin_path in plugins_dir.iterdir():
-            # 只处理目录
-            if not plugin_path.is_dir():
+        for plugin_entry in sorted(plugins_dir.iterdir(), key=lambda path: path.name):
+            if plugin_entry.is_symlink():
+                continue
+            try:
+                plugin_path = plugin_entry.resolve(strict=True)
+            except (OSError, RuntimeError):
+                continue
+            if not plugin_path.is_relative_to(plugins_dir) or not plugin_path.is_dir():
                 continue
 
-            # 目录名（可能是下划线格式、点格式或其他格式）
-            folder_name = plugin_path.name
-
-            # 跳过隐藏目录和特殊目录
+            folder_name = plugin_entry.name
             if folder_name.startswith(".") or folder_name.startswith("__"):
                 continue
 
-            # 读取 _manifest.json
-            manifest_path = plugin_path / "_manifest.json"
-
-            if not manifest_path.exists():
-                logger.warning(f"插件文件夹 {folder_name} 缺少 _manifest.json，跳过")
-                continue
-
             try:
-                import json as json_module
-
-                with open(manifest_path, "r", encoding="utf-8") as f:
-                    manifest = json_module.load(f)
-
-                # 基本验证
-                if "name" not in manifest or "version" not in manifest:
-                    logger.warning(f"插件文件夹 {folder_name} 的 _manifest.json 格式无效，跳过")
+                validate_plugin_id(folder_name)
+                manifest = _load_plugin_manifest(plugin_path)
+                if manifest is None:
+                    logger.warning("插件文件夹缺少清单，已跳过")
+                    continue
+                if not isinstance(manifest.get("name"), str) or not isinstance(manifest.get("version"), str):
+                    logger.warning("插件清单缺少有效的名称或版本，已跳过")
                     continue
 
-                # 获取插件 ID（优先从 manifest，否则从文件夹名推断）
                 if "id" in manifest:
-                    # 优先使用 manifest 中的 id（最准确）
-                    plugin_id = manifest["id"]
+                    plugin_id = validate_plugin_id(manifest["id"])
                 else:
-                    # 从 manifest 信息构建 ID
-                    # 尝试从 author.name 和 repository_url 构建标准 ID
                     author_name = None
                     repo_name = None
 
-                    # 获取作者名
-                    if "author" in manifest:
-                        if isinstance(manifest["author"], dict) and "name" in manifest["author"]:
-                            author_name = manifest["author"]["name"]
-                        elif isinstance(manifest["author"], str):
-                            author_name = manifest["author"]
+                    author = manifest.get("author")
+                    if isinstance(author, dict) and isinstance(author.get("name"), str):
+                        author_name = author["name"]
+                    elif isinstance(author, str):
+                        author_name = author
 
-                    # 从 repository_url 获取仓库名
-                    if "repository_url" in manifest:
-                        repo_url = manifest["repository_url"].rstrip("/")
+                    repository_url = manifest.get("repository_url")
+                    if isinstance(repository_url, str):
+                        repo_url = repository_url.rstrip("/")
                         if repo_url.endswith(".git"):
                             repo_url = repo_url[:-4]
                         repo_name = repo_url.split("/")[-1]
 
-                    # 构建 ID
                     if author_name and repo_name:
-                        # 标准格式: Author.RepoName
                         plugin_id = f"{author_name}.{repo_name}"
                     elif author_name:
-                        # 如果只有作者，使用 Author.FolderName
                         plugin_id = f"{author_name}.{folder_name}"
+                    elif "_" in folder_name and "." not in folder_name:
+                        plugin_id = folder_name.replace("_", ".", 1)
                     else:
-                        # 从文件夹名推断
-                        if "_" in folder_name and "." not in folder_name:
-                            # 假设格式为 Author_PluginName，转换为 Author.PluginName
-                            plugin_id = folder_name.replace("_", ".", 1)
-                        else:
-                            # 直接使用文件夹名
-                            plugin_id = folder_name
+                        plugin_id = folder_name
 
-                    # 将推断的 ID 写入 manifest（方便下次识别）
-                    logger.info(f"为插件 {folder_name} 自动生成 ID: {plugin_id}")
+                    plugin_id = validate_plugin_id(plugin_id)
+                    logger.info("已为缺少 ID 的插件清单生成安全 ID")
                     manifest["id"] = plugin_id
                     try:
-                        with open(manifest_path, "w", encoding="utf-8") as f:
-                            json_module.dump(manifest, f, ensure_ascii=False, indent=2)
-                    except Exception as write_error:
-                        logger.warning(f"无法写入 ID 到 manifest: {write_error}")
+                        manifest_content = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+                        manifest_path = _plugin_file_path(plugin_path, "_manifest.json")
+                        _atomic_write_bytes(
+                            manifest_path,
+                            manifest_content,
+                            MAX_PLUGIN_MANIFEST_BYTES,
+                            "插件清单",
+                        )
+                    except HTTPException:
+                        logger.warning("无法安全写入插件清单 ID")
+                    except OSError as e:
+                        log_exception_type(logger, "写入插件清单 ID 失败", e, level="warning")
 
-                # 添加到已安装列表（返回完整的 manifest 信息）
                 installed_plugins.append(
                     {
                         "id": plugin_id,
-                        "manifest": manifest,  # 返回完整的 manifest 对象
-                        "path": str(plugin_path.absolute()),
+                        "manifest": manifest,
+                        "path": str(Path("plugins") / folder_name),
                     }
                 )
-
-            except json.JSONDecodeError as e:
-                logger.warning(f"插件 {folder_name} 的 _manifest.json 解析失败: {e}")
+            except HTTPException:
+                logger.warning("插件清单未通过安全校验，已跳过")
                 continue
-            except Exception as e:
-                logger.error(f"读取插件 {folder_name} 信息时出错: {e}")
+            except (OSError, RuntimeError, ValueError, TypeError) as e:
+                log_exception_type(logger, "读取插件清单失败，已跳过", e, level="warning")
                 continue
 
         # 去重：如果有重复的 plugin_id，只保留第一个（按路径）
@@ -1382,19 +1673,20 @@ async def get_installed_plugins(
                 unique_plugins.append(plugin)
             else:
                 duplicates.append(plugin)
-                first_path = seen_ids[plugin_id]
-                logger.warning(f"重复插件 {plugin_id}: 保留 {first_path}, 跳过 {plugin_path}")
+                logger.warning("检测到重复插件，已保留首个目录", plugin_id=plugin_id)
 
         if duplicates:
-            logger.warning(f"共检测到 {len(duplicates)} 个重复插件已去重")
+            logger.warning("重复插件已去重", duplicate_count=len(duplicates))
 
-        logger.info(f"找到 {len(unique_plugins)} 个已安装插件")
+        logger.info("已扫描安装插件", plugin_count=len(unique_plugins))
 
         return {"success": True, "plugins": unique_plugins, "total": len(unique_plugins)}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取已安装插件列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "获取已安装插件列表失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.get("/local-readme/{plugin_id}")
@@ -1416,31 +1708,11 @@ async def get_local_plugin_readme(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"获取本地插件 README: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("获取本地插件 README", plugin_id=plugin_id)
 
     try:
-        plugins_dir = Path("plugins")
-
-        # 查找插件目录
-        plugin_path = None
-        for folder in plugins_dir.iterdir():
-            if not folder.is_dir():
-                continue
-
-            manifest_path = folder / "_manifest.json"
-            if manifest_path.exists():
-                try:
-                    import json as json_module
-
-                    with open(manifest_path, "r", encoding="utf-8") as f:
-                        manifest = json_module.load(f)
-
-                    # 检查是否匹配 plugin_id
-                    if manifest.get("id") == plugin_id:
-                        plugin_path = folder
-                        break
-                except Exception:
-                    continue
+        plugin_path = _find_plugin_path(plugin_id)
 
         if not plugin_path:
             return {"success": False, "error": "插件未安装"}
@@ -1450,15 +1722,16 @@ async def get_local_plugin_readme(
         readme_content = None
 
         for readme_name in readme_files:
-            readme_path = plugin_path / readme_name
-            if readme_path.exists():
+            readme_path = _plugin_file_path(plugin_path, readme_name)
+            if readme_path.is_file():
                 try:
-                    with open(readme_path, "r", encoding="utf-8") as f:
-                        readme_content = f.read()
-                    logger.info(f"成功读取本地 README: {readme_path}")
+                    readme_content = _read_limited_utf8(readme_path, MAX_PLUGIN_README_BYTES, "插件 README")
+                    logger.info("成功读取本地插件 README")
                     break
-                except Exception as e:
-                    logger.warning(f"读取 {readme_path} 失败: {e}")
+                except HTTPException:
+                    raise
+                except Exception:
+                    logger.warning("读取本地插件 README 失败")
                     continue
 
         if readme_content:
@@ -1466,9 +1739,11 @@ async def get_local_plugin_readme(
         else:
             return {"success": False, "error": "本地未找到 README 文件"}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取本地 README 失败: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+        log_exception_type(logger, "获取本地 README 失败", e)
+        return {"success": False, "error": "读取本地 README 失败"}
 
 
 # ============ 插件配置管理 API ============
@@ -1496,7 +1771,8 @@ async def get_plugin_config_schema(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"获取插件配置 Schema: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("获取插件配置 Schema", plugin_id=plugin_id)
 
     try:
         # 尝试从已加载的插件中获取
@@ -1524,35 +1800,24 @@ async def get_plugin_config_schema(
             schema = plugin_instance.get_webui_config_schema()
             return {"success": True, "schema": schema}
 
-        # 如果插件未加载，尝试从文件系统读取
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
+        # 如果插件未加载，尝试从文件系统读取。
+        plugin_path = _find_plugin_path(plugin_id)
 
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
         # 读取配置文件获取当前配置
-        config_path = plugin_path / "config.toml"
+        config_path = _plugin_file_path(plugin_path, "config.toml")
         current_config = {}
         if config_path.exists():
             import tomlkit
 
-            with open(config_path, "r", encoding="utf-8") as f:
-                current_config = tomlkit.load(f)
+            try:
+                current_config = tomlkit.loads(_read_limited_utf8(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置"))
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail="插件配置格式无效") from exc
 
         # 构建基础 schema（无法获取完整的 ConfigField 信息）
         schema = {
@@ -1653,8 +1918,8 @@ async def get_plugin_config_schema(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取插件配置 Schema 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "获取插件配置 Schema 失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.get("/config/{plugin_id}/raw")
@@ -1672,44 +1937,31 @@ async def get_plugin_config_raw(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"获取插件原始配置: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("获取插件原始配置", plugin_id=plugin_id)
 
     try:
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
+        plugin_path = _find_plugin_path(plugin_id)
 
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
         # 读取配置文件
-        config_path = plugin_path / "config.toml"
+        config_path = _plugin_file_path(plugin_path, "config.toml")
         if not config_path.exists():
             return {"success": True, "config": "", "message": "配置文件不存在"}
+        if not config_path.is_file():
+            raise HTTPException(status_code=400, detail="插件配置路径不是普通文件")
 
-        with open(config_path, "r", encoding="utf-8") as f:
-            config_content = f.read()
+        config_content = _read_limited_utf8(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
 
         return {"success": True, "config": config_content}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取插件原始配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "获取插件原始配置失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.put("/config/{plugin_id}/raw")
@@ -1730,65 +1982,46 @@ async def update_plugin_config_raw(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"更新插件原始配置: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("更新插件原始配置", plugin_id=plugin_id)
 
     try:
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
+        plugin_path = _find_plugin_path(plugin_id)
 
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
-        config_path = plugin_path / "config.toml"
+        config_path = _plugin_file_path(plugin_path, "config.toml")
 
         # 验证 TOML 格式
         import tomlkit
 
         if not isinstance(request.config, str):
             raise HTTPException(status_code=400, detail="配置必须是字符串格式的 TOML 内容")
+        encoded_config = request.config.encode("utf-8")
+        if len(encoded_config) > MAX_PLUGIN_CONFIG_BYTES:
+            raise HTTPException(status_code=413, detail="插件配置过大")
 
         try:
             tomlkit.loads(request.config)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"TOML 格式错误: {str(e)}") from e
-
-        # 备份旧配置
-        import shutil
-        import datetime
+            raise HTTPException(status_code=400, detail="TOML 格式错误，请检查配置语法") from e
 
         if config_path.exists():
-            backup_name = f"config.toml.backup.{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-            backup_path = plugin_path / backup_name
-            shutil.copy(config_path, backup_path)
-            logger.info(f"已备份配置文件: {backup_path}")
+            _create_config_backup(plugin_path, config_path, "backup")
+            logger.info("已备份插件配置文件")
 
-        # 写入新配置
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(request.config)
+        _atomic_write_bytes(config_path, encoded_config, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
 
-        logger.info(f"已更新插件原始配置: {plugin_id}")
+        logger.info("已更新插件原始配置", plugin_id=plugin_id)
 
         return {"success": True, "message": "配置已保存", "note": "配置更改将在插件重新加载后生效"}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新插件原始配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "更新插件原始配置失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.get("/config/{plugin_id}")
@@ -1806,46 +2039,33 @@ async def get_plugin_config(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"获取插件配置: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("获取插件配置", plugin_id=plugin_id)
 
     try:
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
-
+        plugin_path = _find_plugin_path(plugin_id)
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
-        # 读取配置文件
-        config_path = plugin_path / "config.toml"
+        config_path = _plugin_file_path(plugin_path, "config.toml")
         if not config_path.exists():
             return {"success": True, "config": {}, "message": "配置文件不存在"}
 
         import tomlkit
 
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = tomlkit.load(f)
+        config_content = _read_limited_utf8(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
+        try:
+            config = tomlkit.loads(config_content)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="插件配置格式无效") from exc
 
         return {"success": True, "config": dict(config)}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取插件配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "获取插件配置失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.put("/config/{plugin_id}")
@@ -1866,7 +2086,8 @@ async def update_plugin_config(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"更新插件配置: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("更新插件配置", plugin_id=plugin_id)
 
     try:
         if not isinstance(request.config, dict):
@@ -1880,50 +2101,28 @@ async def update_plugin_config(
             if isinstance(plugin_instance.config_schema, dict):
                 coerce_types(plugin_instance.config_schema, request.config)
 
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
-
+        plugin_path = _find_plugin_path(plugin_id)
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
-        config_path = plugin_path / "config.toml"
-
-        # 备份旧配置
-        import shutil
-        import datetime
+        config_path = _plugin_file_path(plugin_path, "config.toml")
+        rendered_config = _render_plugin_toml(config_path, request.config)
 
         if config_path.exists():
-            backup_name = f"config.toml.backup.{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-            backup_path = plugin_path / backup_name
-            shutil.copy(config_path, backup_path)
-            logger.info(f"已备份配置文件: {backup_path}")
+            _create_config_backup(plugin_path, config_path, "backup")
+            logger.info("已备份插件配置文件")
 
-        # 写入新配置（自动保留注释和格式）
-        save_toml_with_format(request.config, str(config_path))
+        _atomic_write_bytes(config_path, rendered_config, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
 
-        logger.info(f"已更新插件配置: {plugin_id}")
+        logger.info("已更新插件配置", plugin_id=plugin_id)
 
         return {"success": True, "message": "配置已保存", "note": "配置更改将在插件重新加载后生效"}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新插件配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "更新插件配置失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.post("/config/{plugin_id}/reset")
@@ -1941,51 +2140,34 @@ async def reset_plugin_config(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"重置插件配置: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("重置插件配置", plugin_id=plugin_id)
 
     try:
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
-
+        plugin_path = _find_plugin_path(plugin_id)
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
-        config_path = plugin_path / "config.toml"
+        config_path = _plugin_file_path(plugin_path, "config.toml")
 
         if not config_path.exists():
             return {"success": True, "message": "配置文件不存在，无需重置"}
 
-        # 备份并删除
-        import shutil
-        import datetime
+        backup_path = _move_config_to_reset_backup(plugin_path, config_path)
 
-        backup_name = f"config.toml.reset.{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-        backup_path = plugin_path / backup_name
-        shutil.move(config_path, backup_path)
+        logger.info("已重置插件配置", plugin_id=plugin_id)
 
-        logger.info(f"已重置插件配置: {plugin_id}，备份: {backup_path}")
-
-        return {"success": True, "message": "配置已重置，下次加载插件时将使用默认配置", "backup": str(backup_path)}
+        return {
+            "success": True,
+            "message": "配置已重置，下次加载插件时将使用默认配置",
+            "backup": backup_path.name,
+        }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"重置插件配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "重置插件配置失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e
 
 
 @router.post("/config/{plugin_id}/toggle")
@@ -2003,52 +2185,42 @@ async def toggle_plugin(
     if not token or not token_manager.verify_token(token):
         raise HTTPException(status_code=401, detail="未授权：无效的访问令牌")
 
-    logger.info(f"切换插件状态: {plugin_id}")
+    plugin_id = validate_plugin_id(plugin_id)
+    logger.info("切换插件状态", plugin_id=plugin_id)
 
     try:
-        # 查找插件目录
-        plugins_dir = Path("plugins")
-        plugin_path = None
-
-        for p in plugins_dir.iterdir():
-            if p.is_dir():
-                manifest_path = p / "_manifest.json"
-                if manifest_path.exists():
-                    try:
-                        with open(manifest_path, "r", encoding="utf-8") as f:
-                            manifest = json.load(f)
-                        if manifest.get("id") == plugin_id or p.name == plugin_id:
-                            plugin_path = p
-                            break
-                    except Exception:
-                        continue
-
+        plugin_path = _find_plugin_path(plugin_id)
         if not plugin_path:
             raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_id}")
 
-        config_path = plugin_path / "config.toml"
+        config_path = _plugin_file_path(plugin_path, "config.toml")
 
         import tomlkit
 
-        # 读取当前配置（保留注释和格式）
         config = tomlkit.document()
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = tomlkit.load(f)
+            config_content = _read_limited_utf8(config_path, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
+            try:
+                config = tomlkit.loads(config_content)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail="插件配置格式无效") from exc
 
-        # 切换 enabled 状态
         if "plugin" not in config:
             config["plugin"] = tomlkit.table()
+        elif not hasattr(config["plugin"], "get"):
+            raise HTTPException(status_code=400, detail="插件配置格式无效")
 
         current_enabled = config["plugin"].get("enabled", True)
+        if not isinstance(current_enabled, bool):
+            raise HTTPException(status_code=400, detail="插件启用状态格式无效")
         new_enabled = not current_enabled
         config["plugin"]["enabled"] = new_enabled
 
-        # 写入配置（保留注释，格式化数组）
-        save_toml_with_format(config, str(config_path))
+        rendered_config = _render_plugin_toml(config_path, config)
+        _atomic_write_bytes(config_path, rendered_config, MAX_PLUGIN_CONFIG_BYTES, "插件配置")
 
         status = "启用" if new_enabled else "禁用"
-        logger.info(f"已{status}插件: {plugin_id}")
+        logger.info("已切换插件状态", plugin_id=plugin_id, enabled=new_enabled)
 
         return {
             "success": True,
@@ -2060,5 +2232,5 @@ async def toggle_plugin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"切换插件状态失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}") from e
+        log_exception_type(logger, "切换插件状态失败", e)
+        raise HTTPException(status_code=500, detail="服务器错误") from e

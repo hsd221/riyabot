@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from src.common import remote
 
@@ -67,6 +67,7 @@ class TelemetryHeartBeatTaskTest(unittest.IsolatedAsyncioTestCase):
             patch.object(remote.TelemetryHeartBeatTask, "_get_sys_info", return_value={"os_type": "Linux"}),
         ):
             task = remote.TelemetryHeartBeatTask()
+        task.server_url = "https://telemetry.example"
         return task, storage
 
     def test_sys_info_normalizes_platform_names_and_uses_config_version(self) -> None:
@@ -107,7 +108,7 @@ class TelemetryHeartBeatTaskTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(task.client_uuid, "uuid-1")
         self.assertEqual(storage["mmc_uuid"], "uuid-1")
-        self.assertEqual(calls[0]["url"], "http://hyybuth.xyz:10058/stat/reg_client")
+        self.assertEqual(calls[0]["url"], "https://telemetry.example/stat/reg_client")
         self.assertEqual(calls[0]["json"], {"deploy_time": "2026-01-01T00:00:00"})
 
     async def test_req_uuid_retries_failures_without_real_sleep(self) -> None:
@@ -188,7 +189,7 @@ class TelemetryHeartBeatTaskTest(unittest.IsolatedAsyncioTestCase):
         ):
             await task._send_heartbeat()
 
-        self.assertEqual(calls[0]["url"], "http://hyybuth.xyz:10058/stat/client_heartbeat")
+        self.assertEqual(calls[0]["url"], "https://telemetry.example/stat/client_heartbeat")
         self.assertEqual(calls[0]["headers"]["Client-UUID"], "uuid-1")
         self.assertEqual(calls[0]["json"], {"os_type": "Linux"})
         self.assertEqual(task.client_uuid, "uuid-1")
@@ -228,6 +229,51 @@ class TelemetryHeartBeatTaskTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.client_uuid, "uuid-1")
         self.assertEqual(storage["mmc_uuid"], "uuid-1")
 
+    async def test_insecure_telemetry_requires_explicit_opt_in(self) -> None:
+        task, storage = self.make_task(FakeLocalStorage({"deploy_time": "t"}))
+        task.server_url = "http://telemetry.example"
+        calls = []
+
+        with (
+            patch.dict(remote.os.environ, {}, clear=True),
+            patch.object(remote, "local_storage", storage),
+            patch.object(remote, "get_tcp_connector", new=AsyncMock(return_value="connector")),
+            patch.object(
+                remote.aiohttp,
+                "ClientSession",
+                side_effect=make_session_factory(FakeResponse(200, payload={"mmc_uuid": "uuid-1"}), calls),
+            ),
+        ):
+            self.assertFalse(await task._req_uuid())
+
+        self.assertEqual(calls, [])
+
+        with (
+            patch.dict(remote.os.environ, {"MAIBOT_ALLOW_INSECURE_TELEMETRY": "1"}, clear=True),
+            patch.object(remote, "local_storage", storage),
+            patch.object(remote, "get_tcp_connector", new=AsyncMock(return_value="connector")),
+            patch.object(
+                remote.aiohttp,
+                "ClientSession",
+                side_effect=make_session_factory(FakeResponse(200, payload={"mmc_uuid": "uuid-1"}), calls),
+            ),
+        ):
+            self.assertTrue(await task._req_uuid())
+
+        self.assertEqual(len(calls), 1)
+
+    def test_telemetry_endpoint_rejects_credentials_query_fragment_and_invalid_ports(self) -> None:
+        for url in [
+            "https://user:secret@telemetry.example",
+            "https://telemetry.example?token=secret",
+            "https://telemetry.example/#fragment",
+            "https://telemetry.example:99999",
+        ]:
+            with self.subTest(url=url):
+                self.assertFalse(remote._is_telemetry_transport_allowed(url))
+
+        self.assertTrue(remote._is_telemetry_transport_allowed("https://telemetry.example/api/v1"))
+
     async def test_send_heartbeat_swallows_post_exceptions_and_keeps_uuid(self) -> None:
         task, storage = self.make_task(FakeLocalStorage({"mmc_uuid": "uuid-1"}))
         calls = []
@@ -246,6 +292,33 @@ class TelemetryHeartBeatTaskTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(task.client_uuid, "uuid-1")
         self.assertEqual(storage["mmc_uuid"], "uuid-1")
+
+    async def test_telemetry_logs_do_not_expose_endpoint_exception_text_or_tracebacks(self) -> None:
+        task, storage = self.make_task(FakeLocalStorage({"mmc_uuid": "uuid-1"}))
+        task.server_url = "https://telemetry.example/private-endpoint"
+        secret_text = "proxy-password-super-secret"
+        calls = []
+        safe_logger = Mock()
+
+        with (
+            patch.object(remote, "local_storage", storage),
+            patch.object(remote, "get_tcp_connector", new=AsyncMock(return_value="connector")),
+            patch.object(
+                remote.aiohttp,
+                "ClientSession",
+                side_effect=make_session_factory(RuntimeError(secret_text), calls),
+            ),
+            patch.object(remote, "logger", safe_logger),
+        ):
+            await task._send_heartbeat()
+
+        logged = repr(safe_logger.method_calls)
+        self.assertNotIn(task.server_url, logged)
+        self.assertNotIn(secret_text, logged)
+        self.assertFalse(
+            any(call.kwargs.get("exc_info") is True for call in safe_logger.method_calls),
+            logged,
+        )
 
     async def test_run_honors_telemetry_switch_and_skips_when_uuid_request_fails(self) -> None:
         task, _storage = self.make_task()

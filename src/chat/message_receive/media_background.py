@@ -49,7 +49,7 @@ def _hash_media_data(media_data: str) -> str:
         media_bytes = base64.b64decode(normalized_data)
     except Exception:
         media_bytes = normalized_data.encode("utf-8", errors="ignore")
-    return hashlib.md5(media_bytes).hexdigest()
+    return hashlib.md5(media_bytes, usedforsecurity=False).hexdigest()
 
 
 def _make_task_key(kind: str, media_data: str) -> str:

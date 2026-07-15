@@ -1,11 +1,55 @@
-from src.common.server import get_global_server
-import os
 import importlib.metadata
+import ipaddress
+import os
+import secrets
+
 from maim_message import MessageServer
+
 from src.common.logger import get_logger, hash_id
+from src.common.server import get_global_server
 from src.config.config import global_config
 
 global_api = None
+_TRUE_VALUES = {"1", "true", "yes"}
+
+
+def _is_loopback_bind_host(host: str) -> bool:
+    normalized = host.strip().lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _env_enabled(name: str) -> bool:
+    return os.getenv(name, "").lower() in _TRUE_VALUES
+
+
+def _legacy_auth_tokens(maim_message_config) -> list[str]:
+    """合并 TOML 与环境变量中的旧版消息服务器令牌，并保持顺序去重。"""
+    configured_tokens = getattr(maim_message_config, "auth_token", [])
+    if isinstance(configured_tokens, str):
+        candidates = [configured_tokens]
+    elif isinstance(configured_tokens, (list, tuple)):
+        candidates = list(configured_tokens)
+    else:
+        candidates = []
+    environment_token = os.getenv("MAIBOT_LEGACY_SERVER_TOKEN", "")
+    if environment_token:
+        candidates.append(environment_token)
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        token = candidate.strip()
+        if token and token not in seen:
+            seen.add(token)
+            tokens.append(token)
+    return tokens
 
 
 def get_global_api() -> MessageServer:  # sourcery skip: extract-method
@@ -25,10 +69,27 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
 
         # 读取配置项
         maim_message_config = global_config.maim_message
+        legacy_auth_tokens = _legacy_auth_tokens(maim_message_config)
+        configured_legacy_host = os.environ["HOST"]
+        legacy_host = configured_legacy_host
+        allow_unauthenticated_legacy = _is_loopback_bind_host(configured_legacy_host) or _env_enabled(
+            "MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER"
+        )
+        legacy_auth_available = version_compatible and bool(legacy_auth_tokens)
+        if not allow_unauthenticated_legacy and not legacy_auth_available:
+            legacy_host = "127.0.0.1"
+            get_logger("maim_message").warning(
+                "旧版消息服务器远程匿名监听已被阻止，已回退到本机监听",
+                event_code="maim_message.legacy_server.remote_unauthenticated_blocked",
+                remediation=(
+                    "配置 maim_message.auth_token 或 MAIBOT_LEGACY_SERVER_TOKEN；"
+                    "仅兼容受信旧环境时才设置 MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER=1"
+                ),
+            )
 
         # 设置基本参数 (Legacy Server Mode)
         kwargs = {
-            "host": os.environ["HOST"],
+            "host": legacy_host,
             "port": int(os.environ["PORT"]),
             "app": get_global_server().get_app(),
         }
@@ -40,15 +101,15 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
             kwargs["custom_logger"] = maim_message_logger
 
             # 添加token认证
-            if maim_message_config.auth_token and len(maim_message_config.auth_token) > 0:
+            if legacy_auth_tokens:
                 kwargs["enable_token"] = True
 
             # Removed legacy custom config block (use_custom) as requested.
             kwargs["enable_custom_uvicorn_logger"] = False
 
         global_api = MessageServer(**kwargs)
-        if version_compatible and maim_message_config.auth_token:
-            for token in maim_message_config.auth_token:
+        if version_compatible:
+            for token in legacy_auth_tokens:
                 global_api.add_valid_token(token)
 
         # ---------------------------------------------------------------------
@@ -68,6 +129,20 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                 api_server_host = maim_message_config.api_server_host
                 api_server_port = maim_message_config.api_server_port
                 use_wss = maim_message_config.api_server_use_wss
+                allow_unauthenticated = _is_loopback_bind_host(api_server_host) or _env_enabled(
+                    "MAIBOT_ALLOW_UNAUTHENTICATED_API_SERVER"
+                )
+
+                if not maim_message_config.api_server_allowed_api_keys and not allow_unauthenticated:
+                    api_logger.warning(
+                        "Additional API Server 远程监听必须配置 API Key",
+                        event_code="maim_message.api_server.missing_api_keys",
+                        host=api_server_host,
+                        remediation=(
+                            "配置 maim_message.api_server_allowed_api_keys；仅兼容受信旧环境时才设置 "
+                            "MAIBOT_ALLOW_UNAUTHENTICATED_API_SERVER=1"
+                        ),
+                    )
 
                 server_config = ServerConfig(
                     host=api_server_host,
@@ -80,12 +155,14 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                 # 2. Setup Auth Handler
                 async def auth_handler(metadata: dict) -> bool:
                     allowed_keys = maim_message_config.api_server_allowed_api_keys
-                    # If list is empty/None, allow all (default behavior of returning True)
                     if not allowed_keys:
-                        return True
+                        return allow_unauthenticated
 
                     api_key = metadata.get("api_key")
-                    if api_key in allowed_keys:
+                    if isinstance(api_key, str) and any(
+                        isinstance(allowed_key, str) and secrets.compare_digest(api_key, allowed_key)
+                        for allowed_key in allowed_keys
+                    ):
                         return True
 
                     api_logger.warning(
@@ -129,11 +206,11 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                                 platform = msg_info.get("platform")
                                 if platform:
                                     global_api.platform_map[platform] = api_key
-                        except Exception:
+                        except Exception as e:
                             api_logger.warning(
                                 "Additional API Server 平台映射更新失败",
                                 event_code="maim_message.api_server.platform_map_update_failed",
-                                exc_info=True,
+                                error_type=type(e).__name__,
                             )
 
                     # Compatibility Layer: Ensure raw_message exists (even if None) as it's part of MessageBase
@@ -181,10 +258,11 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
                     event_code="maim_message.api_server.import_failed",
                     required_version=">=0.6.0",
                 )
-            except Exception:
-                get_logger("maim_message").exception(
+            except Exception as e:
+                get_logger("maim_message").error(
                     "Additional API Server 初始化失败",
                     event_code="maim_message.api_server.init_failed",
+                    error_type=type(e).__name__,
                 )
 
     return global_api

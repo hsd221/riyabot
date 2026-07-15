@@ -1,4 +1,6 @@
 import importlib
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +73,32 @@ class PluginManagerDirectoryTest(unittest.TestCase):
         self.assertEqual(load_file.call_count, 2)
         self.assertFalse(manager._load_plugin_modules_from_directory("/definitely/missing/plugins")[0])
 
+    @unittest.skipUnless(hasattr(os, "symlink"), "platform does not support symlinks")
+    def test_plugin_discovery_does_not_follow_symlinked_directories_or_module_files(self) -> None:
+        manager = make_manager()
+
+        with tempfile.TemporaryDirectory() as tmp_dir, tempfile.TemporaryDirectory() as outside_dir:
+            root = Path(tmp_dir)
+            outside = Path(outside_dir)
+
+            good_plugin = root / "good_plugin"
+            good_plugin.mkdir()
+            (good_plugin / "plugin.py").write_text("# safe", encoding="utf-8")
+
+            outside_plugin = outside / "outside_plugin"
+            outside_plugin.mkdir()
+            (outside_plugin / "plugin.py").write_text("# outside", encoding="utf-8")
+            (root / "linked_directory").symlink_to(outside_plugin, target_is_directory=True)
+
+            linked_file_plugin = root / "linked_file_plugin"
+            linked_file_plugin.mkdir()
+            (linked_file_plugin / "plugin.py").symlink_to(outside_plugin / "plugin.py")
+
+            with patch.object(manager, "_load_plugin_module_file", return_value=True) as load_file:
+                self.assertEqual(manager._load_plugin_modules_from_directory(tmp_dir), (1, 0))
+
+        load_file.assert_called_once_with(str(good_plugin / "plugin.py"))
+
     def test_load_plugin_module_file_uses_importlib_spec_and_records_loader_failures(self) -> None:
         manager = make_manager()
         fake_loader = SimpleNamespace(exec_module=Mock())
@@ -78,6 +106,7 @@ class PluginManagerDirectoryTest(unittest.TestCase):
         fake_module = SimpleNamespace()
 
         with (
+            patch.object(manager, "_preflight_plugin_module"),
             patch.object(plugin_manager_module, "spec_from_file_location", return_value=fake_spec) as spec_from_file,
             patch.object(plugin_manager_module, "module_from_spec", return_value=fake_module) as module_from_spec,
         ):
@@ -90,6 +119,7 @@ class PluginManagerDirectoryTest(unittest.TestCase):
 
         failing_loader = SimpleNamespace(exec_module=Mock(side_effect=RuntimeError("boom")))
         with (
+            patch.object(manager, "_preflight_plugin_module"),
             patch.object(
                 plugin_manager_module, "spec_from_file_location", return_value=SimpleNamespace(loader=failing_loader)
             ),
@@ -102,15 +132,86 @@ class PluginManagerDirectoryTest(unittest.TestCase):
     def test_load_plugin_module_file_rejects_missing_specs_or_loaders(self) -> None:
         manager = make_manager()
 
-        with patch.object(plugin_manager_module, "spec_from_file_location", return_value=None):
+        with (
+            patch.object(manager, "_preflight_plugin_module"),
+            patch.object(plugin_manager_module, "spec_from_file_location", return_value=None),
+        ):
             self.assertFalse(manager._load_plugin_module_file("plugins/missing_spec/plugin.py"))
 
-        with patch.object(
-            plugin_manager_module,
-            "spec_from_file_location",
-            return_value=SimpleNamespace(loader=None),
+        with (
+            patch.object(manager, "_preflight_plugin_module"),
+            patch.object(
+                plugin_manager_module,
+                "spec_from_file_location",
+                return_value=SimpleNamespace(loader=None),
+            ),
         ):
             self.assertFalse(manager._load_plugin_module_file("plugins/missing_loader/plugin.py"))
+
+    def test_load_plugin_module_file_rejects_missing_manifest_before_import(self) -> None:
+        manager = make_manager()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_dir = Path(tmp_dir) / "untrusted"
+            plugin_dir.mkdir()
+            plugin_file = plugin_dir / "plugin.py"
+            plugin_file.write_text("raise RuntimeError('must not execute')", encoding="utf-8")
+
+            fake_loader = SimpleNamespace(exec_module=Mock())
+            with patch.object(
+                plugin_manager_module,
+                "spec_from_file_location",
+                return_value=SimpleNamespace(loader=fake_loader),
+            ) as spec_from_file:
+                self.assertFalse(manager._load_plugin_module_file(str(plugin_file)))
+
+        spec_from_file.assert_not_called()
+        fake_loader.exec_module.assert_not_called()
+
+    def test_preflight_plugin_module_accepts_regular_plugin_with_valid_manifest(self) -> None:
+        manager = make_manager()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_dir = Path(tmp_dir) / "valid_plugin"
+            plugin_dir.mkdir()
+            plugin_file = plugin_dir / "plugin.py"
+            plugin_file.write_text("# safe plugin entry", encoding="utf-8")
+            (plugin_dir / "_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "manifest_version": 1,
+                        "name": "valid_plugin",
+                        "version": "1.0.0",
+                        "description": "A valid test plugin",
+                        "author": "MaiBot",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            manager._preflight_plugin_module(plugin_file)
+
+    def test_plugin_import_failures_do_not_store_or_log_exception_text(self) -> None:
+        manager = make_manager()
+        secret_text = "api-key-super-secret"
+        failing_loader = SimpleNamespace(exec_module=Mock(side_effect=RuntimeError(secret_text)))
+        safe_logger = Mock()
+
+        with (
+            patch.object(manager, "_preflight_plugin_module"),
+            patch.object(
+                plugin_manager_module,
+                "spec_from_file_location",
+                return_value=SimpleNamespace(loader=failing_loader),
+            ),
+            patch.object(plugin_manager_module, "module_from_spec", return_value=SimpleNamespace()),
+            patch.object(plugin_manager_module, "logger", safe_logger),
+        ):
+            self.assertFalse(manager._load_plugin_module_file("plugins/untrusted/plugin.py"))
+
+        self.assertNotIn(secret_text, repr(manager.failed_plugins))
+        self.assertNotIn(secret_text, repr(safe_logger.method_calls))
+        safe_logger.exception.assert_not_called()
 
 
 class PluginManagerLoadTest(unittest.IsolatedAsyncioTestCase):

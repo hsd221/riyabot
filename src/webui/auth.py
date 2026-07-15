@@ -4,6 +4,8 @@ WebUI 认证模块
 """
 
 from typing import Optional
+from urllib.parse import urlsplit
+
 from fastapi import HTTPException, Cookie, Header, Response, Request
 from src.common.logger import get_logger, hash_id
 from src.config.config import global_config
@@ -51,6 +53,45 @@ def request_uses_https(request: Optional[Request] = None) -> bool:
         return False
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", maxsplit=1)[0].strip().lower()
     return forwarded_proto == "https"
+
+
+def require_same_site_request(request: Request) -> None:
+    """拒绝浏览器发起的跨站状态修改请求。"""
+    headers = getattr(request, "headers", {})
+    if headers.get("sec-fetch-site", "").lower() == "cross-site":
+        raise HTTPException(status_code=403, detail="不允许跨站请求")
+
+    # Sec-Fetch-Site 在旧浏览器和非浏览器客户端中可能缺失。对带 Origin 的
+    # 浏览器请求再做一次明确来源校验，避免首次设置密码被跨站表单抢先提交。
+    origin = headers.get("origin", "").strip()
+    if not origin:
+        return
+    try:
+        origin_url = urlsplit(origin)
+        origin_host = origin_url.hostname
+        request_url = getattr(request, "url", None)
+        request_host = getattr(request_url, "hostname", None)
+        if origin_url.scheme not in {"http", "https"} or not origin_host or not request_host:
+            raise ValueError
+
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+        local_dev_ports = {5173, 7999, 8001}
+        origin_port = origin_url.port or (443 if origin_url.scheme == "https" else 80)
+        request_port = getattr(request_url, "port", None) or (
+            443 if getattr(request_url, "scheme", "") == "https" else 80
+        )
+        same_host = origin_host.lower() == request_host.lower() and origin_port == request_port
+        local_dev = (
+            origin_host.lower() in local_hosts
+            and request_host.lower() in local_hosts
+            and origin_port in local_dev_ports
+        )
+        if not (same_host or local_dev):
+            raise HTTPException(status_code=403, detail="不允许跨站请求")
+    except HTTPException:
+        raise
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=403, detail="不允许的请求来源") from None
 
 
 def _should_use_secure_cookie(request: Optional[Request] = None) -> bool:

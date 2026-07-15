@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import tempfile
 import threading
 import time
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from src.common.logger import get_logger
+from src.webui.error_utils import log_exception_type
 
 logger = get_logger("webui")
 
@@ -31,13 +33,13 @@ class TokenManager:
     """管理 WebUI 密码、初始化状态和签名会话。"""
 
     PASSWORD_MIN_LENGTH = 8
-    PASSWORD_MAX_LENGTH = 16
+    PASSWORD_MAX_LENGTH = 128
     SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
     SCRYPT_N = 2**14
     SCRYPT_R = 8
     SCRYPT_P = 1
     SCRYPT_DKLEN = 32
-    _PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
+    MAX_CONFIG_BYTES = 1024 * 1024
     _SESSION_NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
     _SESSION_SIGNATURE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
@@ -47,16 +49,51 @@ class TokenManager:
             config_path = project_root / "data" / "webui.json"
 
         self.config_path = Path(config_path)
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._prepare_storage()
         self._ensure_config()
+
+    def _prepare_storage(self) -> None:
+        """创建并保护凭据目录，同时拒绝配置文件符号链接。"""
+        parent = self.config_path.parent
+        try:
+            if parent.is_symlink():
+                raise RuntimeError("WebUI 配置目录不能是符号链接")
+            parent.mkdir(parents=True, exist_ok=True)
+            parent_stat = os.lstat(parent)
+            if not stat.S_ISDIR(parent_stat.st_mode):
+                raise RuntimeError("WebUI 配置目录无效")
+
+            parent_mode = stat.S_IMODE(parent_stat.st_mode)
+            if parent_mode & 0o022:
+                os.chmod(parent, parent_mode & ~0o022)
+
+            if self.config_path.is_symlink():
+                raise RuntimeError("WebUI 配置文件不能是符号链接")
+        except RuntimeError:
+            raise
+        except OSError as exc:
+            raise RuntimeError("无法安全初始化 WebUI 配置目录") from exc
 
     @contextmanager
     def _file_lock(self) -> Iterator[None]:
         """在多个 worker 进程之间串行化初始化和配置更新。"""
         lock_path = self.config_path.with_name(f"{self.config_path.name}.lock")
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        if lock_path.is_symlink():
+            raise RuntimeError("WebUI 配置锁文件路径无效")
+        flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         try:
+            fd = os.open(lock_path, flags, 0o600)
+        except OSError as exc:
+            raise RuntimeError("无法安全打开 WebUI 配置锁文件") from exc
+        try:
+            lock_stat = os.fstat(fd)
+            if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1:
+                raise RuntimeError("WebUI 配置锁文件路径无效")
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
             try:
                 import fcntl
 
@@ -97,10 +134,11 @@ class TokenManager:
             try:
                 config = self._load_config()
             except (OSError, ValueError, TypeError) as error:
-                logger.exception(
+                log_exception_type(
+                    logger,
                     "WebUI 配置文件读取失败，已拒绝进入未初始化状态",
+                    error,
                     event_code="webui.config.load_failed",
-                    path=str(self.config_path),
                 )
                 raise RuntimeError(
                     f"WebUI 配置文件损坏或不可读：{self.config_path}。请修复该文件，或确认无需保留后再手动删除"
@@ -130,18 +168,42 @@ class TokenManager:
                     logger.warning("无法限制 WebUI 配置文件权限", event_code="webui.config.chmod_failed")
 
     def _load_config(self) -> dict:
-        with self.config_path.open("r", encoding="utf-8") as file:
-            value = json.load(file)
+        if self.config_path.is_symlink():
+            raise ValueError("WebUI 配置文件路径无效")
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        file_descriptor = os.open(self.config_path, flags)
+        try:
+            config_stat = os.fstat(file_descriptor)
+            if not stat.S_ISREG(config_stat.st_mode) or config_stat.st_nlink != 1:
+                raise ValueError("WebUI 配置文件路径无效")
+            if config_stat.st_size > self.MAX_CONFIG_BYTES:
+                raise ValueError("WebUI 配置文件过大")
+            with os.fdopen(file_descriptor, "rb") as file:
+                file_descriptor = -1
+                raw_value = file.read(self.MAX_CONFIG_BYTES + 1)
+        finally:
+            if file_descriptor >= 0:
+                os.close(file_descriptor)
+
+        if len(raw_value) > self.MAX_CONFIG_BYTES:
+            raise ValueError("WebUI 配置文件过大")
+        try:
+            value = json.loads(raw_value.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("WebUI 配置文件格式无效") from exc
         if not isinstance(value, dict):
             raise ValueError("WebUI 配置必须是 JSON 对象")
         return value
 
     def _write_config_unlocked(self, config: dict) -> None:
         """原子写入配置，并将配置文件限制为仅所有者可读写。"""
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self._prepare_storage()
         fd, temp_name = tempfile.mkstemp(prefix=".webui-", suffix=".tmp", dir=self.config_path.parent)
         try:
-            os.fchmod(fd, 0o600)
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as file:
                 json.dump(config, file, ensure_ascii=False, indent=2)
                 file.write("\n")
@@ -173,11 +235,11 @@ class TokenManager:
             return False, f"密码长度至少为 {cls.PASSWORD_MIN_LENGTH} 位"
         if len(password) > cls.PASSWORD_MAX_LENGTH:
             return False, f"密码长度不能超过 {cls.PASSWORD_MAX_LENGTH} 位"
-        if not cls._PASSWORD_PATTERN.fullmatch(password):
-            return False, "密码只能包含数字和英文字母"
-        if not re.search(r"[A-Za-z]", password):
-            return False, "密码必须包含英文字母"
-        if not re.search(r"[0-9]", password):
+        if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in password):
+            return False, "密码不能包含换行或控制字符"
+        if not any(char.isalpha() for char in password):
+            return False, "密码必须包含字母"
+        if not any(char.isdecimal() for char in password):
             return False, "密码必须包含数字"
         return True, "密码格式正确"
 
@@ -233,6 +295,22 @@ class TokenManager:
         """兼容旧调用但不再暴露任何明文凭据。"""
         return ""
 
+    def get_adapter_config_path_preference(self) -> Optional[str]:
+        """读取适配器配置路径偏好，不暴露其他凭据字段。"""
+        with self._lock:
+            value = self._load_config().get("adapter_config_path")
+        return value if isinstance(value, str) and value else None
+
+    def set_adapter_config_path_preference(self, path: str) -> None:
+        """在同一受保护配置中原子保存适配器配置路径偏好。"""
+        if not isinstance(path, str) or not path or len(path) > 4096:
+            raise ValueError("适配器配置路径偏好无效")
+        with self._lock, self._file_lock():
+            config = self._load_config()
+            config["adapter_config_path"] = path
+            config["updated_at"] = self._get_current_timestamp()
+            self._write_config_unlocked(config)
+
     def set_initial_password(self, password: str) -> tuple[bool, str]:
         """在未初始化状态下设置密码，成功后仍需完成其余向导步骤。"""
         valid, message = self.validate_password(password)
@@ -281,8 +359,8 @@ class TokenManager:
                     return False
                 self._migrate_legacy_password_unlocked(password, config)
                 return True
-        except (OSError, ValueError, TypeError, UnicodeError):
-            logger.exception("WebUI 密码配置读取失败", event_code="webui.password.authenticate_failed")
+        except (OSError, ValueError, TypeError, UnicodeError) as e:
+            log_exception_type(logger, "WebUI 密码配置读取失败", e, event_code="webui.password.authenticate_failed")
             return False
 
     def verify_password(self, password: str) -> bool:
@@ -426,8 +504,8 @@ class TokenManager:
                 self._write_config_unlocked(config)
             logger.info("WebUI 首次配置已标记为完成", event_code="webui.setup.completed")
             return True
-        except Exception:
-            logger.exception("WebUI 首次配置标记失败", event_code="webui.setup.complete_failed")
+        except Exception as e:
+            log_exception_type(logger, "WebUI 首次配置标记失败", e, event_code="webui.setup.complete_failed")
             return False
 
     def reset_setup_status(self) -> bool:
@@ -440,8 +518,8 @@ class TokenManager:
                 self._write_config_unlocked(config)
             logger.info("WebUI 首次配置状态已重置", event_code="webui.setup.reset")
             return True
-        except Exception:
-            logger.exception("WebUI 首次配置状态重置失败", event_code="webui.setup.reset_failed")
+        except Exception as e:
+            log_exception_type(logger, "WebUI 首次配置状态重置失败", e, event_code="webui.setup.reset_failed")
             return False
 
 

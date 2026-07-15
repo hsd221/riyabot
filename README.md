@@ -70,9 +70,21 @@ cd ..
 docker build -t riyabot .
 ```
 
-使用 compose 启动：
+Compose 中的旧版消息 WebSocket 跨容器通信默认拒绝远程匿名监听。若适配器版本支持
+`MAIBOT_LEGACY_SERVER_TOKEN`，请先为核心与适配器设置同一个强随机令牌：
 
 ```bash
+export MAIBOT_LEGACY_SERVER_TOKEN="$(openssl rand -hex 32)"
+docker compose up -d
+```
+
+若迁移中的旧适配器镜像尚不支持该变量，可暂时保持令牌为空并设置
+`MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER=1`。此兼容方式仅适用于受信的私有 Compose 网络，且绝不能发布
+核心的 `8000` 端口；完成适配器升级后应立即改用共享令牌并关闭兼容开关。
+
+```bash
+export MAIBOT_LEGACY_SERVER_TOKEN=
+export MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER=1
 docker compose up -d
 ```
 

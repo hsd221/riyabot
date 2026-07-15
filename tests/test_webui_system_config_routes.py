@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from src.webui import config_routes
 from src.webui.routers import system as system_routes
+from src.webui.token_manager import TokenManager
 
 
 class SystemRoutesTest(unittest.IsolatedAsyncioTestCase):
@@ -56,7 +57,16 @@ class SystemRoutesTest(unittest.IsolatedAsyncioTestCase):
                 await system_routes.restart_riyabot(_auth=True)
 
         self.assertEqual(exc.exception.status_code, 500)
-        self.assertIn("scheduler down", exc.exception.detail)
+        self.assertEqual(exc.exception.detail, "重启失败")
+        self.assertNotIn("scheduler down", exc.exception.detail)
+
+    async def test_status_does_not_expose_internal_exception_details(self) -> None:
+        with patch.object(system_routes, "_start_time", "sensitive runtime detail"):
+            with self.assertRaises(HTTPException) as exc:
+                await system_routes.get_riyabot_status(_auth=True)
+
+        self.assertEqual(exc.exception.status_code, 500)
+        self.assertEqual(exc.exception.detail, "获取状态失败")
 
     async def test_reload_config_returns_current_placeholder_response(self) -> None:
         self.assertEqual(
@@ -101,6 +111,264 @@ class ConfigRoutesHelperTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("legacy_field", config_data["personality"])
 
 
+class StructuredConfigRoutesSecurityTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config_dir_patch = patch.object(config_routes, "CONFIG_DIR", self.tmp.name)
+        self.config_dir_patch.start()
+
+    def tearDown(self) -> None:
+        self.config_dir_patch.stop()
+        self.tmp.cleanup()
+
+    async def test_schema_read_and_save_failures_are_sanitized_in_responses_and_logs(self) -> None:
+        secret = 'api_key = "super-secret" at /private/model_config.toml'
+
+        with (
+            patch.object(
+                config_routes.ConfigSchemaGenerator,
+                "generate_config_schema",
+                side_effect=RuntimeError(secret),
+            ),
+            patch.object(config_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as schema_error,
+        ):
+            await config_routes.get_bot_config_schema(_auth=True)
+
+        self.assertEqual(schema_error.exception.status_code, 500)
+        self.assertEqual(schema_error.exception.detail, "获取配置架构失败")
+        self.assertNotIn(secret, repr(logged.call_args))
+
+        config_path = Path(self.tmp.name) / "bot_config.toml"
+        config_path.write_text("[bot]\n", encoding="utf-8")
+        with (
+            patch.object(config_routes.tomlkit, "loads", side_effect=RuntimeError(secret)),
+            patch.object(config_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as read_error,
+        ):
+            await config_routes.get_bot_config(_auth=True)
+
+        self.assertEqual(read_error.exception.status_code, 500)
+        self.assertEqual(read_error.exception.detail, "读取配置文件失败")
+        self.assertNotIn(secret, repr(logged.call_args))
+
+        with (
+            patch.object(config_routes.Config, "from_dict", return_value=None),
+            patch.object(config_routes, "format_toml_string", side_effect=OSError(secret)),
+            patch.object(config_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as save_error,
+        ):
+            await config_routes.update_bot_config({}, _auth=True)
+
+        self.assertEqual(save_error.exception.status_code, 500)
+        self.assertEqual(save_error.exception.detail, "保存配置文件失败")
+        self.assertNotIn(secret, repr(logged.call_args))
+
+    async def test_structured_validation_failures_do_not_echo_values(self) -> None:
+        secret = 'invalid api_key "super-secret" at /private/config.toml'
+        cases = [
+            (config_routes.update_bot_config, config_routes.Config),
+            (config_routes.update_model_config, config_routes.APIAdapterConfig),
+        ]
+
+        for endpoint, config_class in cases:
+            with self.subTest(endpoint=endpoint.__name__):
+                with (
+                    patch.object(config_class, "from_dict", side_effect=ValueError(secret)),
+                    self.assertRaises(HTTPException) as validation_error,
+                ):
+                    await endpoint({}, _auth=True)
+
+                self.assertEqual(validation_error.exception.status_code, 400)
+                self.assertEqual(validation_error.exception.detail, "配置数据验证失败，请检查字段和值")
+                self.assertNotIn("super-secret", str(validation_error.exception.detail))
+
+    async def test_structured_reads_reject_symlinks_oversized_files_and_invalid_utf8(self) -> None:
+        cases = [
+            ("bot_config.toml", config_routes.get_bot_config),
+            ("model_config.toml", config_routes.get_model_config),
+        ]
+
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_path = Path(outside_dir) / "outside.toml"
+            outside_path.write_text('secret = "outside"\n', encoding="utf-8")
+
+            for filename, endpoint in cases:
+                with self.subTest(filename=filename, case="symlink"):
+                    config_path = Path(self.tmp.name) / filename
+                    config_path.symlink_to(outside_path)
+                    with self.assertRaises(HTTPException) as symlink_error:
+                        await endpoint(_auth=True)
+                    self.assertEqual(symlink_error.exception.status_code, 400)
+                    config_path.unlink()
+
+                with self.subTest(filename=filename, case="oversized"):
+                    config_path.write_text("value = 12345\n", encoding="utf-8")
+                    with patch.object(config_routes, "MAX_CONFIG_FILE_BYTES", 4):
+                        with self.assertRaises(HTTPException) as size_error:
+                            await endpoint(_auth=True)
+                    self.assertEqual(size_error.exception.status_code, 413)
+
+                with self.subTest(filename=filename, case="invalid-utf8"):
+                    config_path.write_bytes(b"\xff")
+                    with self.assertRaises(HTTPException) as encoding_error:
+                        await endpoint(_auth=True)
+                    self.assertEqual(encoding_error.exception.status_code, 400)
+                    config_path.unlink()
+
+    async def test_structured_writes_reject_symlinks_and_preserve_existing_files_on_failure(self) -> None:
+        config_path = Path(self.tmp.name) / "bot_config.toml"
+
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_path = Path(outside_dir) / "outside.toml"
+            outside_content = '[bot]\nnickname = "outside"\n'
+            outside_path.write_text(outside_content, encoding="utf-8")
+            config_path.symlink_to(outside_path)
+
+            with (
+                patch.object(config_routes.Config, "from_dict", return_value=None),
+                self.assertRaises(HTTPException) as symlink_error,
+            ):
+                await config_routes.update_bot_config({"bot": {"nickname": "changed"}}, _auth=True)
+
+            self.assertEqual(symlink_error.exception.status_code, 400)
+            self.assertEqual(outside_path.read_text(encoding="utf-8"), outside_content)
+            config_path.unlink()
+
+        original_content = '[bot]\nnickname = "old"\n'
+        config_path.write_text(original_content, encoding="utf-8")
+        secret = 'write failed at /private/config with api_key="super-secret"'
+
+        with (
+            patch.object(config_routes.Config, "from_dict", return_value=None),
+            patch.object(config_routes.os, "replace", side_effect=OSError(secret)),
+            patch.object(config_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as replace_error,
+        ):
+            await config_routes.update_bot_config({"bot": {"nickname": "new"}}, _auth=True)
+
+        self.assertEqual(replace_error.exception.status_code, 500)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), original_content)
+        self.assertNotIn(secret, repr(logged.call_args))
+
+        with (
+            patch.object(config_routes.Config, "from_dict", return_value=None),
+            patch.object(config_routes, "MAX_CONFIG_FILE_BYTES", 32),
+            self.assertRaises(HTTPException) as size_error,
+        ):
+            await config_routes.update_bot_config({"bot": {"nickname": "x" * 100}}, _auth=True)
+
+        self.assertEqual(size_error.exception.status_code, 413)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), original_content)
+
+    async def test_structured_write_preserves_comments_version_and_rejects_changed_target(self) -> None:
+        config_path = Path(self.tmp.name) / "bot_config.toml"
+        config_path.write_text(
+            '# keep this comment\n[inner]\nversion = "1.0.0"\n\n[bot]\nnickname = "old"\n',
+            encoding="utf-8",
+        )
+
+        with patch.object(config_routes.Config, "from_dict", return_value=None):
+            result = await config_routes.update_bot_config(
+                {"inner": {"version": "9.9.9"}, "bot": {"nickname": "new"}},
+                _auth=True,
+            )
+
+        self.assertTrue(result["success"])
+        saved_content = config_path.read_text(encoding="utf-8")
+        self.assertIn("# keep this comment", saved_content)
+        self.assertIn('version = "1.0.0"', saved_content)
+        self.assertIn('nickname = "new"', saved_content)
+        self.assertNotIn('version = "9.9.9"', saved_content)
+
+        _, fingerprint = config_routes._read_config_text("bot_config.toml")
+        raced_content = '[bot]\nnickname = "raced"\n'
+        config_path.write_text(raced_content, encoding="utf-8")
+
+        with self.assertRaises(HTTPException) as race_error:
+            config_routes._atomic_write_config("bot_config.toml", b'[bot]\nnickname = "lost"\n', fingerprint)
+
+        self.assertEqual(race_error.exception.status_code, 409)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), raced_content)
+
+
+class RawConfigRoutesSecurityTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config_dir_patch = patch.object(config_routes, "CONFIG_DIR", self.tmp.name)
+        self.config_dir_patch.start()
+
+    def tearDown(self) -> None:
+        self.config_dir_patch.stop()
+        self.tmp.cleanup()
+
+    async def test_raw_config_read_and_write_enforce_byte_limit_before_parsing(self) -> None:
+        config_path = Path(self.tmp.name) / "bot_config.toml"
+        config_path.write_text("value = 12345\n", encoding="utf-8")
+
+        with patch.object(config_routes, "MAX_CONFIG_FILE_BYTES", 4):
+            with self.assertRaises(HTTPException) as read_error:
+                await config_routes.get_bot_config_raw(_auth=True)
+            self.assertEqual(read_error.exception.status_code, 413)
+
+            with (
+                patch.object(config_routes.tomlkit, "loads") as loads,
+                self.assertRaises(HTTPException) as write_error,
+            ):
+                await config_routes.update_bot_config_raw("value = 12345\n", _auth=True)
+
+        self.assertEqual(write_error.exception.status_code, 413)
+        loads.assert_not_called()
+
+    async def test_raw_config_rejects_invalid_utf8_and_does_not_echo_toml_content(self) -> None:
+        config_path = Path(self.tmp.name) / "bot_config.toml"
+        config_path.write_bytes(b"\xff")
+
+        with self.assertRaises(HTTPException) as read_error:
+            await config_routes.get_bot_config_raw(_auth=True)
+        self.assertEqual(read_error.exception.status_code, 400)
+
+        secret_content = 'api_key = "super-secret"\n[broken'
+        with self.assertRaises(HTTPException) as write_error:
+            await config_routes.update_bot_config_raw(secret_content, _auth=True)
+        self.assertEqual(write_error.exception.status_code, 400)
+        self.assertNotIn("super-secret", str(write_error.exception.detail))
+
+    async def test_raw_config_rejects_symlinks_and_preserves_existing_file_on_replace_failure(self) -> None:
+        config_path = Path(self.tmp.name) / "bot_config.toml"
+
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_path = Path(outside_dir) / "outside.toml"
+            outside_content = '[bot]\nnickname = "outside"\n'
+            outside_path.write_text(outside_content, encoding="utf-8")
+            config_path.symlink_to(outside_path)
+
+            with self.assertRaises(HTTPException) as read_error:
+                await config_routes.get_bot_config_raw(_auth=True)
+            self.assertEqual(read_error.exception.status_code, 400)
+
+            with (
+                patch.object(config_routes.Config, "from_dict", return_value=None),
+                self.assertRaises(HTTPException) as write_error,
+            ):
+                await config_routes.update_bot_config_raw('[bot]\nnickname = "changed"\n', _auth=True)
+            self.assertEqual(write_error.exception.status_code, 400)
+            self.assertEqual(outside_path.read_text(encoding="utf-8"), outside_content)
+            config_path.unlink()
+
+        original_content = '[bot]\nnickname = "old"\n'
+        config_path.write_text(original_content, encoding="utf-8")
+        with (
+            patch.object(config_routes.Config, "from_dict", return_value=None),
+            patch.object(config_routes.os, "replace", side_effect=OSError("replace failed")),
+            self.assertRaises(HTTPException) as replace_error,
+        ):
+            await config_routes.update_bot_config_raw('[bot]\nnickname = "new"\n', _auth=True)
+
+        self.assertEqual(replace_error.exception.status_code, 500)
+        self.assertEqual(config_path.read_text(encoding="utf-8"), original_content)
+
+
 class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -109,8 +377,12 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
         os.chdir(self.root)
         self.project_root_patch = patch.object(config_routes, "PROJECT_ROOT", str(self.root))
         self.project_root_patch.start()
+        self.token_manager = TokenManager(self.root / "data" / "webui.json")
+        self.token_manager_patch = patch.object(config_routes, "get_token_manager", return_value=self.token_manager)
+        self.token_manager_patch.start()
 
     def tearDown(self) -> None:
+        self.token_manager_patch.stop()
         self.project_root_patch.stop()
         os.chdir(self.old_cwd)
         self.tmp.cleanup()
@@ -120,11 +392,60 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
         outside = self.root.parent / "outside-adapter.toml"
 
         self.assertEqual(config_routes._normalize_adapter_path("adapters/napcat.toml"), str(inside))
-        self.assertEqual(config_routes._normalize_adapter_path(str(outside)), str(outside))
+        with patch.dict(config_routes.os.environ, {"MAIBOT_ALLOW_EXTERNAL_ADAPTER_CONFIG": ""}):
+            with self.assertRaisesRegex(ValueError, "项目目录"):
+                config_routes._normalize_adapter_path(str(outside))
+        with patch.dict(config_routes.os.environ, {"MAIBOT_ALLOW_EXTERNAL_ADAPTER_CONFIG": "1"}):
+            self.assertEqual(config_routes._normalize_adapter_path(str(outside)), str(outside))
         self.assertEqual(config_routes._normalize_adapter_path(""), "")
         self.assertEqual(config_routes._to_relative_path(str(inside)), "adapters/napcat.toml")
         self.assertEqual(config_routes._to_relative_path(str(outside)), str(outside))
         self.assertEqual(config_routes._to_relative_path("relative.toml"), "relative.toml")
+
+    async def test_adapter_config_blocks_external_and_symlink_escape_paths_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_path = Path(outside_dir) / "outside.toml"
+            outside_path.write_text('secret = "outside"\n', encoding="utf-8")
+            symlink_path = self.root / "linked.toml"
+            symlink_path.symlink_to(outside_path)
+
+            with patch.dict(config_routes.os.environ, {"MAIBOT_ALLOW_EXTERNAL_ADAPTER_CONFIG": ""}):
+                for unsafe_path in [str(outside_path), "linked.toml"]:
+                    with self.subTest(path=unsafe_path):
+                        with self.assertRaises(HTTPException) as read_error:
+                            await config_routes.get_adapter_config(unsafe_path, _auth=True)
+                        self.assertEqual(read_error.exception.status_code, 400)
+
+                        with self.assertRaises(HTTPException) as write_error:
+                            await config_routes.save_adapter_config(
+                                {"path": unsafe_path, "content": "enabled = true\n"},
+                                _auth=True,
+                            )
+                        self.assertEqual(write_error.exception.status_code, 400)
+
+                with self.assertRaises(HTTPException) as preference_error:
+                    await config_routes.save_adapter_config_path({"path": str(outside_path)}, _auth=True)
+                self.assertEqual(preference_error.exception.status_code, 400)
+
+            with patch.dict(config_routes.os.environ, {"MAIBOT_ALLOW_EXTERNAL_ADAPTER_CONFIG": "1"}):
+                loaded = await config_routes.get_adapter_config(str(outside_path), _auth=True)
+            self.assertEqual(loaded["content"], 'secret = "outside"\n')
+
+    async def test_adapter_config_enforces_read_and_write_size_limits(self) -> None:
+        adapter_path = self.root / "large.toml"
+        adapter_path.write_text("value = 12345\n", encoding="utf-8")
+
+        with patch.object(config_routes, "MAX_ADAPTER_CONFIG_BYTES", 4):
+            with self.assertRaises(HTTPException) as read_error:
+                await config_routes.get_adapter_config("large.toml", _auth=True)
+            self.assertEqual(read_error.exception.status_code, 413)
+
+            with self.assertRaises(HTTPException) as write_error:
+                await config_routes.save_adapter_config(
+                    {"path": "new.toml", "content": "value = 12345\n"},
+                    _auth=True,
+                )
+            self.assertEqual(write_error.exception.status_code, 413)
 
     async def test_adapter_config_path_preference_round_trips_through_temp_data_file(self) -> None:
         adapter_path = self.root / "adapters" / "napcat.toml"
@@ -139,6 +460,7 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
             json.loads((self.root / "data" / "webui.json").read_text(encoding="utf-8"))["adapter_config_path"],
             "adapters/napcat.toml",
         )
+        self.assertEqual((self.root / "data" / "webui.json").stat().st_mode & 0o777, 0o600)
 
         loaded = await config_routes.get_adapter_config_path(_auth=True)
         self.assertEqual(loaded["path"], "adapters/napcat.toml")
@@ -155,6 +477,47 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
             await config_routes.save_adapter_config_path({"path": ""}, _auth=True)
         self.assertEqual(empty_path.exception.status_code, 400)
 
+        with self.assertRaises(HTTPException) as invalid_extension:
+            await config_routes.save_adapter_config_path({"path": "adapter.txt"}, _auth=True)
+        self.assertEqual(invalid_extension.exception.status_code, 400)
+
+    async def test_adapter_config_path_revalidates_unsafe_legacy_preference(self) -> None:
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_path = Path(outside_dir) / "legacy.toml"
+            outside_path.write_text("enabled = true\n", encoding="utf-8")
+            (self.root / "data").mkdir(exist_ok=True)
+            (self.root / "data" / "webui.json").write_text(
+                json.dumps({"adapter_config_path": str(outside_path)}),
+                encoding="utf-8",
+            )
+
+            with patch.dict(config_routes.os.environ, {"MAIBOT_ALLOW_EXTERNAL_ADAPTER_CONFIG": ""}):
+                with self.assertRaises(HTTPException) as error:
+                    await config_routes.get_adapter_config_path(_auth=True)
+
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertNotIn(str(outside_path), str(error.exception.detail))
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "platform does not support symlinks")
+    async def test_adapter_config_path_preference_does_not_follow_webui_config_symlink(self) -> None:
+        adapter_path = self.root / "adapter.toml"
+        adapter_path.write_text("enabled = true\n", encoding="utf-8")
+        data_dir = self.root / "data"
+        data_dir.mkdir(exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as outside_dir:
+            external_path = Path(outside_dir) / "external.json"
+            original_external = json.dumps({"password_hash": "do-not-touch"})
+            external_path.write_text(original_external, encoding="utf-8")
+            (data_dir / "webui.json").unlink()
+            (data_dir / "webui.json").symlink_to(external_path)
+
+            with self.assertRaises(HTTPException) as error:
+                await config_routes.save_adapter_config_path({"path": "adapter.toml"}, _auth=True)
+
+            self.assertEqual(error.exception.status_code, 400)
+            self.assertEqual(external_path.read_text(encoding="utf-8"), original_external)
+
     async def test_adapter_config_read_and_write_validate_paths_extensions_and_toml(self) -> None:
         adapter_path = self.root / "adapter.toml"
         adapter_path.write_text('name = "napcat"\n', encoding="utf-8")
@@ -163,6 +526,18 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
 
         loaded = await config_routes.get_adapter_config("adapter.toml", _auth=True)
         self.assertEqual(loaded, {"success": True, "content": 'name = "napcat"\n'})
+
+        invalid_utf8_path = self.root / "invalid-utf8.toml"
+        invalid_utf8_path.write_bytes(b"\xff")
+        with self.assertRaises(HTTPException) as invalid_utf8:
+            await config_routes.get_adapter_config("invalid-utf8.toml", _auth=True)
+        self.assertEqual(invalid_utf8.exception.status_code, 400)
+
+        directory_path = self.root / "directory.toml"
+        directory_path.mkdir()
+        with self.assertRaises(HTTPException) as non_file:
+            await config_routes.get_adapter_config("directory.toml", _auth=True)
+        self.assertEqual(non_file.exception.status_code, 400)
 
         for path, expected_status in [("", 400), ("missing.toml", 404), ("adapter.txt", 400)]:
             with self.subTest(path=path):
@@ -173,6 +548,10 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as missing_content:
             await config_routes.save_adapter_config({"path": "new.toml"}, _auth=True)
         self.assertEqual(missing_content.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as non_string_content:
+            await config_routes.save_adapter_config({"path": "new.toml", "content": {"enabled": True}}, _auth=True)
+        self.assertEqual(non_string_content.exception.status_code, 400)
 
         with self.assertRaises(HTTPException) as invalid_extension:
             await config_routes.save_adapter_config({"path": "new.txt", "content": "name = 'x'\n"}, _auth=True)
@@ -188,6 +567,8 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(saved, {"success": True, "message": "配置已保存"})
         self.assertEqual((self.root / "nested" / "new.toml").read_text(encoding="utf-8"), "enabled = true\n")
+        self.assertEqual((self.root / "nested" / "new.toml").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.root / "nested").stat().st_mode & 0o022, 0)
 
 
 if __name__ == "__main__":

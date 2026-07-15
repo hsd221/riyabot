@@ -276,7 +276,7 @@ class NoticeHandler:
             first_txt = raw_info[2].get("txt", "戳了戳")
             second_txt = raw_info[4].get("txt", "")
         except Exception as e:
-            logger.debug(f"解析戳一戳消息失败，使用默认文本: {str(e)}")
+            logger.debug(f"解析戳一戳消息失败，使用默认文本: error_type={type(e).__name__}")
 
         user_info: UserInfo = UserInfo(
             platform=global_config.maibot_server.platform_name,
@@ -691,7 +691,7 @@ class NoticeHandler:
                     else:
                         await unsuccessful_notice_queue.put(to_be_send)
                 except Exception as e:
-                    logger.error(f"发送通知消息失败: {str(e)}")
+                    logger.error(f"发送通知消息失败: error_type={type(e).__name__}")
                     await unsuccessful_notice_queue.put(to_be_send)
                 await asyncio.sleep(1)
                 continue
@@ -703,7 +703,7 @@ class NoticeHandler:
                 else:
                     await unsuccessful_notice_queue.put(to_be_send)
             except Exception as e:
-                logger.error(f"发送通知消息失败: {str(e)}")
+                logger.error(f"发送通知消息失败: error_type={type(e).__name__}")
                 await unsuccessful_notice_queue.put(to_be_send)
             await asyncio.sleep(1)
 

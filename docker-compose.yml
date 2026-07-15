@@ -4,13 +4,15 @@ services:
   adapters:
     container_name: riyabot-adapters
     #### prod ####
-    image: unclas/maimbot-adapter:latest
+    image: unclas/maimbot-adapter:latest@sha256:6eaa3f3ec872113444357700c2019a8be7b7978845dd06f6fb671fd3e8aa3cc9
     # image: infinitycat/maimbot-adapter:latest
     #### dev ####
     # image: unclas/maimbot-adapter:dev
     # image: infinitycat/maimbot-adapter:dev
     environment:
       - TZ=Asia/Shanghai
+      # 仅支持该变量的新适配器版本会使用它；旧镜像的迁移方式见 README 的 Docker 章节。
+      - MAIBOT_LEGACY_SERVER_TOKEN=${MAIBOT_LEGACY_SERVER_TOKEN:-}
 #    ports:
 #      - "8095:8095"
     volumes:
@@ -27,11 +29,14 @@ services:
     image: riyabot:latest
     environment:
       - TZ=Asia/Shanghai
+      # 跨容器 Legacy WebSocket 推荐配置共享强随机令牌；空令牌且兼容开关为 0 时，核心会回退到回环监听。
+      - MAIBOT_LEGACY_SERVER_TOKEN=${MAIBOT_LEGACY_SERVER_TOKEN:-}
+      - MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER=${MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER:-0}
 #      - EULA_AGREE=1b662741904d7155d1ce1c00b3530d0d # 同意EULA
 #      - PRIVACY_AGREE=9943b855e72199d0f5016ea39052f1b6 # 同意EULA
     ports:
-      - "18001:8001" # webui端口
-#      - "8000:8000"
+      - "${RIYABOT_WEBUI_BIND_ADDRESS:-127.0.0.1}:${RIYABOT_WEBUI_PORT:-18001}:8001" # 默认仅本机访问
+#      - "8000:8000" # 启用远程匿名兼容模式时绝不能发布此端口
     volumes:
       - ./docker-config/mmc/.env:/RiyaBot/.env # 持久化env配置文件
       - ./docker-config/mmc:/RiyaBot/config # 持久化bot配置文件
@@ -42,6 +47,10 @@ services:
       - ./data/RiyaBot/logs:/RiyaBot/logs # 日志目录
       # - site-packages:/usr/local/lib/python3.13/site-packages # 持久化Python包，需要时启用
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - riyabot_net
   napcat:
@@ -50,27 +59,31 @@ services:
       - NAPCAT_GID=1000
       - TZ=Asia/Shanghai
     ports:
-      - "6099:6099"
+      - "${NAPCAT_BIND_ADDRESS:-127.0.0.1}:${NAPCAT_PORT:-6099}:6099"
     volumes:
       - ./docker-config/napcat:/app/napcat/config # 持久化napcat配置文件
       - ./data/qq:/app/.config/QQ # 持久化QQ本体
       - ./data/RiyaBot:/RiyaBot/data # 共享目录
     container_name: riyabot-napcat
     restart: always
-    image: mlikiowa/napcat-docker:latest
+    image: mlikiowa/napcat-docker:latest@sha256:32891e1f5aa654ef84fb4fcfb1724b4d844a26c2fcb11519945e64e22d13e766
     networks:
       - riyabot_net
   sqlite-web:
     # 注意：coleifer/sqlite-web 镜像不支持arm64
-    image: coleifer/sqlite-web
+    image: coleifer/sqlite-web:latest@sha256:1e5b86237968ed747554f951c6df2fc2fe4bf4ef070b8ca23d553d7f6c6426f7
     container_name: sqlite-web
-    restart: always
+    profiles: ["debug"]
+    restart: "no"
     ports:
-      - "8120:8080"
+      - "${SQLITE_WEB_BIND_ADDRESS:-127.0.0.1}:${SQLITE_WEB_PORT:-8120}:8080"
     volumes:
-      - ./data/RiyaBot:/data/RiyaBot
-    environment:
-      - SQLITE_DATABASE=RiyaBot/RiyaBot.db  # 你的数据库文件
+      - ./data/RiyaBot:/data/RiyaBot:ro
+    command: ["-r", "RiyaBot/RiyaBot.db"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - riyabot_net
 

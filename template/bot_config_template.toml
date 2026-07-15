@@ -1,5 +1,5 @@
 [inner]
-version = "7.5.3"
+version = "7.5.4"
 
 #----以下是给开发人员阅读的，如果你只是部署了璃夜，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -292,19 +292,19 @@ show_planner_prompt = false # 是否显示planner的prompt和原始返回结果
 show_lpmm_paragraph = false # 是否显示lpmm找到的相关文段日志
 
 [maim_message]
-auth_token = [] # 认证令牌，用于旧版API验证，为空则不启用验证
+auth_token = [] # 旧版API认证令牌；远程监听必须配置，并与适配器 maibot_server.auth_token 一致
 
 # 新版API Server配置（额外监听端口）
 enable_api_server = false # 是否启用额外的新版API Server
-api_server_host = "0.0.0.0" # 新版API Server主机地址
+api_server_host = "127.0.0.1" # 默认仅本机；远程监听时请同时配置 API Key 和 WSS
 api_server_port = 8090 # 新版API Server端口号
 api_server_use_wss = false # 新版API Server是否启用WSS
 api_server_cert_file = "" # 新版API Server SSL证书文件路径
 api_server_key_file = "" # 新版API Server SSL密钥文件路径
-api_server_allowed_api_keys = [] # 新版API Server允许的API Key列表，为空则允许所有连接
+api_server_allowed_api_keys = [] # 为空时仅本机允许匿名连接；远程监听必须配置 Key
 
-[telemetry] #发送统计信息，主要是看全球有多少只璃夜
-enable = true
+[telemetry] # 发送匿名运行统计；仅允许 HTTPS 端点，默认关闭
+enable = false
 
 [webui] # WebUI 独立服务器配置
 # 注意: WebUI 的监听地址(host)和端口(port)已移至 .env 文件中的 WEBUI_HOST 和 WEBUI_PORT

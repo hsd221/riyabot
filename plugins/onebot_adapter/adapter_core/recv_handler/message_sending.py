@@ -43,11 +43,7 @@ class MessageSending:
                     f"消息大小 ({msg_size_mb:.2f} MB) 超过限制 ({MAX_MESSAGE_SIZE_MB:.0f} MB)，"
                     f"消息已被丢弃以避免连接断开"
                 )
-                logger.warning(
-                    f"被丢弃的消息来源: platform={message_base.message_info.platform}, "
-                    f"group_id={message_base.message_info.group_info.group_id if message_base.message_info.group_info else 'N/A'}, "
-                    f"user_id={message_base.message_info.user_info.user_id if message_base.message_info.user_info else 'N/A'}"
-                )
+                logger.warning("已丢弃超限消息")
                 return False
 
             if msg_size_kb > 1024:  # 超过 1MB 时警告
@@ -59,7 +55,7 @@ class MessageSending:
             logger.debug("消息发送成功")
             return send_status
         except Exception as e:
-            logger.error(f"发送消息失败: {str(e)}")
+            logger.error(f"发送消息失败: error_type={type(e).__name__}")
             return False
 
     async def send_custom_message(self, custom_message: Dict, platform: str, message_type: str) -> bool:
@@ -72,7 +68,7 @@ class MessageSending:
             )
             return True
         except Exception as e:
-            logger.error(f"发送自定义消息失败: {str(e)}")
+            logger.error(f"发送自定义消息失败: error_type={type(e).__name__}")
             return False
 
 

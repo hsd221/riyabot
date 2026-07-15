@@ -14,6 +14,19 @@ from src.config.config import global_config
 
 logger = get_logger("webui.rate_limiter")
 
+PUBLIC_AUTH_RATE_LIMIT_PATHS = frozenset(
+    {
+        "/api/webui/auth/setup",
+        "/api/webui/auth/login",
+        "/api/webui/auth/verify",
+    }
+)
+
+
+def should_rate_limit_auth_path(path: str) -> bool:
+    """仅对未登录认证入口启用 IP 限速。"""
+    return path in PUBLIC_AUTH_RATE_LIMIT_PATHS
+
 
 def is_trusted_proxy(peer_ip: str, config=None) -> bool:
     """判断直连对端是否在显式信任的代理列表中。"""
@@ -275,30 +288,6 @@ async def check_auth_rate_limit(request: Request):
         raise HTTPException(status_code=429, detail="认证请求过于频繁，请稍后重试", headers={"Retry-After": "60"})
 
 
-async def check_api_rate_limit(request: Request):
-    """
-    普通 API 的频率限制依赖
-
-    规则：每个 IP 每分钟最多 100 次请求
-    """
-    limiter = get_rate_limiter()
-
-    # 检查是否被封禁
-    blocked, remaining_block = limiter.is_blocked(request)
-    if blocked:
-        raise HTTPException(
-            status_code=429,
-            detail=f"请求过于频繁，请在 {remaining_block} 秒后重试",
-            headers={"Retry-After": str(remaining_block)},
-        )
-
-    # 检查频率限制
-    allowed, _ = limiter.check_rate_limit(
-        request,
-        max_requests=100,  # 每分钟 100 次
-        window_seconds=60,
-        key_suffix="api",
-    )
-
-    if not allowed:
-        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后重试", headers={"Retry-After": "60"})
+async def check_api_rate_limit(request: Request) -> None:
+    """兼容旧依赖；登录后的普通 API 不再执行 IP 请求数限制。"""
+    del request

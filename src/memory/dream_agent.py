@@ -581,7 +581,9 @@ class DreamTask(AsyncTask):
                     continue
 
                 topic_id = str(topic.get("topic_id") or topic.get("topic_name") or "summary")
-                digest = hashlib.sha1(f"{stream_id}|{topic_id}|{last_active}|{summary}".encode("utf-8")).hexdigest()
+                digest = hashlib.sha1(
+                    f"{stream_id}|{topic_id}|{last_active}|{summary}".encode("utf-8"), usedforsecurity=False
+                ).hexdigest()
                 message_id = f"topic_summary:{digest[:16]}"
 
                 try:
@@ -1273,7 +1275,7 @@ class DreamTask(AsyncTask):
     @staticmethod
     def _soft_cap_digest(entity: str) -> str:
         """生成软上限摘要稳定 ID 的短哈希。"""
-        return hashlib.sha1(entity.encode("utf-8")).hexdigest()[:16]
+        return hashlib.sha1(entity.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
     @classmethod
     def _soft_cap_source_id(cls, entity: str) -> str:

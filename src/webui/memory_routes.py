@@ -17,6 +17,7 @@ from src.memory.schema import (
     initialize_database,
     memory_db,
 )
+from src.webui.error_utils import internal_server_error
 from .auth import verify_auth_token_from_cookie_or_header
 
 logger = get_logger("webui.memory")
@@ -255,8 +256,7 @@ async def get_memory_stats(_auth: bool = Depends(require_auth)):
             noise_pool_count=noise_count,
         )
     except Exception as e:
-        logger.error(f"获取记忆统计失败: {e}")
-        raise HTTPException(status_code=500, detail="获取记忆统计失败") from e
+        raise internal_server_error(logger, "获取记忆统计失败", e) from None
 
 
 @router.get("/atoms", response_model=AtomListResponse)
@@ -281,19 +281,14 @@ async def get_memory_atoms(
             query = query.where(*conditions)
 
         total = query.count()
-        items = (
-            query.order_by(MemoryAtom.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        items = query.order_by(MemoryAtom.created_at.desc()).limit(limit).offset(offset)
 
         return AtomListResponse(
             items=[AtomData(**_atom_to_dict(item)) for item in items],
             total=total,
         )
     except Exception as e:
-        logger.error(f"获取记忆原子列表失败: {e}")
-        raise HTTPException(status_code=500, detail="获取记忆原子列表失败") from e
+        raise internal_server_error(logger, "获取记忆原子列表失败", e) from None
 
 
 @router.get("/atoms/{atom_id}", response_model=AtomDetailResponse)
@@ -311,8 +306,7 @@ async def get_memory_atom_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取记忆原子详情失败: {e}")
-        raise HTTPException(status_code=500, detail="获取记忆原子详情失败") from e
+        raise internal_server_error(logger, "获取记忆原子详情失败", e) from None
 
 
 @router.get("/dream-runs", response_model=DreamRunListResponse)
@@ -325,20 +319,14 @@ async def get_dream_runs(
     try:
         _ensure_memory_database_ready()
         total = DreamRun.select().count()
-        items = (
-            DreamRun.select()
-            .order_by(DreamRun.start_time.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        items = DreamRun.select().order_by(DreamRun.start_time.desc()).limit(limit).offset(offset)
 
         return DreamRunListResponse(
             items=[DreamRunData(**_dream_run_to_dict(item)) for item in items],
             total=total,
         )
     except Exception as e:
-        logger.error(f"获取梦境运行记录失败: {e}")
-        raise HTTPException(status_code=500, detail="获取梦境运行记录失败") from e
+        raise internal_server_error(logger, "获取梦境运行记录失败", e) from None
 
 
 @router.get("/insights", response_model=InsightPoolListResponse)
@@ -351,20 +339,14 @@ async def get_insights(
     try:
         _ensure_memory_database_ready()
         total = InsightPool.select().count()
-        items = (
-            InsightPool.select()
-            .order_by(InsightPool.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        items = InsightPool.select().order_by(InsightPool.created_at.desc()).limit(limit).offset(offset)
 
         return InsightPoolListResponse(
             items=[InsightPoolData(**_insight_to_dict(item)) for item in items],
             total=total,
         )
     except Exception as e:
-        logger.error(f"获取洞见列表失败: {e}")
-        raise HTTPException(status_code=500, detail="获取洞见列表失败") from e
+        raise internal_server_error(logger, "获取洞见列表失败", e) from None
 
 
 @router.get("/noise-pool", response_model=NoisePoolListResponse)
@@ -377,17 +359,11 @@ async def get_noise_pool(
     try:
         _ensure_memory_database_ready()
         total = NoisePool.select().count()
-        items = (
-            NoisePool.select()
-            .order_by(NoisePool.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        items = NoisePool.select().order_by(NoisePool.created_at.desc()).limit(limit).offset(offset)
 
         return NoisePoolListResponse(
             items=[NoisePoolData(**_noise_to_dict(item)) for item in items],
             total=total,
         )
     except Exception as e:
-        logger.error(f"获取噪声池列表失败: {e}")
-        raise HTTPException(status_code=500, detail="获取噪声池列表失败") from e
+        raise internal_server_error(logger, "获取噪声池列表失败", e) from None

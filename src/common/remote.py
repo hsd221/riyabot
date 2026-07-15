@@ -1,4 +1,6 @@
 import asyncio
+import os
+from urllib.parse import urlsplit
 
 import aiohttp
 import platform
@@ -15,12 +17,40 @@ TELEMETRY_SERVER_URL = "http://hyybuth.xyz:10058"
 """遥测服务地址"""
 
 
+def _is_telemetry_transport_allowed(url: str) -> bool:
+    """仅允许加密遥测；旧 HTTP 端点需要部署者显式选择承担风险。"""
+    if (
+        not isinstance(url, str)
+        or not url
+        or url != url.strip()
+        or len(url) > 2048
+        or any(ord(char) < 32 or ord(char) == 127 for char in url)
+    ):
+        return False
+
+    try:
+        parsed = urlsplit(url)
+        _ = parsed.port
+    except ValueError:
+        return False
+
+    if not parsed.hostname or parsed.username is not None or parsed.password is not None or "?" in url or "#" in url:
+        return False
+    if parsed.scheme == "https":
+        return True
+    return parsed.scheme == "http" and os.getenv("MAIBOT_ALLOW_INSECURE_TELEMETRY", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 class TelemetryHeartBeatTask(AsyncTask):
     HEARTBEAT_INTERVAL = 300
 
     def __init__(self):
         super().__init__(task_name="Telemetry Heart Beat Task", run_interval=self.HEARTBEAT_INTERVAL)
-        self.server_url = TELEMETRY_SERVER_URL
+        self.server_url = os.getenv("MAIBOT_TELEMETRY_SERVER_URL", TELEMETRY_SERVER_URL).rstrip("/")
         """遥测服务地址"""
 
         self.client_uuid: str | None = local_storage["mmc_uuid"] if "mmc_uuid" in local_storage else None  # type: ignore
@@ -55,6 +85,14 @@ class TelemetryHeartBeatTask(AsyncTask):
         向服务端请求UUID（不应在已存在UUID的情况下调用，会覆盖原有的UUID）
         """
 
+        if not _is_telemetry_transport_allowed(self.server_url):
+            logger.warning(
+                "遥测端点未使用 HTTPS，已拒绝发送",
+                event_code="telemetry.insecure_transport_blocked",
+                remediation="配置 MAIBOT_TELEMETRY_SERVER_URL 为 HTTPS 地址，或显式设置 MAIBOT_ALLOW_INSECURE_TELEMETRY=1",
+            )
+            return False
+
         if "deploy_time" not in local_storage:
             logger.error("本地存储缺少部署时间，无法请求 UUID", event_code="telemetry.uuid.deploy_time_missing")
             return False
@@ -67,7 +105,7 @@ class TelemetryHeartBeatTask(AsyncTask):
             try:
                 async with aiohttp.ClientSession(connector=await get_tcp_connector()) as session:
                     async with session.post(
-                        f"{TELEMETRY_SERVER_URL}/stat/reg_client",
+                        f"{self.server_url}/stat/reg_client",
                         json={"deploy_time": local_storage["deploy_time"]},
                         timeout=aiohttp.ClientTimeout(total=5),  # 设置超时时间为5秒
                     ) as response:
@@ -93,20 +131,16 @@ class TelemetryHeartBeatTask(AsyncTask):
                             else:
                                 logger.error("遥测 UUID 响应缺少 UUID", event_code="telemetry.uuid.invalid_response")
                         else:
-                            response_text = await response.text()
                             logger.error(
                                 "遥测 UUID 请求失败，主程序继续运行",
                                 event_code="telemetry.uuid.request_failed",
                                 status_code=response.status,
-                                response=response_text,
                             )
             except Exception as e:
                 logger.warning(
                     "遥测 UUID 请求异常，主程序继续运行",
                     event_code="telemetry.uuid.request_exception",
                     error_type=type(e).__name__,
-                    error=str(e) or "未知错误",
-                    exc_info=True,
                 )
 
             # 请求失败，重试次数+1
@@ -122,6 +156,14 @@ class TelemetryHeartBeatTask(AsyncTask):
 
     async def _send_heartbeat(self):
         """向服务器发送心跳"""
+        if not _is_telemetry_transport_allowed(self.server_url):
+            logger.warning(
+                "遥测端点未使用 HTTPS，已拒绝发送",
+                event_code="telemetry.insecure_transport_blocked",
+                remediation="配置 MAIBOT_TELEMETRY_SERVER_URL 为 HTTPS 地址，或显式设置 MAIBOT_ALLOW_INSECURE_TELEMETRY=1",
+            )
+            return
+
         headers = {
             "Client-UUID": self.client_uuid,
             "User-Agent": f"HeartbeatClient/{self.client_uuid[:8]}",  # type: ignore
@@ -130,7 +172,7 @@ class TelemetryHeartBeatTask(AsyncTask):
         logger.debug(
             "遥测心跳开始发送",
             event_code="telemetry.heartbeat.send_started",
-            server_url=self.server_url,
+            server_url_hash=hash_id(self.server_url),
             uuid_hash=hash_id(self.client_uuid),
         )
 
@@ -162,20 +204,16 @@ class TelemetryHeartBeatTask(AsyncTask):
                         del local_storage["mmc_uuid"]  # 删除本地存储的UUID
                     else:
                         # 其他错误
-                        response_text = await response.text()
                         logger.warning(
                             "遥测心跳发送失败，主程序继续运行",
                             event_code="telemetry.heartbeat.failed",
                             status_code=response.status,
-                            response=response_text,
                         )
         except Exception as e:
             logger.warning(
                 "遥测心跳发送异常，主程序继续运行",
                 event_code="telemetry.heartbeat.exception",
                 error_type=type(e).__name__,
-                error=str(e) or "未知错误",
-                exc_info=True,
             )
 
     async def run(self):

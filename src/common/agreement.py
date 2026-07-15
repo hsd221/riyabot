@@ -56,7 +56,7 @@ def _read_text(path: Path, file_type: str) -> str:
 def calculate_file_hash(file_path: Path, file_type: str) -> str:
     """计算协议文件的 MD5 哈希值。"""
     content = _read_text(file_path, file_type)
-    return hashlib.md5(content.encode("utf-8")).hexdigest()
+    return hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _check_confirmation(file_hash: str, confirm_file: Path, env_var: str) -> tuple[bool, bool, bool]:
@@ -78,7 +78,7 @@ def get_agreement_status(include_content: bool = False) -> dict[str, AgreementDo
         file_name = info["file_name"]
         file_path = PROJECT_ROOT / file_name
         content = _read_text(file_path, file_name)
-        file_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+        file_hash = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
         confirmed, file_confirmed, environment_confirmed = _check_confirmation(
             file_hash,
             PROJECT_ROOT / info["confirmation_file_name"],

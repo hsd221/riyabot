@@ -250,7 +250,7 @@ export function SetupPage() {
           if (!initialPasswordConfigured) {
             const passwordValidation = validatePassword(password)
             if (!passwordValidation.isValid) {
-              throw new Error('密码必须为 8-16 位，并同时包含英文字母和数字')
+              throw new Error('密码必须为 8-128 位，并同时包含字母和数字，且不能含控制字符')
             }
             if (password !== passwordConfirm) {
               throw new Error('两次输入的密码不一致')

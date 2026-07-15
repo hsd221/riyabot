@@ -23,7 +23,7 @@ def get_person_id(platform: str = "", user_id: str | int = "") -> str:
         platform = platform.split("-")[1]
     components = [platform, str(user_id)]
     key = "_".join(components)
-    return hashlib.md5(key.encode()).hexdigest()
+    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()
 
 
 class Person:

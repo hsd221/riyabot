@@ -2,10 +2,13 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from fastapi import HTTPException
 from playhouse.sqlite_ext import SqliteExtDatabase
 
 from src.common.database.database_model import BehaviorPattern, ChatStreams
+from src.webui import behavior_routes
 from src.webui.behavior_routes import behavior_to_response, get_behavior_stats_data
 
 
@@ -103,6 +106,30 @@ class BehaviorRoutesTest(unittest.TestCase):
         self.assertEqual(stats["top_chats"], {"chat-a": 1, "chat-b": 1})
         self.assertEqual(stats["actor_type_counts"], {"maibot_self": 1, "other_user": 1})
         self.assertEqual(stats["learning_type_counts"], {"observed_behavior": 1, "self_reflection": 1})
+
+
+class BehaviorRouteSecurityTest(unittest.IsolatedAsyncioTestCase):
+    async def test_internal_failures_are_sanitized(self) -> None:
+        secret = 'database error at /private/behavior.db: token="super-secret"'
+        with (
+            patch.object(behavior_routes, "verify_auth_token", return_value=True),
+            patch.object(behavior_routes.BehaviorPattern, "select", side_effect=RuntimeError(secret)),
+            patch.object(behavior_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as failure,
+        ):
+            await behavior_routes.get_behavior_list(
+                page=1,
+                page_size=20,
+                search=None,
+                chat_id=None,
+                enabled=None,
+                actor_type=None,
+                learning_type=None,
+            )
+
+        self.assertEqual(failure.exception.status_code, 500)
+        self.assertEqual(failure.exception.detail, "获取行为模式列表失败")
+        self.assertNotIn(secret, repr(logged.call_args))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from src.webui import (
     auth,
@@ -17,6 +19,7 @@ from src.webui import (
     plugin_progress_ws,
     rate_limiter,
     routes as webui_routes,
+    token_manager,
     webui_server,
 )
 from src.webui.token_manager import TokenManager
@@ -58,9 +61,74 @@ class WebUIPasswordAuthTest(unittest.TestCase):
 
             self.assertEqual(path.read_text(encoding="utf-8"), "{not-valid-json")
 
-    def test_password_policy_requires_ascii_letters_digits_and_eight_to_sixteen_chars(self) -> None:
-        valid = ("a1b2c3d4", "A1234567", "abcDEF1234567890")
-        invalid = ("", "abc1234", "abc12345678901234", "abcdefgh", "12345678", "abc1234!", "中文123456")
+    def test_webui_config_rejects_oversized_files_and_removes_parent_write_access(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            os.chmod(root, 0o777)
+            path = root / "webui.json"
+            manager = TokenManager(path)
+
+            self.assertEqual(root.stat().st_mode & 0o022, 0)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+            path.write_text(
+                json.dumps({"padding": "x" * (manager.MAX_CONFIG_BYTES + 1)}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError):
+                TokenManager(path)
+
+    def test_webui_config_supports_platforms_without_fchmod(self) -> None:
+        os_without_fchmod = SimpleNamespace(**{name: getattr(os, name) for name in dir(os) if name != "fchmod"})
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(token_manager, "os", os_without_fchmod):
+            path = Path(tmp_dir) / "webui.json"
+            manager = TokenManager(path)
+            self.assertFalse(manager.is_password_configured())
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "platform does not support symlinks")
+    def test_webui_config_and_lock_files_reject_symbolic_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir, tempfile.TemporaryDirectory() as outside_dir:
+            root = Path(tmp_dir)
+            outside = Path(outside_dir)
+            external_config = outside / "external.json"
+            original_config = json.dumps({"access_token": "LegacyToken123", "first_setup_completed": True})
+            external_config.write_text(original_config, encoding="utf-8")
+            linked_config = root / "webui.json"
+            linked_config.symlink_to(external_config)
+
+            with self.assertRaises(RuntimeError):
+                TokenManager(linked_config)
+
+            self.assertTrue(linked_config.is_symlink())
+            self.assertEqual(external_config.read_text(encoding="utf-8"), original_config)
+
+            linked_config.unlink()
+            external_lock = outside / "external.lock"
+            external_lock.write_text("do-not-open", encoding="utf-8")
+            (root / "webui.json.lock").symlink_to(external_lock)
+
+            with self.assertRaises(RuntimeError):
+                TokenManager(linked_config)
+
+            self.assertEqual(external_lock.read_text(encoding="utf-8"), "do-not-open")
+
+    def test_password_policy_allows_long_passphrases_symbols_and_unicode(self) -> None:
+        valid = (
+            "a1b2c3d4",
+            "abcDEF1234567890",
+            "correct horse battery staple 7!",
+            "璃夜安全密码123!",
+            "A1" + "x" * 126,
+        )
+        invalid = (
+            "",
+            "abc1234",
+            "abcdefgh",
+            "12345678",
+            "abc1234\n",
+            "A1" + "x" * 127,
+        )
 
         for password in valid:
             with self.subTest(password=password):
@@ -69,6 +137,15 @@ class WebUIPasswordAuthTest(unittest.TestCase):
         for password in invalid:
             with self.subTest(password=password):
                 self.assertFalse(TokenManager.validate_password(password)[0])
+
+        longest = "A1" + "x" * 126
+        self.assertEqual(webui_routes.PasswordSetupRequest(password=longest).password, longest)
+        self.assertEqual(
+            webui_routes.PasswordChangeRequest(current_password="old-password", new_password=longest).new_password,
+            longest,
+        )
+        with self.assertRaises(ValidationError):
+            webui_routes.PasswordSetupRequest(password="A1" + "x" * 127)
 
     def test_untrusted_scrypt_parameters_are_rejected_before_hashing(self) -> None:
         encoded = "scrypt$1048576$8$1$c2FsdHNhbHRzYWx0c2FsdA$ZGlnZXN0"
@@ -170,6 +247,18 @@ class WebUIPasswordRoutesTest(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
 
+    def test_only_public_auth_entrypoints_have_ip_rate_limit_dependency(self) -> None:
+        limited_paths = {
+            route.path
+            for route in webui_routes.router.routes
+            if any(
+                dependency.call is rate_limiter.check_auth_rate_limit
+                for dependency in getattr(getattr(route, "dependant", None), "dependencies", ())
+            )
+        }
+
+        self.assertEqual(limited_paths, set(rate_limiter.PUBLIC_AUTH_RATE_LIMIT_PATHS))
+
     async def test_auth_check_and_initial_password_setup_issue_a_session_once(self) -> None:
         with patch.object(webui_routes, "get_token_manager", return_value=self.manager):
             initial = await webui_routes.check_auth_status(self.request, maibot_session=None, authorization=None)
@@ -240,17 +329,21 @@ class WebUIPasswordRoutesTest(unittest.IsolatedAsyncioTestCase):
     async def test_password_change_requires_current_password_and_revokes_old_session(self) -> None:
         self.assertTrue(self.manager.set_initial_password("abc12345")[0])
         session = self.manager.create_session()
+        limiter = Mock()
 
-        with patch.object(webui_routes, "get_token_manager", return_value=self.manager):
+        with (
+            patch.object(webui_routes, "get_token_manager", return_value=self.manager),
+            patch.object(webui_routes, "get_rate_limiter", return_value=limiter),
+        ):
             with self.assertRaises(HTTPException) as wrong_password:
                 await webui_routes.change_password(
                     webui_routes.PasswordChangeRequest(current_password="wrong123", new_password="def45678"),
                     Response(),
                     self.request,
                     maibot_session=session,
-                    _rate_limit=None,
                 )
         self.assertEqual(wrong_password.exception.status_code, 400)
+        limiter.record_failed_attempt.assert_not_called()
 
         with (
             patch.object(webui_routes, "get_token_manager", return_value=self.manager),
@@ -261,7 +354,6 @@ class WebUIPasswordRoutesTest(unittest.IsolatedAsyncioTestCase):
                 Response(),
                 self.request,
                 maibot_session=session,
-                _rate_limit=None,
             )
 
         self.assertTrue(changed.success)
@@ -371,6 +463,23 @@ class WebUISessionTransportTest(unittest.IsolatedAsyncioTestCase):
 
 
 class WebUISecurityHardeningTest(unittest.TestCase):
+    def test_request_validation_errors_do_not_echo_secret_input(self) -> None:
+        server = object.__new__(webui_server.WebUIServer)
+        server.app = FastAPI()
+        server._setup_exception_handlers()
+
+        @server.app.post("/password")
+        async def validate_password_request(payload: webui_routes.PasswordSetupRequest):
+            return payload
+
+        secret = "A1" + "secret-value-" * 20
+        with TestClient(server.app, raise_server_exceptions=False) as client:
+            response = client.post("/password", json={"password": secret})
+
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn(secret, response.text)
+        self.assertNotIn('"input"', response.text)
+
     def test_auth_cookie_is_strict_and_automatically_secure_on_https(self) -> None:
         fake_config = SimpleNamespace(webui=SimpleNamespace(secure_cookie=False, mode="development"))
         request = SimpleNamespace(headers={}, url=SimpleNamespace(scheme="https"))

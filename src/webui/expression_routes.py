@@ -3,8 +3,9 @@
 from fastapi import APIRouter, HTTPException, Header, Query, Cookie
 from pydantic import BaseModel
 from typing import Optional, List, Dict
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.common.database.database_model import Expression, ChatStreams
+from src.webui.error_utils import internal_server_error, log_exception_type
 from .auth import verify_auth_token_from_cookie_or_header
 import time
 
@@ -136,7 +137,7 @@ def get_chat_names_batch(chat_ids: List[str]) -> Dict[str, str]:
             elif cs.user_nickname:
                 result[cs.stream_id] = cs.user_nickname
     except Exception as e:
-        logger.warning(f"批量获取聊天名称失败: {e}")
+        log_exception_type(logger, "批量获取聊天名称失败", e, level="warning")
     return result
 
 
@@ -190,8 +191,7 @@ async def get_chat_list(maibot_session: Optional[str] = Cookie(None), authorizat
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取聊天列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取聊天列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取聊天列表失败", e) from None
 
 
 @router.get("/list", response_model=ExpressionListResponse)
@@ -252,8 +252,7 @@ async def get_expression_list(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取表达方式列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取表达方式列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取表达方式列表失败", e) from None
 
 
 @router.get("/{expression_id}", response_model=ExpressionDetailResponse)
@@ -283,8 +282,7 @@ async def get_expression_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取表达方式详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取表达方式详情失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取表达方式详情失败", e) from None
 
 
 @router.post("/", response_model=ExpressionCreateResponse)
@@ -317,7 +315,7 @@ async def create_expression(
             create_date=current_time,
         )
 
-        logger.info(f"表达方式已创建: ID={expression.id}, situation={request.situation}")
+        logger.info("表达方式已创建", expression_id=expression.id, situation_hash=hash_id(request.situation))
 
         return ExpressionCreateResponse(
             success=True, message="表达方式创建成功", data=expression_to_response(expression)
@@ -326,8 +324,7 @@ async def create_expression(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"创建表达方式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"创建表达方式失败: {str(e)}") from e
+        raise internal_server_error(logger, "创建表达方式失败", e) from None
 
 
 @router.patch("/{expression_id}", response_model=ExpressionUpdateResponse)
@@ -385,7 +382,7 @@ async def update_expression(
 
         expression.save()
 
-        logger.info(f"表达方式已更新: ID={expression_id}, 字段: {list(update_data.keys())}")
+        logger.info("表达方式已更新", expression_id=expression_id, fields=list(update_data.keys()))
 
         return ExpressionUpdateResponse(
             success=True, message=f"成功更新 {len(update_data)} 个字段", data=expression_to_response(expression)
@@ -394,8 +391,7 @@ async def update_expression(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"更新表达方式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新表达方式失败: {str(e)}") from e
+        raise internal_server_error(logger, "更新表达方式失败", e) from None
 
 
 @router.delete("/{expression_id}", response_model=ExpressionDeleteResponse)
@@ -426,15 +422,14 @@ async def delete_expression(
         # 执行删除
         expression.delete_instance()
 
-        logger.info(f"表达方式已删除: ID={expression_id}, situation={situation}")
+        logger.info("表达方式已删除", expression_id=expression_id, situation_hash=hash_id(situation))
 
         return ExpressionDeleteResponse(success=True, message=f"成功删除表达方式: {situation}")
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"删除表达方式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除表达方式失败: {str(e)}") from e
+        raise internal_server_error(logger, "删除表达方式失败", e) from None
 
 
 class BatchDeleteRequest(BaseModel):
@@ -472,20 +467,19 @@ async def batch_delete_expressions(
         # 检查是否有未找到的ID
         not_found_ids = set(request.ids) - set(found_ids)
         if not_found_ids:
-            logger.warning(f"部分表达方式未找到: {not_found_ids}")
+            logger.warning("部分表达方式未找到", expression_ids=sorted(not_found_ids))
 
         # 执行批量删除
         deleted_count = Expression.delete().where(Expression.id.in_(found_ids)).execute()
 
-        logger.info(f"批量删除了 {deleted_count} 个表达方式")
+        logger.info("批量删除表达方式完成", deleted_count=deleted_count)
 
         return ExpressionDeleteResponse(success=True, message=f"成功删除 {deleted_count} 个表达方式")
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"批量删除表达方式失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除表达方式失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量删除表达方式失败", e) from None
 
 
 @router.get("/stats/summary")
@@ -533,8 +527,7 @@ async def get_expression_stats(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取统计数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取统计数据失败", e) from None
 
 
 # ============ 审核相关接口 ============
@@ -581,8 +574,7 @@ async def get_review_stats(maibot_session: Optional[str] = Cookie(None), authori
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取审核统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取审核统计失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取审核统计失败", e) from None
 
 
 class ReviewListResponse(BaseModel):
@@ -660,8 +652,7 @@ async def get_review_list(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取审核列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取审核列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取审核列表失败", e) from None
 
 
 class BatchReviewItem(BaseModel):
@@ -757,10 +748,11 @@ async def batch_review_expressions(
                 succeeded += 1
 
             except Exception as e:
-                results.append(BatchReviewResultItem(id=item.id, success=False, message=str(e)))
+                log_exception_type(logger, "审核表达方式失败", e, item_id=item.id)
+                results.append(BatchReviewResultItem(id=item.id, success=False, message="审核失败"))
                 failed += 1
 
-        logger.info(f"批量审核完成: 成功 {succeeded}, 失败 {failed}")
+        logger.info("批量审核表达方式完成", succeeded=succeeded, failed=failed)
 
         return BatchReviewResponse(
             success=True, total=len(request.items), succeeded=succeeded, failed=failed, results=results
@@ -769,5 +761,4 @@ async def batch_review_expressions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"批量审核失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量审核失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量审核失败", e) from None

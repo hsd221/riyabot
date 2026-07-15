@@ -155,6 +155,26 @@ class JargonRoutesTest(WebUICrudRoutesTestCase):
             await jargon_routes.delete_jargon(created.data.id)
         self.assertEqual(missing_delete.exception.status_code, 404)
 
+    async def test_jargon_internal_failures_are_sanitized(self) -> None:
+        secret = 'database error at /private/jargon.db: token="super-secret"'
+        with (
+            patch.object(jargon_routes.Jargon, "select", side_effect=RuntimeError(secret)),
+            patch.object(jargon_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as failure,
+        ):
+            await jargon_routes.get_jargon_list(
+                search=None,
+                chat_id=None,
+                is_jargon=None,
+                is_global=None,
+                page=1,
+                page_size=20,
+            )
+
+        self.assertEqual(failure.exception.status_code, 500)
+        self.assertEqual(failure.exception.detail, "获取黑话列表失败")
+        self.assertNotIn(secret, repr(logged.call_args))
+
 
 class ExpressionRoutesTest(WebUICrudRoutesTestCase):
     def setUp(self) -> None:
@@ -309,6 +329,33 @@ class ExpressionRoutesTest(WebUICrudRoutesTestCase):
         with self.assertRaises(HTTPException) as missing_delete:
             await expression_routes.delete_expression(rejected.id)
         self.assertEqual(missing_delete.exception.status_code, 404)
+
+    async def test_expression_internal_and_batch_item_failures_are_sanitized(self) -> None:
+        secret = 'database error at /private/expression.db: token="super-secret"'
+        with (
+            patch.object(expression_routes.Expression, "select", side_effect=RuntimeError(secret)),
+            patch.object(expression_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as list_failure,
+        ):
+            await expression_routes.get_expression_list(search=None, chat_id=None, page=1, page_size=20)
+
+        self.assertEqual(list_failure.exception.status_code, 500)
+        self.assertEqual(list_failure.exception.detail, "获取表达方式列表失败")
+        self.assertNotIn(secret, repr(logged.call_args))
+
+        with (
+            patch.object(expression_routes.Expression, "get_or_none", side_effect=RuntimeError(secret)),
+            patch.object(expression_routes.logger, "error") as logged,
+        ):
+            batch = await expression_routes.batch_review_expressions(
+                expression_routes.BatchReviewRequest(
+                    items=[expression_routes.BatchReviewItem(id=1, rejected=False, require_unchecked=False)]
+                )
+            )
+
+        self.assertEqual(batch.failed, 1)
+        self.assertEqual(batch.results[0].message, "审核失败")
+        self.assertNotIn(secret, repr(logged.call_args))
 
 
 if __name__ == "__main__":

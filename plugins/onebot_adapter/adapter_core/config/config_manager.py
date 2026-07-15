@@ -42,7 +42,7 @@ class ConfigManager:
         self._config_path = os.path.abspath(config_path)
         self._config = load_config(config_path)
 
-        logger.info(f"配置已加载: {config_path}")
+        logger.info("配置已加载")
 
     async def reload(self, config_path: Optional[str] = None) -> bool:
         """重载配置文件（热重载）
@@ -65,11 +65,11 @@ class ConfigManager:
                     await self._notify_changes(old_config, new_config)
 
                 self._config = new_config
-                logger.info(f"配置重载成功: {config_path}")
+                logger.info("配置重载成功")
                 return True
 
             except Exception as e:
-                logger.error(f"配置重载失败: {e}", exc_info=True)
+                logger.error(f"配置重载失败: error_type={type(e).__name__}")
                 return False
 
     def on_config_change(self, config_path: str, callback: Callable[[Any, Any], Any]) -> None:
@@ -105,9 +105,9 @@ class ConfigManager:
                             else:
                                 callback(old_value, new_value)
                         except Exception as e:
-                            logger.error(f"配置变更回调执行失败 [{config_path}]: {e}", exc_info=True)
+                            logger.error(f"配置变更回调执行失败: error_type={type(e).__name__}")
             except Exception as e:
-                logger.error(f"获取配置值失败 [{config_path}]: {e}")
+                logger.error(f"获取配置值失败: error_type={type(e).__name__}")
 
     def _get_value(self, config: Config, path: str) -> Any:
         """获取嵌套配置值

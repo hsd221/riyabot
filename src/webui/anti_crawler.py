@@ -13,6 +13,8 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from src.common.logger import get_logger
+from src.webui.error_utils import log_exception_type
+from src.webui.rate_limiter import should_rate_limit_auth_path
 
 logger = get_logger("webui.anti_crawler")
 
@@ -164,7 +166,7 @@ def _parse_allowed_ips(ip_string: str) -> list:
             if pattern:
                 allowed.append(pattern)
             else:
-                logger.warning(f"无效的通配符IP格式，已忽略: {ip_entry}")
+                logger.warning("无效的通配符 IP 格式，已忽略")
             continue
 
         try:
@@ -175,7 +177,7 @@ def _parse_allowed_ips(ip_string: str) -> list:
                 # 精确IP地址
                 allowed.append(ipaddress.ip_address(ip_entry))
         except (ValueError, AttributeError) as e:
-            logger.warning(f"无效的IP白名单条目，已忽略: {ip_entry} ({e})")
+            log_exception_type(logger, "无效的 IP 白名单条目，已忽略", e, level="warning")
 
     return allowed
 
@@ -771,7 +773,7 @@ class AntiCrawlerMiddleware(BaseHTTPMiddleware):
                 )
 
         # 检查请求频率限制
-        if self.check_rate_limit and self._check_rate_limit(client_ip):
+        if self.check_rate_limit and should_rate_limit_auth_path(path) and self._check_rate_limit(client_ip):
             logger.warning("请求频率过高", ip=client_ip, user_agent=user_agent, path=request.url.path)
             return PlainTextResponse(
                 "Too Many Requests: Rate limit exceeded",

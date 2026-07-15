@@ -282,7 +282,7 @@ class ImageManager:
         if isinstance(image_base64, str):
             image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
         image_bytes = base64.b64decode(image_base64)
-        image_hash = hashlib.md5(image_bytes).hexdigest()
+        image_hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
         emoji = await emoji_manager.get_emoji_from_manager(image_hash)
         if not emoji:
             return "[表情包：未知]"
@@ -339,7 +339,7 @@ class ImageManager:
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
             image_bytes = base64.b64decode(image_base64)
-            image_hash = hashlib.md5(image_bytes).hexdigest()
+            image_hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
             image_format = Image.open(io.BytesIO(image_bytes)).format.lower()  # type: ignore
             is_gif = image_format == "gif"
 
@@ -482,7 +482,7 @@ class ImageManager:
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
             image_bytes = base64.b64decode(image_base64)
-            image_hash = hashlib.md5(image_bytes).hexdigest()
+            image_hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
 
             # 优先检查Images表中是否已有完整的描述
             existing_image = Images.get_or_none(Images.emoji_hash == image_hash)
@@ -620,7 +620,7 @@ class ImageManager:
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
             image_bytes = base64.b64decode(image_base64)
-            image_hash = hashlib.md5(image_bytes).hexdigest()
+            image_hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
 
             if existing_image := Images.get_or_none(Images.emoji_hash == image_hash):
                 # 检查是否缺少必要字段，如果缺少则创建新记录
@@ -691,7 +691,7 @@ class ImageManager:
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
             image_bytes = base64.b64decode(image_base64)
-            image_hash = hashlib.md5(image_bytes).hexdigest()
+            image_hash = hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
 
             # 获取当前图片记录
             image = Images.get(Images.image_id == image_id)

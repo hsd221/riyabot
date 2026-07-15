@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, Depends, Cookie, Header
 from pydantic import BaseModel
 import logging
+from src.common.logger import hash_id
 from src.webui.auth import verify_auth_token_from_cookie_or_header
 
 logger = logging.getLogger(__name__)
@@ -76,5 +77,5 @@ async def get_knowledge_stats(_auth: bool = Depends(require_auth)):
 @router.get("/search", response_model=List[KnowledgeNode])
 async def search_knowledge_node(query: str = Query(..., min_length=1), _auth: bool = Depends(require_auth)):
     """搜索知识节点 — LPMM 已移除，返回空列表"""
-    logger.info(f"LPMM 知识库已移除，知识搜索不可用 (query={query})")
+    logger.info("LPMM 知识库已移除，知识搜索不可用", extra={"query_hash": hash_id(query)})
     return []

@@ -437,7 +437,7 @@ def _stream_id_from_blacklist_entry(entry: str) -> Optional[str]:
         key = f"{platform}_{chat_id}_private"
     else:
         return None
-    return hashlib.md5(key.encode()).hexdigest()
+    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()
 
 
 def _global_memory_blacklist_source_ids() -> set[str]:

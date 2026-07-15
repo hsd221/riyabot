@@ -1,6 +1,6 @@
 """璃夜 2025 年度总结 API 路由"""
 
-from fastapi import APIRouter, HTTPException, Depends, Cookie, Header
+from fastapi import APIRouter, Depends, Cookie, Header
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -18,6 +18,7 @@ from src.common.database.database_model import (
     Jargon,
 )
 from src.webui.auth import verify_auth_token_from_cookie_or_header
+from src.webui.error_utils import internal_server_error, log_exception_type
 
 logger = get_logger("webui.annual_report")
 
@@ -221,7 +222,7 @@ async def get_time_footprint(year: int = 2025) -> TimeFootprintData:
         data.is_night_owl = night_activity > morning_activity
 
     except Exception as e:
-        logger.error(f"获取时光足迹数据失败: {e}")
+        log_exception_type(logger, "获取时光足迹数据失败", e)
 
     return data
 
@@ -326,7 +327,7 @@ async def get_social_network(year: int = 2025) -> SocialNetworkData:
             data.longest_companion_days = int(duration / 86400)  # 转换为天
 
     except Exception as e:
-        logger.error(f"获取社交网络数据失败: {e}")
+        log_exception_type(logger, "获取社交网络数据失败", e)
 
     return data
 
@@ -502,7 +503,7 @@ async def get_brain_power(year: int = 2025) -> BrainPowerData:
                 data.max_reasoning_time = datetime.fromtimestamp(max_len_time).strftime("%Y-%m-%d %H:%M:%S")
 
     except Exception as e:
-        logger.error(f"获取最强大脑数据失败: {e}")
+        log_exception_type(logger, "获取最强大脑数据失败", e)
 
     return data
 
@@ -749,7 +750,7 @@ async def get_expression_vibe(year: int = 2025) -> ExpressionVibeData:
                 }
 
     except Exception as e:
-        logger.error(f"获取个性与表达数据失败: {e}")
+        log_exception_type(logger, "获取个性与表达数据失败", e)
 
     return data
 
@@ -794,7 +795,7 @@ async def get_achievements(year: int = 2025) -> AchievementData:
         )
 
     except Exception as e:
-        logger.error(f"获取趣味成就数据失败: {e}")
+        log_exception_type(logger, "获取趣味成就数据失败", e)
 
     return data
 
@@ -816,7 +817,7 @@ async def get_full_annual_report(year: int = 2025, _auth: bool = Depends(require
     try:
         from src.config.config import global_config
 
-        logger.info(f"开始生成 {year} 年度报告...")
+        logger.info("开始生成年度报告", year=year)
 
         # 获取 bot 名称
         bot_name = global_config.bot.nickname or "璃夜"
@@ -839,12 +840,11 @@ async def get_full_annual_report(year: int = 2025, _auth: bool = Depends(require
             achievements=achievements,
         )
 
-        logger.info(f"{year} 年度报告生成完成")
+        logger.info("年度报告生成完成", year=year)
         return report
 
     except Exception as e:
-        logger.error(f"生成年度报告失败: {e}")
-        raise HTTPException(status_code=500, detail=f"生成年度报告失败: {str(e)}") from e
+        raise internal_server_error(logger, "生成年度报告失败", e) from None
 
 
 @router.get("/time-footprint", response_model=TimeFootprintData)
@@ -853,8 +853,7 @@ async def get_time_footprint_api(year: int = 2025, _auth: bool = Depends(require
     try:
         return await get_time_footprint(year)
     except Exception as e:
-        logger.error(f"获取时光足迹数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise internal_server_error(logger, "获取时光足迹数据失败", e) from None
 
 
 @router.get("/social-network", response_model=SocialNetworkData)
@@ -863,8 +862,7 @@ async def get_social_network_api(year: int = 2025, _auth: bool = Depends(require
     try:
         return await get_social_network(year)
     except Exception as e:
-        logger.error(f"获取社交网络数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise internal_server_error(logger, "获取社交网络数据失败", e) from None
 
 
 @router.get("/brain-power", response_model=BrainPowerData)
@@ -873,8 +871,7 @@ async def get_brain_power_api(year: int = 2025, _auth: bool = Depends(require_au
     try:
         return await get_brain_power(year)
     except Exception as e:
-        logger.error(f"获取最强大脑数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise internal_server_error(logger, "获取最强大脑数据失败", e) from None
 
 
 @router.get("/expression-vibe", response_model=ExpressionVibeData)
@@ -883,8 +880,7 @@ async def get_expression_vibe_api(year: int = 2025, _auth: bool = Depends(requir
     try:
         return await get_expression_vibe(year)
     except Exception as e:
-        logger.error(f"获取个性与表达数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise internal_server_error(logger, "获取个性与表达数据失败", e) from None
 
 
 @router.get("/achievements", response_model=AchievementData)
@@ -893,5 +889,4 @@ async def get_achievements_api(year: int = 2025, _auth: bool = Depends(require_a
     try:
         return await get_achievements(year)
     except Exception as e:
-        logger.error(f"获取趣味成就数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise internal_server_error(logger, "获取趣味成就数据失败", e) from None

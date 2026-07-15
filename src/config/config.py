@@ -1,7 +1,8 @@
 import os
 import json
 import tomlkit
-import shutil
+import stat
+import tempfile
 
 from datetime import datetime
 from tomlkit import TOMLDocument
@@ -63,6 +64,8 @@ TEMPLATE_DIR = os.path.join(PROJECT_ROOT, "template")
 MMC_VERSION = "0.13.0"
 
 _CREATED_CONFIG_FILES: list[str] = []
+_MAX_CONFIG_FILE_BYTES = 8 * 1024 * 1024
+_MAX_WEBUI_CONFIG_BYTES = 1024 * 1024
 
 
 def get_created_config_files() -> list[str]:
@@ -70,27 +73,141 @@ def get_created_config_files() -> list[str]:
     return list(_CREATED_CONFIG_FILES)
 
 
+def _secure_directory(path: str) -> None:
+    """创建固定目录并移除组/其他用户的写权限。"""
+    if os.path.islink(path):
+        raise RuntimeError(f"目录不能是符号链接: {path}")
+    os.makedirs(path, exist_ok=True)
+    directory_stat = os.lstat(path)
+    if not stat.S_ISDIR(directory_stat.st_mode):
+        raise RuntimeError(f"目录路径无效: {path}")
+    mode = stat.S_IMODE(directory_stat.st_mode)
+    if mode & 0o022:
+        os.chmod(path, mode & ~0o022)
+
+
+def _secure_regular_file(path: str, *, mode: Optional[int] = None) -> bool:
+    """不跟随链接地校验普通文件，可选收紧权限。"""
+    try:
+        file_stat = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+        raise RuntimeError(f"文件路径无效: {path}")
+    if mode is not None:
+        os.chmod(path, mode)
+    return True
+
+
+def _read_limited_bytes(path: str, max_bytes: int) -> bytes:
+    if os.path.islink(path):
+        raise RuntimeError(f"文件不能是符号链接: {path}")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    file_descriptor = os.open(path, flags)
+    try:
+        file_stat = os.fstat(file_descriptor)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise RuntimeError(f"文件路径无效: {path}")
+        if file_stat.st_size > max_bytes:
+            raise RuntimeError(f"文件过大: {path}")
+        with os.fdopen(file_descriptor, "rb") as file:
+            file_descriptor = -1
+            content = file.read(max_bytes + 1)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+    if len(content) > max_bytes:
+        raise RuntimeError(f"文件过大: {path}")
+    return content
+
+
+def _read_toml_file(path: str) -> TOMLDocument:
+    try:
+        content = _read_limited_bytes(path, _MAX_CONFIG_FILE_BYTES).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(f"TOML 文件必须使用 UTF-8: {path}") from exc
+    return tomlkit.loads(content)
+
+
+def _atomic_write_bytes(path: str, content: bytes, *, mode: int) -> None:
+    parent = os.path.dirname(path) or "."
+    _secure_directory(parent)
+    if os.path.lexists(path):
+        _secure_regular_file(path)
+
+    file_descriptor, temp_name = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", dir=parent)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(file_descriptor, mode)
+        with os.fdopen(file_descriptor, "wb") as file:
+            file_descriptor = -1
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_name, path)
+        os.chmod(path, mode)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def _atomic_write_text(path: str, content: str, *, mode: int = 0o600) -> None:
+    encoded = content.encode("utf-8")
+    if len(encoded) > _MAX_CONFIG_FILE_BYTES:
+        raise RuntimeError(f"配置内容过大: {path}")
+    _atomic_write_bytes(path, encoded, mode=mode)
+
+
+def _copy_file_secure(source: str, destination: str, *, mode: int) -> None:
+    _secure_regular_file(source)
+    _atomic_write_bytes(destination, _read_limited_bytes(source, _MAX_CONFIG_FILE_BYTES), mode=mode)
+
+
+def _prepare_config_storage(config_dir: str) -> None:
+    _secure_directory(config_dir)
+    old_dir = os.path.join(config_dir, "old")
+    _secure_directory(old_dir)
+    for directory in (config_dir, old_dir):
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.name.endswith(".toml"):
+                    _secure_regular_file(entry.path, mode=0o600)
+
+
 def _mark_webui_setup_required(reason: str) -> None:
     """配置文件被重新创建时，要求 WebUI 重新进入首次配置。"""
     webui_config_path = os.path.join(PROJECT_ROOT, "data", "webui.json")
-    if not os.path.exists(webui_config_path):
+    if not os.path.lexists(webui_config_path):
         return
 
     try:
-        with open(webui_config_path, "r", encoding="utf-8") as f:
-            webui_config = json.load(f)
+        _secure_directory(os.path.dirname(webui_config_path))
+        _secure_regular_file(webui_config_path, mode=0o600)
+        raw_config = _read_limited_bytes(webui_config_path, _MAX_WEBUI_CONFIG_BYTES)
+        webui_config = json.loads(raw_config.decode("utf-8"))
+        if not isinstance(webui_config, dict):
+            raise ValueError("WebUI 配置必须是 JSON 对象")
 
         webui_config["first_setup_completed"] = False
         webui_config["setup_required_reason"] = reason
         webui_config.pop("setup_completed_at", None)
 
-        with open(webui_config_path, "w", encoding="utf-8") as f:
-            json.dump(webui_config, f, ensure_ascii=False, indent=2)
-        os.chmod(webui_config_path, 0o600)
+        encoded_config = (json.dumps(webui_config, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        if len(encoded_config) > _MAX_WEBUI_CONFIG_BYTES:
+            raise ValueError("WebUI 配置文件过大")
+        _atomic_write_bytes(webui_config_path, encoded_config, mode=0o600)
 
         logger.info("已标记 WebUI 需要重新进行首次配置", event_code="webui.setup.required", reason=reason)
-    except Exception:
-        logger.exception("标记 WebUI 首次配置状态失败", event_code="webui.setup.mark_required_failed")
+    except Exception as e:
+        logger.error(
+            "标记 WebUI 首次配置状态失败",
+            event_code="webui.setup.mark_required_failed",
+            error_type=type(e).__name__,
+        )
 
 
 def get_key_comment(toml_table, key):
@@ -179,10 +296,9 @@ def compare_default_values(new, old, path=None, logs=None, changes=None):
 
 def _get_version_from_toml(toml_path) -> Optional[str]:
     """从TOML文件中获取版本号"""
-    if not os.path.exists(toml_path):
+    if not os.path.lexists(toml_path):
         return None
-    with open(toml_path, "r", encoding="utf-8") as f:
-        doc = tomlkit.load(f)
+    doc = _read_toml_file(str(toml_path))
     if "inner" in doc and "version" in doc["inner"]:  # type: ignore
         return doc["inner"]["version"]  # type: ignore
     return None
@@ -239,41 +355,40 @@ def _update_config_generic(config_name: str, template_name: str):
     new_config_path = os.path.join(CONFIG_DIR, f"{config_name}.toml")
     compare_path = os.path.join(compare_dir, f"{template_name}.toml")
 
-    # 创建compare目录（如果不存在）
-    os.makedirs(compare_dir, exist_ok=True)
+    _prepare_config_storage(CONFIG_DIR)
+    _secure_directory(compare_dir)
+    _secure_regular_file(template_path)
 
     template_version = _get_version_from_toml(template_path)
     compare_version = _get_version_from_toml(compare_path)
 
     # 检查配置文件是否存在
-    if not os.path.exists(old_config_path):
+    if not os.path.lexists(old_config_path):
         logger.info(f"{config_name}.toml配置文件不存在，从模板创建新配置")
-        os.makedirs(CONFIG_DIR, exist_ok=True)  # 创建文件夹
-        shutil.copy2(template_path, old_config_path)  # 复制模板文件
+        _copy_file_secure(template_path, old_config_path, mode=0o600)
         created_file = f"{config_name}.toml"
         _CREATED_CONFIG_FILES.append(created_file)
         _mark_webui_setup_required(f"{created_file} 已从模板创建")
         logger.info(f"已创建新{config_name}配置文件，可在 WebUI 首次配置向导中继续填写: {old_config_path}")
         return
+    _secure_regular_file(old_config_path, mode=0o600)
 
     compare_config = None
     new_config = None
     old_config = None
 
     # 先读取 compare 下的模板（如果有），用于默认值变动检测
-    if os.path.exists(compare_path):
-        with open(compare_path, "r", encoding="utf-8") as f:
-            compare_config = tomlkit.load(f)
+    if os.path.lexists(compare_path):
+        _secure_regular_file(compare_path)
+        compare_config = _read_toml_file(compare_path)
 
     # 读取当前模板
-    with open(template_path, "r", encoding="utf-8") as f:
-        new_config = tomlkit.load(f)
+    new_config = _read_toml_file(template_path)
 
     # 检查默认值变化并处理（只有 compare_config 存在时才做）
     if compare_config and not (config_name == "model_config" and _is_blank_model_template(new_config)):
         # 读取旧配置
-        with open(old_config_path, "r", encoding="utf-8") as f:
-            old_config = tomlkit.load(f)
+        old_config = _read_toml_file(old_config_path)
         logs, changes = compare_default_values(new_config, compare_config)
         if logs:
             logger.info(f"检测到{config_name}模板默认值变动如下：")
@@ -292,8 +407,7 @@ def _update_config_generic(config_name: str, template_name: str):
 
             # 如果配置有更新，立即保存到文件
             if config_updated:
-                with open(old_config_path, "w", encoding="utf-8") as f:
-                    f.write(format_toml_string(old_config))
+                _atomic_write_text(old_config_path, format_toml_string(old_config))
                 logger.info(f"已保存更新后的{config_name}配置文件")
         else:
             logger.info(f"未检测到{config_name}模板默认值变动")
@@ -301,19 +415,18 @@ def _update_config_generic(config_name: str, template_name: str):
         logger.info(f"检测到{config_name}使用空白模型模板，跳过默认值自动迁移")
 
     # 检查 compare 下没有模板，或新模板版本更高，则复制
-    if not os.path.exists(compare_path):
-        shutil.copy2(template_path, compare_path)
+    if not os.path.lexists(compare_path):
+        _copy_file_secure(template_path, compare_path, mode=0o644)
         logger.info(f"已将{config_name}模板文件复制到: {compare_path}")
     elif _version_tuple(template_version) > _version_tuple(compare_version):
-        shutil.copy2(template_path, compare_path)
+        _copy_file_secure(template_path, compare_path, mode=0o644)
         logger.info(f"{config_name}模板版本较新，已替换compare下的模板: {compare_path}")
     else:
         logger.debug(f"compare下的{config_name}模板版本不低于当前模板，无需替换: {compare_path}")
 
     # 读取旧配置文件和模板文件（如果前面没读过 old_config，这里再读一次）
     if old_config is None:
-        with open(old_config_path, "r", encoding="utf-8") as f:
-            old_config = tomlkit.load(f)
+        old_config = _read_toml_file(old_config_path)
     # new_config 已经读取
 
     # 检查version是否相同
@@ -331,16 +444,17 @@ def _update_config_generic(config_name: str, template_name: str):
         logger.info(f"已有{config_name}配置文件未检测到版本号，可能是旧版本。将进行更新")
 
     # 创建old目录（如果不存在）
-    os.makedirs(old_config_dir, exist_ok=True)  # 生成带时间戳的新文件名
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _secure_directory(old_config_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     old_backup_path = os.path.join(old_config_dir, f"{config_name}_{timestamp}.toml")
 
     # 移动旧配置文件到old目录
-    shutil.move(old_config_path, old_backup_path)
+    os.replace(old_config_path, old_backup_path)
+    os.chmod(old_backup_path, 0o600)
     logger.info(f"已备份旧{config_name}配置文件到: {old_backup_path}")
 
     # 复制模板文件到配置目录
-    shutil.copy2(template_path, new_config_path)
+    _copy_file_secure(template_path, new_config_path, mode=0o600)
     logger.info(f"已创建新{config_name}配置文件: {new_config_path}")
 
     # 输出新增和删减项及注释
@@ -357,8 +471,7 @@ def _update_config_generic(config_name: str, template_name: str):
     _update_dict(new_config, old_config)
 
     # 保存更新后的配置（保留注释和格式，数组多行格式化）
-    with open(new_config_path, "w", encoding="utf-8") as f:
-        f.write(format_toml_string(new_config))
+    _atomic_write_text(new_config_path, format_toml_string(new_config))
     logger.info(f"{config_name}配置文件更新完成，建议检查新配置文件中的内容，以免丢失重要信息")
 
 
@@ -462,8 +575,7 @@ class APIAdapterConfig(ConfigBase):
             missing_tasks = self.get_missing_runtime_tasks()
             if missing_tasks:
                 raise ValueError(
-                    "以下运行必需任务尚未分配模型: "
-                    f"{', '.join(missing_tasks)}。请在 WebUI 的模型管理与分配中完成配置。"
+                    f"以下运行必需任务尚未分配模型: {', '.join(missing_tasks)}。请在 WebUI 的模型管理与分配中完成配置。"
                 )
 
     def get_unknown_task_models(self) -> dict[str, list[str]]:
@@ -531,9 +643,7 @@ def load_config(config_path: str) -> Config:
     Returns:
         Config对象
     """
-    # 读取配置文件
-    with open(config_path, "r", encoding="utf-8") as f:
-        config_data = tomlkit.load(f)
+    config_data = _read_toml_file(config_path)
 
     # 创建Config对象
     try:
@@ -551,9 +661,7 @@ def api_ada_load_config(config_path: str) -> APIAdapterConfig:
     Returns:
         APIAdapterConfig对象
     """
-    # 读取配置文件
-    with open(config_path, "r", encoding="utf-8") as f:
-        config_data = tomlkit.load(f)
+    config_data = _read_toml_file(config_path)
 
     # 创建APIAdapterConfig对象
     try:

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Header, Query, Cookie
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List, Dict
 from src.common.logger import get_logger
+from src.webui.error_utils import internal_server_error
 from .auth import verify_auth_token_from_cookie_or_header
 import json
 import zlib
@@ -356,8 +357,7 @@ async def get_person_list(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取人物列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取人物列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取人物列表失败", e) from None
 
 
 @router.get("/stats/summary")
@@ -369,8 +369,7 @@ async def get_person_stats(maibot_session: Optional[str] = Cookie(None), authori
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取统计数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取统计数据失败", e) from None
 
 
 @router.post("/batch/delete", response_model=BatchDeleteResponse)
@@ -403,8 +402,7 @@ async def batch_delete_persons(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"批量删除人物信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量删除人物信息失败", e, detail="批量删除失败") from None
 
 
 @router.get("/{person_id}", response_model=PersonDetailResponse)
@@ -421,8 +419,7 @@ async def get_person_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取人物详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取人物详情失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取人物详情失败", e) from None
 
 
 @router.patch("/{person_id}", response_model=PersonUpdateResponse)
@@ -490,8 +487,7 @@ async def update_person(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"更新人物信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新人物信息失败: {str(e)}") from e
+        raise internal_server_error(logger, "更新人物信息失败", e) from None
 
 
 @router.delete("/{person_id}", response_model=PersonDeleteResponse)
@@ -509,5 +505,4 @@ async def delete_person(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"删除人物信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除人物信息失败: {str(e)}") from e
+        raise internal_server_error(logger, "删除人物信息失败", e) from None

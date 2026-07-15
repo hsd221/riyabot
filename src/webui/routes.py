@@ -3,11 +3,11 @@
 from fastapi import APIRouter, HTTPException, Header, Response, Request, Cookie, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
-from urllib.parse import urlsplit
 from src.common.logger import get_logger
 from src.common.agreement import are_agreements_confirmed, confirm_agreements, get_agreement_status
+from src.webui.error_utils import internal_server_error, log_exception_type
 from .token_manager import get_token_manager
-from .auth import set_auth_cookie, clear_auth_cookie
+from .auth import clear_auth_cookie, require_same_site_request, set_auth_cookie
 from .rate_limiter import get_rate_limiter, check_auth_rate_limit
 from .config_routes import router as config_router
 from .statistics_routes import router as statistics_router
@@ -82,14 +82,14 @@ class TokenVerifyResponse(BaseModel):
 class PasswordSetupRequest(BaseModel):
     """首次设置密码请求。"""
 
-    password: str = Field(..., min_length=1, max_length=16, description="8-16 位数字和字母组合")
+    password: str = Field(..., min_length=1, max_length=128, description="8-128 位密码，需包含字母和数字")
 
 
 class PasswordChangeRequest(BaseModel):
     """修改密码请求。"""
 
     current_password: str = Field(..., min_length=1, max_length=1024, description="当前密码")
-    new_password: str = Field(..., min_length=1, max_length=16, description="8-16 位数字和字母组合")
+    new_password: str = Field(..., min_length=1, max_length=128, description="8-128 位密码，需包含字母和数字")
 
 
 class TokenUpdateRequest(BaseModel):
@@ -209,46 +209,8 @@ def _get_model_config_readiness_error() -> str:
         current_model_config = api_ada_load_config(os.path.join(CONFIG_DIR, "model_config.toml"))
         return current_model_config.get_runtime_readiness_error() or ""
     except Exception as e:
-        return f"模型配置文件解析失败: {e}"
-
-
-def require_same_site_request(request: Request) -> None:
-    """拒绝浏览器发起的跨站状态修改请求。"""
-    headers = getattr(request, "headers", {})
-    if headers.get("sec-fetch-site", "").lower() == "cross-site":
-        raise HTTPException(status_code=403, detail="不允许跨站请求")
-
-    # Sec-Fetch-Site 在旧浏览器和非浏览器客户端中可能缺失。对带 Origin 的
-    # 浏览器请求再做一次明确来源校验，避免首次设置密码被跨站表单抢先提交。
-    origin = headers.get("origin", "").strip()
-    if not origin:
-        return
-    try:
-        origin_url = urlsplit(origin)
-        origin_host = origin_url.hostname
-        request_url = getattr(request, "url", None)
-        request_host = getattr(request_url, "hostname", None)
-        if origin_url.scheme not in {"http", "https"} or not origin_host or not request_host:
-            raise ValueError
-
-        local_hosts = {"localhost", "127.0.0.1", "::1"}
-        local_dev_ports = {5173, 7999, 8001}
-        origin_port = origin_url.port or (443 if origin_url.scheme == "https" else 80)
-        request_port = getattr(request_url, "port", None) or (
-            443 if getattr(request_url, "scheme", "") == "https" else 80
-        )
-        same_host = origin_host.lower() == request_host.lower() and origin_port == request_port
-        local_dev = (
-            origin_host.lower() in local_hosts
-            and request_host.lower() in local_hosts
-            and origin_port in local_dev_ports
-        )
-        if not (same_host or local_dev):
-            raise HTTPException(status_code=403, detail="不允许跨站请求")
-    except HTTPException:
-        raise
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=403, detail="不允许的请求来源") from None
+        log_exception_type(logger, "读取模型配置就绪状态失败", e)
+        return "模型配置文件解析失败，请检查配置格式"
 
 
 def _get_session_token(maibot_session: Optional[str], authorization: Optional[str]) -> Optional[str]:
@@ -355,8 +317,8 @@ async def login(
         return _complete_password_login(request_body.password, request, response)
     except HTTPException:
         raise
-    except Exception:
-        logger.exception("WebUI 密码验证失败", event_code="webui.auth.login_failed")
+    except Exception as e:
+        log_exception_type(logger, "WebUI 密码验证失败", e, event_code="webui.auth.login_failed")
         raise HTTPException(status_code=500, detail="登录失败") from None
 
 
@@ -373,8 +335,8 @@ async def verify_token(
         return _complete_password_login(request_body.token, request, response)
     except HTTPException:
         raise
-    except Exception:
-        logger.exception("旧版 WebUI 登录失败", event_code="webui.auth.legacy_login_failed")
+    except Exception as e:
+        log_exception_type(logger, "旧版 WebUI 登录失败", e, event_code="webui.auth.legacy_login_failed")
         raise HTTPException(status_code=500, detail="登录失败") from None
 
 
@@ -408,8 +370,8 @@ async def check_auth_status(
             "authenticated": token_manager.verify_token(token),
             "password_configured": password_configured,
         }
-    except Exception:
-        logger.exception("WebUI 认证状态检查失败", event_code="webui.auth.status_failed")
+    except Exception as e:
+        log_exception_type(logger, "WebUI 认证状态检查失败", e, event_code="webui.auth.status_failed")
         return {"authenticated": False, "password_configured": True}
 
 
@@ -420,7 +382,6 @@ async def change_password(
     request: Request,
     maibot_session: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
-    _rate_limit: None = Depends(check_auth_rate_limit),
 ):
     """验证当前密码后修改密码，并撤销已有会话。"""
     require_same_site_request(request)
@@ -430,7 +391,6 @@ async def change_password(
         raise HTTPException(status_code=422, detail=message)
     success, message = token_manager.update_password(request_body.current_password, request_body.new_password)
     if not success:
-        get_rate_limiter().record_failed_attempt(request)
         raise HTTPException(status_code=400, detail=message)
     clear_auth_cookie(response, request)
     response.headers["Cache-Control"] = "no-store"
@@ -518,8 +478,7 @@ async def get_setup_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取配置状态失败: {e}")
-        raise HTTPException(status_code=500, detail="获取配置状态失败") from e
+        raise internal_server_error(logger, "获取配置状态失败", e) from None
 
 
 @router.get("/setup/agreement", response_model=AgreementStatusResponse)
@@ -547,8 +506,7 @@ async def get_setup_agreement(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取协议状态失败: {e}")
-        raise HTTPException(status_code=500, detail="获取协议状态失败") from e
+        raise internal_server_error(logger, "获取协议状态失败", e) from None
 
 
 @router.post("/setup/agreement/confirm", response_model=AgreementConfirmResponse)
@@ -580,13 +538,12 @@ async def confirm_setup_agreement(
             message="协议已确认",
             agreement=_build_agreement_status_response(include_content=True),
         )
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError:
+        raise HTTPException(status_code=409, detail="协议内容已更新，请刷新页面后重新确认") from None
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"确认协议失败: {e}")
-        raise HTTPException(status_code=500, detail="确认协议失败") from e
+        raise internal_server_error(logger, "确认协议失败", e) from None
 
 
 @router.post("/setup/complete", response_model=CompleteSetupResponse)
@@ -637,8 +594,7 @@ async def complete_setup(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"标记配置完成失败: {e}")
-        raise HTTPException(status_code=500, detail="标记配置完成失败") from e
+        raise internal_server_error(logger, "标记配置完成失败", e) from None
 
 
 @router.post("/setup/reset", response_model=ResetSetupResponse)
@@ -681,5 +637,4 @@ async def reset_setup(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"重置配置状态失败: {e}")
-        raise HTTPException(status_code=500, detail="重置配置状态失败") from e
+        raise internal_server_error(logger, "重置配置状态失败", e) from None

@@ -875,7 +875,7 @@ function SecurityTab() {
     if (!validation.isValid) {
       toast({
         title: '密码格式不符合要求',
-        description: '新密码必须为 8-16 位，并同时包含英文字母和数字',
+        description: '新密码必须为 8-128 位，并同时包含字母和数字，且不能含控制字符',
         variant: 'destructive',
       })
       return
@@ -966,8 +966,8 @@ function SecurityTab() {
           onChange={setNewPassword}
           onToggleVisibility={() => setShowNewPassword((visible) => !visible)}
           autoComplete="new-password"
-          placeholder="8-16 位字母与数字"
-          maxLength={16}
+          placeholder="8-128 位，可使用空格与符号"
+          maxLength={128}
         />
         <PasswordField
           id="password-confirm"
@@ -978,7 +978,7 @@ function SecurityTab() {
           onToggleVisibility={() => setShowPasswordConfirm((visible) => !visible)}
           autoComplete="new-password"
           placeholder="再次输入新密码"
-          maxLength={16}
+          maxLength={128}
         />
       </div>
 

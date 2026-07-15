@@ -62,12 +62,12 @@ class OneBotAdapterRuntime:
             except asyncio.TimeoutError:
                 logger.debug("关闭 MMC 连接超时")
             except Exception as exc:
-                logger.debug(f"关闭 MMC 连接时出现错误: {exc}")
+                logger.debug(f"关闭 MMC 连接时出现错误: error_type={type(exc).__name__}")
 
             try:
                 await config_manager.stop_watch()
             except Exception as exc:
-                logger.debug(f"停止配置监控时出现错误: {exc}")
+                logger.debug(f"停止配置监控时出现错误: error_type={type(exc).__name__}")
 
             tasks = [task for task in self._tasks.values() if not task.done()]
             for task in tasks:
@@ -88,11 +88,7 @@ class OneBotAdapterRuntime:
         if not self._started:
             return
 
-        logger.warning(
-            f"NapCat 配置已变更:\n"
-            f"  旧配置: {old_value.host}:{old_value.port}\n"
-            f"  新配置: {new_value.host}:{new_value.port}"
-        )
+        logger.warning("NapCat 配置已变更，准备重启连接")
 
         await self._close_websocket_server()
         if self._restart_event:
@@ -111,7 +107,7 @@ class OneBotAdapterRuntime:
         except asyncio.CancelledError:
             return
         if exc:
-            logger.error(f"OneBot/NapCat 适配器任务 {name} 异常退出: {exc}", exc_info=True)
+            logger.error(f"OneBot/NapCat 适配器任务异常退出: task={name} error_type={type(exc).__name__}")
 
     async def _close_websocket_server(self) -> None:
         if not self._websocket_server:
@@ -122,7 +118,7 @@ class OneBotAdapterRuntime:
             await self._websocket_server.wait_closed()
             logger.debug("OneBot/NapCat WebSocket 服务器已关闭")
         except Exception as exc:
-            logger.debug(f"关闭 OneBot/NapCat WebSocket 服务器时出现错误: {exc}")
+            logger.debug(f"关闭 OneBot/NapCat WebSocket 服务器时出现错误: error_type={type(exc).__name__}")
         finally:
             self._websocket_server = None
 
@@ -135,12 +131,13 @@ class OneBotAdapterRuntime:
             asyncio.create_task(notice_handler.set_server_connection(server_connection))
             await nc_message_sender.set_server_connection(server_connection)
             async for raw_message in server_connection:
-                logger.debug(f"{raw_message[:1500]}..." if len(raw_message) > 1500 else raw_message)
                 decoded_raw_message: dict = json.loads(raw_message)
                 post_type = decoded_raw_message.get("post_type")
                 if post_type in ["meta_event", "message", "notice"]:
+                    logger.debug(f"收到 OneBot/NapCat 事件: post_type={post_type}")
                     await self._message_queue.put(decoded_raw_message)
                 elif post_type is None:
+                    logger.debug("收到 OneBot/NapCat 响应")
                     await put_response(decoded_raw_message)
         except asyncio.CancelledError:
             logger.debug("message_recv 收到取消信号，正在关闭连接")
@@ -161,7 +158,7 @@ class OneBotAdapterRuntime:
             elif post_type == "notice":
                 await notice_handler.handle_notice(message)
             else:
-                logger.warning(f"未知的 post_type: {post_type}")
+                logger.warning("收到未知的 OneBot/NapCat 事件类型")
             self._message_queue.task_done()
             await asyncio.sleep(0.05)
 
@@ -193,7 +190,7 @@ class OneBotAdapterRuntime:
                 self._log_network_error(exc)
                 break
             except Exception as exc:
-                logger.error(f"OneBot/NapCat 服务器异常: {exc}", exc_info=True)
+                logger.error(f"OneBot/NapCat 服务器异常: error_type={type(exc).__name__}")
                 break
 
             if not self._restart_event.is_set():
@@ -215,16 +212,14 @@ class OneBotAdapterRuntime:
             process_request=self._check_napcat_server_token,
         ) as server:
             self._websocket_server = server
-            logger.info(
-                f"Adapter 启动成功，监听: ws://{global_config.napcat_server.host}:{global_config.napcat_server.port}"
-            )
+            logger.info("Adapter 启动成功")
             await server.serve_forever()
 
     def _log_network_error(self, exc: OSError) -> None:
         if exc.errno == 10048 or "address already in use" in str(exc).lower():
             logger.error(f"端口已被占用: port={global_config.napcat_server.port}")
         else:
-            logger.error(f"网络错误: {exc}")
+            logger.error(f"网络错误: error_type={type(exc).__name__}")
 
 
 adapter_runtime = OneBotAdapterRuntime()

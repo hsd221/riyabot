@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Header, Query, UploadFile, File, F
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Annotated
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.common.database.database_model import Emoji
 from .token_manager import get_token_manager
 from .auth import verify_auth_token_from_cookie_or_header
@@ -18,6 +18,8 @@ import threading
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+from src.webui.error_utils import internal_server_error, log_exception_type
+
 logger = get_logger("webui.emoji")
 
 # ==================== 缩略图缓存配置 ====================
@@ -27,6 +29,14 @@ THUMBNAIL_CACHE_DIR = Path("data/emoji_thumbnails")
 THUMBNAIL_SIZE = (200, 200)
 # 缩略图质量 (WebP 格式, 1-100)
 THUMBNAIL_QUALITY = 80
+MAX_EMOJI_FILE_BYTES = 10 * 1024 * 1024
+MAX_EMOJI_BATCH_FILES = 20
+MAX_EMOJI_DIMENSION = 8192
+MAX_EMOJI_PIXELS = 40_000_000
+MAX_EMOJI_DESCRIPTION_CHARS = 500
+MAX_EMOJI_EMOTION_CHARS = 500
+ALLOWED_EMOJI_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+ALLOWED_EMOJI_FORMATS = {"jpeg", "png", "gif", "webp"}
 # 缓存锁，防止并发生成同一缩略图
 _thumbnail_locks: dict[str, threading.Lock] = {}
 _locks_lock = threading.Lock()
@@ -54,7 +64,7 @@ def _background_generate_thumbnail(source_path: str, file_hash: str) -> None:
     try:
         _generate_thumbnail(source_path, file_hash)
     except Exception as e:
-        logger.warning(f"后台生成缩略图失败 {file_hash}: {e}")
+        log_exception_type(logger, "后台生成缩略图失败", e, level="warning")
     finally:
         with _generating_lock:
             _generating_thumbnails.discard(file_hash)
@@ -118,10 +128,14 @@ def _generate_thumbnail(source_path: str, file_hash: str) -> Path:
                 # 保存为 WebP 格式
                 img.save(cache_path, "WEBP", quality=THUMBNAIL_QUALITY, method=6)
 
-                logger.debug(f"生成缩略图: {file_hash} -> {cache_path}")
+                logger.debug(
+                    "生成缩略图完成",
+                    file_hash=hash_id(file_hash),
+                    cache_path_hash=hash_id(cache_path),
+                )
 
         except Exception as e:
-            logger.warning(f"生成缩略图失败 {file_hash}: {e}，将返回原图")
+            log_exception_type(logger, "生成缩略图失败，将返回原图", e, level="warning")
             # 生成失败时不创建缓存文件，下次会重试
             raise
 
@@ -152,14 +166,14 @@ def cleanup_orphaned_thumbnails() -> tuple[int, int]:
             try:
                 cache_file.unlink()
                 cleaned += 1
-                logger.debug(f"清理孤立缩略图: {cache_file.name}")
+                logger.debug("清理孤立缩略图", cache_file_hash=hash_id(cache_file.name))
             except Exception as e:
-                logger.warning(f"清理缩略图失败 {cache_file.name}: {e}")
+                log_exception_type(logger, "清理缩略图失败", e, level="warning")
         else:
             kept += 1
 
     if cleaned > 0:
-        logger.info(f"清理孤立缩略图: 删除 {cleaned} 个，保留 {kept} 个")
+        logger.info("清理孤立缩略图完成", cleaned_count=cleaned, kept_count=kept)
 
     return cleaned, kept
 
@@ -167,8 +181,14 @@ def cleanup_orphaned_thumbnails() -> tuple[int, int]:
 # 模块级别的类型别名（解决 B008 ruff 错误）
 EmojiFile = Annotated[UploadFile, File(description="表情包图片文件")]
 EmojiFiles = Annotated[List[UploadFile], File(description="多个表情包图片文件")]
-DescriptionForm = Annotated[str, Form(description="表情包描述")]
-EmotionForm = Annotated[str, Form(description="情感标签，多个用逗号分隔")]
+DescriptionForm = Annotated[
+    str,
+    Form(max_length=MAX_EMOJI_DESCRIPTION_CHARS, description="表情包描述"),
+]
+EmotionForm = Annotated[
+    str,
+    Form(max_length=MAX_EMOJI_EMOTION_CHARS, description="情感标签，多个用逗号分隔"),
+]
 IsRegisteredForm = Annotated[bool, Form(description="是否直接注册")]
 
 # 创建路由器
@@ -361,8 +381,7 @@ async def get_emoji_list(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取表情包列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取表情包列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取表情包列表失败", e) from None
 
 
 @router.get("/{emoji_id}", response_model=EmojiDetailResponse)
@@ -392,8 +411,7 @@ async def get_emoji_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取表情包详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取表情包详情失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取表情包详情失败", e) from None
 
 
 @router.patch("/{emoji_id}", response_model=EmojiUpdateResponse)
@@ -440,7 +458,7 @@ async def update_emoji(
 
         emoji.save()
 
-        logger.info(f"表情包已更新: ID={emoji_id}, 字段: {list(update_data.keys())}")
+        logger.info("表情包已更新", emoji_id=emoji_id, fields=list(update_data.keys()))
 
         return EmojiUpdateResponse(
             success=True, message=f"成功更新 {len(update_data)} 个字段", data=emoji_to_response(emoji)
@@ -449,8 +467,7 @@ async def update_emoji(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"更新表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新表情包失败: {str(e)}") from e
+        raise internal_server_error(logger, "更新表情包失败", e) from None
 
 
 @router.delete("/{emoji_id}", response_model=EmojiDeleteResponse)
@@ -481,15 +498,14 @@ async def delete_emoji(
         # 执行删除
         emoji.delete_instance()
 
-        logger.info(f"表情包已删除: ID={emoji_id}, hash={emoji_hash}")
+        logger.info("表情包已删除", emoji_id=emoji_id, emoji_hash=hash_id(emoji_hash))
 
         return EmojiDeleteResponse(success=True, message=f"成功删除表情包: {emoji_hash}")
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"删除表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除表情包失败: {str(e)}") from e
+        raise internal_server_error(logger, "删除表情包失败", e) from None
 
 
 @router.get("/stats/summary")
@@ -543,8 +559,7 @@ async def get_emoji_stats(maibot_session: Optional[str] = Cookie(None), authoriz
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取统计数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计数据失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取统计数据失败", e) from None
 
 
 @router.post("/{emoji_id}/register", response_model=EmojiUpdateResponse)
@@ -578,15 +593,14 @@ async def register_emoji(
         emoji.register_time = time.time()
         emoji.save()
 
-        logger.info(f"表情包已注册: ID={emoji_id}")
+        logger.info("表情包已注册", emoji_id=emoji_id)
 
         return EmojiUpdateResponse(success=True, message="表情包注册成功", data=emoji_to_response(emoji))
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"注册表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"注册表情包失败: {str(e)}") from e
+        raise internal_server_error(logger, "注册表情包失败", e) from None
 
 
 @router.post("/{emoji_id}/ban", response_model=EmojiUpdateResponse)
@@ -616,15 +630,14 @@ async def ban_emoji(
         emoji.is_registered = False
         emoji.save()
 
-        logger.info(f"表情包已禁用: ID={emoji_id}")
+        logger.info("表情包已禁用", emoji_id=emoji_id)
 
         return EmojiUpdateResponse(success=True, message="表情包禁用成功", data=emoji_to_response(emoji))
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"禁用表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"禁用表情包失败: {str(e)}") from e
+        raise internal_server_error(logger, "禁用表情包失败", e) from None
 
 
 @router.get("/{emoji_id}/thumbnail")
@@ -727,8 +740,7 @@ async def get_emoji_thumbnail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取表情包缩略图失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取表情包缩略图失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取表情包缩略图失败", e) from None
 
 
 @router.post("/batch/delete", response_model=BatchDeleteResponse)
@@ -763,12 +775,12 @@ async def batch_delete_emojis(
                 if emoji:
                     emoji.delete_instance()
                     deleted_count += 1
-                    logger.info(f"批量删除表情包: {emoji_id}")
+                    logger.info("批量删除表情包条目", emoji_id=emoji_id)
                 else:
                     failed_count += 1
                     failed_ids.append(emoji_id)
             except Exception as e:
-                logger.error(f"删除表情包 {emoji_id} 失败: {e}")
+                log_exception_type(logger, "删除表情包失败", e, item_id=emoji_id)
                 failed_count += 1
                 failed_ids.append(emoji_id)
 
@@ -787,12 +799,48 @@ async def batch_delete_emojis(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"批量删除表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量删除表情包失败", e, detail="批量删除失败") from None
 
 
 # 表情包存储目录
 EMOJI_REGISTERED_DIR = os.path.join("data", "emoji_registed")
+
+
+async def _read_upload_content(file: UploadFile) -> bytes:
+    """仅读取允许大小内的上传内容，避免将超大文件完整载入内存。"""
+    file_content = await file.read(MAX_EMOJI_FILE_BYTES + 1)
+    if len(file_content) > MAX_EMOJI_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="图片文件不能超过 10MB")
+    if not file_content:
+        raise HTTPException(status_code=400, detail="文件内容为空")
+    return file_content
+
+
+def _validate_image_content(file_content: bytes) -> str:
+    """验证图片格式与解码尺寸，阻止伪造类型和解压炸弹。"""
+    try:
+        with Image.open(io.BytesIO(file_content)) as img:
+            width, height = img.size
+            if (
+                width <= 0
+                or height <= 0
+                or width > MAX_EMOJI_DIMENSION
+                or height > MAX_EMOJI_DIMENSION
+                or width * height > MAX_EMOJI_PIXELS
+            ):
+                raise HTTPException(status_code=413, detail="图片尺寸过大")
+
+            image_format = (img.format or "").lower()
+            if image_format not in ALLOWED_EMOJI_FORMATS:
+                raise HTTPException(status_code=400, detail="图片实际格式不受支持")
+            img.verify()
+            return image_format
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError as e:
+        raise HTTPException(status_code=413, detail="图片尺寸过大") from e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="无效的图片文件") from e
 
 
 class EmojiUploadResponse(BaseModel):
@@ -832,34 +880,17 @@ async def upload_emoji(
         if not file.content_type:
             raise HTTPException(status_code=400, detail="无法识别文件类型")
 
-        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
-        if file.content_type not in allowed_types:
+        if file.content_type not in ALLOWED_EMOJI_CONTENT_TYPES:
             raise HTTPException(
                 status_code=400,
-                detail=f"不支持的文件类型: {file.content_type}，支持: {', '.join(allowed_types)}",
+                detail=f"不支持的文件类型: {file.content_type}",
             )
 
-        # 读取文件内容
-        file_content = await file.read()
-
-        if not file_content:
-            raise HTTPException(status_code=400, detail="文件内容为空")
-
-        # 验证图片并获取格式
-        try:
-            with Image.open(io.BytesIO(file_content)) as img:
-                img_format = img.format.lower() if img.format else "png"
-                # 验证图片可以正常打开
-                img.verify()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"无效的图片文件: {str(e)}") from e
-
-        # 重新打开图片（verify后需要重新打开）
-        with Image.open(io.BytesIO(file_content)) as img:
-            img_format = img.format.lower() if img.format else "png"
+        file_content = await _read_upload_content(file)
+        img_format = _validate_image_content(file_content)
 
         # 计算文件哈希
-        emoji_hash = hashlib.md5(file_content).hexdigest()
+        emoji_hash = hashlib.md5(file_content, usedforsecurity=False).hexdigest()
 
         # 检查是否已存在相同哈希的表情包
         existing_emoji = Emoji.get_or_none(Emoji.emoji_hash == emoji_hash)
@@ -888,7 +919,7 @@ async def upload_emoji(
         with open(full_path, "wb") as f:
             f.write(file_content)
 
-        logger.info(f"表情包文件已保存: {full_path}")
+        logger.info("表情包文件已保存", path_hash=hash_id(full_path))
 
         # 处理情感标签
         emotion_str = ",".join(e.strip() for e in emotion.split(",") if e.strip()) if emotion else ""
@@ -910,7 +941,7 @@ async def upload_emoji(
             last_used_time=None,
         )
 
-        logger.info(f"表情包已上传并注册: ID={emoji.id}, hash={emoji_hash}")
+        logger.info("表情包已上传并注册", emoji_id=emoji.id, emoji_hash=hash_id(emoji_hash))
 
         return EmojiUploadResponse(
             success=True,
@@ -921,8 +952,7 @@ async def upload_emoji(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"上传表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}") from e
+        raise internal_server_error(logger, "上传表情包失败", e, detail="上传失败") from None
 
 
 @router.post("/batch/upload")
@@ -948,6 +978,9 @@ async def batch_upload_emoji(
     try:
         verify_auth_token(maibot_session, authorization)
 
+        if len(files) > MAX_EMOJI_BATCH_FILES:
+            raise HTTPException(status_code=413, detail=f"单次最多上传 {MAX_EMOJI_BATCH_FILES} 个文件")
+
         results = {
             "success": True,
             "total": len(files),
@@ -956,13 +989,12 @@ async def batch_upload_emoji(
             "details": [],
         }
 
-        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
         os.makedirs(EMOJI_REGISTERED_DIR, exist_ok=True)
 
         for file in files:
             try:
                 # 验证文件类型
-                if file.content_type not in allowed_types:
+                if file.content_type not in ALLOWED_EMOJI_CONTENT_TYPES:
                     results["failed"] += 1
                     results["details"].append(
                         {
@@ -973,37 +1005,11 @@ async def batch_upload_emoji(
                     )
                     continue
 
-                # 读取文件内容
-                file_content = await file.read()
-
-                if not file_content:
-                    results["failed"] += 1
-                    results["details"].append(
-                        {
-                            "filename": file.filename,
-                            "success": False,
-                            "error": "文件内容为空",
-                        }
-                    )
-                    continue
-
-                # 验证图片
-                try:
-                    with Image.open(io.BytesIO(file_content)) as img:
-                        img_format = img.format.lower() if img.format else "png"
-                except Exception as e:
-                    results["failed"] += 1
-                    results["details"].append(
-                        {
-                            "filename": file.filename,
-                            "success": False,
-                            "error": f"无效的图片: {str(e)}",
-                        }
-                    )
-                    continue
+                file_content = await _read_upload_content(file)
+                img_format = _validate_image_content(file_content)
 
                 # 计算哈希
-                emoji_hash = hashlib.md5(file_content).hexdigest()
+                emoji_hash = hashlib.md5(file_content, usedforsecurity=False).hexdigest()
 
                 # 检查重复
                 if Emoji.get_or_none(Emoji.emoji_hash == emoji_hash):
@@ -1060,13 +1066,23 @@ async def batch_upload_emoji(
                     }
                 )
 
-            except Exception as e:
+            except HTTPException as e:
                 results["failed"] += 1
                 results["details"].append(
                     {
                         "filename": file.filename,
                         "success": False,
-                        "error": str(e),
+                        "error": str(e.detail),
+                    }
+                )
+            except Exception as e:
+                log_exception_type(logger, "批量上传单个表情包失败", e)
+                results["failed"] += 1
+                results["details"].append(
+                    {
+                        "filename": file.filename,
+                        "success": False,
+                        "error": "上传失败",
                     }
                 )
 
@@ -1076,8 +1092,7 @@ async def batch_upload_emoji(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"批量上传表情包失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量上传失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量上传表情包失败", e, detail="批量上传失败") from None
 
 
 # ==================== 缩略图缓存管理 API ====================
@@ -1153,8 +1168,7 @@ async def get_thumbnail_cache_stats(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"获取缩略图缓存统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取缩略图缓存统计失败", e, detail="获取统计失败") from None
 
 
 @router.post("/thumbnail-cache/cleanup", response_model=ThumbnailCleanupResponse)
@@ -1183,8 +1197,7 @@ async def cleanup_thumbnail_cache(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"清理缩略图缓存失败: {e}")
-        raise HTTPException(status_code=500, detail=f"清理失败: {str(e)}") from e
+        raise internal_server_error(logger, "清理缩略图缓存失败", e, detail="清理失败") from None
 
 
 @router.post("/thumbnail-cache/preheat", response_model=ThumbnailPreheatResponse)
@@ -1243,7 +1256,7 @@ async def preheat_thumbnail_cache(
                 await loop.run_in_executor(_thumbnail_executor, _generate_thumbnail, emoji.full_path, emoji.emoji_hash)
                 generated += 1
             except Exception as e:
-                logger.warning(f"预热缩略图失败 {emoji.emoji_hash}: {e}")
+                log_exception_type(logger, "预热缩略图失败", e, level="warning")
                 failed += 1
 
         return ThumbnailPreheatResponse(
@@ -1257,8 +1270,7 @@ async def preheat_thumbnail_cache(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"预热缩略图缓存失败: {e}")
-        raise HTTPException(status_code=500, detail=f"预热失败: {str(e)}") from e
+        raise internal_server_error(logger, "预热缩略图缓存失败", e, detail="预热失败") from None
 
 
 @router.delete("/thumbnail-cache/clear", response_model=ThumbnailCleanupResponse)
@@ -1289,9 +1301,9 @@ async def clear_all_thumbnail_cache(
                 cache_file.unlink()
                 cleaned += 1
             except Exception as e:
-                logger.warning(f"删除缓存文件失败 {cache_file.name}: {e}")
+                log_exception_type(logger, "删除缓存文件失败", e, level="warning")
 
-        logger.info(f"已清空缩略图缓存: 删除 {cleaned} 个文件")
+        logger.info("已清空缩略图缓存", cleaned_count=cleaned)
 
         return ThumbnailCleanupResponse(
             success=True,
@@ -1303,5 +1315,4 @@ async def clear_all_thumbnail_cache(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"清空缩略图缓存失败: {e}")
-        raise HTTPException(status_code=500, detail=f"清空失败: {str(e)}") from e
+        raise internal_server_error(logger, "清空缩略图缓存失败", e, detail="清空失败") from None

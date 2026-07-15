@@ -750,7 +750,7 @@ class ResponseSplitterConfig(ConfigBase):
 class TelemetryConfig(ConfigBase):
     """遥测配置类"""
 
-    enable: bool = True
+    enable: bool = False
     """是否启用遥测"""
 
 
@@ -887,8 +887,8 @@ class MaimMessageConfig(ConfigBase):
     enable_api_server: bool = False
     """是否启用额外的新版API Server"""
 
-    api_server_host: str = "0.0.0.0"
-    """新版API Server主机地址"""
+    api_server_host: str = "127.0.0.1"
+    """新版API Server主机地址，默认仅监听本机"""
 
     api_server_port: int = 8090
     """新版API Server端口号"""
@@ -903,7 +903,7 @@ class MaimMessageConfig(ConfigBase):
     """新版API Server SSL密钥文件路径"""
 
     api_server_allowed_api_keys: list[str] = field(default_factory=lambda: [])
-    """新版API Server允许的API Key列表，为空则允许所有连接"""
+    """新版API Server允许的API Key列表；为空时仅本机监听允许匿名连接"""
 
 
 @dataclass

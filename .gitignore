@@ -364,6 +364,8 @@ config.toml
 interested_rates.txt
 MaiBot.code-workspace
 *.lock
+!uv.lock
+!webui/bun.lock
 actionlint
 adapter/
 :memory:_write_ops.jsonl

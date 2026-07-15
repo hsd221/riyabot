@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
+import { getChartColorVariable } from '@/components/ui/chart-style'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ChartConfig } from '@/components/ui/chart'
 import type { TimeSeriesData } from '@/types/statistics'
@@ -71,7 +72,7 @@ export function TrendChart({ data, granularity }: TrendChartProps) {
           <Line
             type="monotone"
             dataKey={metric}
-            stroke={`var(--color-${metric})`}
+            stroke={getChartColorVariable(metric)}
             strokeWidth={2.5}
             dot={false}
             activeDot={{ r: 4 }}

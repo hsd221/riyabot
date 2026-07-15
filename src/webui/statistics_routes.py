@@ -3,13 +3,14 @@
 from datetime import datetime, timedelta
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, Header, Query
 from peewee import Case, fn
 from pydantic import BaseModel, Field
 
 from src.common.database.database_model import ActionRecords, LLMUsage, Messages, OnlineTime
 from src.common.logger import get_logger
 from src.webui.auth import verify_auth_token_from_cookie_or_header
+from src.webui.error_utils import internal_server_error
 
 logger = get_logger("webui.statistics")
 
@@ -403,8 +404,7 @@ async def get_dashboard_data(
             recent_activity=await _get_recent_activity(start_time, now, limit=10),
         )
     except Exception as exc:
-        logger.exception("获取仪表盘数据失败")
-        raise HTTPException(status_code=500, detail="获取统计数据失败") from exc
+        raise internal_server_error(logger, "获取仪表盘数据失败", exc, detail="获取统计数据失败") from None
 
 
 @router.get("/report", response_model=StatisticsReport)
@@ -436,8 +436,7 @@ async def get_statistics_report(
             recent_activity=await _get_recent_activity(start_time, now, limit=recent_limit),
         )
     except Exception as exc:
-        logger.exception("获取完整统计报表失败")
-        raise HTTPException(status_code=500, detail="获取统计报表失败") from exc
+        raise internal_server_error(logger, "获取完整统计报表失败", exc, detail="获取统计报表失败") from None
 
 
 @router.get("/summary", response_model=StatisticsSummary)
@@ -450,8 +449,7 @@ async def get_summary(
         now = datetime.now()
         return await _get_summary_statistics(now - timedelta(hours=hours), now)
     except Exception as exc:
-        logger.exception("获取统计摘要失败")
-        raise HTTPException(status_code=500, detail="获取统计摘要失败") from exc
+        raise internal_server_error(logger, "获取统计摘要失败", exc) from None
 
 
 @router.get("/models", response_model=list[ModelStatistics])
@@ -464,5 +462,4 @@ async def get_model_stats(
         now = datetime.now()
         return await _get_model_statistics(now - timedelta(hours=hours), now)
     except Exception as exc:
-        logger.exception("获取模型统计失败")
-        raise HTTPException(status_code=500, detail="获取模型统计失败") from exc
+        raise internal_server_error(logger, "获取模型统计失败", exc) from None

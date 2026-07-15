@@ -41,10 +41,10 @@ class SendHandler:
         try:
             command, args_dict = SendCommandHandleClass.handle_command(seg_data, group_info)
         except Exception as e:
-            logger.error(f"处理命令时出错: {str(e)}")
+            logger.error(f"处理命令时出错: error_type={type(e).__name__}")
             # 发送错误响应给璃夜
             await self._send_command_response(
-                platform=message_info.platform, command_name=command_name, success=False, error=str(e)
+                platform=message_info.platform, command_name=command_name, success=False, error="命令处理失败"
             )
             return
 
@@ -64,13 +64,12 @@ class SendHandler:
                 platform=message_info.platform, command_name=command_name, success=True, data=response.get("data")
             )
         else:
-            logger.warning(f"命令执行失败: {command_name}, napcat_response={str(response)}")
+            logger.warning("NapCat 命令执行失败")
             await self._send_command_response(
                 platform=message_info.platform,
                 command_name=command_name,
                 success=False,
-                error=str(response),
-                data=response.get("data"),  # 有些错误响应也可能包含部分数据
+                error="NapCat 命令执行失败",
             )
 
     async def _send_command_response(
@@ -98,7 +97,7 @@ class SendHandler:
             )
             logger.debug(f"已发送命令响应: {command_name}, success={success}")
         except Exception as e:
-            logger.error(f"发送命令响应失败: {e}")
+            logger.error(f"发送命令响应失败: error_type={type(e).__name__}")
 
     async def send_normal_message(self, raw_message_base: MessageBase) -> None:
         """
@@ -116,7 +115,7 @@ class SendHandler:
         try:
             processed_message = SendMessageHandleClass.process_seg_recursive(message_segment)
         except Exception as e:
-            logger.error(f"处理消息时发生错误: {e}")
+            logger.error(f"处理消息时发生错误: error_type={type(e).__name__}")
             return
 
         if not processed_message:
@@ -149,7 +148,7 @@ class SendHandler:
             qq_message_id = response.get("data", {}).get("message_id")
             await nc_message_sender.message_sent_back(raw_message_base, qq_message_id)
         else:
-            logger.warning(f"消息发送失败: napcat_response={str(response)}")
+            logger.warning("NapCat 消息发送失败")
 
 
 send_handler = SendHandler()

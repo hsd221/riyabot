@@ -122,6 +122,28 @@ class PlannerApiTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as bad_detail:
             await planner.get_log_detail("chat-a", "1500000000000_bad.json")
         self.assertEqual(bad_detail.exception.status_code, 500)
+        self.assertEqual(bad_detail.exception.detail, "读取日志失败")
+
+    async def test_planner_log_detail_rejects_paths_outside_log_root(self) -> None:
+        self.plan_dir.mkdir(parents=True, exist_ok=True)
+        write_json(
+            self.plan_dir.parent / "outside.json",
+            {
+                "type": "plan",
+                "chat_id": "outside",
+                "timestamp": 1.0,
+                "prompt": "secret prompt",
+                "reasoning": "secret reasoning",
+                "raw_output": "{}",
+                "actions": [],
+                "timing": {},
+            },
+        )
+
+        with self.assertRaises(HTTPException) as blocked:
+            await planner.get_log_detail("..", "outside.json")
+
+        self.assertEqual(blocked.exception.status_code, 404)
 
 
 class ReplierApiTest(unittest.IsolatedAsyncioTestCase):
@@ -232,3 +254,28 @@ class ReplierApiTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as bad_detail:
             await replier.get_reply_log_detail("chat-a", "1500000000000_bad.json")
         self.assertEqual(bad_detail.exception.status_code, 500)
+        self.assertEqual(bad_detail.exception.detail, "读取日志失败")
+
+    async def test_replier_log_detail_rejects_paths_outside_log_root(self) -> None:
+        self.reply_dir.mkdir(parents=True, exist_ok=True)
+        write_json(
+            self.reply_dir.parent / "outside.json",
+            {
+                "type": "reply",
+                "chat_id": "outside",
+                "timestamp": 1.0,
+                "prompt": "secret prompt",
+                "output": "secret output",
+                "processed_output": [],
+                "model": "secret-model",
+                "reasoning": "secret reasoning",
+                "think_level": 0,
+                "timing": {},
+                "success": True,
+            },
+        )
+
+        with self.assertRaises(HTTPException) as blocked:
+            await replier.get_reply_log_detail("..", "outside.json")
+
+        self.assertEqual(blocked.exception.status_code, 404)

@@ -12,12 +12,19 @@ TEST_MODELS = [Messages]
 
 
 class FakeWebSocket:
-    def __init__(self, *, fail_send: bool = False, cookies: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_send: bool = False,
+        cookies: dict[str, str] | None = None,
+        receive_items: list | None = None,
+    ) -> None:
         self.accepted = False
         self.closed: tuple[int, str] | None = None
         self.sent: list[dict] = []
         self.fail_send = fail_send
         self.cookies = cookies or {}
+        self.receive_items = list(receive_items or [])
 
     async def accept(self) -> None:
         self.accepted = True
@@ -29,6 +36,14 @@ class FakeWebSocket:
 
     async def close(self, code: int, reason: str) -> None:
         self.closed = (code, reason)
+
+    async def receive_json(self):
+        if not self.receive_items:
+            raise chat_routes.WebSocketDisconnect(code=1000)
+        item = self.receive_items.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 class WebUIChatRoutesTestCase(unittest.IsolatedAsyncioTestCase):
@@ -199,6 +214,45 @@ class ChatConnectionManagerTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("session-1", manager.active_connections)
         self.assertNotIn("user-1", manager.user_sessions)
         self.assertIn("session-2", manager.active_connections)
+
+    async def test_chat_websocket_caps_connections_and_rejects_oversized_messages(self) -> None:
+        full_manager = chat_routes.ChatConnectionManager()
+        full_manager.active_connections["existing"] = FakeWebSocket()
+        rejected = FakeWebSocket()
+
+        with (
+            patch.object(chat_routes, "chat_manager", full_manager),
+            patch.object(chat_routes, "MAX_CHAT_WS_CONNECTIONS", 1),
+            patch.object(chat_routes, "verify_ws_token", return_value=True),
+        ):
+            await chat_routes.websocket_chat(rejected, token="valid")
+
+        self.assertFalse(rejected.accepted)
+        self.assertEqual(rejected.closed, (1013, "连接数过多，请稍后重试"))
+
+        manager = chat_routes.ChatConnectionManager()
+        oversized = FakeWebSocket(
+            receive_items=[
+                {"type": "message", "content": "12345", "user_name": "Alice"},
+                chat_routes.WebSocketDisconnect(code=1000),
+            ]
+        )
+        message_process = Mock()
+
+        with (
+            patch.object(chat_routes, "chat_manager", manager),
+            patch.object(chat_routes, "MAX_CHAT_MESSAGE_CHARS", 4),
+            patch.object(chat_routes, "verify_ws_token", return_value=True),
+            patch.object(chat_routes.chat_history, "get_history", return_value=[]),
+            patch.object(chat_routes.chat_bot, "message_process", message_process),
+        ):
+            await chat_routes.websocket_chat(oversized, user_id="user", user_name="Alice", token="valid")
+
+        self.assertTrue(oversized.accepted)
+        self.assertTrue(
+            any(item.get("type") == "error" and "过长" in item.get("content", "") for item in oversized.sent)
+        )
+        message_process.assert_not_called()
 
 
 class MessageDataAndRouteWrapperTest(WebUIChatRoutesTestCase):

@@ -2,16 +2,18 @@
 
 import json
 from typing import Optional, List, Annotated
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from peewee import fn
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.common.database.database_model import Jargon, ChatStreams
+from src.webui.auth import get_current_token
+from src.webui.error_utils import internal_server_error
 
 logger = get_logger("webui.jargon")
 
-router = APIRouter(prefix="/jargon", tags=["Jargon"])
+router = APIRouter(prefix="/jargon", tags=["Jargon"], dependencies=[Depends(get_current_token)])
 
 
 # ==================== 辅助函数 ====================
@@ -268,8 +270,7 @@ async def get_jargon_list(
         )
 
     except Exception as e:
-        logger.error(f"获取黑话列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取黑话列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取黑话列表失败", e) from None
 
 
 @router.get("/chats", response_model=ChatListResponse)
@@ -315,8 +316,7 @@ async def get_chat_list():
         return ChatListResponse(success=True, data=result)
 
     except Exception as e:
-        logger.error(f"获取聊天列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取聊天列表失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取聊天列表失败", e) from None
 
 
 @router.get("/stats/summary", response_model=JargonStatsResponse)
@@ -368,8 +368,7 @@ async def get_jargon_stats():
         )
 
     except Exception as e:
-        logger.error(f"获取黑话统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取黑话统计失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取黑话统计失败", e) from None
 
 
 @router.get("/{jargon_id}", response_model=JargonDetailResponse)
@@ -385,8 +384,7 @@ async def get_jargon_detail(jargon_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取黑话详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取黑话详情失败: {str(e)}") from e
+        raise internal_server_error(logger, "获取黑话详情失败", e) from None
 
 
 @router.post("/", response_model=JargonCreateResponse)
@@ -410,7 +408,7 @@ async def create_jargon(request: JargonCreateRequest):
             is_complete=False,
         )
 
-        logger.info(f"创建黑话成功: id={jargon.id}, content={request.content}")
+        logger.info("创建黑话成功", jargon_id=jargon.id, content_hash=hash_id(request.content))
 
         return JargonCreateResponse(
             success=True,
@@ -421,8 +419,7 @@ async def create_jargon(request: JargonCreateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"创建黑话失败: {e}")
-        raise HTTPException(status_code=500, detail=f"创建黑话失败: {str(e)}") from e
+        raise internal_server_error(logger, "创建黑话失败", e) from None
 
 
 @router.patch("/{jargon_id}", response_model=JargonUpdateResponse)
@@ -441,7 +438,7 @@ async def update_jargon(jargon_id: int, request: JargonUpdateRequest):
                     setattr(jargon, field, value)
             jargon.save()
 
-        logger.info(f"更新黑话成功: id={jargon_id}")
+        logger.info("更新黑话成功", jargon_id=jargon_id)
 
         return JargonUpdateResponse(
             success=True,
@@ -452,8 +449,7 @@ async def update_jargon(jargon_id: int, request: JargonUpdateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新黑话失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新黑话失败: {str(e)}") from e
+        raise internal_server_error(logger, "更新黑话失败", e) from None
 
 
 @router.delete("/{jargon_id}", response_model=JargonDeleteResponse)
@@ -467,7 +463,7 @@ async def delete_jargon(jargon_id: int):
         content = jargon.content
         jargon.delete_instance()
 
-        logger.info(f"删除黑话成功: id={jargon_id}, content={content}")
+        logger.info("删除黑话成功", jargon_id=jargon_id, content_hash=hash_id(content))
 
         return JargonDeleteResponse(
             success=True,
@@ -478,8 +474,7 @@ async def delete_jargon(jargon_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除黑话失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除黑话失败: {str(e)}") from e
+        raise internal_server_error(logger, "删除黑话失败", e) from None
 
 
 @router.post("/batch/delete", response_model=JargonDeleteResponse)
@@ -491,7 +486,7 @@ async def batch_delete_jargons(request: BatchDeleteRequest):
 
         deleted_count = Jargon.delete().where(Jargon.id.in_(request.ids)).execute()
 
-        logger.info(f"批量删除黑话成功: 删除了 {deleted_count} 条记录")
+        logger.info("批量删除黑话成功", deleted_count=deleted_count)
 
         return JargonDeleteResponse(
             success=True,
@@ -502,8 +497,7 @@ async def batch_delete_jargons(request: BatchDeleteRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"批量删除黑话失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除黑话失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量删除黑话失败", e) from None
 
 
 @router.post("/batch/set-jargon", response_model=JargonUpdateResponse)
@@ -518,7 +512,7 @@ async def batch_set_jargon_status(
 
         updated_count = Jargon.update(is_jargon=is_jargon).where(Jargon.id.in_(ids)).execute()
 
-        logger.info(f"批量更新黑话状态成功: 更新了 {updated_count} 条记录，is_jargon={is_jargon}")
+        logger.info("批量更新黑话状态成功", updated_count=updated_count, is_jargon=is_jargon)
 
         return JargonUpdateResponse(
             success=True,
@@ -528,5 +522,4 @@ async def batch_set_jargon_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"批量更新黑话状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量更新黑话状态失败: {str(e)}") from e
+        raise internal_server_error(logger, "批量更新黑话状态失败", e) from None

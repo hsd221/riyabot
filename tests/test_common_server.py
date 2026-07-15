@@ -5,6 +5,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import APIRouter
+from fastapi.testclient import TestClient
 
 from src.common import server as common_server
 
@@ -62,6 +63,9 @@ class CommonServerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server._host, "0.0.0.0")
         self.assertEqual(server._port, 9000)
         self.assertEqual(server.app.title, "TestServer")
+        self.assertIsNone(server.app.openapi_url)
+        self.assertIsNone(server.app.docs_url)
+        self.assertIsNone(server.app.redoc_url)
         self.assertFalse(any(getattr(route, "path", None) == "/message/inject" for route in server.app.routes))
         self.assertIs(server.get_app(), server.app)
 
@@ -72,7 +76,9 @@ class CommonServerTest(unittest.IsolatedAsyncioTestCase):
             return {"pong": True}
 
         server.register_router(router, prefix="/api")
-        self.assertTrue(any(getattr(route, "path", None) == "/api/ping" for route in server.app.routes))
+        response = TestClient(server.app).get("/api/ping")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"pong": True})
 
         server.set_address(host=None, port=None)
         self.assertEqual(server._host, "0.0.0.0")
@@ -84,6 +90,39 @@ class CommonServerTest(unittest.IsolatedAsyncioTestCase):
         with patch.dict(common_server.os.environ, {"MAIBOT_ENABLE_INJECT_ENDPOINT": "1"}, clear=True):
             inject_server = common_server.Server()
         self.assertTrue(any(getattr(route, "path", None) == "/message/inject" for route in inject_server.app.routes))
+
+    def test_remote_inject_endpoint_requires_and_verifies_dedicated_token(self) -> None:
+        with patch.dict(common_server.os.environ, {"MAIBOT_ENABLE_INJECT_ENDPOINT": "1"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "MAIBOT_INJECT_TOKEN"):
+                common_server.Server(host="0.0.0.0")
+
+        with patch.dict(
+            common_server.os.environ,
+            {
+                "MAIBOT_ENABLE_INJECT_ENDPOINT": "1",
+                "MAIBOT_INJECT_TOKEN": "inject-secret",
+            },
+            clear=True,
+        ):
+            server = common_server.Server(host="0.0.0.0")
+
+        client = TestClient(server.app)
+        self.assertEqual(client.post("/message/inject", json={"_probe": True}).status_code, 401)
+        self.assertEqual(
+            client.post(
+                "/message/inject",
+                json={"_probe": True},
+                headers={"X-MaiBot-Inject-Token": "wrong-secret"},
+            ).status_code,
+            401,
+        )
+        response = client.post(
+            "/message/inject",
+            json={"_probe": True},
+            headers={"X-MaiBot-Inject-Token": "inject-secret"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
 
     async def test_shutdown_marks_uvicorn_server_exit_and_suppresses_shutdown_errors(self) -> None:
         server = common_server.Server()

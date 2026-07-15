@@ -1,16 +1,19 @@
+import json
 import os
+import stat
 
 from typing import Dict, List, Optional, Tuple, Type, Any
 from importlib.util import spec_from_file_location, module_from_spec
 from pathlib import Path
 
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, hash_id
 from src.plugin_system.base.plugin_base import PluginBase
-from src.plugin_system.utils.manifest_utils import VersionComparator
+from src.plugin_system.utils.manifest_utils import ManifestValidator, VersionComparator
 from .component_registry import component_registry
 
 logger = get_logger("plugin_manager")
+MAX_PLUGIN_MANIFEST_BYTES = 256 * 1024
 
 
 class PluginManager:
@@ -137,29 +140,38 @@ class PluginManager:
 
         except FileNotFoundError as e:
             # manifest文件缺失
-            error_msg = f"缺少manifest文件: {str(e)}"
+            error_msg = "缺少manifest文件"
             self.failed_plugins[plugin_name] = error_msg
             logger.error(
-                "插件加载失败，manifest 文件缺失", event_code="plugin.manifest_missing", plugin_name=plugin_name
+                "插件加载失败，manifest 文件缺失",
+                event_code="plugin.manifest_missing",
+                plugin_name_hash=hash_id(plugin_name),
+                error_type=type(e).__name__,
             )
             return False, 1
 
         except ValueError as e:
             # manifest文件格式错误或验证失败
-            error_msg = f"manifest验证失败: {str(e)}"
+            error_msg = "manifest验证失败"
             self.failed_plugins[plugin_name] = error_msg
-            logger.exception(
+            logger.error(
                 "插件加载失败，manifest 验证失败",
                 event_code="plugin.manifest_invalid",
-                plugin_name=plugin_name,
+                plugin_name_hash=hash_id(plugin_name),
+                error_type=type(e).__name__,
             )
             return False, 1
 
         except Exception as e:
             # 其他错误
-            error_msg = f"未知错误: {str(e)}"
+            error_msg = "未知错误"
             self.failed_plugins[plugin_name] = error_msg
-            logger.exception("插件加载失败", event_code="plugin.load_failed", plugin_name=plugin_name)
+            logger.error(
+                "插件加载失败",
+                event_code="plugin.load_failed",
+                plugin_name_hash=hash_id(plugin_name),
+                error_type=type(e).__name__,
+            )
             return False, 1
 
     async def remove_registered_plugin(self, plugin_name: str) -> bool:
@@ -275,24 +287,37 @@ class PluginManager:
         """从指定目录加载插件模块"""
         loaded_count = 0
         failed_count = 0
+        directory_path = Path(directory)
 
-        if not os.path.exists(directory):
+        if directory_path.is_symlink() or not directory_path.is_dir():
             logger.warning("插件根目录不存在", event_code="plugin.directory.missing", directory=directory)
             return 0, 1
 
         logger.debug("插件根目录开始扫描", event_code="plugin.directory.scan_started", directory=directory)
 
         # 遍历目录中的所有包
-        for item in os.listdir(directory):
-            item_path = os.path.join(directory, item)
+        for item_path in sorted(directory_path.iterdir(), key=lambda path: path.name):
+            if item_path.name.startswith((".", "__")):
+                continue
+            try:
+                if item_path.is_symlink() or not item_path.is_dir():
+                    continue
+                plugin_file = item_path / "plugin.py"
+                if plugin_file.is_symlink() or not plugin_file.is_file():
+                    continue
+            except OSError:
+                logger.warning(
+                    "插件目录项检查失败",
+                    event_code="plugin.directory.entry_check_failed",
+                    entry=item_path.name,
+                )
+                failed_count += 1
+                continue
 
-            if os.path.isdir(item_path) and not item.startswith(".") and not item.startswith("__"):
-                plugin_file = os.path.join(item_path, "plugin.py")
-                if os.path.exists(plugin_file):
-                    if self._load_plugin_module_file(plugin_file):
-                        loaded_count += 1
-                    else:
-                        failed_count += 1
+            if self._load_plugin_module_file(str(plugin_file)):
+                loaded_count += 1
+            else:
+                failed_count += 1
 
         return loaded_count, failed_count
 
@@ -310,10 +335,16 @@ class PluginManager:
         module_name = ".".join(plugin_path.parent.parts)
 
         try:
+            self._preflight_plugin_module(plugin_path)
+
             # 动态导入插件模块
             spec = spec_from_file_location(module_name, plugin_file)
             if spec is None or spec.loader is None:
-                logger.error("插件模块规范创建失败", event_code="plugin.module.spec_failed", plugin_file=plugin_file)
+                logger.error(
+                    "插件模块规范创建失败",
+                    event_code="plugin.module.spec_failed",
+                    plugin_file_hash=hash_id(plugin_file),
+                )
                 return False
 
             module = module_from_spec(spec)
@@ -321,15 +352,76 @@ class PluginManager:
             spec.loader.exec_module(module)
 
             logger.debug(
-                "插件模块加载完成", event_code="plugin.module.loaded", plugin_file=plugin_file, module_name=module_name
+                "插件模块加载完成",
+                event_code="plugin.module.loaded",
+                plugin_file_hash=hash_id(plugin_file),
+                module_name_hash=hash_id(module_name),
             )
             return True
 
         except Exception as e:
-            error_msg = f"加载插件模块 {plugin_file} 失败: {e}"
-            logger.exception("插件模块加载失败", event_code="plugin.module.load_failed", plugin_file=plugin_file)
+            error_msg = "插件预检或加载失败"
+            logger.error(
+                "插件模块加载失败",
+                event_code="plugin.module.load_failed",
+                plugin_file_hash=hash_id(plugin_file),
+                error_type=type(e).__name__,
+            )
             self.failed_plugins[module_name] = error_msg
             return False
+
+    def _preflight_plugin_module(self, plugin_path: Path) -> None:
+        """在执行插件代码前校验目录、清单和主程序版本兼容性。"""
+        plugin_dir = plugin_path.parent
+        if plugin_dir.is_symlink() or plugin_path.is_symlink():
+            raise ValueError("插件路径不能是符号链接")
+
+        try:
+            plugin_stat = plugin_path.stat()
+        except OSError as exc:
+            raise ValueError("插件入口文件不可访问") from exc
+        if not stat.S_ISREG(plugin_stat.st_mode):
+            raise ValueError("插件入口路径不是普通文件")
+
+        manifest_path = plugin_dir / "_manifest.json"
+        if manifest_path.is_symlink():
+            raise ValueError("插件清单不能是符号链接")
+
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            file_descriptor = os.open(manifest_path, flags)
+        except OSError as exc:
+            raise ValueError("插件缺少有效清单") from exc
+
+        try:
+            manifest_stat = os.fstat(file_descriptor)
+            if not stat.S_ISREG(manifest_stat.st_mode):
+                raise ValueError("插件清单路径不是普通文件")
+            with os.fdopen(file_descriptor, "rb") as file:
+                file_descriptor = -1
+                raw_manifest = file.read(MAX_PLUGIN_MANIFEST_BYTES + 1)
+        finally:
+            if file_descriptor >= 0:
+                os.close(file_descriptor)
+
+        if len(raw_manifest) > MAX_PLUGIN_MANIFEST_BYTES:
+            raise ValueError("插件清单过大")
+        try:
+            manifest_data = json.loads(raw_manifest.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("插件清单格式无效") from exc
+        if not isinstance(manifest_data, dict):
+            raise ValueError("插件清单格式无效")
+
+        validator = ManifestValidator()
+        if not validator.validate_manifest(manifest_data):
+            raise ValueError("插件清单验证失败")
+
+        compatible, _ = self._check_plugin_version_compatibility(plugin_dir.name, manifest_data)
+        if not compatible:
+            raise ValueError("插件版本与主程序不兼容")
 
     # == 兼容性检查 ==
 
@@ -375,10 +467,10 @@ class PluginManager:
             logger.warning(
                 "插件版本兼容性检查异常",
                 event_code="plugin.version_check_failed",
-                plugin_name=plugin_name,
-                error=str(e),
+                plugin_name_hash=hash_id(plugin_name),
+                error_type=type(e).__name__,
             )
-            return False, f"插件 {plugin_name} 版本兼容性检查失败: {e}"  # 检查失败时默认不允许加载
+            return False, "插件版本兼容性检查失败"  # 检查失败时默认不允许加载
 
     # == 显示统计与插件信息 ==
 

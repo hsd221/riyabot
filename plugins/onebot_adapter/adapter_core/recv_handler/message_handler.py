@@ -400,7 +400,7 @@ class MessageHandler:
         try:
             image_base64 = await get_image_base64(message_data.get("url"))
         except Exception as e:
-            logger.error(f"图片消息处理失败: {str(e)}")
+            logger.error(f"图片消息处理失败: error_type={type(e).__name__}")
             return None
         if image_sub_type == 0:
             """这部分认为是图片"""
@@ -460,7 +460,7 @@ class MessageHandler:
                 return None
             audio_base64: str = record_detail.get("base64")
         except Exception as e:
-            logger.error(f"语音消息处理失败: {str(e)}")
+            logger.error(f"语音消息处理失败: error_type={type(e).__name__}")
             return None
         if not audio_base64:
             logger.error("语音消息处理失败，未获取到音频数据")
@@ -521,7 +521,7 @@ class MessageHandler:
                         if text:
                             text = base64.b64decode(text).decode("utf-8", errors="ignore")
                     except Exception as e:
-                        logger.warning(f"群公告Base64解码失败: {e}")
+                        logger.warning(f"群公告Base64解码失败: error_type={type(e).__name__}")
                 if title and text:
                     content = f"[{title}]:{text}"
                 elif title:
@@ -588,7 +588,7 @@ class MessageHandler:
                             image_base64 = await get_image_base64(preview_url)
                             seg_list.append(Seg(type="image", data=image_base64))
                         except Exception as e:
-                            logger.error(f"QQ小程序预览图下载失败: {e}")
+                            logger.error(f"QQ小程序预览图下载失败: error_type={type(e).__name__}")
 
                     return seg_list
 
@@ -635,7 +635,7 @@ class MessageHandler:
                         image_base64 = await get_image_base64(preview_url)
                         seg_list.append(Seg(type="image", data=image_base64))
                     except Exception as e:
-                        logger.error(f"图文预览图下载失败: {e}")
+                        logger.error(f"图文预览图下载失败: error_type={type(e).__name__}")
 
                 return seg_list
 
@@ -657,7 +657,7 @@ class MessageHandler:
                         image_base64 = await get_image_base64(cover_url)
                         seg_list.append(Seg(type="image", data=image_base64))
                     except Exception as e:
-                        logger.error(f"群相册封面下载失败: {e}")
+                        logger.error(f"群相册封面下载失败: error_type={type(e).__name__}")
 
                 return seg_list
 
@@ -675,7 +675,7 @@ class MessageHandler:
                         image_base64 = await get_image_base64(preview_url)
                         seg_list.append(Seg(type="image", data=image_base64))
                     except Exception as e:
-                        logger.error(f"QQ收藏预览图下载失败: {e}")
+                        logger.error(f"QQ收藏预览图下载失败: error_type={type(e).__name__}")
 
                 return seg_list
 
@@ -693,7 +693,7 @@ class MessageHandler:
                         image_base64 = await get_image_base64(preview_url)
                         seg_list.append(Seg(type="image", data=image_base64))
                     except Exception as e:
-                        logger.error(f"QQ空间预览图下载失败: {e}")
+                        logger.error(f"QQ空间预览图下载失败: error_type={type(e).__name__}")
 
                 return seg_list
 
@@ -724,7 +724,7 @@ class MessageHandler:
                             image_base64 = await get_image_base64(pic_url)
                             seg_list.append(Seg(type="image", data=image_base64))
                         except Exception as e:
-                            logger.error(f"QQ频道图片下载失败: {e}")
+                            logger.error(f"QQ频道图片下载失败: error_type={type(e).__name__}")
 
                     return seg_list
 
@@ -749,7 +749,7 @@ class MessageHandler:
             logger.warning("JSON消息解析失败")
             return [Seg(type="text", data="[卡片消息]")]
         except Exception as e:
-            logger.error(f"JSON消息处理异常: {e}")
+            logger.error(f"JSON消息处理异常: error_type={type(e).__name__}")
             return [Seg(type="text", data="[卡片消息]")]
 
     async def handle_file_message(self, raw_message: dict) -> Seg | None:
@@ -856,7 +856,7 @@ class MessageHandler:
                 try:
                     encoded_image = await get_image_base64(image_url)
                 except Exception as e:
-                    logger.error(f"图片处理失败: {str(e)}")
+                    logger.error(f"图片处理失败: error_type={type(e).__name__}")
                     return Seg(type="text", data="[图片]")
                 return Seg(type="image", data=encoded_image)
             elif seg_data.type == "emoji":
@@ -864,7 +864,7 @@ class MessageHandler:
                 try:
                     encoded_image = await get_image_base64(image_url)
                 except Exception as e:
-                    logger.error(f"图片处理失败: {str(e)}")
+                    logger.error(f"图片处理失败: error_type={type(e).__name__}")
                     return Seg(type="text", data="[表情包]")
                 return Seg(type="emoji", data=encoded_image)
             else:
@@ -995,13 +995,9 @@ class MessageHandler:
             logger.error("获取转发消息超时")
             return None
         except Exception as e:
-            logger.error(f"获取转发消息失败: {str(e)}")
+            logger.error(f"获取转发消息失败: error_type={type(e).__name__}")
             return None
-        logger.debug(
-            f"转发消息原始格式：{json.dumps(response)[:80]}..."
-            if len(json.dumps(response)) > 80
-            else json.dumps(response)
-        )
+        logger.debug("已获取转发消息响应")
         response_data: Dict = response.get("data")
         if not response_data:
             logger.warning("转发消息内容为空或获取失败")

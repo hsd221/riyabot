@@ -11,10 +11,13 @@
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/replier", tags=["replier"])
+from src.webui.auth import get_current_token
+from src.webui.path_utils import resolve_path_within
+
+router = APIRouter(prefix="/api/replier", tags=["replier"], dependencies=[Depends(get_current_token)])
 
 # 回复器日志目录
 REPLY_LOG_DIR = Path("logs/reply")
@@ -142,7 +145,10 @@ async def get_chat_reply_logs(
     需要读取文件内容获取摘要信息
     支持搜索提示词内容
     """
-    chat_dir = REPLY_LOG_DIR / chat_id
+    try:
+        chat_dir = resolve_path_within(REPLY_LOG_DIR, chat_id)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=404, detail="聊天日志不存在") from None
     if not chat_dir.exists():
         return PaginatedReplyLogs(data=[], total=0, page=page, page_size=page_size, chat_id=chat_id)
 
@@ -210,7 +216,10 @@ async def get_chat_reply_logs(
 @router.get("/log/{chat_id}/{filename}", response_model=ReplyLogDetail)
 async def get_reply_log_detail(chat_id: str, filename: str):
     """获取回复日志详情 - 按需加载完整内容"""
-    log_file = REPLY_LOG_DIR / chat_id / filename
+    try:
+        log_file = resolve_path_within(REPLY_LOG_DIR, chat_id, filename)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=404, detail="日志文件不存在") from None
     if not log_file.exists():
         raise HTTPException(status_code=404, detail="日志文件不存在")
 
@@ -231,8 +240,8 @@ async def get_reply_log_detail(chat_id: str, filename: str):
                 error=data.get("error"),
                 success=data.get("success", True),
             )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取日志失败: {str(e)}") from e
+    except Exception:
+        raise HTTPException(status_code=500, detail="读取日志失败") from None
 
 
 # ========== 兼容接口 ==========

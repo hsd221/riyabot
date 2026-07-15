@@ -77,10 +77,10 @@ export function PasswordSetupForm({
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
               className="h-11 rounded-[12px] bg-muted/60 pl-10 pr-11 shadow-none"
-              placeholder="8-16 位字母与数字"
+              placeholder="8-128 位，可使用空格与符号"
               autoComplete="new-password"
               minLength={8}
-              maxLength={16}
+              maxLength={128}
               aria-describedby="setup-password-rules"
               autoFocus
             />
@@ -113,7 +113,7 @@ export function PasswordSetupForm({
               placeholder="再次输入密码"
               autoComplete="new-password"
               minLength={8}
-              maxLength={16}
+              maxLength={128}
             />
             <button
               type="button"

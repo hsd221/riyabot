@@ -14,6 +14,7 @@ heartbeat_interval = 30 # 与Napcat设置的心跳相同（按秒计）
 [maibot_server] # 连接璃夜的ws服务设置
 host = "localhost"        # 璃夜在.env文件中设置的主机地址，即HOST字段
 port = 8000               # 璃夜在.env文件中设置的端口，即PORT字段
+auth_token = ""           # 旧版WebSocket认证令牌，需与璃夜 maim_message.auth_token 中的一项一致
 enable_api_server = false # 是否启用API-Server模式连接
 base_url = "ws://127.0.0.1:18095/ws"             # API-Server连接地址 (ws://ip:port/path)，仅在enable_api_server为true时使用
 api_key = "riyabot"       # API Key (仅在enable_api_server为true时使用)

@@ -1,7 +1,11 @@
-from peewee import Model, DoubleField, IntegerField, BooleanField, TextField, FloatField, DateTimeField
-from .database import db
 import datetime
+import math
+import time
+
+from peewee import BooleanField, DateTimeField, DoubleField, FloatField, IntegerField, Model, TextField
+
 from src.common.logger import get_logger
+from .database import db
 
 logger = get_logger("database_model")
 # 请在此处定义您的数据库实例。
@@ -394,6 +398,46 @@ MODELS = [
 ]
 
 
+def _quote_sqlite_identifier(identifier: str) -> str:
+    """安全引用 SQLite 表名或列名。"""
+    if not isinstance(identifier, str):
+        raise TypeError("SQLite 标识符必须是字符串")
+    if not identifier or "\x00" in identifier:
+        raise ValueError("SQLite 标识符不能为空或包含空字节")
+    escaped_identifier = identifier.replace('"', '""')
+    return f'"{escaped_identifier}"'
+
+
+def _sqlite_literal(value) -> str:
+    """将受信任的模型默认值编码为单个 SQLite 字面量。"""
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return str(int(value))
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("SQLite 默认浮点值必须是有限数")
+        return repr(value)
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        value = str(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    if isinstance(value, bytes):
+        return f"X'{value.hex()}'"
+    raise TypeError(f"不支持的 SQLite 默认值类型: {type(value).__name__}")
+
+
+def _field_column_name(field_name: str, field_obj) -> str:
+    column_name = getattr(field_obj, "column_name", None)
+    return column_name if isinstance(column_name, str) and column_name else field_name
+
+
+def _table_info_sql(table_name: str) -> str:
+    return f"PRAGMA table_info({_quote_sqlite_identifier(table_name)})"
+
+
 def create_tables():
     """
     创建所有在模型中定义的数据库表。
@@ -402,7 +446,7 @@ def create_tables():
         db.create_tables(MODELS)
 
 
-def initialize_database(sync_constraints=False):
+def initialize_database(sync_constraints=False, drop_extra_fields=False):
     """
     检查所有定义的表是否存在，如果不存在则创建它们。
     检查所有表的所有字段是否存在，如果缺失则自动添加。
@@ -410,6 +454,8 @@ def initialize_database(sync_constraints=False):
     Args:
         sync_constraints (bool): 是否同步字段约束。默认为 False。
                                如果为 True，会检查并修复字段的 NULL 约束不一致问题。
+        drop_extra_fields (bool): 是否删除模型未声明的现有字段。默认为 False，
+                                  防止启动时静默丢失旧版本或手工扩展的数据。
     """
 
     try:
@@ -423,16 +469,19 @@ def initialize_database(sync_constraints=False):
                     continue
 
                 # 检查字段
-                cursor = db.execute_sql(f"PRAGMA table_info('{table_name}')")
+                cursor = db.execute_sql(_table_info_sql(table_name))
                 existing_columns = {row[1] for row in cursor.fetchall()}
-                model_fields = set(model._meta.fields.keys())
+                model_columns = {
+                    _field_column_name(field_name, field_obj) for field_name, field_obj in model._meta.fields.items()
+                }
 
-                if missing_fields := model_fields - existing_columns:
+                if missing_fields := model_columns - existing_columns:
                     logger.warning(f"表 '{table_name}' 缺失字段: {missing_fields}")
 
                 for field_name, field_obj in model._meta.fields.items():
-                    if field_name not in existing_columns:
-                        logger.info(f"表 '{table_name}' 缺失字段 '{field_name}'，正在添加...")
+                    column_name = _field_column_name(field_name, field_obj)
+                    if column_name not in existing_columns:
+                        logger.info(f"表 '{table_name}' 缺失字段 '{column_name}'，正在添加...")
                         field_type = field_obj.__class__.__name__
                         sql_type = {
                             "TextField": "TEXT",
@@ -442,7 +491,10 @@ def initialize_database(sync_constraints=False):
                             "BooleanField": "INTEGER",
                             "DateTimeField": "DATETIME",
                         }.get(field_type, "TEXT")
-                        alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {field_name} {sql_type}"
+                        alter_sql = (
+                            f"ALTER TABLE {_quote_sqlite_identifier(table_name)} "
+                            f"ADD COLUMN {_quote_sqlite_identifier(column_name)} {sql_type}"
+                        )
                         alter_sql += " NULL" if field_obj.null else " NOT NULL"
                         if hasattr(field_obj, "default") and field_obj.default is not None:
                             # 正确处理不同类型的默认值，跳过lambda函数
@@ -450,26 +502,31 @@ def initialize_database(sync_constraints=False):
                             if callable(default_value):
                                 # 跳过lambda函数或其他可调用对象，这些无法在SQL中表示
                                 pass
-                            elif isinstance(default_value, str):
-                                alter_sql += f" DEFAULT '{default_value}'"
-                            elif isinstance(default_value, bool):
-                                alter_sql += f" DEFAULT {int(default_value)}"
                             else:
-                                alter_sql += f" DEFAULT {default_value}"
+                                try:
+                                    alter_sql += f" DEFAULT {_sqlite_literal(default_value)}"
+                                except (TypeError, ValueError):
+                                    logger.warning(
+                                        f"字段 '{column_name}' 的数据库默认值类型不受支持，已跳过默认值",
+                                        exc_info=True,
+                                    )
                         try:
                             db.execute_sql(alter_sql)
-                            logger.info(f"字段 '{field_name}' 添加成功")
+                            logger.info(f"字段 '{column_name}' 添加成功")
                         except Exception as e:
-                            logger.error(f"添加字段 '{field_name}' 失败: {e}")
+                            logger.error(f"添加字段 '{column_name}' 失败: {e}")
 
                 # 检查并删除多余字段（新增逻辑）
-                extra_fields = existing_columns - model_fields
+                extra_fields = existing_columns - model_columns
                 if extra_fields:
                     logger.warning(f"表 '{table_name}' 存在多余字段: {extra_fields}")
-                for field_name in extra_fields:
+                for field_name in extra_fields if drop_extra_fields else ():
                     try:
                         logger.warning(f"表 '{table_name}' 存在多余字段 '{field_name}'，正在尝试删除...")
-                        db.execute_sql(f"ALTER TABLE {table_name} DROP COLUMN {field_name}")
+                        db.execute_sql(
+                            f"ALTER TABLE {_quote_sqlite_identifier(table_name)} "
+                            f"DROP COLUMN {_quote_sqlite_identifier(field_name)}"
+                        )
                         logger.info(f"字段 '{field_name}' 删除成功")
                     except Exception as e:
                         logger.error(f"删除字段 '{field_name}' 失败: {e}")
@@ -505,7 +562,7 @@ def sync_field_constraints():
                 logger.debug(f"检查表 '{table_name}' 的字段约束...")
 
                 # 获取当前表结构信息
-                cursor = db.execute_sql(f"PRAGMA table_info('{table_name}')")
+                cursor = db.execute_sql(_table_info_sql(table_name))
                 current_schema = {
                     row[1]: {"type": row[2], "notnull": bool(row[3]), "default": row[4]} for row in cursor.fetchall()
                 }
@@ -513,10 +570,11 @@ def sync_field_constraints():
                 # 检查每个模型字段的约束
                 constraints_to_fix = []
                 for field_name, field_obj in model._meta.fields.items():
-                    if field_name not in current_schema:
+                    column_name = _field_column_name(field_name, field_obj)
+                    if column_name not in current_schema:
                         continue  # 字段不存在，跳过
 
-                    current_notnull = current_schema[field_name]["notnull"]
+                    current_notnull = current_schema[column_name]["notnull"]
                     model_allows_null = field_obj.null
 
                     # 如果模型允许 null 但数据库字段不允许 null，需要修复
@@ -524,6 +582,7 @@ def sync_field_constraints():
                         constraints_to_fix.append(
                             {
                                 "field_name": field_name,
+                                "column_name": column_name,
                                 "field_obj": field_obj,
                                 "action": "allow_null",
                                 "current_constraint": "NOT NULL",
@@ -537,6 +596,7 @@ def sync_field_constraints():
                         constraints_to_fix.append(
                             {
                                 "field_name": field_name,
+                                "column_name": column_name,
                                 "field_obj": field_obj,
                                 "action": "disallow_null",
                                 "current_constraint": "NULL",
@@ -556,122 +616,102 @@ def sync_field_constraints():
         logger.exception(f"同步字段约束时出错: {e}")
 
 
+def _constraint_null_default(field_obj) -> str:
+    if isinstance(field_obj, TextField):
+        return _sqlite_literal("")
+    if isinstance(field_obj, (IntegerField, FloatField, DoubleField)):
+        return _sqlite_literal(0)
+    if isinstance(field_obj, BooleanField):
+        return _sqlite_literal(False)
+    if isinstance(field_obj, DateTimeField):
+        return _sqlite_literal(datetime.datetime.now())
+    return _sqlite_literal("")
+
+
+def _rebuild_table_constraints(table_name, model, constraints_to_fix, backup_table) -> None:
+    quoted_table = _quote_sqlite_identifier(table_name)
+    quoted_backup_table = _quote_sqlite_identifier(backup_table)
+
+    db.execute_sql(f"CREATE TABLE {quoted_backup_table} AS SELECT * FROM {quoted_table}")
+    logger.info(f"已创建备份表 '{backup_table}'")
+
+    original_count = db.execute_sql(f"SELECT COUNT(*) FROM {quoted_backup_table}").fetchone()[0]
+    logger.info(f"备份表 '{backup_table}' 包含 {original_count} 行数据")
+
+    db.execute_sql(f"DROP TABLE {quoted_table}")
+    logger.info(f"已删除原表 '{table_name}'")
+
+    db.create_tables([model])
+    logger.info(f"已重新创建表 '{table_name}' 使用新的约束")
+
+    fields = [
+        (field_name, field_obj, _field_column_name(field_name, field_obj))
+        for field_name, field_obj in model._meta.fields.items()
+    ]
+    fields_str = ", ".join(_quote_sqlite_identifier(column_name) for _, _, column_name in fields)
+    null_to_notnull_fields = {
+        constraint["field_name"] for constraint in constraints_to_fix if constraint["action"] == "disallow_null"
+    }
+    null_to_notnull_columns = {
+        constraint.get("column_name")
+        for constraint in constraints_to_fix
+        if constraint["action"] == "disallow_null" and constraint.get("column_name")
+    }
+
+    if null_to_notnull_fields:
+        logger.warning(f"字段 {null_to_notnull_fields} 将从允许NULL改为不允许NULL，需要处理现有的NULL值")
+        select_fields = []
+        for field_name, field_obj, column_name in fields:
+            quoted_column = _quote_sqlite_identifier(column_name)
+            if field_name in null_to_notnull_fields or column_name in null_to_notnull_columns:
+                default_value = _constraint_null_default(field_obj)
+                select_fields.append(f"COALESCE({quoted_column}, {default_value}) AS {quoted_column}")
+            else:
+                select_fields.append(quoted_column)
+        select_str = ", ".join(select_fields)
+    else:
+        select_str = fields_str
+
+    db.execute_sql(f"INSERT INTO {quoted_table} ({fields_str}) SELECT {select_str} FROM {quoted_backup_table}")
+    logger.info(f"已从备份表恢复数据到 '{table_name}'")
+
+    new_count = db.execute_sql(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0]
+    if original_count != new_count:
+        raise RuntimeError(f"数据完整性验证失败: 原始 {original_count} 行，新表 {new_count} 行")
+
+    logger.info(f"数据完整性验证通过: {original_count} 行数据")
+    db.execute_sql(f"DROP TABLE {quoted_backup_table}")
+    logger.info(f"已删除备份表 '{backup_table}'")
+
+    for constraint in constraints_to_fix:
+        logger.info(
+            f"已修复字段 '{constraint['field_name']}': "
+            f"{constraint['current_constraint']} -> {constraint['target_constraint']}"
+        )
+
+
 def _fix_table_constraints(table_name, model, constraints_to_fix):
-    """
-    修复表的字段约束。
-    对于 SQLite，由于不支持直接修改列约束，需要重建表。
-    """
+    """在事务中重建 SQLite 表并同步字段约束。"""
+    backup_table = f"{table_name}_backup_{time.time_ns()}"
+    logger.info(f"开始修复表 '{table_name}' 的字段约束...")
+
     try:
-        # 备份表名
-        backup_table = f"{table_name}_backup_{int(datetime.datetime.now().timestamp())}"
-
-        logger.info(f"开始修复表 '{table_name}' 的字段约束...")
-
-        # 1. 创建备份表
-        db.execute_sql(f"CREATE TABLE {backup_table} AS SELECT * FROM {table_name}")
-        logger.info(f"已创建备份表 '{backup_table}'")
-
-        # 2. 获取原始行数（在删除表之前）
-        original_count = db.execute_sql(f"SELECT COUNT(*) FROM {backup_table}").fetchone()[0]
-        logger.info(f"备份表 '{backup_table}' 包含 {original_count} 行数据")
-
-        # 3. 删除原表
-        db.execute_sql(f"DROP TABLE {table_name}")
-        logger.info(f"已删除原表 '{table_name}'")
-
-        # 4. 重新创建表（使用当前模型定义）
-        db.create_tables([model])
-        logger.info(f"已重新创建表 '{table_name}' 使用新的约束")
-
-        # 5. 从备份表恢复数据
-        # 获取字段列表，排除主键字段（让数据库自动生成新的主键）
-        fields = list(model._meta.fields.keys())
-        # Peewee 默认使用 'id' 作为主键字段名
-        # 尝试获取主键字段名，如果获取失败则默认使用 'id'
-        primary_key_name = "id"  # 默认值
-        try:
-            if hasattr(model._meta, "primary_key") and model._meta.primary_key:
-                if hasattr(model._meta.primary_key, "name"):
-                    primary_key_name = model._meta.primary_key.name
-                elif isinstance(model._meta.primary_key, str):
-                    primary_key_name = model._meta.primary_key
-        except Exception:
-            pass  # 如果获取失败，使用默认值 'id'
-
-        # 如果字段列表包含主键，则排除它
-        if primary_key_name in fields:
-            fields_without_pk = [f for f in fields if f != primary_key_name]
-            logger.info(f"排除主键字段 '{primary_key_name}'，让数据库自动生成新的主键")
+        atomic = getattr(db, "atomic", None)
+        if callable(atomic):
+            with atomic():
+                _rebuild_table_constraints(table_name, model, constraints_to_fix, backup_table)
         else:
-            fields_without_pk = fields
-
-        fields_str = ", ".join(fields_without_pk)
-
-        # 检查是否有字段需要从 NULL 改为 NOT NULL
-        null_to_notnull_fields = [
-            constraint["field_name"] for constraint in constraints_to_fix if constraint["action"] == "disallow_null"
-        ]
-
-        if null_to_notnull_fields:
-            # 需要处理 NULL 值，为这些字段设置默认值
-            logger.warning(f"字段 {null_to_notnull_fields} 将从允许NULL改为不允许NULL，需要处理现有的NULL值")
-
-            # 构建更复杂的 SELECT 语句来处理 NULL 值
-            select_fields = []
-            for field_name in fields_without_pk:
-                if field_name in null_to_notnull_fields:
-                    field_obj = model._meta.fields[field_name]
-                    # 根据字段类型设置默认值
-                    if isinstance(field_obj, (TextField,)):
-                        default_value = "''"
-                    elif isinstance(field_obj, (IntegerField, FloatField, DoubleField)):
-                        default_value = "0"
-                    elif isinstance(field_obj, BooleanField):
-                        default_value = "0"
-                    elif isinstance(field_obj, DateTimeField):
-                        default_value = f"'{datetime.datetime.now()}'"
-                    else:
-                        default_value = "''"
-
-                    select_fields.append(f"COALESCE({field_name}, {default_value}) as {field_name}")
-                else:
-                    select_fields.append(field_name)
-
-            select_str = ", ".join(select_fields)
-            insert_sql = f"INSERT INTO {table_name} ({fields_str}) SELECT {select_str} FROM {backup_table}"
-        else:
-            # 没有需要处理 NULL 的字段，直接复制数据（排除主键）
-            insert_sql = f"INSERT INTO {table_name} ({fields_str}) SELECT {fields_str} FROM {backup_table}"
-
-        db.execute_sql(insert_sql)
-        logger.info(f"已从备份表恢复数据到 '{table_name}'")
-
-        new_count = db.execute_sql(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-
-        if original_count == new_count:
-            logger.info(f"数据完整性验证通过: {original_count} 行数据")
-            # 删除备份表
-            db.execute_sql(f"DROP TABLE {backup_table}")
-            logger.info(f"已删除备份表 '{backup_table}'")
-        else:
-            logger.error(f"数据完整性验证失败: 原始 {original_count} 行，新表 {new_count} 行")
-            logger.error(f"备份表 '{backup_table}' 已保留，请手动检查")
-
-        # 记录修复的约束
-        for constraint in constraints_to_fix:
-            logger.info(
-                f"已修复字段 '{constraint['field_name']}': "
-                f"{constraint['current_constraint']} -> {constraint['target_constraint']}"
-            )
-
+            _rebuild_table_constraints(table_name, model, constraints_to_fix, backup_table)
     except Exception as e:
         logger.exception(f"修复表 '{table_name}' 约束时出错: {e}")
-        # 尝试恢复
         try:
             if db.table_exists(backup_table):
                 logger.info(f"尝试从备份表 '{backup_table}' 恢复...")
-                db.execute_sql(f"DROP TABLE IF EXISTS {table_name}")
-                db.execute_sql(f"ALTER TABLE {backup_table} RENAME TO {table_name}")
+                db.execute_sql(f"DROP TABLE IF EXISTS {_quote_sqlite_identifier(table_name)}")
+                db.execute_sql(
+                    f"ALTER TABLE {_quote_sqlite_identifier(backup_table)} "
+                    f"RENAME TO {_quote_sqlite_identifier(table_name)}"
+                )
                 logger.info(f"已从备份恢复表 '{table_name}'")
         except Exception as restore_error:
             logger.exception(f"恢复表失败: {restore_error}")
@@ -693,7 +733,7 @@ def check_field_constraints():
                     continue
 
                 # 获取当前表结构信息
-                cursor = db.execute_sql(f"PRAGMA table_info('{table_name}')")
+                cursor = db.execute_sql(_table_info_sql(table_name))
                 current_schema = {
                     row[1]: {"type": row[2], "notnull": bool(row[3]), "default": row[4]} for row in cursor.fetchall()
                 }
@@ -702,10 +742,11 @@ def check_field_constraints():
 
                 # 检查每个模型字段的约束
                 for field_name, field_obj in model._meta.fields.items():
-                    if field_name not in current_schema:
+                    column_name = _field_column_name(field_name, field_obj)
+                    if column_name not in current_schema:
                         continue
 
-                    current_notnull = current_schema[field_name]["notnull"]
+                    current_notnull = current_schema[column_name]["notnull"]
                     model_allows_null = field_obj.null
 
                     if model_allows_null and current_notnull:

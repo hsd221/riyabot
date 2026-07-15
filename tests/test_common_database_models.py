@@ -4,7 +4,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from peewee import BooleanField, DateTimeField, DoubleField, FloatField, IntegerField, IntegrityError, SqliteDatabase
+from peewee import (
+    BooleanField,
+    DateTimeField,
+    DoubleField,
+    FloatField,
+    IntegerField,
+    IntegrityError,
+    Model,
+    SqliteDatabase,
+)
 from peewee import TextField
 
 from src.common.database import database_model as database_model_module
@@ -291,6 +300,157 @@ class CommonDatabaseModelsTest(unittest.TestCase):
 
         self.assertEqual(fake_db.created_models, database_model_module.MODELS)
 
+    def test_sqlite_identifier_quoting_escapes_quotes_and_rejects_invalid_values(self) -> None:
+        self.assertEqual(database_model_module._quote_sqlite_identifier('odd "name'), '"odd ""name"')
+
+        for invalid_identifier in ["", "bad\x00name", None, 123]:
+            with self.subTest(identifier=invalid_identifier):
+                with self.assertRaises((TypeError, ValueError)):
+                    database_model_module._quote_sqlite_identifier(invalid_identifier)
+
+    def test_initialize_database_quotes_special_table_columns_and_string_defaults(self) -> None:
+        table_name = "odd'table\"; DROP TABLE sentinel; --"
+        wanted_column = "wanted'column\""
+        extra_column = "extra'column\"; DROP TABLE sentinel; --"
+
+        def quote(identifier: str) -> str:
+            return '"' + identifier.replace('"', '""') + '"'
+
+        self.test_db.execute_sql("CREATE TABLE sentinel (id INTEGER PRIMARY KEY)")
+        self.test_db.execute_sql(
+            f"CREATE TABLE {quote(table_name)} (id INTEGER PRIMARY KEY, {quote(extra_column)} TEXT)"
+        )
+
+        fake_model = SimpleNamespace(
+            _meta=SimpleNamespace(
+                table_name=table_name,
+                fields={
+                    "id": IntegerField(primary_key=True),
+                    wanted_column: TextField(null=True, default="O'Reilly"),
+                },
+            )
+        )
+
+        class ExistingDb:
+            def __enter__(inner_self):
+                return inner_self
+
+            def __exit__(inner_self, exc_type, exc, tb):
+                return False
+
+            def table_exists(inner_self, model):
+                return True
+
+            def execute_sql(inner_self, sql):
+                return self.test_db.execute_sql(sql)
+
+            def create_tables(inner_self, models):
+                raise AssertionError("existing table must not be recreated")
+
+        with (
+            patch.object(database_model_module, "db", ExistingDb()),
+            patch.object(database_model_module, "MODELS", [fake_model]),
+        ):
+            database_model_module.initialize_database()
+
+        schema = self.test_db.execute_sql(f"PRAGMA table_info({quote(table_name)})").fetchall()
+        columns = {row[1]: row for row in schema}
+        self.assertIn(wanted_column, columns)
+        self.assertIn(extra_column, columns)
+        self.assertEqual(columns[wanted_column][4], "'O''Reilly'")
+        self.assertTrue(self.test_db.table_exists("sentinel"))
+
+        with (
+            patch.object(database_model_module, "db", ExistingDb()),
+            patch.object(database_model_module, "MODELS", [fake_model]),
+        ):
+            database_model_module.initialize_database(drop_extra_fields=True)
+
+        columns_after_explicit_cleanup = {
+            row[1] for row in self.test_db.execute_sql(f"PRAGMA table_info({quote(table_name)})").fetchall()
+        }
+        self.assertNotIn(extra_column, columns_after_explicit_cleanup)
+
+        self.test_db.execute_sql(f"INSERT INTO {quote(table_name)} (id) VALUES (1)")
+        stored_default = self.test_db.execute_sql(
+            f"SELECT {quote(wanted_column)} FROM {quote(table_name)} WHERE id = 1"
+        ).fetchone()[0]
+        self.assertEqual(stored_default, "O'Reilly")
+
+    def test_fix_table_constraints_quotes_special_identifiers_and_preserves_rows(self) -> None:
+        table_name = "constraint'table\"; --"
+        column_name = "value'column\""
+
+        def quote(identifier: str) -> str:
+            return '"' + identifier.replace('"', '""') + '"'
+
+        class WeirdConstraintModel(Model):
+            id = IntegerField(primary_key=True)
+            value = TextField(null=False, column_name=column_name)
+
+            class Meta:
+                database = self.test_db
+
+        WeirdConstraintModel._meta.table_name = table_name
+        self.test_db.execute_sql(
+            f"CREATE TABLE {quote(table_name)} (id INTEGER PRIMARY KEY, {quote(column_name)} TEXT NULL)"
+        )
+        self.test_db.execute_sql(f"INSERT INTO {quote(table_name)} (id, {quote(column_name)}) VALUES (42, NULL)")
+
+        constraints_to_fix = [
+            {
+                "field_name": "value",
+                "action": "disallow_null",
+                "current_constraint": "NULL",
+                "target_constraint": "NOT NULL",
+            }
+        ]
+        with patch.object(database_model_module, "db", self.test_db):
+            database_model_module._fix_table_constraints(table_name, WeirdConstraintModel, constraints_to_fix)
+
+        schema = self.test_db.execute_sql(f"PRAGMA table_info({quote(table_name)})").fetchall()
+        columns = {row[1]: row for row in schema}
+        self.assertEqual(columns[column_name][3], 1)
+        row = self.test_db.execute_sql(f"SELECT id, {quote(column_name)} FROM {quote(table_name)}").fetchone()
+        self.assertEqual(row, (42, ""))
+        remaining_backups = self.test_db.execute_sql(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE ?",
+            (f"{table_name}_backup_%",),
+        ).fetchall()
+        self.assertEqual(remaining_backups, [])
+
+    def test_fix_table_constraints_rolls_back_failed_rebuild_without_losing_indexes(self) -> None:
+        class RollbackModel(Model):
+            id = IntegerField(primary_key=True)
+            value = TextField(null=False)
+
+            class Meta:
+                database = self.test_db
+                table_name = "rollback_table"
+
+        self.test_db.execute_sql("CREATE TABLE rollback_table (id INTEGER PRIMARY KEY, value TEXT NULL)")
+        self.test_db.execute_sql("CREATE INDEX rollback_value_idx ON rollback_table (value)")
+        self.test_db.execute_sql("INSERT INTO rollback_table (id, value) VALUES (42, NULL)")
+
+        with patch.object(database_model_module, "db", self.test_db):
+            database_model_module._fix_table_constraints("rollback_table", RollbackModel, [])
+
+        row = self.test_db.execute_sql("SELECT id, value FROM rollback_table").fetchone()
+        self.assertEqual(row, (42, None))
+        schema = self.test_db.execute_sql("PRAGMA table_info(rollback_table)").fetchall()
+        self.assertEqual({column[1]: column[3] for column in schema}["value"], 0)
+        indexes = {
+            row[0]
+            for row in self.test_db.execute_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'rollback_table'"
+            ).fetchall()
+        }
+        self.assertIn("rollback_value_idx", indexes)
+        remaining_backups = self.test_db.execute_sql(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'rollback_table_backup_%'"
+        ).fetchall()
+        self.assertEqual(remaining_backups, [])
+
     def test_initialize_database_creates_missing_tables_adds_known_field_types_and_drops_extra_fields(self) -> None:
         class FakeField:
             def __init__(self, null=False, default=None):
@@ -302,6 +462,7 @@ class CommonDatabaseModelsTest(unittest.TestCase):
             default = None
 
         fake_fields = {
+            "id": IntegerField(primary_key=True),
             "existing": TextField(),
             "text_value": TextField(null=True, default="fallback"),
             "int_value": IntegerField(default=7),
@@ -348,17 +509,17 @@ class CommonDatabaseModelsTest(unittest.TestCase):
             patch.object(database_model_module, "MODELS", [missing_model, fake_model]),
             patch.object(database_model_module, "sync_field_constraints") as sync_field_constraints,
         ):
-            database_model_module.initialize_database(sync_constraints=True)
+            database_model_module.initialize_database(sync_constraints=True, drop_extra_fields=True)
 
         self.assertEqual(fake_db.created_models, [missing_model])
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN text_value TEXT NULL DEFAULT 'fallback'", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN int_value INTEGER NOT NULL DEFAULT 7", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN float_value FLOAT NOT NULL DEFAULT 1.5", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN double_value DOUBLE NOT NULL DEFAULT 2.5", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN bool_value INTEGER NOT NULL DEFAULT 1", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN datetime_value DATETIME NOT NULL", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table ADD COLUMN unknown_value TEXT NULL", fake_db.sql)
-        self.assertIn("ALTER TABLE fake_table DROP COLUMN extra_column", fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "text_value" TEXT NULL DEFAULT \'fallback\'', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "int_value" INTEGER NOT NULL DEFAULT 7', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "float_value" FLOAT NOT NULL DEFAULT 1.5', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "double_value" DOUBLE NOT NULL DEFAULT 2.5', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "bool_value" INTEGER NOT NULL DEFAULT 1', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "datetime_value" DATETIME NOT NULL', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" ADD COLUMN "unknown_value" TEXT NULL', fake_db.sql)
+        self.assertIn('ALTER TABLE "fake_table" DROP COLUMN "extra_column"', fake_db.sql)
         sync_field_constraints.assert_called_once_with()
 
     def test_initialize_database_suppresses_table_check_and_alter_errors(self) -> None:
@@ -565,9 +726,9 @@ class CommonDatabaseModelsTest(unittest.TestCase):
 
             def execute_sql(self, sql):
                 self.sql.append(sql)
-                if sql.startswith("SELECT COUNT(*) FROM rebuild_table_backup"):
+                if sql.startswith('SELECT COUNT(*) FROM "rebuild_table_backup_'):
                     return FakeCursor(2)
-                if sql == "SELECT COUNT(*) FROM rebuild_table":
+                if sql == 'SELECT COUNT(*) FROM "rebuild_table"':
                     return FakeCursor(2)
                 return SimpleNamespace()
 
@@ -580,15 +741,16 @@ class CommonDatabaseModelsTest(unittest.TestCase):
             database_model_module._fix_table_constraints("rebuild_table", model, constraints_to_fix)
 
         self.assertEqual(fake_db.create_tables_calls, [[model]])
-        insert_sql = next(sql for sql in fake_db.sql if sql.startswith("INSERT INTO rebuild_table"))
-        self.assertIn("COALESCE(text_value, '') as text_value", insert_sql)
-        self.assertIn("COALESCE(int_value, 0) as int_value", insert_sql)
-        self.assertIn("COALESCE(float_value, 0) as float_value", insert_sql)
-        self.assertIn("COALESCE(double_value, 0) as double_value", insert_sql)
-        self.assertIn("COALESCE(bool_value, 0) as bool_value", insert_sql)
-        self.assertIn("COALESCE(datetime_value, '", insert_sql)
-        self.assertIn("COALESCE(unknown_value, '') as unknown_value", insert_sql)
-        self.assertTrue(any(sql.startswith("DROP TABLE rebuild_table_backup") for sql in fake_db.sql))
+        insert_sql = next(sql for sql in fake_db.sql if sql.startswith('INSERT INTO "rebuild_table"'))
+        self.assertIn('"id"', insert_sql)
+        self.assertIn('COALESCE("text_value", \'\') AS "text_value"', insert_sql)
+        self.assertIn('COALESCE("int_value", 0) AS "int_value"', insert_sql)
+        self.assertIn('COALESCE("float_value", 0) AS "float_value"', insert_sql)
+        self.assertIn('COALESCE("double_value", 0) AS "double_value"', insert_sql)
+        self.assertIn('COALESCE("bool_value", 0) AS "bool_value"', insert_sql)
+        self.assertIn('COALESCE("datetime_value", \'', insert_sql)
+        self.assertIn('COALESCE("unknown_value", \'\') AS "unknown_value"', insert_sql)
+        self.assertTrue(any(sql.startswith('DROP TABLE "rebuild_table_backup_') for sql in fake_db.sql))
 
     def test_fix_table_constraints_handles_string_primary_key_direct_copy_and_count_mismatch(self) -> None:
         fields = {"custom_id": TextField(), "text_value": TextField()}
@@ -607,27 +769,32 @@ class CommonDatabaseModelsTest(unittest.TestCase):
 
             def execute_sql(self, sql):
                 self.sql.append(sql)
-                if sql.startswith("SELECT COUNT(*) FROM direct_table_backup"):
+                if sql.startswith('SELECT COUNT(*) FROM "direct_table_backup_'):
                     return FakeCursor(2)
-                if sql == "SELECT COUNT(*) FROM direct_table":
+                if sql == 'SELECT COUNT(*) FROM "direct_table"':
                     return FakeCursor(1)
                 return SimpleNamespace()
 
             def create_tables(self, models):
                 self.created_models = list(models)
 
+            def table_exists(self, table_name):
+                return True
+
         fake_db = FakeDb()
 
         with patch.object(database_model_module, "db", fake_db):
             database_model_module._fix_table_constraints("direct_table", model, [])
 
-        insert_sql = next(sql for sql in fake_db.sql if sql.startswith("INSERT INTO direct_table"))
+        insert_sql = next(sql for sql in fake_db.sql if sql.startswith('INSERT INTO "direct_table"'))
         self.assertEqual(
             insert_sql,
-            "INSERT INTO direct_table (text_value) SELECT text_value FROM direct_table_backup_"
-            + insert_sql.rsplit("_", 1)[-1],
+            'INSERT INTO "direct_table" ("custom_id", "text_value") '
+            'SELECT "custom_id", "text_value" FROM "direct_table_backup_' + insert_sql.rsplit("_", 1)[-1],
         )
-        self.assertFalse(any(sql.startswith("DROP TABLE direct_table_backup") for sql in fake_db.sql))
+        self.assertFalse(any(sql.startswith('DROP TABLE "direct_table_backup_') for sql in fake_db.sql))
+        self.assertIn('DROP TABLE IF EXISTS "direct_table"', fake_db.sql)
+        self.assertTrue(any(sql.startswith('ALTER TABLE "direct_table_backup_') for sql in fake_db.sql))
 
     def test_fix_table_constraints_uses_all_fields_when_primary_key_lookup_fails_or_is_absent(self) -> None:
         class BrokenMeta:
@@ -667,9 +834,9 @@ class CommonDatabaseModelsTest(unittest.TestCase):
         with patch.object(database_model_module, "db", fake_db):
             database_model_module._fix_table_constraints("no_pk_table", model, constraints_to_fix)
 
-        insert_sql = next(sql for sql in fake_db.sql if sql.startswith("INSERT INTO no_pk_table"))
-        self.assertIn("INSERT INTO no_pk_table (field_one, field_two)", insert_sql)
-        self.assertIn("COALESCE(field_one, '') as field_one, field_two", insert_sql)
+        insert_sql = next(sql for sql in fake_db.sql if sql.startswith('INSERT INTO "no_pk_table"'))
+        self.assertIn('INSERT INTO "no_pk_table" ("field_one", "field_two")', insert_sql)
+        self.assertIn('COALESCE("field_one", \'\') AS "field_one", "field_two"', insert_sql)
 
     def test_fix_table_constraints_restores_backup_on_failure_and_suppresses_restore_errors(self) -> None:
         model = SimpleNamespace(
@@ -682,7 +849,7 @@ class CommonDatabaseModelsTest(unittest.TestCase):
 
             def execute_sql(self, sql):
                 self.sql.append(sql)
-                if sql.startswith("DROP TABLE broken_table"):
+                if sql == 'DROP TABLE "broken_table"':
                     raise RuntimeError("drop failed")
                 return SimpleNamespace(fetchone=lambda: (1,))
 
@@ -697,8 +864,8 @@ class CommonDatabaseModelsTest(unittest.TestCase):
         with patch.object(database_model_module, "db", recovering_db):
             database_model_module._fix_table_constraints("broken_table", model, [])
 
-        self.assertIn("DROP TABLE IF EXISTS broken_table", recovering_db.sql)
-        self.assertTrue(any(sql.startswith("ALTER TABLE broken_table_backup_") for sql in recovering_db.sql))
+        self.assertIn('DROP TABLE IF EXISTS "broken_table"', recovering_db.sql)
+        self.assertTrue(any(sql.startswith('ALTER TABLE "broken_table_backup_') for sql in recovering_db.sql))
 
         class RestoreFailingDb(RecoveringDb):
             def execute_sql(self, sql):

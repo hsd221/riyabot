@@ -8,11 +8,12 @@ import os
 import time
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Cookie, Header
+from fastapi import APIRouter, Depends, Cookie, Header
 from pydantic import BaseModel
 from src.config.config import MMC_VERSION
 from src.common.logger import get_logger
 from src.webui.auth import verify_auth_token_from_cookie_or_header
+from src.webui.error_utils import internal_server_error
 
 router = APIRouter(prefix="/system", tags=["system"])
 logger = get_logger("webui_system")
@@ -73,7 +74,7 @@ async def restart_riyabot(_auth: bool = Depends(require_auth)):
         # 立即返回成功响应
         return RestartResponse(success=True, message="璃夜正在重启中...")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"重启失败: {str(e)}") from e
+        raise internal_server_error(logger, "WebUI 重启任务调度失败", e, detail="重启失败") from None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -93,7 +94,7 @@ async def get_riyabot_status(_auth: bool = Depends(require_auth)):
             running=True, uptime=uptime, version=version, start_time=datetime.fromtimestamp(_start_time).isoformat()
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取状态失败: {str(e)}") from e
+        raise internal_server_error(logger, "WebUI 状态读取失败", e, detail="获取状态失败") from None
 
 
 # 可选：添加更多系统控制功能

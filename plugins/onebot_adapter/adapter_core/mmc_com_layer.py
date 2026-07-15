@@ -4,6 +4,7 @@ from .logger import logger, custom_logger
 from .send_handler.main_send_handler import send_handler
 from .recv_handler.message_sending import message_send_instance
 from typing import Dict, Any
+import os
 import importlib.metadata
 
 
@@ -27,6 +28,15 @@ except (importlib.metadata.PackageNotFoundError, ValueError):
 # router = Router(route_config, custom_logger)
 # router will be initialized in mmc_start_com
 router = None
+
+
+def _legacy_auth_token(config) -> str | None:
+    environment_token = os.getenv("MAIBOT_LEGACY_SERVER_TOKEN", "")
+    configured_token = getattr(config, "auth_token", "")
+    for candidate in (environment_token, configured_token):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 class APIServerWrapper:
@@ -137,10 +147,7 @@ async def mmc_start_com():
                 await send_handler.handle_message(msg_dict)
 
             except Exception as e:
-                logger.error(f"消息桥接转换失败: {e}")
-                import traceback
-
-                logger.error(traceback.format_exc())
+                logger.error(f"消息桥接转换失败: error_type={type(e).__name__}")
 
         client_config = create_client_config(
             url=config.base_url,
@@ -163,7 +170,7 @@ async def mmc_start_com():
             route_config={
                 config.platform_name: TargetConfig(
                     url=f"ws://{config.host}:{config.port}/ws",
-                    token=None,
+                    token=_legacy_auth_token(config),
                 )
             }
         )

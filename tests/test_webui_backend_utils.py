@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import tomlkit
-from fastapi import HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.testclient import TestClient
 from starlette.responses import PlainTextResponse
 
 from src.config.config_base import ConfigBase
@@ -202,28 +203,32 @@ class RateLimiterTest(unittest.TestCase):
             self.assertEqual(limiter.is_blocked(request), (False, None))
         self.assertEqual(limiter._blocked, {})
 
-    def test_auth_and_api_dependencies_raise_http_429_when_limits_are_exceeded(self) -> None:
-        request = fake_request(host="10.0.0.4")
+    def test_rate_limit_dependencies_only_restrict_public_auth_endpoints(self) -> None:
+        public_auth_requests = (
+            fake_web_request(host="10.0.0.4", path="/api/webui/auth/setup"),
+            fake_web_request(host="10.0.0.4", path="/api/webui/auth/login"),
+            fake_web_request(host="10.0.0.4", path="/api/webui/auth/verify"),
+        )
+        login_request = public_auth_requests[1]
+        api_request = fake_web_request(host="10.0.0.4", path="/api/webui/config/bot")
         limiter = RateLimiter()
 
         with patch("src.webui.rate_limiter.get_rate_limiter", return_value=limiter):
             with patch.object(limiter, "is_blocked", return_value=(True, 12)):
-                with self.assertRaises(HTTPException) as blocked:
-                    asyncio.run(check_auth_rate_limit(request))
-                self.assertEqual(blocked.exception.status_code, 429)
-                self.assertEqual(blocked.exception.headers["Retry-After"], "12")
+                for auth_request in public_auth_requests:
+                    with self.subTest(path=auth_request.url.path), self.assertRaises(HTTPException) as blocked:
+                        asyncio.run(check_auth_rate_limit(auth_request))
+                    self.assertEqual(blocked.exception.status_code, 429)
+                    self.assertEqual(blocked.exception.headers["Retry-After"], "12")
+
+                asyncio.run(check_api_rate_limit(api_request))
 
             with patch.object(limiter, "is_blocked", return_value=(False, None)):
                 with patch.object(limiter, "check_rate_limit", return_value=(False, 0)):
                     with self.assertRaises(HTTPException) as auth_limited:
-                        asyncio.run(check_auth_rate_limit(request))
+                        asyncio.run(check_auth_rate_limit(login_request))
                     self.assertEqual(auth_limited.exception.status_code, 429)
                     self.assertEqual(auth_limited.exception.headers["Retry-After"], "60")
-
-                    with self.assertRaises(HTTPException) as api_limited:
-                        asyncio.run(check_api_rate_limit(request))
-                    self.assertEqual(api_limited.exception.status_code, 429)
-                    self.assertEqual(api_limited.exception.headers["Retry-After"], "60")
 
 
 class TokenManagerTest(unittest.TestCase):
@@ -354,6 +359,22 @@ class AuthAndWsAuthTest(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(ws_auth.verify_ws_token("revoked"))
         self.assertNotIn("revoked", ws_auth._ws_temp_tokens)
 
+    def test_ws_token_pool_evicts_the_oldest_entry_at_capacity(self) -> None:
+        ws_auth._ws_temp_tokens.clear()
+        ws_auth._ws_temp_tokens.update(
+            {f"token-{index}": (100.0 + index, "session-token") for index in range(ws_auth._WS_MAX_TOKENS)}
+        )
+
+        with (
+            patch.object(ws_auth.secrets, "token_urlsafe", return_value="new-token"),
+            patch.object(ws_auth.time, "time", return_value=50.0),
+        ):
+            ws_auth.generate_ws_token("new-session")
+
+        self.assertEqual(len(ws_auth._ws_temp_tokens), ws_auth._WS_MAX_TOKENS)
+        self.assertNotIn("token-0", ws_auth._ws_temp_tokens)
+        self.assertIn("new-token", ws_auth._ws_temp_tokens)
+
     async def test_ws_token_endpoint_accepts_cookie_or_bearer_and_returns_soft_failures(self) -> None:
         manager = SimpleNamespace(verify_token=Mock(side_effect=lambda token: token == "valid"))
 
@@ -376,6 +397,29 @@ class AuthAndWsAuthTest(unittest.IsolatedAsyncioTestCase):
                 {"success": True, "token": "ws-token", "expires_in": 60},
             )
         generate.assert_called_once_with("valid")
+
+    def test_websocket_origin_validation_allows_same_origin_and_rejects_cross_site_browsers(self) -> None:
+        same_origin = SimpleNamespace(
+            headers={"origin": "https://bot.example", "host": "bot.example"},
+            url=SimpleNamespace(scheme="wss", hostname="bot.example", port=None),
+        )
+        cross_site = SimpleNamespace(
+            headers={"origin": "https://evil.example", "host": "bot.example"},
+            url=SimpleNamespace(scheme="wss", hostname="bot.example", port=None),
+        )
+        local_dev = SimpleNamespace(
+            headers={"origin": "http://localhost:5173", "host": "127.0.0.1:8001"},
+            url=SimpleNamespace(scheme="ws", hostname="127.0.0.1", port=8001),
+        )
+        non_browser = SimpleNamespace(
+            headers={"host": "bot.example"},
+            url=SimpleNamespace(scheme="wss", hostname="bot.example", port=None),
+        )
+
+        self.assertTrue(ws_auth.is_websocket_origin_allowed(same_origin))
+        self.assertFalse(ws_auth.is_websocket_origin_allowed(cross_site))
+        self.assertTrue(ws_auth.is_websocket_origin_allowed(local_dev))
+        self.assertTrue(ws_auth.is_websocket_origin_allowed(non_browser))
 
 
 class AntiCrawlerTest(unittest.IsolatedAsyncioTestCase):
@@ -491,18 +535,270 @@ class AntiCrawlerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(crawler_response.status_code, 403)
         self.assertIn("Crawlers", crawler_response.body.decode())
 
-        with (
-            patch.object(anti_crawler, "ALLOWED_IPS", []),
-            patch.object(middleware, "_check_rate_limit", return_value=True),
-        ):
-            limited = await middleware.dispatch(fake_web_request({"User-Agent": "Mozilla"}, path="/api"), call_next)
-        self.assertEqual(limited.status_code, 429)
+        rate_check = Mock(return_value=True)
+        with patch.object(anti_crawler, "ALLOWED_IPS", []), patch.object(middleware, "_check_rate_limit", rate_check):
+            regular_api = await middleware.dispatch(
+                fake_web_request({"User-Agent": "Mozilla"}, path="/api/webui/config/bot"), call_next
+            )
+            limited_login = await middleware.dispatch(
+                fake_web_request({"User-Agent": "Mozilla"}, path="/api/webui/auth/login"), call_next
+            )
+        self.assertEqual(regular_api.status_code, 200)
+        self.assertEqual(limited_login.status_code, 429)
+        rate_check.assert_called_once()
 
         disabled = anti_crawler.AntiCrawlerMiddleware(lambda scope, receive, send: None, mode="false")
         self.assertEqual((await disabled.dispatch(fake_web_request(path="/api"), call_next)).status_code, 200)
 
 
 class GitMirrorServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_git_url_validation_rejects_dangerous_protocols_credentials_and_plaintext_by_default(self) -> None:
+        for url in [
+            "file:///etc/passwd",
+            "ext::sh -c id",
+            "https://user:secret@example.com/repo",
+            "ssh://-oProxyCommand=calc/owner/repo.git",
+            "-oProxyCommand=calc:owner/repo.git",
+            "git@example.com:owner/repo.git?token=secret",
+        ]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                git_mirror_service.validate_clone_url(url)
+
+        with self.assertRaises(ValueError):
+            git_mirror_service.validate_raw_url("http://example.com/index.json")
+
+        with patch.dict(os.environ, {"MAIBOT_ALLOW_INSECURE_GIT_URLS": "1"}, clear=True):
+            self.assertEqual(
+                git_mirror_service.validate_raw_url("http://example.com/index.json"),
+                "http://example.com/index.json",
+            )
+
+        self.assertEqual(
+            git_mirror_service.validate_clone_url("ssh://git@example.com/owner/repo.git"),
+            "ssh://git@example.com/owner/repo.git",
+        )
+        self.assertEqual(
+            git_mirror_service.parse_repository_url("https://github.com/Owner/Repo.git")[:3],
+            ("Owner", "Repo", True),
+        )
+        self.assertFalse(git_mirror_service.parse_repository_url("https://github.com.evil.example/Owner/Repo")[2])
+
+    async def test_outbound_url_validation_blocks_local_networks_unless_explicitly_enabled(self) -> None:
+        private_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+
+        with patch.object(git_mirror_service.socket, "getaddrinfo", return_value=private_answer):
+            with self.assertRaisesRegex(ValueError, "私有或本地地址"):
+                await git_mirror_service.validate_outbound_host("internal.example", 443)
+
+        nat64_loopback_answer = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("64:ff9b::7f00:1", 443, 0, 0))]
+        with patch.object(git_mirror_service.socket, "getaddrinfo", return_value=nat64_loopback_answer):
+            with self.assertRaisesRegex(ValueError, "私有或本地地址"):
+                await git_mirror_service.validate_outbound_host("nat64-rebind.example", 443)
+
+        compatible_loopback_answer = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::127.0.0.1", 443, 0, 0))]
+        with patch.object(git_mirror_service.socket, "getaddrinfo", return_value=compatible_loopback_answer):
+            with self.assertRaisesRegex(ValueError, "私有或本地地址"):
+                await git_mirror_service.validate_outbound_host("compatible-rebind.example", 443)
+
+        with (
+            patch.dict(os.environ, {"MAIBOT_ALLOW_PRIVATE_GIT_URLS": "1"}, clear=True),
+            patch.object(git_mirror_service.socket, "getaddrinfo", return_value=private_answer),
+        ):
+            addresses = await git_mirror_service.validate_outbound_host("internal.example", 443)
+
+        self.assertEqual(addresses, ("127.0.0.1",))
+
+    async def test_raw_fetch_pins_the_validated_dns_address(self) -> None:
+        requests = []
+
+        class SuccessfulResponse:
+            status_code = 200
+            headers = {}
+            encoding = "utf-8"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def raise_for_status(self):
+                return None
+
+            async def aiter_bytes(self):
+                yield b"ok"
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method, url, **kwargs):
+                requests.append((method, url, kwargs))
+                return SuccessfulResponse()
+
+        service = git_mirror_service.GitMirrorService(
+            max_retries=1, config=SimpleNamespace(get_enabled_mirrors=Mock(return_value=[]))
+        )
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+        with (
+            patch.object(git_mirror_service.socket, "getaddrinfo", return_value=public_answer) as resolve,
+            patch.object(git_mirror_service.httpx, "AsyncClient", return_value=FakeClient()) as async_client,
+        ):
+            result = await service._fetch_with_url("https://example.com/index.json?token=secret", "custom")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(resolve.call_count, 1)
+        self.assertEqual(requests[0][1], "https://93.184.216.34/index.json?token=secret")
+        self.assertEqual(requests[0][2]["headers"], {"Host": "example.com"})
+        self.assertEqual(requests[0][2]["extensions"], {"sni_hostname": "example.com"})
+        self.assertFalse(async_client.call_args.kwargs["trust_env"])
+        self.assertNotIn("secret", result["url"])
+
+    async def test_raw_fetch_enforces_streaming_size_limit(self) -> None:
+        class OversizedResponse:
+            status_code = 200
+            headers = {}
+            encoding = "utf-8"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def raise_for_status(self):
+                return None
+
+            async def aiter_bytes(self):
+                yield b"a" * git_mirror_service.MAX_RAW_FILE_BYTES
+                yield b"b"
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method, url, **kwargs):
+                return OversizedResponse()
+
+        service = git_mirror_service.GitMirrorService(
+            max_retries=1, config=SimpleNamespace(get_enabled_mirrors=Mock(return_value=[]))
+        )
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+        with (
+            patch.object(git_mirror_service.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(git_mirror_service.httpx, "AsyncClient", return_value=FakeClient()),
+        ):
+            result = await service._fetch_with_url("https://example.com/index.json", "custom")
+
+        self.assertFalse(result["success"])
+        self.assertIn("过大", result["error"])
+
+    async def test_clone_disables_dangerous_git_protocols_and_redacts_url_secrets(self) -> None:
+        service = git_mirror_service.GitMirrorService(
+            max_retries=1, config=SimpleNamespace(get_enabled_mirrors=Mock(return_value=[]))
+        )
+        url = "https://example.com/owner/repo.git?token=top-secret"
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target_path = Path(tmp_dir) / "repo"
+
+            def failed_clone(command, **kwargs):
+                target_path.mkdir()
+                (target_path / "partial.py").write_text("untrusted", encoding="utf-8")
+                return SimpleNamespace(returncode=1, stdout="", stderr=f"fatal: cannot clone {url}")
+
+            with (
+                patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.example:8080"}, clear=False),
+                patch.object(git_mirror_service.socket, "getaddrinfo", return_value=public_answer),
+                patch.object(git_mirror_service.subprocess, "run", side_effect=failed_clone) as run,
+            ):
+                result = await service._clone_with_url(url, target_path, "main", 1, "custom")
+
+            self.assertFalse(target_path.exists())
+
+        command = run.call_args.args[0]
+        self.assertIn("protocol.file.allow=never", command)
+        self.assertIn("protocol.ext.allow=never", command)
+        self.assertIn("http.followRedirects=false", command)
+        self.assertIn("http.curloptResolve=example.com:443:93.184.216.34", command)
+        self.assertIn("http.proxy=", command)
+        self.assertIn("--", command)
+        self.assertNotIn("HTTPS_PROXY", run.call_args.kwargs["env"])
+        self.assertEqual(run.call_args.kwargs["env"]["NO_PROXY"], "*")
+        self.assertNotIn("top-secret", result["error"])
+        self.assertNotIn("top-secret", result["url"])
+
+    async def test_clone_pins_ssh_dns_resolution_and_preserves_host_key_name(self) -> None:
+        service = git_mirror_service.GitMirrorService(
+            max_retries=1, config=SimpleNamespace(get_enabled_mirrors=Mock(return_value=[]))
+        )
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 22))]
+
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+            patch.object(git_mirror_service.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(
+                git_mirror_service.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=1, stdout="", stderr="clone failed"),
+            ) as run,
+        ):
+            await service._clone_with_url(
+                "ssh://git@example.com/owner/repo.git",
+                Path(tmp_dir) / "repo",
+                "main",
+                1,
+                "custom",
+            )
+
+        clone_env = run.call_args.kwargs["env"]
+        self.assertIn("HostName=93.184.216.34", clone_env["GIT_SSH_COMMAND"])
+        self.assertIn("HostKeyAlias=example.com", clone_env["GIT_SSH_COMMAND"])
+        self.assertEqual(clone_env["GIT_TERMINAL_PROMPT"], "0")
+
+    async def test_clone_preserves_proxy_only_after_explicit_opt_in(self) -> None:
+        service = git_mirror_service.GitMirrorService(
+            max_retries=1, config=SimpleNamespace(get_enabled_mirrors=Mock(return_value=[]))
+        )
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+            patch.dict(
+                os.environ,
+                {
+                    "MAIBOT_ALLOW_GIT_PROXY": "1",
+                    "HTTPS_PROXY": "http://proxy.example:8080",
+                },
+                clear=True,
+            ),
+            patch.object(git_mirror_service.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(
+                git_mirror_service.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=1, stdout="", stderr="clone failed"),
+            ) as run,
+        ):
+            await service._clone_with_url(
+                "https://example.com/owner/repo.git",
+                Path(tmp_dir) / "repo",
+                "main",
+                1,
+                "custom",
+            )
+
+        self.assertNotIn("http.proxy=", run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs["env"]["HTTPS_PROXY"], "http://proxy.example:8080")
+
     def test_git_mirror_config_loads_defaults_preserves_existing_file_and_manages_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "webui.json"
@@ -577,6 +873,31 @@ class GitMirrorServiceTest(unittest.IsolatedAsyncioTestCase):
             missing = git_mirror_service.GitMirrorService.check_git_installed()
         self.assertFalse(missing["installed"])
         self.assertIn("未找到 Git", missing["error"])
+
+        stderr_secret = 'git failed at /private/path: token="stderr-secret"'
+        with (
+            patch.object(git_mirror_service.shutil, "which", return_value="/usr/bin/git"),
+            patch.object(
+                git_mirror_service.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=1, stdout="", stderr=stderr_secret),
+            ),
+            patch.object(git_mirror_service.logger, "warning") as warned,
+        ):
+            command_failed = git_mirror_service.GitMirrorService.check_git_installed()
+        self.assertEqual(command_failed, {"installed": False, "error": "Git 命令执行失败"})
+        warned.assert_called_once()
+        self.assertNotIn(stderr_secret, repr(warned.call_args))
+
+        secret = 'git probe failed at /private/path: token="super-secret"'
+        with (
+            patch.object(git_mirror_service.shutil, "which", side_effect=RuntimeError(secret)),
+            patch.object(git_mirror_service.logger, "error") as logged,
+        ):
+            failed = git_mirror_service.GitMirrorService.check_git_installed()
+        self.assertEqual(failed, {"installed": False, "error": "检测 Git 时发生错误"})
+        logged.assert_called_once()
+        self.assertNotIn(secret, repr(logged.call_args))
 
         original = git_mirror_service._git_mirror_service
         try:
@@ -659,6 +980,221 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model_routes._parse_openai_response({"data": "bad"}), [])
         self.assertEqual(model_routes._parse_gemini_response({"models": "bad"}), [])
 
+    async def test_model_outbound_validation_blocks_unsafe_urls_and_metadata_targets(self) -> None:
+        metadata_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80))]
+        nat64_metadata_answer = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("64:ff9b::a9fe:a9fe", 443, 0, 0))]
+        aws_ipv6_metadata_answer = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fd00:ec2::254", 443, 0, 0))]
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+
+        for unsafe_url in [
+            "ftp://api.example.test",
+            "https://user:password@api.example.test",
+            "https://api.example.test?token=secret",
+            "https://api.example.test#fragment",
+        ]:
+            with self.assertRaises(HTTPException) as invalid_url:
+                await model_routes._fetch_models_from_provider(unsafe_url, "secret", "/models", "openai")
+            self.assertEqual(invalid_url.exception.status_code, 400)
+            self.assertNotIn("secret", str(invalid_url.exception.detail))
+
+        with self.assertRaises(HTTPException) as endpoint_query:
+            await model_routes._fetch_models_from_provider(
+                "https://api.example.test",
+                "secret",
+                "/models?token=secret",
+                "openai",
+            )
+        self.assertEqual(endpoint_query.exception.status_code, 400)
+        self.assertNotIn("secret", str(endpoint_query.exception.detail))
+
+        with patch.object(model_routes.socket, "getaddrinfo", return_value=metadata_answer):
+            with self.assertRaises(HTTPException) as metadata:
+                await model_routes._fetch_models_from_provider(
+                    "http://metadata.internal",
+                    "secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(metadata.exception.status_code, 400)
+
+        with patch.object(model_routes.socket, "getaddrinfo", return_value=nat64_metadata_answer):
+            with self.assertRaises(HTTPException) as nat64_metadata:
+                await model_routes._fetch_models_from_provider(
+                    "https://metadata-v6.internal",
+                    "secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(nat64_metadata.exception.status_code, 400)
+
+        with patch.object(model_routes.socket, "getaddrinfo", return_value=aws_ipv6_metadata_answer):
+            with self.assertRaises(HTTPException) as aws_ipv6_metadata:
+                await model_routes._fetch_models_from_provider(
+                    "https://metadata-aws.internal",
+                    "secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(aws_ipv6_metadata.exception.status_code, 400)
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+        ):
+            with self.assertRaises(HTTPException) as insecure_public_http:
+                await model_routes._fetch_models_from_provider(
+                    "http://api.example.test",
+                    "secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(insecure_public_http.exception.status_code, 400)
+
+        private_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.20", 80))]
+        with patch.object(model_routes.socket, "getaddrinfo", return_value=private_answer):
+            self.assertEqual(
+                await model_routes._resolve_model_host("model.internal", 80, "http"),
+                ("192.168.1.20",),
+            )
+
+        with (
+            patch.dict(os.environ, {"MAIBOT_ALLOW_INSECURE_MODEL_URLS": "1"}, clear=True),
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+        ):
+            self.assertEqual(
+                await model_routes._resolve_model_host("api.example.test", 80, "http"),
+                ("93.184.216.34",),
+            )
+
+    async def test_fetch_models_pins_dns_limits_response_and_does_not_expose_upstream_body(self) -> None:
+        requests = []
+        client_kwargs = []
+        response_status = 200
+        response_body = json.dumps({"data": [{"id": "gpt-test"}]}).encode()
+        response_headers = {}
+
+        class StreamContext:
+            def __init__(self, response):
+                self.response = response
+
+            async def __aenter__(self):
+                return self.response
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                client_kwargs.append(kwargs)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def stream(self, method, url, **kwargs):
+                requests.append((method, url, kwargs))
+                response = httpx.Response(
+                    response_status,
+                    content=response_body,
+                    headers=response_headers,
+                    request=httpx.Request(method, url),
+                )
+                return StreamContext(response)
+
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer) as resolve,
+            patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            models = await model_routes._fetch_models_from_provider(
+                "https://api.example.test",
+                "super-secret",
+                "/models",
+                "openai",
+            )
+
+        self.assertEqual(models, [{"id": "gpt-test", "name": "gpt-test", "owned_by": ""}])
+        self.assertEqual(resolve.call_count, 1)
+        self.assertEqual(requests[0][1], "https://93.184.216.34/models")
+        self.assertEqual(
+            requests[0][2]["headers"],
+            {"Host": "api.example.test", "Authorization": "Bearer super-secret"},
+        )
+        self.assertEqual(requests[0][2]["extensions"], {"sni_hostname": "api.example.test"})
+        self.assertFalse(client_kwargs[0]["follow_redirects"])
+        self.assertFalse(client_kwargs[0]["trust_env"])
+
+        response_headers = {"Content-Length": str(model_routes.MAX_MODEL_RESPONSE_BYTES + 1)}
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            with self.assertRaises(HTTPException) as oversized:
+                await model_routes._fetch_models_from_provider(
+                    "https://api.example.test",
+                    "super-secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(oversized.exception.status_code, 502)
+        self.assertNotIn("super-secret", str(oversized.exception.detail))
+
+        response_headers = {}
+        response_body = b"12345"
+        with (
+            patch.object(model_routes, "MAX_MODEL_RESPONSE_BYTES", 4),
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            with self.assertRaises(HTTPException) as streamed_oversized:
+                await model_routes._fetch_models_from_provider(
+                    "https://api.example.test",
+                    "super-secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(streamed_oversized.exception.status_code, 502)
+
+        response_status = 500
+        response_headers = {}
+        response_body = b"upstream-secret-debug-body"
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient),
+        ):
+            with self.assertRaises(HTTPException) as upstream_error:
+                await model_routes._fetch_models_from_provider(
+                    "https://api.example.test",
+                    "super-secret",
+                    "/models",
+                    "openai",
+                )
+        self.assertEqual(upstream_error.exception.status_code, 502)
+        self.assertNotIn("upstream-secret-debug-body", str(upstream_error.exception.detail))
+        self.assertNotIn("super-secret", str(upstream_error.exception.detail))
+
+    def test_secret_bearing_model_routes_use_post_body_contract(self) -> None:
+        route_methods = {
+            route.path: route.methods
+            for route in model_routes.router.routes
+            if route.path in {"/models/list-by-url", "/models/test-connection"}
+        }
+        self.assertEqual(route_methods["/models/list-by-url"], {"POST"})
+        self.assertEqual(route_methods["/models/test-connection"], {"POST"})
+
+        list_request = model_routes.ModelsByURLRequest(
+            base_url="https://api.example.test",
+            api_key="secret",
+        )
+        connection_request = model_routes.TestConnectionRequest(
+            base_url="https://api.example.test",
+            api_key="secret",
+        )
+        self.assertEqual(list_request.api_key, "secret")
+        self.assertEqual(connection_request.api_key, "secret")
+
     def test_provider_config_reads_named_provider_and_handles_missing_or_invalid_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_dir = Path(tmp_dir)
@@ -687,6 +1223,16 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_models_from_provider_sets_auth_style_and_translates_upstream_errors(self) -> None:
         calls = []
 
+        class StreamContext:
+            def __init__(self, response):
+                self.response = response
+
+            async def __aenter__(self):
+                return self.response
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
         class FakeAsyncClient:
             def __init__(self, *args, **kwargs):
                 self.kwargs = kwargs
@@ -697,15 +1243,20 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, exc_type, exc, tb):
                 return False
 
-            async def get(self, url, headers=None, params=None):
-                calls.append({"url": url, "headers": headers or {}, "params": params or {}})
-                return httpx.Response(
+            def stream(self, method, url, **kwargs):
+                calls.append({"url": url, "headers": kwargs.get("headers") or {}, "params": kwargs.get("params") or {}})
+                response = httpx.Response(
                     200,
                     json={"data": [{"id": "gpt-test"}]},
-                    request=httpx.Request("GET", url),
+                    request=httpx.Request(method, url),
                 )
+                return StreamContext(response)
 
-        with patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient):
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient),
+        ):
             models = await model_routes._fetch_models_from_provider(
                 "https://api.example.test/",
                 "secret",
@@ -725,31 +1276,40 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(gemini_models[0]["id"], "gpt-test")
         self.assertEqual(calls[0]["headers"]["Authorization"], "Bearer secret")
         self.assertEqual(calls[0]["params"], {})
-        self.assertEqual(calls[1]["headers"], {})
-        self.assertEqual(calls[1]["params"], {"key": "gemini-secret"})
+        self.assertEqual(
+            calls[1]["headers"],
+            {"Host": "gemini.example.test", "x-goog-api-key": "gemini-secret"},
+        )
+        self.assertEqual(calls[1]["params"], {})
 
         class UnauthorizedClient(FakeAsyncClient):
-            async def get(self, url, headers=None, params=None):
-                return httpx.Response(401, text="unauthorized", request=httpx.Request("GET", url))
+            def stream(self, method, url, **kwargs):
+                response = httpx.Response(401, text="unauthorized", request=httpx.Request(method, url))
+                return StreamContext(response)
 
-        with patch.object(model_routes.httpx, "AsyncClient", UnauthorizedClient):
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", UnauthorizedClient),
+        ):
             with self.assertRaises(HTTPException) as exc:
                 await model_routes._fetch_models_from_provider("https://api.test", "bad", "/models", "openai")
         self.assertEqual(exc.exception.status_code, 502)
         self.assertIn("API Key", exc.exception.detail)
 
         class TimeoutClient(FakeAsyncClient):
-            async def get(self, url, headers=None, params=None):
+            def stream(self, method, url, **kwargs):
                 raise httpx.TimeoutException("slow")
 
-        with patch.object(model_routes.httpx, "AsyncClient", TimeoutClient):
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", TimeoutClient),
+        ):
             with self.assertRaises(HTTPException) as exc:
                 await model_routes._fetch_models_from_provider("https://api.test", "key", "/models", "openai")
         self.assertEqual(exc.exception.status_code, 504)
 
-        with patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient):
-            with self.assertRaises(HTTPException) as bad_parser:
-                await model_routes._fetch_models_from_provider("https://api.test", "key", "/models", "bad")
+        with self.assertRaises(HTTPException) as bad_parser:
+            await model_routes._fetch_models_from_provider("https://api.test", "key", "/models", "bad")
         self.assertEqual(bad_parser.exception.status_code, 400)
 
     async def test_model_route_wrappers_validate_provider_config_and_delegate_fetch(self) -> None:
@@ -792,11 +1352,13 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(model_routes, "_fetch_models_from_provider", new=AsyncMock(return_value=[{"id": "m2"}])):
             self.assertEqual(
                 await model_routes.get_models_by_url(
-                    base_url="https://api.test",
-                    api_key="secret",
-                    parser="openai",
-                    endpoint="/models",
-                    client_type="openai",
+                    request=model_routes.ModelsByURLRequest(
+                        base_url="https://api.test",
+                        api_key="secret",
+                        parser="openai",
+                        endpoint="/models",
+                        client_type="openai",
+                    ),
                     _auth=True,
                 ),
                 {"success": True, "models": [{"id": "m2"}], "count": 1},
@@ -804,6 +1366,16 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_provider_connection_reports_network_latency_and_api_key_status(self) -> None:
         calls = []
+
+        class StreamContext:
+            def __init__(self, response):
+                self.response = response
+
+            async def __aenter__(self):
+                return self.response
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
 
         class FakeAsyncClient:
             def __init__(self, *args, **kwargs):
@@ -815,16 +1387,26 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, exc_type, exc, tb):
                 return False
 
-            async def get(self, url, headers=None):
-                calls.append({"url": url, "headers": headers or {}, "timeout": self.kwargs.get("timeout")})
+            def stream(self, method, url, **kwargs):
+                calls.append(
+                    {"url": url, "headers": kwargs.get("headers") or {}, "timeout": self.kwargs.get("timeout")}
+                )
                 if url.endswith("/models"):
-                    return httpx.Response(401, text="unauthorized", request=httpx.Request("GET", url))
-                return httpx.Response(204, request=httpx.Request("GET", url))
+                    response = httpx.Response(401, text="unauthorized", request=httpx.Request(method, url))
+                else:
+                    response = httpx.Response(204, request=httpx.Request(method, url))
+                return StreamContext(response)
 
-        with patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient):
+        public_answer = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", FakeAsyncClient),
+        ):
             result = await model_routes.test_provider_connection(
-                base_url="https://api.example.test/",
-                api_key="bad-key",
+                request=model_routes.TestConnectionRequest(
+                    base_url="https://api.example.test/",
+                    api_key="bad-key",
+                ),
                 _auth=True,
             )
 
@@ -833,19 +1415,24 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["http_status"], 204)
         self.assertIsInstance(result["latency_ms"], float)
         self.assertIn("API Key", result["error"])
-        self.assertEqual(calls[0]["url"], "https://api.example.test")
+        self.assertEqual(calls[0]["url"], "https://93.184.216.34")
         self.assertEqual(calls[0]["timeout"], 10.0)
-        self.assertEqual(calls[1]["url"], "https://api.example.test/models")
+        self.assertEqual(calls[1]["url"], "https://93.184.216.34/models")
         self.assertEqual(calls[1]["headers"]["Authorization"], "Bearer bad-key")
 
         class ConnectErrorClient(FakeAsyncClient):
-            async def get(self, url, headers=None):
-                raise httpx.ConnectError("offline", request=httpx.Request("GET", url))
+            def stream(self, method, url, **kwargs):
+                raise httpx.ConnectError("offline", request=httpx.Request(method, url))
 
-        with patch.object(model_routes.httpx, "AsyncClient", ConnectErrorClient):
+        with (
+            patch.object(model_routes.socket, "getaddrinfo", return_value=public_answer),
+            patch.object(model_routes.httpx, "AsyncClient", ConnectErrorClient),
+        ):
             failed = await model_routes.test_provider_connection(
-                base_url="https://offline.example.test",
-                api_key=None,
+                request=model_routes.TestConnectionRequest(
+                    base_url="https://offline.example.test",
+                    api_key=None,
+                ),
                 _auth=True,
             )
 
@@ -854,7 +1441,10 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("连接失败", failed["error"])
 
         with self.assertRaises(HTTPException) as empty_url:
-            await model_routes.test_provider_connection(base_url="", api_key=None, _auth=True)
+            await model_routes.test_provider_connection(
+                request=SimpleNamespace(base_url="", api_key=None),
+                _auth=True,
+            )
         self.assertEqual(empty_url.exception.status_code, 400)
 
     async def test_provider_connection_by_name_reads_model_config_and_delegates(self) -> None:
@@ -884,12 +1474,18 @@ class ModelRoutesTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"network_ok": True})
         self.assertEqual(no_key_result, {"network_ok": True})
+        first_call = test_connection.await_args_list[0].kwargs
+        second_call = test_connection.await_args_list[1].kwargs
         self.assertEqual(
-            test_connection.await_args_list[0].kwargs, {"base_url": "https://api.example.test", "api_key": "secret"}
+            first_call["request"].model_dump(),
+            {"base_url": "https://api.example.test", "api_key": "secret"},
         )
         self.assertEqual(
-            test_connection.await_args_list[1].kwargs, {"base_url": "https://no-key.example.test", "api_key": None}
+            second_call["request"].model_dump(),
+            {"base_url": "https://no-key.example.test", "api_key": None},
         )
+        self.assertTrue(first_call["_auth"])
+        self.assertTrue(second_call["_auth"])
         self.assertEqual(missing_provider.exception.status_code, 404)
         self.assertEqual(missing_url.exception.status_code, 400)
 
@@ -954,6 +1550,32 @@ class FailingSendWebSocket(FakeWebSocket):
 
 
 class LogsWebSocketTest(unittest.IsolatedAsyncioTestCase):
+    def test_load_recent_logs_limits_bytes_scanned_from_each_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_dir = Path(tmp_dir) / "logs"
+            log_dir.mkdir()
+            log_file = log_dir / "app_large.log.jsonl"
+            old_entry = json.dumps(
+                {"timestamp": "2026-07-07 09:00:00", "level": "info", "logger_name": "old", "event": "old"}
+            )
+            recent_entry = json.dumps(
+                {
+                    "timestamp": "2026-07-07 12:00:00",
+                    "level": "info",
+                    "logger_name": "recent",
+                    "event": "recent",
+                }
+            )
+            log_file.write_text(old_entry + "\n" + ("x" * 512) + "\n" + recent_entry + "\n", encoding="utf-8")
+
+            with (
+                patch.object(logs_ws, "Path", lambda _path: log_dir),
+                patch.object(logs_ws, "MAX_LOG_SCAN_BYTES", 256),
+            ):
+                logs = logs_ws.load_recent_logs(limit=2)
+
+        self.assertEqual([entry["message"] for entry in logs], ["recent"])
+
     def test_load_recent_logs_reads_latest_jsonl_files_skips_bad_lines_and_orders_old_to_new(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_dir = Path(tmp_dir) / "logs"
@@ -1043,6 +1665,34 @@ class LogsWebSocketTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted.sent_texts[1], "pong")
         self.assertNotIn(accepted, logs_ws.active_connections)
 
+    async def test_websocket_logs_caps_connections_and_control_message_size(self) -> None:
+        original_connections = set(logs_ws.active_connections)
+        logs_ws.active_connections.clear()
+        logs_ws.active_connections.add(FakeWebSocket())
+        rejected = FakeWebSocket()
+
+        try:
+            with (
+                patch.object(logs_ws, "MAX_LOG_WS_CONNECTIONS", 1),
+                patch.object(logs_ws, "verify_ws_token", return_value=True),
+            ):
+                await logs_ws.websocket_logs(rejected, token="ws-token")
+        finally:
+            logs_ws.active_connections.clear()
+            logs_ws.active_connections.update(original_connections)
+
+        self.assertFalse(rejected.accepted)
+        self.assertEqual(rejected.closed, (1013, "连接数过多，请稍后重试"))
+
+        oversized = FakeWebSocket(receive_items=["x" * 65])
+        with (
+            patch.object(logs_ws, "MAX_WS_CONTROL_MESSAGE_CHARS", 64),
+            patch.object(logs_ws, "verify_ws_token", return_value=True),
+            patch.object(logs_ws, "load_recent_logs", return_value=[]),
+        ):
+            await logs_ws.websocket_logs(oversized, token="ws-token")
+        self.assertEqual(oversized.closed, (1009, "控制消息过长"))
+
 
 class PluginProgressWebSocketTest(unittest.IsolatedAsyncioTestCase):
     async def test_broadcast_and_update_progress_store_current_state_and_prune_disconnected_clients(self) -> None:
@@ -1055,8 +1705,10 @@ class PluginProgressWebSocketTest(unittest.IsolatedAsyncioTestCase):
 
         try:
             await plugin_progress_ws.broadcast_progress({"stage": "loading", "progress": 10})
-            self.assertEqual(plugin_progress_ws.current_progress, {"stage": "loading", "progress": 10})
-            self.assertEqual(json.loads(ok.sent_texts[0]), {"stage": "loading", "progress": 10})
+            self.assertEqual(plugin_progress_ws.current_progress["operation"], "idle")
+            self.assertEqual(plugin_progress_ws.current_progress["stage"], "loading")
+            self.assertEqual(plugin_progress_ws.current_progress["progress"], 10)
+            self.assertEqual(json.loads(ok.sent_texts[0]), plugin_progress_ws.current_progress)
             self.assertNotIn(broken, plugin_progress_ws.active_connections)
 
             await plugin_progress_ws.update_progress(
@@ -1079,6 +1731,56 @@ class PluginProgressWebSocketTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent_update["progress"], 100)
         self.assertEqual(sent_update["plugin_id"], "plugin-a")
         self.assertIn("timestamp", sent_update)
+
+    async def test_progress_payloads_are_bounded_allowlisted_and_secret_safe(self) -> None:
+        original_connections = set(plugin_progress_ws.active_connections)
+        original_progress = plugin_progress_ws.current_progress.copy()
+        websocket = FakeWebSocket()
+        plugin_progress_ws.active_connections.clear()
+        plugin_progress_ws.active_connections.add(websocket)
+        secret = "super-secret-progress-token"
+
+        try:
+            with patch.object(plugin_progress_ws.logger, "debug") as logged:
+                await plugin_progress_ws.update_progress(
+                    stage={"unexpected": True},
+                    progress=999,
+                    message=f"line one\nline two token={secret}" + ("x" * 1000),
+                    operation=["unexpected"],
+                    error=f"failed at /private/path token={secret}",
+                    plugin_id="bad\nplugin\u202eid",
+                    total_plugins=-5,
+                    loaded_plugins=999_999,
+                )
+
+            await plugin_progress_ws.broadcast_progress(
+                {
+                    "stage": "loading",
+                    "progress": 10,
+                    "message": "ok",
+                    "unexpected": secret,
+                }
+            )
+        finally:
+            plugin_progress_ws.active_connections.clear()
+            plugin_progress_ws.active_connections.update(original_connections)
+            plugin_progress_ws.current_progress = original_progress
+
+        normalized = json.loads(websocket.sent_texts[0])
+        self.assertEqual(normalized["operation"], "idle")
+        self.assertEqual(normalized["stage"], "idle")
+        self.assertEqual(normalized["progress"], 100)
+        self.assertEqual(normalized["total_plugins"], 0)
+        self.assertEqual(normalized["loaded_plugins"], 0)
+        self.assertLessEqual(len(normalized["message"]), 512)
+        self.assertNotIn("\n", normalized["message"])
+        self.assertNotIn("\u202e", normalized["plugin_id"])
+        self.assertNotIn(secret, repr(normalized))
+        self.assertNotIn(secret, repr(logged.call_args))
+
+        allowlisted = json.loads(websocket.sent_texts[1])
+        self.assertNotIn("unexpected", allowlisted)
+        self.assertNotIn(secret, repr(allowlisted))
 
     async def test_websocket_plugin_progress_rejects_unauthenticated_and_cleans_up_after_disconnect(self) -> None:
         denied = FakeWebSocket()
@@ -1114,11 +1816,54 @@ class PluginProgressWebSocketTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted.sent_texts[1], "pong")
         self.assertNotIn(accepted, plugin_progress_ws.active_connections)
 
+    async def test_websocket_plugin_progress_caps_connections_and_control_message_size(self) -> None:
+        original_connections = set(plugin_progress_ws.active_connections)
+        plugin_progress_ws.active_connections.clear()
+        plugin_progress_ws.active_connections.add(FakeWebSocket())
+        rejected = FakeWebSocket()
+
+        try:
+            with (
+                patch.object(plugin_progress_ws, "MAX_PROGRESS_WS_CONNECTIONS", 1),
+                patch.object(plugin_progress_ws, "verify_ws_token", return_value=True),
+            ):
+                await plugin_progress_ws.websocket_plugin_progress(rejected, token="ws-token")
+        finally:
+            plugin_progress_ws.active_connections.clear()
+            plugin_progress_ws.active_connections.update(original_connections)
+
+        self.assertFalse(rejected.accepted)
+        self.assertEqual(rejected.closed, (1013, "连接数过多，请稍后重试"))
+
+        oversized = FakeWebSocket(receive_items=["x" * 65])
+        with (
+            patch.object(plugin_progress_ws, "MAX_WS_CONTROL_MESSAGE_CHARS", 64),
+            patch.object(plugin_progress_ws, "verify_ws_token", return_value=True),
+        ):
+            await plugin_progress_ws.websocket_plugin_progress(oversized, token="ws-token")
+        self.assertEqual(oversized.closed, (1009, "控制消息过长"))
+
     def test_get_progress_router_returns_module_router(self) -> None:
         self.assertIs(plugin_progress_ws.get_progress_router(), plugin_progress_ws.router)
 
 
 class WebUIRoutesTest(unittest.IsolatedAsyncioTestCase):
+    async def test_model_config_readiness_error_sanitizes_parser_failures(self) -> None:
+        secret_error = ValueError('invalid value near api_key = "super-secret"')
+
+        with (
+            patch("src.config.config.api_ada_load_config", side_effect=secret_error),
+            patch.object(webui_routes.logger, "error") as log_error,
+        ):
+            message = webui_routes._get_model_config_readiness_error()
+
+        self.assertEqual(message, "模型配置文件解析失败，请检查配置格式")
+        self.assertNotIn("super-secret", message)
+        log_error.assert_called_once()
+        self.assertEqual(log_error.call_args.kwargs["error_type"], "ValueError")
+        self.assertNotIn("super-secret", repr(log_error.call_args))
+        self.assertFalse(log_error.call_args.kwargs.get("exc_info", False))
+
     async def test_health_logout_and_auth_check_use_cookie_or_bearer_token(self) -> None:
         self.assertEqual(await webui_routes.health_check(), {"status": "healthy", "service": "RiyaBot WebUI"})
 
@@ -1285,6 +2030,27 @@ class WebUIServerTest(unittest.IsolatedAsyncioTestCase):
         server._server = None
         return server
 
+    def test_http_exception_handler_redacts_internal_details_and_preserves_client_errors(self) -> None:
+        server = self.make_server()
+        server.app = FastAPI()
+        server._setup_exception_handlers()
+
+        @server.app.get("/internal")
+        async def internal_error():
+            raise HTTPException(status_code=500, detail="database failed at /secret/path.db")
+
+        @server.app.get("/invalid")
+        async def invalid_request():
+            raise HTTPException(status_code=400, detail="invalid field")
+
+        client = TestClient(server.app)
+        internal_response = client.get("/internal")
+        invalid_response = client.get("/invalid")
+
+        self.assertEqual(internal_response.status_code, 500)
+        self.assertEqual(internal_response.json(), {"detail": "服务器内部错误"})
+        self.assertEqual(invalid_response.json(), {"detail": "invalid field"})
+
     def test_check_port_available_handles_free_and_bound_ipv4_ports(self) -> None:
         server = self.make_server(port=0)
         self.assertTrue(server._check_port_available())
@@ -1309,6 +2075,22 @@ class WebUIServerTest(unittest.IsolatedAsyncioTestCase):
                 await server.start()
 
         uvicorn_server.assert_not_called()
+
+    async def test_start_configures_bounded_websocket_buffers(self) -> None:
+        server = self.make_server(port=8001)
+        server.app = FastAPI()
+        fake_uvicorn = SimpleNamespace(serve=AsyncMock())
+
+        with (
+            patch.object(server, "_check_port_available", return_value=True),
+            patch.object(webui_server, "UvicornServer", return_value=fake_uvicorn) as uvicorn_server,
+        ):
+            await server.start()
+
+        config = uvicorn_server.call_args.kwargs["config"]
+        self.assertEqual(config.ws_max_size, webui_server.MAX_WEBUI_WS_MESSAGE_BYTES)
+        self.assertEqual(config.ws_max_queue, 4)
+        self.assertFalse(config.ws_per_message_deflate)
 
     async def test_shutdown_marks_underlying_server_exit_and_suppresses_shutdown_errors(self) -> None:
         server = self.make_server()

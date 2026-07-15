@@ -268,6 +268,26 @@ class PersonRouteEndpointTest(unittest.IsolatedAsyncioTestCase):
             await person_routes.delete_person("u3")
         self.assertEqual(missing.exception.status_code, 404)
 
+    async def test_internal_failures_do_not_expose_profile_data_or_paths(self) -> None:
+        secret = 'profile secret at /private/user_profiles.db: token="super-secret"'
+
+        with (
+            patch.object(person_routes, "list_profile_person_dicts", side_effect=RuntimeError(secret)),
+            patch.object(person_routes.logger, "error") as logged,
+            self.assertRaises(HTTPException) as failure,
+        ):
+            await person_routes.get_person_list(
+                page=1,
+                page_size=20,
+                search=None,
+                is_known=None,
+                platform=None,
+            )
+
+        self.assertEqual(failure.exception.status_code, 500)
+        self.assertEqual(failure.exception.detail, "获取人物列表失败")
+        self.assertNotIn(secret, repr(logged.call_args))
+
 
 if __name__ == "__main__":
     unittest.main()

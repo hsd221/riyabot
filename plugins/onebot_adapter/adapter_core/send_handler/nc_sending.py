@@ -25,8 +25,8 @@ class NCMessageSender:
             logger.error("发送消息超时，未收到响应")
             return {"status": "error", "message": "timeout"}
         except Exception as e:
-            logger.error(f"发送消息失败: {e}")
-            return {"status": "error", "message": str(e)}
+            logger.error(f"发送消息失败: error_type={type(e).__name__}")
+            return {"status": "error", "message": "request_failed"}
         return response
 
     async def message_sent_back(self, message_base: MessageBase, qq_message_id: str) -> None:

@@ -2,9 +2,10 @@ import sys
 import types
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from src.common.message import api as message_api
+from src.config.official_configs import MaimMessageConfig
 
 
 class FakeMessageServer:
@@ -69,7 +70,7 @@ def maim_config(**overrides):
     data = {
         "auth_token": [],
         "enable_api_server": False,
-        "api_server_host": "0.0.0.0",
+        "api_server_host": "127.0.0.1",
         "api_server_port": 8090,
         "api_server_use_wss": False,
         "api_server_cert_file": "",
@@ -89,6 +90,17 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         message_api.global_api = None
+
+    def test_additional_api_server_defaults_to_loopback(self) -> None:
+        self.assertEqual(MaimMessageConfig().api_server_host, "127.0.0.1")
+
+    def test_legacy_auth_tokens_normalize_a_string_and_ignore_invalid_shapes(self) -> None:
+        with patch.dict(message_api.os.environ, {}, clear=True):
+            self.assertEqual(
+                message_api._legacy_auth_tokens(SimpleNamespace(auth_token="  legacy-token  ")),
+                ["legacy-token"],
+            )
+            self.assertEqual(message_api._legacy_auth_tokens(SimpleNamespace(auth_token=42)), [])
 
     def call_get_global_api(self, *, version: str, config: SimpleNamespace):
         with (
@@ -124,6 +136,46 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(api.kwargs["enable_token"])
         self.assertFalse(api.kwargs["enable_custom_uvicorn_logger"])
         self.assertEqual(api.valid_tokens, ["token-a", "token-b"])
+
+    def test_legacy_remote_bind_requires_auth_or_explicit_compatibility_override(self) -> None:
+        def build_api(*, version: str = "0.3.3", auth_tokens=None, extra_environment=None):
+            message_api.global_api = None
+            FakeMessageServer.instances.clear()
+            environment = {"HOST": "0.0.0.0", "PORT": "8123", **(extra_environment or {})}
+            with (
+                patch.object(message_api, "MessageServer", FakeMessageServer),
+                patch.object(message_api.importlib.metadata, "version", return_value=version),
+                patch.object(
+                    message_api,
+                    "global_config",
+                    SimpleNamespace(maim_message=maim_config(auth_token=auth_tokens or [])),
+                ),
+                patch.object(message_api, "get_global_server", return_value=SimpleNamespace(get_app=lambda: "app")),
+                patch.dict(message_api.os.environ, environment, clear=True),
+            ):
+                return message_api.get_global_api()
+
+        protected_api = build_api()
+        self.assertEqual(protected_api.kwargs["host"], "127.0.0.1")
+        self.assertNotIn("enable_token", protected_api.kwargs)
+
+        configured_api = build_api(auth_tokens=["config-token"])
+        self.assertEqual(configured_api.kwargs["host"], "0.0.0.0")
+        self.assertTrue(configured_api.kwargs["enable_token"])
+        self.assertEqual(configured_api.valid_tokens, ["config-token"])
+
+        environment_api = build_api(extra_environment={"MAIBOT_LEGACY_SERVER_TOKEN": "environment-token"})
+        self.assertEqual(environment_api.kwargs["host"], "0.0.0.0")
+        self.assertTrue(environment_api.kwargs["enable_token"])
+        self.assertEqual(environment_api.valid_tokens, ["environment-token"])
+
+        compatibility_api = build_api(extra_environment={"MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER": "1"})
+        self.assertEqual(compatibility_api.kwargs["host"], "0.0.0.0")
+        self.assertNotIn("enable_token", compatibility_api.kwargs)
+
+        unsupported_api = build_api(version="0.2.9", auth_tokens=["unsupported-token"])
+        self.assertEqual(unsupported_api.kwargs["host"], "127.0.0.1")
+        self.assertEqual(unsupported_api.valid_tokens, [])
 
     async def test_additional_api_server_configures_auth_bridge_and_lifecycle_for_supported_versions(self) -> None:
         server_module = types.ModuleType("maim_message.server")
@@ -209,6 +261,7 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
         server_module.ServerConfig = FakeServerConfig
         message_module = types.ModuleType("maim_message.message")
         message_module.APIMessageBase = object
+        safe_logger = Mock()
 
         with (
             patch.dict(sys.modules, {"maim_message.server": server_module, "maim_message.message": message_module}),
@@ -220,6 +273,7 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(maim_message=maim_config(enable_api_server=True, api_server_allowed_api_keys=[])),
             ),
             patch.object(message_api, "get_global_server", return_value=SimpleNamespace(get_app=lambda: "app")),
+            patch.object(message_api, "get_logger", return_value=safe_logger),
             patch.dict(message_api.os.environ, {"HOST": "127.0.0.1", "PORT": "8123"}, clear=True),
         ):
             api = message_api.get_global_api()
@@ -234,6 +288,47 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(api.processed_messages[0]["message_info"]["platform"], "qq")
+        self.assertNotIn("map failed", repr(safe_logger.method_calls))
+        self.assertFalse(any(call.kwargs.get("exc_info") for call in safe_logger.method_calls))
+        safe_logger.exception.assert_not_called()
+
+    async def test_additional_api_server_requires_keys_for_remote_bind_unless_explicitly_allowed(self) -> None:
+        server_module = types.ModuleType("maim_message.server")
+        server_module.WebSocketServer = FakeWebSocketServer
+        server_module.ServerConfig = FakeServerConfig
+        message_module = types.ModuleType("maim_message.message")
+        message_module.APIMessageBase = object
+
+        def build_api(extra_environment: dict[str, str] | None = None):
+            message_api.global_api = None
+            FakeServerConfig.instances.clear()
+            FakeWebSocketServer.instances.clear()
+            environment = {"HOST": "127.0.0.1", "PORT": "8123", **(extra_environment or {})}
+            with (
+                patch.dict(sys.modules, {"maim_message.server": server_module, "maim_message.message": message_module}),
+                patch.object(message_api, "MessageServer", FakeMessageServer),
+                patch.object(message_api.importlib.metadata, "version", return_value="0.6.0"),
+                patch.object(
+                    message_api,
+                    "global_config",
+                    SimpleNamespace(
+                        maim_message=maim_config(
+                            enable_api_server=True,
+                            api_server_host="0.0.0.0",
+                            api_server_allowed_api_keys=[],
+                        )
+                    ),
+                ),
+                patch.object(message_api, "get_global_server", return_value=SimpleNamespace(get_app=lambda: "app")),
+                patch.dict(message_api.os.environ, environment, clear=True),
+            ):
+                return message_api.get_global_api()
+
+        protected_api = build_api()
+        self.assertFalse(await protected_api.extra_server.config.on_auth({"api_key": "any-key"}))
+
+        legacy_api = build_api({"MAIBOT_ALLOW_UNAUTHENTICATED_API_SERVER": "1"})
+        self.assertTrue(await legacy_api.extra_server.config.on_auth({"api_key": "any-key"}))
 
     def test_additional_api_server_import_and_initialization_failures_keep_legacy_server_available(self) -> None:
         with (
@@ -257,13 +352,14 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
 
         class FailingWebSocketServer:
             def __init__(self, config):
-                raise RuntimeError("init failed")
+                raise RuntimeError("api-key-super-secret")
 
         server_module = types.ModuleType("maim_message.server")
         server_module.WebSocketServer = FailingWebSocketServer
         server_module.ServerConfig = FakeServerConfig
         message_module = types.ModuleType("maim_message.message")
         message_module.APIMessageBase = object
+        safe_logger = Mock()
 
         with (
             patch.dict(sys.modules, {"maim_message.server": server_module, "maim_message.message": message_module}),
@@ -275,12 +371,16 @@ class CommonMessageAPITest(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(maim_message=maim_config(enable_api_server=True)),
             ),
             patch.object(message_api, "get_global_server", return_value=SimpleNamespace(get_app=lambda: "app")),
+            patch.object(message_api, "get_logger", return_value=safe_logger),
             patch.dict(message_api.os.environ, {"HOST": "127.0.0.1", "PORT": "8123"}, clear=True),
         ):
             api = message_api.get_global_api()
 
         self.assertIs(api, FakeMessageServer.instances[-1])
         self.assertFalse(hasattr(api, "extra_server"))
+        self.assertNotIn("api-key-super-secret", repr(safe_logger.method_calls))
+        self.assertFalse(any(call.kwargs.get("exc_info") for call in safe_logger.method_calls))
+        safe_logger.exception.assert_not_called()
 
     def test_invalid_or_missing_version_falls_back_to_basic_message_server(self) -> None:
         with (

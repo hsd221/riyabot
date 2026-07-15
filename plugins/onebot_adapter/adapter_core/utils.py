@@ -1,26 +1,20 @@
+import asyncio
 import websockets as Server
 import json
 import base64
 import uuid
-import urllib3
-import ssl
 import io
 
 from .database import BanUser, db_manager
 from .logger import logger
+from .network import download_media
 from .response_pool import get_response
 
 from PIL import Image
 from typing import Union, List, Tuple, Optional
 
 
-class SSLAdapter(urllib3.PoolManager):
-    def __init__(self, *args, **kwargs):
-        context = ssl.create_default_context()
-        context.set_ciphers("DEFAULT@SECLEVEL=1")
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        kwargs["ssl_context"] = context
-        super().__init__(*args, **kwargs)
+_media_download_semaphore = asyncio.Semaphore(4)
 
 
 async def get_group_info(websocket: Server.ServerConnection, group_id: int) -> dict | None:
@@ -39,9 +33,9 @@ async def get_group_info(websocket: Server.ServerConnection, group_id: int) -> d
         logger.error(f"获取群信息超时，群号: {group_id}")
         return None
     except Exception as e:
-        logger.error(f"获取群信息失败: {e}")
+        logger.error(f"获取群信息失败: error_type={type(e).__name__}")
         return None
-    logger.debug(socket_response)
+    logger.debug("已获取群信息响应")
     return socket_response.get("data")
 
 
@@ -61,9 +55,9 @@ async def get_group_detail_info(websocket: Server.ServerConnection, group_id: in
         logger.error(f"获取群详细信息超时，群号: {group_id}")
         return None
     except Exception as e:
-        logger.error(f"获取群详细信息失败: {e}")
+        logger.error(f"获取群详细信息失败: error_type={type(e).__name__}")
         return None
-    logger.debug(socket_response)
+    logger.debug("已获取群详细信息响应")
     return socket_response.get("data")
 
 
@@ -89,25 +83,22 @@ async def get_member_info(websocket: Server.ServerConnection, group_id: int, use
         logger.error(f"获取成员信息超时，群号: {group_id}, 用户ID: {user_id}")
         return None
     except Exception as e:
-        logger.error(f"获取成员信息失败: {e}")
+        logger.error(f"获取成员信息失败: error_type={type(e).__name__}")
         return None
-    logger.debug(socket_response)
+    logger.debug("已获取成员信息响应")
     return socket_response.get("data")
 
 
 async def get_image_base64(url: str) -> str:
     # sourcery skip: raise-specific-error
     """获取图片/表情包的Base64"""
-    logger.debug(f"下载图片: {url}")
-    http = SSLAdapter()
+    logger.debug("下载图片")
     try:
-        response = http.request("GET", url, timeout=10)
-        if response.status != 200:
-            raise Exception(f"HTTP Error: {response.status}")
-        image_bytes = response.data
+        async with _media_download_semaphore:
+            image_bytes = await asyncio.to_thread(download_media, url)
         return base64.b64encode(image_bytes).decode("utf-8")
     except Exception as e:
-        logger.error(f"图片下载失败: {str(e)}")
+        logger.error(f"图片下载失败: {type(e).__name__}")
         raise
 
 
@@ -129,7 +120,7 @@ def convert_image_to_gif(image_base64: str) -> str:
         output_buffer.seek(0)
         return base64.b64encode(output_buffer.read()).decode("utf-8")
     except Exception as e:
-        logger.error(f"图片转换为GIF失败: {str(e)}")
+        logger.error(f"图片转换为GIF失败: error_type={type(e).__name__}")
         return image_base64
 
 
@@ -151,9 +142,9 @@ async def get_self_info(websocket: Server.ServerConnection) -> dict | None:
         logger.error("获取自身信息超时")
         return None
     except Exception as e:
-        logger.error(f"获取自身信息失败: {e}")
+        logger.error(f"获取自身信息失败: error_type={type(e).__name__}")
         return None
-    logger.debug(response)
+    logger.debug("已获取自身信息响应")
     return response.get("data")
 
 
@@ -188,9 +179,9 @@ async def get_stranger_info(websocket: Server.ServerConnection, user_id: int) ->
         logger.error(f"获取陌生人信息超时，用户ID: {user_id}")
         return None
     except Exception as e:
-        logger.error(f"获取陌生人信息失败: {e}")
+        logger.error(f"获取陌生人信息失败: error_type={type(e).__name__}")
         return None
-    logger.debug(response)
+    logger.debug("已获取陌生人信息响应")
     return response.get("data")
 
 
@@ -213,9 +204,9 @@ async def get_message_detail(websocket: Server.ServerConnection, message_id: Uni
         logger.error(f"获取消息详情超时，消息ID: {message_id}")
         return None
     except Exception as e:
-        logger.error(f"获取消息详情失败: {e}")
+        logger.error(f"获取消息详情失败: error_type={type(e).__name__}")
         return None
-    logger.debug(response)
+    logger.debug("已获取消息详情响应")
     return response.get("data")
 
 
@@ -247,9 +238,9 @@ async def get_record_detail(
         logger.error(f"获取语音消息详情超时，文件: {file}, 文件ID: {file_id}")
         return None
     except Exception as e:
-        logger.error(f"获取语音消息详情失败: {e}")
+        logger.error(f"获取语音消息详情失败: error_type={type(e).__name__}")
         return None
-    logger.debug(f"{str(response)[:200]}...")  # 防止语音的超长base64编码导致日志过长
+    logger.debug("已获取语音消息详情响应")
     return response.get("data")
 
 
@@ -302,7 +293,7 @@ async def read_ban_list(
         db_manager.update_ban_record(ban_list)
         return ban_list, lifted_list
     except Exception as e:
-        logger.error(f"读取禁言列表失败: {e}")
+        logger.error(f"读取禁言列表失败: error_type={type(e).__name__}")
         return [], []
 
 

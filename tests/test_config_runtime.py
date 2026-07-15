@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,16 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
                 webui_path.unlink()
                 with patch.object(config_module, "PROJECT_ROOT", str(root)):
                     config_module._mark_webui_setup_required("missing")
+
+                if hasattr(os, "symlink"):
+                    external_path = root / "external-webui.json"
+                    original_external = json.dumps({"first_setup_completed": True})
+                    external_path.write_text(original_external, encoding="utf-8")
+                    webui_path.symlink_to(external_path)
+                    with patch.object(config_module, "PROJECT_ROOT", str(root)):
+                        config_module._mark_webui_setup_required("must-not-follow")
+                    self.assertTrue(webui_path.is_symlink())
+                    self.assertEqual(external_path.read_text(encoding="utf-8"), original_external)
         finally:
             config_module._CREATED_CONFIG_FILES[:] = original_created
 
@@ -143,7 +154,7 @@ value = 1 # value comment
     def test_version_and_blank_model_template_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.toml"
-            config_path.write_text("[inner]\nversion = \"1.2.3\"\n", encoding="utf-8")
+            config_path.write_text('[inner]\nversion = "1.2.3"\n', encoding="utf-8")
 
             self.assertEqual(config_module._get_version_from_toml(config_path), "1.2.3")
             self.assertIsNone(config_module._get_version_from_toml(Path(tmpdir) / "missing.toml"))
@@ -164,7 +175,7 @@ value = 1 # value comment
                 config_dir = root / "config"
                 template_dir = root / "template"
                 template_dir.mkdir()
-                (template_dir / "bot_config_template.toml").write_text("[inner]\nversion = \"1\"\n", encoding="utf-8")
+                (template_dir / "bot_config_template.toml").write_text('[inner]\nversion = "1"\n', encoding="utf-8")
 
                 with (
                     patch.object(config_module, "CONFIG_DIR", str(config_dir)),
@@ -176,6 +187,8 @@ value = 1 # value comment
                     config_module._update_config_generic("bot_config", "bot_config_template")
 
                 self.assertTrue((config_dir / "bot_config.toml").exists())
+                self.assertEqual((config_dir / "bot_config.toml").stat().st_mode & 0o777, 0o600)
+                self.assertEqual(config_dir.stat().st_mode & 0o022, 0)
                 self.assertIn("bot_config.toml", config_module.get_created_config_files())
                 mark_setup.assert_called_once_with("bot_config.toml 已从模板创建")
         finally:
@@ -191,15 +204,15 @@ value = 1 # value comment
             template_dir.mkdir()
             compare_dir.mkdir()
             (template_dir / "bot_config_template.toml").write_text(
-                "[inner]\nversion = \"2\"\nvalue = 2\nnew_key = true\n",
+                '[inner]\nversion = "2"\nvalue = 2\nnew_key = true\n',
                 encoding="utf-8",
             )
             (compare_dir / "bot_config_template.toml").write_text(
-                "[inner]\nversion = \"1\"\nvalue = 1\nold_key = true\n",
+                '[inner]\nversion = "1"\nvalue = 1\nold_key = true\n',
                 encoding="utf-8",
             )
             (config_dir / "bot_config.toml").write_text(
-                "[inner]\nversion = \"1\"\nvalue = 1\nold_key = false\n",
+                '[inner]\nversion = "1"\nvalue = 1\nold_key = false\n',
                 encoding="utf-8",
             )
 
@@ -213,7 +226,39 @@ value = 1 # value comment
             self.assertEqual(migrated["inner"]["version"], "2")
             self.assertEqual(migrated["inner"]["value"], 2)
             self.assertTrue(migrated["inner"]["new_key"])
-            self.assertTrue(list((config_dir / "old").glob("bot_config_*.toml")))
+            backups = list((config_dir / "old").glob("bot_config_*.toml"))
+            self.assertTrue(backups)
+            self.assertEqual((config_dir / "bot_config.toml").stat().st_mode & 0o777, 0o600)
+            self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in backups))
+            self.assertEqual((config_dir / "old").stat().st_mode & 0o022, 0)
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "platform does not support symlinks")
+    def test_update_config_generic_rejects_symbolic_link_config_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as outside_dir:
+            root = Path(tmpdir)
+            config_dir = root / "config"
+            template_dir = root / "template"
+            config_dir.mkdir()
+            template_dir.mkdir()
+            (template_dir / "bot_config_template.toml").write_text(
+                '[inner]\nversion = "2"\n',
+                encoding="utf-8",
+            )
+            external_path = Path(outside_dir) / "external.toml"
+            original_external = '[inner]\nversion = "1"\nsecret = "do-not-touch"\n'
+            external_path.write_text(original_external, encoding="utf-8")
+            linked_config = config_dir / "bot_config.toml"
+            linked_config.symlink_to(external_path)
+
+            with (
+                patch.object(config_module, "CONFIG_DIR", str(config_dir)),
+                patch.object(config_module, "TEMPLATE_DIR", str(template_dir)),
+            ):
+                with self.assertRaises(RuntimeError):
+                    config_module._update_config_generic("bot_config", "bot_config_template")
+
+            self.assertTrue(linked_config.is_symlink())
+            self.assertEqual(external_path.read_text(encoding="utf-8"), original_external)
 
     def test_update_config_generic_skips_same_version_and_blank_model_default_migration(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -225,15 +270,15 @@ value = 1 # value comment
             template_dir.mkdir()
             compare_dir.mkdir()
             (template_dir / "model_config_template.toml").write_text(
-                "api_providers = []\nmodels = []\n[inner]\nversion = \"1\"\n",
+                'api_providers = []\nmodels = []\n[inner]\nversion = "1"\n',
                 encoding="utf-8",
             )
             (compare_dir / "model_config_template.toml").write_text(
-                "api_providers = [{name = \"old\"}]\nmodels = []\n[inner]\nversion = \"1\"\n",
+                'api_providers = [{name = "old"}]\nmodels = []\n[inner]\nversion = "1"\n',
                 encoding="utf-8",
             )
             config_path = config_dir / "model_config.toml"
-            config_path.write_text("[inner]\nversion = \"1\"\n", encoding="utf-8")
+            config_path.write_text('[inner]\nversion = "1"\n', encoding="utf-8")
 
             with (
                 patch.object(config_module, "CONFIG_DIR", str(config_dir)),
@@ -241,7 +286,7 @@ value = 1 # value comment
             ):
                 config_module._update_config_generic("model_config", "model_config_template")
 
-            self.assertEqual(config_path.read_text(encoding="utf-8"), "[inner]\nversion = \"1\"\n")
+            self.assertEqual(config_path.read_text(encoding="utf-8"), '[inner]\nversion = "1"\n')
 
     def test_update_config_generic_copies_missing_compare_and_updates_configs_without_versions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -251,7 +296,7 @@ value = 1 # value comment
             config_dir.mkdir()
             template_dir.mkdir()
             (template_dir / "bot_config_template.toml").write_text(
-                "[inner]\nversion = \"2\"\nvalue = 2\n",
+                '[inner]\nversion = "2"\nvalue = 2\n',
                 encoding="utf-8",
             )
             (config_dir / "bot_config.toml").write_text("value = 1\n", encoding="utf-8")
@@ -276,15 +321,15 @@ value = 1 # value comment
             template_dir.mkdir()
             compare_dir.mkdir()
             (template_dir / "bot_config_template.toml").write_text(
-                "[inner]\nversion = \"2\"\nvalue = 1\n",
+                '[inner]\nversion = "2"\nvalue = 1\n',
                 encoding="utf-8",
             )
             (compare_dir / "bot_config_template.toml").write_text(
-                "[inner]\nversion = \"1\"\nvalue = 1\n",
+                '[inner]\nversion = "1"\nvalue = 1\n',
                 encoding="utf-8",
             )
             (config_dir / "bot_config.toml").write_text(
-                "[inner]\nversion = \"1\"\nvalue = 1\n",
+                '[inner]\nversion = "1"\nvalue = 1\n',
                 encoding="utf-8",
             )
 
@@ -309,8 +354,12 @@ value = 1 # value comment
 class APIAdapterConfigRuntimeTest(unittest.TestCase):
     def make_config(self, *, model_names=None, task_models=None, providers=None) -> config_module.APIAdapterConfig:
         model_names = model_names if model_names is not None else ["model-a"]
-        providers = providers if providers is not None else [APIProvider("provider-a", "https://api.example.test", "secret")]
-        models = [ModelInfo(model_identifier=f"id-{name}", name=name, api_provider=providers[0].name) for name in model_names]
+        providers = (
+            providers if providers is not None else [APIProvider("provider-a", "https://api.example.test", "secret")]
+        )
+        models = [
+            ModelInfo(model_identifier=f"id-{name}", name=name, api_provider=providers[0].name) for name in model_names
+        ]
         return config_module.APIAdapterConfig(
             models=models,
             model_task_config=make_model_task_config(task_models if task_models is not None else model_names),
@@ -328,9 +377,9 @@ class APIAdapterConfigRuntimeTest(unittest.TestCase):
         self.assertEqual(config.get_provider("provider-a").name, "provider-a")
 
         with self.assertRaisesRegex(ValueError, "模型列表不能为空"):
-            config_module.APIAdapterConfig(models=[], model_task_config=make_model_task_config(), api_providers=[]).validate_integrity(
-                require_complete=True
-            )
+            config_module.APIAdapterConfig(
+                models=[], model_task_config=make_model_task_config(), api_providers=[]
+            ).validate_integrity(require_complete=True)
         with self.assertRaisesRegex(ValueError, "API提供商列表不能为空"):
             config_module.APIAdapterConfig(
                 models=[ModelInfo("id-a", "model-a", "provider-a")],
@@ -389,7 +438,7 @@ class APIAdapterConfigRuntimeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             bot_config = root / "bot_config.toml"
-            bot_config.write_text("[bot]\nplatform = \"qq\"\n", encoding="utf-8")
+            bot_config.write_text('[bot]\nplatform = "qq"\n', encoding="utf-8")
             model_config = root / "model_config.toml"
             model_config.write_text(
                 """
@@ -429,7 +478,7 @@ model_list = []
 
             self.assertIsInstance(config_module.api_ada_load_config(str(model_config)), config_module.APIAdapterConfig)
             invalid_model_config = root / "invalid_model_config.toml"
-            invalid_model_config.write_text("[[models]]\nname = \"missing required fields\"\n", encoding="utf-8")
+            invalid_model_config.write_text('[[models]]\nname = "missing required fields"\n', encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 config_module.api_ada_load_config(str(invalid_model_config))
             with self.assertRaisesRegex(RuntimeError, "Missing required field: 'qq_account'"):
