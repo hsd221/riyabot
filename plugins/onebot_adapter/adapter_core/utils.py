@@ -89,13 +89,13 @@ async def get_member_info(websocket: Server.ServerConnection, group_id: int, use
     return socket_response.get("data")
 
 
-async def get_image_base64(url: str) -> str:
+async def get_image_base64(url: str, *, https_only: bool = False) -> str:
     # sourcery skip: raise-specific-error
-    """获取图片/表情包的Base64"""
+    """获取图片/表情包的 Base64，可要求整个重定向链保持 HTTPS。"""
     logger.debug("下载图片")
     try:
         async with _media_download_semaphore:
-            image_bytes = await asyncio.to_thread(download_media, url)
+            image_bytes = await asyncio.to_thread(download_media, url, https_only=https_only)
         return base64.b64encode(image_bytes).decode("utf-8")
     except Exception as e:
         logger.error(f"图片下载失败: {type(e).__name__}")

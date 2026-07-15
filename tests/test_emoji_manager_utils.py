@@ -13,6 +13,10 @@ from PIL import Image
 from src.chat.emoji_system import emoji_manager
 
 
+class StopPeriodicLoop(Exception):
+    """用于在单轮扫描结束后停止无限循环测试。"""
+
+
 def write_png(path: Path, color: tuple[int, int, int] = (255, 0, 0)) -> bytes:
     image = Image.new("RGB", (2, 2), color=color)
     buffer = io.BytesIO()
@@ -126,6 +130,24 @@ class MaiEmojiTest(unittest.IsolatedAsyncioTestCase):
 
 
 class EmojiHelperFunctionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_clear_temp_emoji_preserves_pending_queue_and_cleans_transient_caches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            emoji_dir = base_dir / "emoji"
+            image_dir = base_dir / "image"
+            images_dir = base_dir / "images"
+            for directory in (emoji_dir, image_dir, images_dir):
+                directory.mkdir()
+                for index in range(101):
+                    (directory / f"{index}.tmp").write_text("x", encoding="utf-8")
+
+            with patch.object(emoji_manager, "BASE_DIR", str(base_dir)):
+                await emoji_manager.clear_temp_emoji()
+
+            self.assertEqual(len(list(emoji_dir.iterdir())), 101)
+            self.assertEqual(list(image_dir.iterdir()), [])
+            self.assertEqual(list(images_dir.iterdir()), [])
+
     async def test_to_emoji_objects_readable_list_clean_unused_and_clear_temp_files(self) -> None:
         valid_record = SimpleNamespace(
             id=1,
@@ -199,8 +221,43 @@ class EmojiHelperFunctionTest(unittest.IsolatedAsyncioTestCase):
             with patch.object(emoji_manager, "BASE_DIR", str(base_dir)):
                 await emoji_manager.clear_temp_emoji()
 
-            self.assertEqual(list(emoji_dir.iterdir()), [])
+            self.assertEqual(len(list(emoji_dir.iterdir())), 101)
             self.assertEqual(len(list(image_dir.iterdir())), 2)
+
+
+class EmojiManagerPeriodicRegistrationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_periodic_scan_processes_the_entire_pending_queue_before_sleeping(self) -> None:
+        manager = make_manager()
+        manager.get_all_emoji_from_db = AsyncMock()
+        manager.check_emoji_file_integrity = AsyncMock()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pending_dir = Path(temp_dir)
+            filenames = ["first.png", "removed-on-failure.png", "last.png"]
+            for filename in filenames:
+                (pending_dir / filename).write_bytes(b"image")
+
+            async def register(filename: str) -> bool:
+                if filename == "removed-on-failure.png":
+                    (pending_dir / filename).unlink()
+                    return False
+                return True
+
+            manager.register_emoji_by_filename = AsyncMock(side_effect=register)
+
+            with (
+                patch.object(emoji_manager, "EMOJI_DIR", str(pending_dir)),
+                patch.object(emoji_manager.os, "listdir", return_value=filenames),
+                patch.object(emoji_manager, "clear_temp_emoji", new=AsyncMock()),
+                patch.object(emoji_manager.asyncio, "sleep", new=AsyncMock(side_effect=StopPeriodicLoop)),
+                self.assertRaises(StopPeriodicLoop),
+            ):
+                await manager.start_periodic_check_register()
+
+        self.assertEqual(
+            [call.args[0] for call in manager.register_emoji_by_filename.await_args_list],
+            filenames,
+        )
 
 
 class EmojiManagerLookupTest(unittest.IsolatedAsyncioTestCase):

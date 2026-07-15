@@ -15,7 +15,7 @@ import uuid
 
 from typing import Optional, Tuple, List, Dict, Any
 from src.common.logger import get_logger
-from src.chat.emoji_system.emoji_manager import get_emoji_manager, EMOJI_DIR
+from src.chat.emoji_system.emoji_manager import EMOJI_DIR, get_emoji_manager, is_supported_emoji_filename
 from src.chat.utils.utils_image import image_path_to_base64, base64_to_image
 
 logger = get_logger("emoji_api")
@@ -381,7 +381,7 @@ async def register_emoji(image_base64: str, filename: Optional[str] = None) -> D
             filename = f"emoji_{timestamp}_{microseconds}_{short_id}"
 
         # 确保文件名有扩展名
-        if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+        if not is_supported_emoji_filename(filename):
             filename = f"{filename}.png"  # 默认使用png格式
 
         # 检查文件名是否已存在，如果存在则重新生成短标识符

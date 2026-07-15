@@ -408,9 +408,7 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
         ]:
             with self.subTest(responses=responses):
                 vlm = SimpleNamespace(
-                    generate_response_for_images=AsyncMock(
-                        side_effect=[(response, None) for response in responses]
-                    )
+                    generate_response_for_images=AsyncMock(side_effect=[(response, None) for response in responses])
                 )
                 result = await utils_image.audit_gif_frames(
                     vlm,

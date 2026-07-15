@@ -40,12 +40,18 @@ logger = get_logger("emoji")
 BASE_DIR = os.path.join("data")
 EMOJI_DIR = os.path.join(BASE_DIR, "emoji")  # 表情包存储目录
 EMOJI_REGISTERED_DIR = os.path.join(BASE_DIR, "emoji_registed")  # 已注册的表情包注册目录
+SUPPORTED_EMOJI_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 MAX_EMOJI_FOR_PROMPT = 20  # 最大允许的表情包描述数量于图片替换的 prompt 中
 
 """
 还没经过测试，有些地方数据库和内存数据同步可能不完全
 
 """
+
+
+def is_supported_emoji_filename(filename: str) -> bool:
+    """判断文件名是否属于表情包注册流程支持的图片格式。"""
+    return isinstance(filename, str) and filename.lower().endswith(SUPPORTED_EMOJI_EXTENSIONS)
 
 
 class MaiEmoji:
@@ -315,18 +321,15 @@ def _ensure_emoji_dir() -> None:
 
 
 async def clear_temp_emoji() -> None:
-    """清理临时表情包
-    清理/data/emoji、/data/image和/data/images目录下的所有文件
-    当目录中文件数超过100时，会全部删除
+    """清理临时图片缓存，但保留 ``data/emoji`` 待注册队列。
+
+    ``data/image`` 和 ``data/images`` 中任一目录超过 100 个条目时，
+    仍按原策略删除其中的普通文件。
     """
 
     logger.info("[清理] 开始清理缓存...")
 
-    for need_clear in (
-        os.path.join(BASE_DIR, "emoji"),
-        os.path.join(BASE_DIR, "image"),
-        os.path.join(BASE_DIR, "images"),
-    ):
+    for need_clear in (os.path.join(BASE_DIR, "image"), os.path.join(BASE_DIR, "images")):
         if os.path.exists(need_clear):
             files = os.listdir(need_clear)
             # 如果文件数超过100就全部删除
@@ -631,22 +634,31 @@ class EmojiManager:
                     files_to_process = [
                         f
                         for f in files
-                        if os.path.isfile(os.path.join(EMOJI_DIR, f))
-                        and f.lower().endswith((".jpg", ".jpeg", ".png", ".gif"))
+                        if os.path.isfile(os.path.join(EMOJI_DIR, f)) and is_supported_emoji_filename(f)
                     ]
 
-                    # 处理每个符合条件的文件
+                    # 顺序处理本轮所有符合条件的文件，避免每注册一个就等待整个检查周期。
                     for filename in files_to_process:
+                        # 保持原有容量语义：达到上限后保留剩余待注册文件，等待配置调整。
+                        if self.emoji_num == self.emoji_num_max:
+                            logger.info(
+                                f"[扫描] 表情包数量已达到上限({self.emoji_num}/{self.emoji_num_max})，停止本轮注册"
+                            )
+                            break
+
                         # 尝试注册表情包
                         success = await self.register_emoji_by_filename(filename)
                         if success:
-                            # 注册成功则跳出循环
-                            break
+                            continue
 
                         # 注册失败则删除对应文件
                         file_path = os.path.join(EMOJI_DIR, filename)
-                        os.remove(file_path)
-                        logger.warning(f"[清理] 删除注册失败的表情包文件: {filename}")
+                        if os.path.exists(file_path):
+                            try:
+                                os.remove(file_path)
+                                logger.warning(f"[清理] 删除注册失败的表情包文件: {filename}")
+                            except OSError as cleanup_error:
+                                logger.error(f"[错误] 删除注册失败的表情包文件失败 ({filename}): {cleanup_error}")
                 except Exception as e:
                     logger.error(f"[错误] 扫描表情包目录失败: {str(e)}")
 

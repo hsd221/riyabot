@@ -183,6 +183,47 @@ class OneBotAdapterNetworkTest(unittest.TestCase):
         self.assertTrue(redirect_response.closed)
         redirect_pool.close.assert_called_once_with()
 
+    def test_download_media_https_only_rejects_redirect_downgrade(self) -> None:
+        https_target = network.MediaTarget(
+            url="https://example.com/image.png",
+            scheme="https",
+            hostname="example.com",
+            ip_address=ipaddress.ip_address("93.184.216.34"),
+            port=443,
+            request_target="/image.png",
+            host_header="example.com",
+        )
+        http_target = network.MediaTarget(
+            url="http://example.com/image.png",
+            scheme="http",
+            hostname="example.com",
+            ip_address=ipaddress.ip_address("93.184.216.34"),
+            port=80,
+            request_target="/image.png",
+            host_header="example.com",
+        )
+        redirect_response = FakeResponse(status=302, headers={"Location": http_target.url})
+        redirected_response = FakeResponse(headers={"Content-Type": "image/png"}, chunks=[b"image"])
+        redirect_pool = Mock()
+        redirected_pool = Mock()
+
+        with (
+            patch.object(network, "resolve_media_target", side_effect=[https_target, http_target]),
+            patch.object(
+                network,
+                "_open_pinned_response",
+                side_effect=[(redirect_pool, redirect_response), (redirected_pool, redirected_response)],
+            ) as open_url,
+        ):
+            with self.assertRaises(network.MediaDownloadError):
+                network.download_media(https_target.url, https_only=True)
+
+        open_url.assert_called_once_with(https_target)
+        self.assertTrue(redirect_response.closed)
+        redirect_pool.close.assert_called_once_with()
+        self.assertFalse(redirected_response.closed)
+        redirected_pool.close.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

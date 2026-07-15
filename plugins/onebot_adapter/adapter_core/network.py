@@ -236,7 +236,7 @@ def _read_limited_response(response: Any, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def _download_media(url: str, *, max_bytes: int, max_redirects: int) -> bytes:
+def _download_media(url: str, *, max_bytes: int, max_redirects: int, https_only: bool) -> bytes:
     if max_bytes <= 0 or max_redirects < 0:
         raise MediaDownloadError("媒体下载限制无效")
 
@@ -244,6 +244,8 @@ def _download_media(url: str, *, max_bytes: int, max_redirects: int) -> bytes:
     redirect_count = 0
     while True:
         target = resolve_media_target(current_url)
+        if https_only and target.scheme != "https":
+            raise MediaDownloadError("媒体 URL 仅允许 HTTPS")
         pool, response = _open_pinned_response(target)
         try:
             status = int(response.status)
@@ -271,10 +273,11 @@ def download_media(
     *,
     max_bytes: int = MAX_MEDIA_BYTES,
     max_redirects: int = MAX_MEDIA_REDIRECTS,
+    https_only: bool = False,
 ) -> bytes:
-    """下载受限媒体；所有非策略错误统一为不含 URL 的安全异常。"""
+    """下载受限媒体；https_only 会同时阻止重定向降级，异常中不包含 URL。"""
     try:
-        return _download_media(url, max_bytes=max_bytes, max_redirects=max_redirects)
+        return _download_media(url, max_bytes=max_bytes, max_redirects=max_redirects, https_only=https_only)
     except MediaDownloadError:
         raise
     except Exception as exc:
