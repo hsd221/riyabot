@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -203,23 +204,44 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
     async def test_get_emoji_description_uses_manager_cache_table_or_vlm_flow(self) -> None:
         manager = make_image_manager()
         image_b64 = png_base64()
-        fake_emoji_manager = SimpleNamespace(get_emoji_tag_by_hash=AsyncMock(return_value=["开心", "好笑"]))
+        registered_description = (
+            "情感：开心、好笑；适用场景：当朋友讲笑话时，用于表示被逗乐；"
+            "表达意图：积极回应；画面内容：小狗拍桌大笑；画面文字：哈哈哈；风格/梗：夸张反应图"
+        )
+        fake_emoji_manager = SimpleNamespace(
+            get_emoji_description_by_hash=AsyncMock(return_value=registered_description)
+        )
 
         with patch("src.chat.emoji_system.emoji_manager.get_emoji_manager", return_value=fake_emoji_manager):
-            self.assertEqual(await manager.get_emoji_description(image_b64), "[表情包：开心,好笑]")
+            self.assertEqual(await manager.get_emoji_description(image_b64), f"[表情包：{registered_description}]")
 
-        fake_emoji_manager.get_emoji_tag_by_hash = AsyncMock(return_value=None)
-        cache_record = SimpleNamespace(emotion_tags="缓存情绪", description="缓存描述")
+        fake_emoji_manager.get_emoji_description_by_hash = AsyncMock(return_value=None)
+        cached_description = (
+            "情感：无奈；适用场景：当对方说出离谱内容时，用于表达无语；"
+            "表达意图：轻度吐槽；画面内容：猫咪眯眼侧头；画面文字：无文字；风格/梗：猫 meme"
+        )
+        cache_record = SimpleNamespace(emotion_tags="缓存情绪", description=cached_description)
         manager._save_emoji_file_if_needed = AsyncMock()
         with (
             patch("src.chat.emoji_system.emoji_manager.get_emoji_manager", return_value=fake_emoji_manager),
             patch.object(utils_image.EmojiDescriptionCache, "get_or_none", return_value=cache_record),
         ):
-            self.assertEqual(await manager.get_emoji_description(image_b64), "[表情包：缓存情绪]")
+            self.assertEqual(await manager.get_emoji_description(image_b64), f"[表情包：{cached_description}]")
 
         manager._save_emoji_file_if_needed.assert_awaited_once()
 
-        fake_emotion_llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=("惊喜,开心", None)))
+        semantic_payload = json.dumps(
+            {
+                "emotion": ["惊喜", "开心"],
+                "scene": "当收到意外好消息时，用于表达惊喜和开心",
+                "intent": "积极回应并分享喜悦",
+                "content": "角色睁大眼睛后举手欢呼",
+                "text": "好耶",
+                "style": "夸张庆祝反应图",
+            },
+            ensure_ascii=False,
+        )
+        fake_semantic_llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=(semantic_payload, None)))
         manager = make_image_manager()
         manager.vlm.generate_response_for_image = AsyncMock(return_value=("详细描述", None))
         manager._save_emoji_file_if_needed = AsyncMock()
@@ -231,12 +253,17 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
                 "get_or_create",
                 return_value=(SimpleNamespace(save=Mock()), True),
             ),
-            patch.object(utils_image, "LLMRequest", return_value=fake_emotion_llm),
+            patch.object(utils_image, "LLMRequest", return_value=fake_semantic_llm),
         ):
-            self.assertEqual(await manager.get_emoji_description(image_b64), "[表情包：惊喜，开心]")
+            self.assertEqual(
+                await manager.get_emoji_description(image_b64),
+                "[表情包：情感：惊喜、开心；适用场景：当收到意外好消息时，用于表达惊喜和开心；"
+                "表达意图：积极回应并分享喜悦；画面内容：角色睁大眼睛后举手欢呼；"
+                "画面文字：好耶；风格/梗：夸张庆祝反应图]",
+            )
 
         manager.vlm.generate_response_for_image.assert_awaited_once()
-        fake_emotion_llm.generate_response_async.assert_awaited_once()
+        fake_semantic_llm.generate_response_async.assert_awaited_once()
         manager._save_emoji_file_if_needed.assert_awaited_once()
 
         self.assertEqual(await manager.get_emoji_description("not-base64"), "[表情包(处理失败)]")
@@ -245,8 +272,19 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
         manager = make_image_manager()
         manager.vlm.generate_response_for_images = AsyncMock(return_value=("逐帧与整体描述", None))
         manager._save_emoji_file_if_needed = AsyncMock()
-        fake_emoji_manager = SimpleNamespace(get_emoji_tag_by_hash=AsyncMock(return_value=["旧标签"]))
-        fake_emotion_llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=("开心", None)))
+        fake_emoji_manager = SimpleNamespace(get_emoji_description_by_hash=AsyncMock(return_value="旧描述"))
+        semantic_payload = json.dumps(
+            {
+                "emotion": ["开心"],
+                "scene": "当聊天气氛轻松时，用于表示开心回应",
+                "intent": "积极接住对方的话题",
+                "content": "角色连续点头并露出笑容",
+                "text": "无文字",
+                "style": "循环动态反应图",
+            },
+            ensure_ascii=False,
+        )
+        fake_semantic_llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=(semantic_payload, None)))
         stale_cache = SimpleNamespace(description="旧拼图描述", emotion_tags="旧情绪", save=Mock())
 
         with (
@@ -257,25 +295,74 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
                 "get_or_create",
                 return_value=(stale_cache, False),
             ),
-            patch.object(utils_image, "LLMRequest", return_value=fake_emotion_llm),
+            patch.object(utils_image, "LLMRequest", return_value=fake_semantic_llm),
         ):
-            self.assertEqual(await manager.get_emoji_description(gif_base64()), "[表情包：开心]")
+            self.assertEqual(
+                await manager.get_emoji_description(gif_base64()),
+                "[表情包：情感：开心；适用场景：当聊天气氛轻松时，用于表示开心回应；"
+                "表达意图：积极接住对方的话题；画面内容：角色连续点头并露出笑容；"
+                "画面文字：无文字；风格/梗：循环动态反应图]",
+            )
 
         args = manager.vlm.generate_response_for_images.await_args.args
         self.assertIn("分别概括每一帧", args[0])
         self.assertIn("整体", args[0])
         self.assertEqual([image_format for image_format, _ in args[1]], ["png", "png"])
         self.assertEqual(manager.vlm.generate_response_for_images.await_args.kwargs["max_tokens"], 512)
-        self.assertEqual(utils_image.read_gif_description_cache(stale_cache.description), "逐帧与整体描述")
-        fake_emoji_manager.get_emoji_tag_by_hash.assert_not_awaited()
+        self.assertIn("情感：开心；适用场景：", utils_image.read_gif_description_cache(stale_cache.description))
+        fake_emoji_manager.get_emoji_description_by_hash.assert_not_awaited()
         manager.vlm.generate_response_for_image.assert_not_awaited()
+
+    async def test_get_emoji_description_upgrades_legacy_registered_description_without_vlm(self) -> None:
+        manager = make_image_manager()
+        manager._save_emoji_file_if_needed = AsyncMock()
+        fake_emoji_manager = SimpleNamespace(
+            get_emoji_description_by_hash=AsyncMock(return_value="[表情包：旧注册视觉描述]")
+        )
+        semantic_payload = json.dumps(
+            {
+                "emotion": ["无奈"],
+                "scene": "当事情反复返工时，用于表达疲惫无奈",
+                "intent": "吐槽当前处境",
+                "content": "角色低头趴在桌面上",
+                "text": "又来",
+                "style": "夸张反应图",
+            },
+            ensure_ascii=False,
+        )
+        fake_semantic_llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=(semantic_payload, None)))
+
+        with (
+            patch("src.chat.emoji_system.emoji_manager.get_emoji_manager", return_value=fake_emoji_manager),
+            patch.object(utils_image.EmojiDescriptionCache, "get_or_none", side_effect=[None, None]),
+            patch.object(
+                utils_image.EmojiDescriptionCache,
+                "get_or_create",
+                return_value=(SimpleNamespace(save=Mock()), True),
+            ),
+            patch.object(utils_image, "LLMRequest", return_value=fake_semantic_llm),
+        ):
+            result = await manager.get_emoji_description(png_base64())
+
+        self.assertEqual(
+            result,
+            "[表情包：情感：无奈；适用场景：当事情反复返工时，用于表达疲惫无奈；"
+            "表达意图：吐槽当前处境；画面内容：角色低头趴在桌面上；"
+            "画面文字：又来；风格/梗：夸张反应图]",
+        )
+        manager.vlm.generate_response_for_image.assert_not_awaited()
+        self.assertIn("旧注册视觉描述", fake_semantic_llm.generate_response_async.await_args.args[0])
 
     async def test_get_emoji_description_reuses_versioned_gif_cache_without_exposing_marker(self) -> None:
         manager = make_image_manager()
         manager._save_emoji_file_if_needed = AsyncMock()
-        fake_emoji_manager = SimpleNamespace(get_emoji_tag_by_hash=AsyncMock(return_value=["旧标签"]))
+        fake_emoji_manager = SimpleNamespace(get_emoji_description_by_hash=AsyncMock(return_value="旧描述"))
+        semantic_description = (
+            "情感：无奈；适用场景：当工作反复返工时，用于表达疲惫无奈；"
+            "表达意图：吐槽现状；画面内容：角色缓慢趴到桌上；画面文字：又来；风格/梗：循环反应图"
+        )
         cache_record = SimpleNamespace(
-            description=utils_image.write_gif_description_cache("新版逐帧描述"),
+            description=utils_image.write_gif_description_cache(semantic_description),
             emotion_tags="新版情绪",
         )
 
@@ -285,9 +372,9 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
         ):
             result = await manager.get_emoji_description(gif_base64())
 
-        self.assertEqual(result, "[表情包：新版情绪]")
+        self.assertEqual(result, f"[表情包：{semantic_description}]")
         manager.vlm.generate_response_for_images.assert_not_awaited()
-        fake_emoji_manager.get_emoji_tag_by_hash.assert_not_awaited()
+        fake_emoji_manager.get_emoji_description_by_hash.assert_not_awaited()
 
     async def test_describe_gif_frames_batches_long_sequences_and_builds_overall_summary(self) -> None:
         frames = [("png", f"frame-{index}") for index in range(1, 18)]

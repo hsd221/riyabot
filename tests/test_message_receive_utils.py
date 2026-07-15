@@ -281,6 +281,10 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
 
     def test_load_cached_media_result_reads_image_and_emoji_persistent_caches(self) -> None:
         media_hash = "hash-1"
+        semantic_description = (
+            "情感：开心、惊讶；适用场景：当收到意外好消息时，用于表达惊喜；"
+            "表达意图：积极回应；画面内容：角色举手欢呼；画面文字：好耶；风格/梗：庆祝反应图"
+        )
         Images.create(
             image_id="img-1",
             emoji_hash=media_hash,
@@ -293,14 +297,35 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
             full_path="/tmp/emoji.gif",
             format="gif",
             emoji_hash=media_hash,
-            description="fallback emoji",
+            description=f"[表情包：{semantic_description}]",
             emotion="开心，惊讶",
             record_time=1.0,
         )
 
         self.assertEqual(media_background._load_cached_media_result("image", media_hash), "[图片：cached image]")
-        self.assertEqual(media_background._load_cached_media_result("emoji", media_hash), "[表情包：开心,惊讶]")
+        self.assertEqual(
+            media_background._load_cached_media_result("emoji", media_hash),
+            f"[表情包：{semantic_description}]",
+        )
         self.assertIsNone(media_background._load_cached_media_result("voice", media_hash))
+
+        Emoji.create(
+            full_path="/tmp/legacy-emoji.png",
+            format="png",
+            emoji_hash="legacy-registered",
+            description="旧注册视觉描述",
+            emotion="开心",
+            record_time=1.0,
+        )
+        self.assertIsNone(media_background._load_cached_media_result("emoji", "legacy-registered"))
+
+        EmojiDescriptionCache.create(
+            emoji_hash="legacy-static",
+            description="旧式视觉描述",
+            emotion_tags="开心,惊讶",
+            timestamp=1.0,
+        )
+        self.assertIsNone(media_background._load_cached_media_result("emoji", "legacy-static"))
 
     def test_load_cached_media_result_ignores_stale_gif_cache_and_strips_current_marker(self) -> None:
         gif_data = base64.b64encode(b"GIF89a-test-data").decode("ascii")
@@ -323,13 +348,17 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(media_background._load_cached_media_result("emoji", media_hash, gif_data))
 
         cache_record = EmojiDescriptionCache.get(EmojiDescriptionCache.emoji_hash == media_hash)
-        cache_record.description = utils_image.write_gif_description_cache("新版逐帧描述")
+        semantic_description = (
+            "情感：开心；适用场景：当收到好消息时，用于表达开心；表达意图：积极回应；"
+            "画面内容：角色跳起来欢呼；画面文字：好耶；风格/梗：庆祝反应图"
+        )
+        cache_record.description = utils_image.write_gif_description_cache(semantic_description)
         cache_record.emotion_tags = "新版情绪"
         cache_record.save()
 
         self.assertEqual(
             media_background._load_cached_media_result("emoji", media_hash, gif_data),
-            "[表情包：新版情绪]",
+            f"[表情包：{semantic_description}]",
         )
 
     def test_enhance_media_placeholders_uses_only_completed_task_refs(self) -> None:

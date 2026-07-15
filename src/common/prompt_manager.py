@@ -34,8 +34,6 @@ LEGACY_PROMPT_ALIASES = {
     "brain_planner_prompt_react": "chat.private.planner",
     "default_expressor_prompt": "chat.shared.expressor",
     "emoji_content_filter": "media.emoji.content_filter",
-    "emoji_core_emotion": "media.emoji.core_emotion",
-    "emoji_emotion_analysis": "media.emoji.emotion_analysis",
     "emoji_replace_decision": "media.emoji.replace_decision",
     "emoji_selection": "media.emoji.selection",
     "expression_auto_check": "learning.expression.auto_check",

@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from src.chat.emoji_system.emoji_description import is_semantic_emoji_description
 from src.chat.utils.utils_image import get_image_manager, is_gif_base64_data, read_gif_description_cache
 from src.chat.utils.utils_voice import get_voice_text
 from src.common.database.database_model import Emoji, EmojiDescriptionCache, ImageDescriptions, Images, Messages
@@ -109,22 +110,25 @@ def _load_cached_media_result(kind: str, media_hash: str, media_data: Optional[s
             if media_data and is_gif_base64_data(media_data):
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == media_hash)
                 cached_description = read_gif_description_cache(getattr(cache_record, "description", None))
-                if not cached_description:
+                if not cached_description or not is_semantic_emoji_description(cached_description):
                     return None
-                if cache_record.emotion_tags:
-                    return _format_cached_result("emoji", str(cache_record.emotion_tags).replace("，", ","))
                 return _format_cached_result("emoji", cached_description)
 
             emoji_record = Emoji.get_or_none(Emoji.emoji_hash == media_hash)
-            if emoji_record and emoji_record.emotion:
-                return _format_cached_result("emoji", str(emoji_record.emotion).replace("，", ","))
-            if result := _format_cached_result("emoji", getattr(emoji_record, "description", None)):
-                return result
+            registered_description = getattr(emoji_record, "description", None)
+            if registered_description and is_semantic_emoji_description(registered_description):
+                return _format_cached_result("emoji", registered_description)
 
             cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == media_hash)
+            cached_description = getattr(cache_record, "description", None)
+            if cached_description and is_semantic_emoji_description(cached_description):
+                return _format_cached_result("emoji", cached_description)
+            if cached_description:
+                return None
+            if registered_description:
+                return None
             if cache_record and cache_record.emotion_tags:
                 return _format_cached_result("emoji", str(cache_record.emotion_tags).replace("，", ","))
-            return _format_cached_result("emoji", getattr(cache_record, "description", None))
     except Exception as e:
         logger.debug(f"读取{kind}持久缓存失败，继续后台识别: {e}")
 

@@ -9,6 +9,11 @@ from typing import Optional, Tuple, List
 from PIL import Image
 from rich.traceback import install
 
+from src.chat.emoji_system.emoji_description import (
+    build_semantic_emoji_description,
+    is_semantic_emoji_description,
+    unwrap_emoji_description,
+)
 from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
 from src.common.database.database import db
@@ -332,7 +337,7 @@ class ImageManager:
             logger.warning(f"[自动保存] 保存表情包文件时出错: {save_error}")
 
     async def get_emoji_description(self, image_base64: str) -> str:
-        """获取表情包描述，优先使用EmojiDescriptionCache表中的缓存数据"""
+        """获取表情包多维描述，并将旧的情绪词/视觉描述缓存按需升级。"""
         try:
             # 计算图片哈希
             # 确保base64字符串只包含ASCII字符
@@ -343,21 +348,26 @@ class ImageManager:
             image_format = Image.open(io.BytesIO(image_bytes)).format.lower()  # type: ignore
             is_gif = image_format == "gif"
 
-            # 优先使用EmojiManager查询已注册表情包的描述
+            # 优先使用 EmojiManager 中已注册表情包的多维描述；旧描述作为升级素材复用。
+            registered_visual_description = None
             if not is_gif:
                 try:
                     from src.chat.emoji_system.emoji_manager import get_emoji_manager
 
                     emoji_manager = get_emoji_manager()
-                    tags = await emoji_manager.get_emoji_tag_by_hash(image_hash)
-                    if tags:
-                        tag_str = ",".join(tags)
-                        logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
-                        return f"[表情包：{tag_str}]"
+                    description = await emoji_manager.get_emoji_description_by_hash(image_hash)
+                    if description:
+                        if is_semantic_emoji_description(description):
+                            logger.debug(f"已注册表情包多维描述命中: hash={image_hash[:8]}")
+                            return description if description.startswith("[表情包：") else f"[表情包：{description}]"
+                        registered_visual_description = unwrap_emoji_description(description)
+                        logger.info(f"[缓存升级] 复用已注册表情包的旧描述: hash={image_hash[:8]}")
                 except Exception as e:
                     logger.debug(f"查询EmojiManager时出错: {e}")
 
-            # 查询EmojiDescriptionCache表的缓存（包含描述和情感标签）
+            # 查询 EmojiDescriptionCache。符合新协议的描述直接返回；旧描述作为升级输入复用。
+            cache_record = None
+            detailed_description = registered_visual_description
             try:
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
                 if cache_record:
@@ -366,110 +376,96 @@ class ImageManager:
                     )
                     if is_gif and cached_description is None:
                         logger.debug(f"忽略旧版GIF拼图描述缓存: hash={image_hash[:8]}")
-                        cache_record = None
-
-                    # 优先使用情感标签，如果没有则使用详细描述
-                    result_text = ""
-                    if cache_record and cache_record.emotion_tags:
-                        logger.debug(f"表情包情感标签缓存命中: hash={image_hash[:8]}")
-                        result_text = f"[表情包：{cache_record.emotion_tags}]"
-                    elif cache_record and cached_description:
-                        logger.debug(f"表情包描述缓存命中: hash={image_hash[:8]}")
-                        result_text = f"[表情包：{cached_description}]"
-
-                    # 即使缓存命中，如果启用了steal_emoji，也检查是否需要保存文件
-                    if result_text:
+                    elif cached_description and is_semantic_emoji_description(cached_description):
+                        logger.debug(f"表情包多维描述缓存命中: hash={image_hash[:8]}")
                         await self._save_emoji_file_if_needed(image_base64, image_hash, image_format)
-                        return result_text
+                        return f"[表情包：{cached_description}]"
+                    elif cached_description:
+                        detailed_description = cached_description
+                        logger.info(f"[缓存升级] 复用旧表情视觉描述生成多维描述: hash={image_hash[:8]}")
             except Exception as e:
                 logger.debug(f"查询EmojiDescriptionCache时出错: {e}")
 
-            # === 二步走识别流程 ===
-
-            # 第一步：VLM视觉分析 - 生成详细描述
-            if is_gif:
-                gif_frames = self.extract_gif_frames(image_base64)
-                if not gif_frames:
-                    logger.warning("GIF帧提取失败，无法获取描述")
-                    return "[表情包(GIF处理失败)]"
-                detailed_description = await describe_gif_frames(
-                    self.vlm,
-                    [("png", frame) for frame in gif_frames],
-                    temperature=0.4,
-                )
-            else:
-                vlm_prompt = prompt_manager.format_prompt("media.emoji.vision_description.static_detailed")
-                detailed_description, _ = await self.vlm.generate_response_for_image(
-                    vlm_prompt, image_base64, image_format, temperature=0.4
-                )
+            # 第一步：没有可复用缓存时，再调用 VLM 生成视觉事实描述。
+            if not detailed_description:
+                if is_gif:
+                    gif_frames = self.extract_gif_frames(image_base64)
+                    if not gif_frames:
+                        logger.warning("GIF帧提取失败，无法获取描述")
+                        return "[表情包(GIF处理失败)]"
+                    detailed_description = await describe_gif_frames(
+                        self.vlm,
+                        [("png", frame) for frame in gif_frames],
+                        temperature=0.4,
+                    )
+                else:
+                    vlm_prompt = prompt_manager.format_prompt("media.emoji.vision_description.static_detailed")
+                    detailed_description, _ = await self.vlm.generate_response_for_image(
+                        vlm_prompt, image_base64, image_format, temperature=0.4
+                    )
 
             if detailed_description is None:
                 logger.warning("VLM未能生成表情包详细描述")
                 return "[表情包(VLM描述生成失败)]"
 
-            # 第二步：LLM情感分析 - 基于详细描述生成简短的情感标签
-            emotion_prompt = prompt_manager.format_prompt("media.emoji.core_emotion", description=detailed_description)
-
-            # 使用较低温度确保输出稳定
-            emotion_llm = LLMRequest(model_set=model_config.model_task_config.utils, request_type="emoji")
-            emotion_result, _ = await emotion_llm.generate_response_async(emotion_prompt, temperature=0.3)
-
-            if not emotion_result:
-                logger.warning("LLM未能生成情感标签，使用详细描述的前几个词")
-                # 降级处理：从详细描述中提取关键词
-                import jieba
-
-                words = list(jieba.cut(detailed_description))
-                emotion_result = "，".join(words[:2]) if len(words) >= 2 else (words[0] if words else "表情")
-
-            # 处理情感结果，取前1-2个最重要的标签
-            emotions = [e.strip() for e in emotion_result.replace("，", ",").split(",") if e.strip()]
-            final_emotion = emotions[0] if emotions else "表情"
-
-            # 如果有第二个情感且不重复，也包含进来
-            if len(emotions) > 1 and emotions[1] != emotions[0]:
-                final_emotion = f"{emotions[0]}，{emotions[1]}"
-
-            logger.debug(f"[emoji识别] 详细描述: {detailed_description[:50]}... -> 情感标签: {final_emotion}")
+            # 第二步：生成固定字段的多维语义描述，并独立提取选图情感标签。
+            semantic_llm = LLMRequest(model_set=model_config.model_task_config.utils, request_type="emoji")
+            semantic_description, emotions = await build_semantic_emoji_description(
+                semantic_llm,
+                detailed_description,
+            )
+            emotion_tags = ",".join(emotions)
+            logger.debug(f"[emoji识别] 多维描述: {semantic_description[:80]}... -> 情感标签: {emotion_tags}")
 
             # 再次检查缓存（防止并发情况下其他线程已经保存）
             try:
-                cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
-                cache_is_current = not is_gif or read_gif_description_cache(getattr(cache_record, "description", None))
-                if cache_record and cache_is_current and cache_record.emotion_tags:
-                    logger.warning(f"虽然生成了描述，但是找到缓存表情包情感标签: {cache_record.emotion_tags}")
-                    return f"[表情包：{cache_record.emotion_tags}]"
+                latest_cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == image_hash)
+                latest_description = (
+                    read_gif_description_cache(getattr(latest_cache_record, "description", None))
+                    if is_gif
+                    else getattr(latest_cache_record, "description", None)
+                )
+                if latest_description and is_semantic_emoji_description(latest_description):
+                    logger.warning(f"生成期间命中并发写入的表情包多维描述: {image_hash[:8]}")
+                    await self._save_emoji_file_if_needed(image_base64, image_hash, image_format)
+                    return f"[表情包：{latest_description}]"
+                cache_record = latest_cache_record or cache_record
             except Exception as e:
                 logger.debug(f"再次查询EmojiDescriptionCache时出错: {e}")
 
-            # 保存识别出的详细描述和情感标签到 emoji_description_cache
+            # 保存多维描述和独立情感标签到 emoji_description_cache。
             try:
                 current_timestamp = time.time()
                 cached_description = (
-                    write_gif_description_cache(detailed_description) if is_gif else detailed_description
+                    write_gif_description_cache(semantic_description) if is_gif else semantic_description
                 )
-                cache_record, created = EmojiDescriptionCache.get_or_create(
-                    emoji_hash=image_hash,
-                    defaults={
-                        "description": cached_description,
-                        "emotion_tags": final_emotion,
-                        "timestamp": current_timestamp,
-                    },
-                )
-                if not created:
-                    # 更新已有记录
+                if cache_record:
                     cache_record.description = cached_description
-                    cache_record.emotion_tags = final_emotion
+                    cache_record.emotion_tags = emotion_tags
                     cache_record.timestamp = current_timestamp
                     cache_record.save()
-                logger.info(f"[缓存保存] 表情包描述和情感标签已保存到EmojiDescriptionCache: {image_hash[:8]}...")
+                else:
+                    cache_record, created = EmojiDescriptionCache.get_or_create(
+                        emoji_hash=image_hash,
+                        defaults={
+                            "description": cached_description,
+                            "emotion_tags": emotion_tags,
+                            "timestamp": current_timestamp,
+                        },
+                    )
+                    if not created:
+                        cache_record.description = cached_description
+                        cache_record.emotion_tags = emotion_tags
+                        cache_record.timestamp = current_timestamp
+                        cache_record.save()
+                logger.info(f"[缓存保存] 表情包多维描述已保存到EmojiDescriptionCache: {image_hash[:8]}...")
             except Exception as e:
-                logger.error(f"保存表情包描述和情感标签缓存失败: {str(e)}")
+                logger.error(f"保存表情包多维描述缓存失败: {str(e)}")
 
             # 如果启用了steal_emoji，自动保存表情包文件到data/emoji目录
             await self._save_emoji_file_if_needed(image_base64, image_hash, image_format)
 
-            return f"[表情包：{final_emotion}]"
+            return f"[表情包：{semantic_description}]"
 
         except Exception as e:
             logger.error(f"获取表情包描述失败: {str(e)}")
