@@ -1,24 +1,25 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-MaiBot is a Python 3.10+ backend with a React 19/Vite dashboard. `bot.py` starts the runner/worker process; `src/main.py` initializes the system. Backend code lives in `src/`: `chat/` handles group/private chat behavior, `plugin_system/` contains the plugin SDK, `common/` holds infrastructure utilities, `config/` defines TOML schemas, and `webui/` exposes the FastAPI dashboard backend. Frontend code is in `webui/src/`; prompts are grouped by domain under `prompts/`, where paths map to dotted prompt IDs; external plugins live under `plugins/` and require `_manifest.json`. Runtime `config/`, `data/`, and `logs/` are gitignored; copy from `template/` for local setup. Read nested `AGENTS.md` files before editing covered subtrees.
+RiyaBot combines a Python 3.10+ backend with a React 19/TypeScript dashboard. `bot.py` manages the runner/worker lifecycle; `src/main.py` initializes `MainSystem`. Backend code is under `src/`: `chat/`, `memory/`, `bw_learner/`, `llm_models/`, `plugin_system/`, and shared `common/`, `config/`, `services/`, and `webui/`. Dashboard code is in `webui/src/`, unit tests in `tests/test_*.py`, prompts in `prompts/`, and external plugins in `plugins/` with `_manifest.json`. Runtime `config/`, `data/`, and `logs/` are not source. Read the nearest nested `AGENTS.md` before editing.
 
 ## Build, Test, and Development Commands
-- `uv sync`: install Python dependencies from `pyproject.toml` and `uv.lock`.
-- `python bot.py`: run MaiBot locally; startup may require EULA/privacy confirmation and local TOML config.
-- `ruff check --fix . && ruff format .`: lint and format Python.
-- `cd webui && bun install && bun run dev`: install and run the dashboard.
-- `cd webui && bun run build`: type-check and build frontend assets into `webui/dist/`; run this before Docker builds.
-- `docker compose up -d`: start the bundled services after config and frontend assets are prepared.
+- `uv sync`: install the locked Python dependencies.
+- `python bot.py`: start the local runner and worker after preparing configuration.
+- `ruff check . && ruff format --check .`: validate Python; use `--fix` and `ruff format .` to repair issues.
+- `uv run python -m unittest discover -s tests -p 'test_*.py'`: run the unit test suite.
+- `cd webui && bun install && bun run dev`: install dependencies and start Vite on port 7999.
+- `cd webui && bun run lint && bun run build`: lint, type-check, and build the dashboard.
+- `docker compose up -d`: start configured services; build the WebUI first.
 
 ## Coding Style & Naming Conventions
-Python formatting is controlled by Ruff: spaces, double quotes, line length 120, rules `E`, `F`, and `B`; `E501` and `E711` are ignored. Match nearby docstrings and comments, often Chinese in backend modules. Prefer existing helpers, logger prefixes such as `planner`, `replyer`, and `pfc`, and explicit singletons using `_instance`. Prompt files support `###SECTION: name` blocks; load them through the prompt loader/manager.
+Python uses four-space indentation, double quotes, and a 120-character limit; Ruff enforces `E`, `F`, and `B`. Use `snake_case` for modules/functions and `PascalCase` for classes. Keep React code typed and functional, using the repository Prettier configuration. Preserve dotted prompt IDs and existing `###SECTION: name` variants.
 
 ## Testing Guidelines
-There is no pytest coverage gate. Verification is script-driven: use `MAIBOT_WORKER_PROCESS=1 uv run python tests/simulator.py --file tests/data/chat_exports/chat_histories_1.json` for message-flow checks, or `uv run python tests/run_e2e.py --quick` for short E2E. Do not commit generated `tests/artifacts/` output unless updating fixtures.
+Tests use standard-library `unittest`, including `IsolatedAsyncioTestCase`; name files `test_<area>.py`. Run focused tests with `uv run python -m unittest tests.test_plugin_manager`. Use `tests/simulator.py` or `tests/run_e2e.py --quick` for configured message-flow checks. Do not commit `tests/artifacts/` output.
 
 ## Commit & Pull Request Guidelines
-Recent history uses Conventional Commit-style prefixes such as `fix:`, `feat:`, `refactor:`, `chore:`, and `baseline:`. PRs should describe behavior changes, list validation, link issues, and include screenshots for dashboard UI changes. Per `docs-src/CONTRIBUTE.md`, feature PRs are generally not accepted directly; propose features through an issue first.
+Use Conventional Commit prefixes (`feat:`, `fix:`, `refactor:`, `chore:`). Keep PRs focused; explain behavior and motivation, affected configuration/API/data boundaries, validation commands, and linked issues. Include screenshots or recordings for WebUI changes. Discuss substantial features in an issue first.
 
 ## Configuration and Safety Notes
-Do not commit secrets, local databases, generated logs, or runtime TOML files. Avoid importing deprecated modules such as `src/chat/knowledge/mem_active_manager.py`. WebUI API routes must be registered before static files, and provider `401/403` errors should be translated so they are not mistaken for WebUI auth failures.
+Create local `.env` and TOML configuration from `template/`. Never commit credentials, tokens, private databases, runtime configuration, or logs. Treat plugin input, model output, uploads, and remote responses as untrusted. Document migrations for configuration schemas, plugin APIs, databases, Docker paths, or authentication.

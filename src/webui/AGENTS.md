@@ -1,51 +1,30 @@
-# src/webui/ — WebUI Backend (FastAPI)
+# src/webui - FastAPI WebUI Backend
 
-28 Python files. Serves React frontend + REST API + WebSocket. Separate from `webui/` (frontend source).
+## Scope and Routing
+This package serves the dashboard API, authenticated WebSockets, and the built frontend from `webui/dist/`. `webui_server.py` configures exception handling, request limits, same-site protection, anti-crawler behavior, CORS, security headers, routes, and the SPA fallback. The default address is `127.0.0.1:8001`, configurable through `WEBUI_HOST` and `WEBUI_PORT`.
 
-## STRUCTURE
+`routes.py` owns the primary `/api/webui` router and includes configuration, statistics, people, expressions, jargon, behavior, emoji, memory, plugins, models, setup, and system routes. `webui_server.py` also registers separate routers for `/api/chat`, `/api/planner`, `/api/replier`, `/api/webui/knowledge`, and `/ws/logs`. Register API and WebSocket routes before `_setup_static_files()` because the SPA route is a catch-all.
+
+## Where to Work
+- `auth.py`, `token_manager.py`, `ws_auth.py`: password login, HttpOnly sessions, same-site checks, and one-use WebSocket tokens.
+- `config_routes.py`, `config_schema.py`: schema-driven bot/model/adapter configuration.
+- `model_routes.py`: provider discovery and connection testing with outbound URL controls.
+- `plugin_routes.py`, `git_mirror_service.py`, `path_utils.py`: plugin marketplace, repositories, and confined filesystem paths.
+- `chat_routes.py`, `logs_ws.py`, `plugin_progress_ws.py`: local chat and authenticated streaming.
+- `memory_routes.py`, `behavior_routes.py`, `expression_routes.py`, `jargon_routes.py`: current learned-state APIs.
+- `error_utils.py`, `request_limits.py`, `rate_limiter.py`: shared defensive boundaries.
+
+## Authentication and Security
+Password authentication issues an HttpOnly `maibot_session`; do not store passwords or session tokens in frontend JavaScript storage. Reuse `get_current_token()` or `verify_auth_token_from_cookie_or_header()` for protected HTTP routes. WebSockets should accept a short-lived token from `/api/webui/ws-token` and verify origin; keep cookie fallback only through existing helpers.
+
+All state-changing HTTP requests pass global same-site protection. Preserve request-size, connection-count, path-confinement, SSRF, and response-size limits. Sanitize server failures with `error_utils.py`; never return exception text, filesystem paths, tokens, or upstream response bodies. Provider `401/403` responses must remain translated to `502`, since frontend `401` means the WebUI session expired.
+
+## Deprecated or Placeholder Paths
+`knowledge_routes.py` is a disabled LPMM compatibility surface that returns empty data; new memory features belong in `memory_routes.py`. Legacy `/auth/verify`, `/auth/update`, and `/auth/regenerate` routes are deprecated. `/api/webui/system/reload-config` is a placeholder, not a supported reload mechanism. Do not build new clients on these paths.
+
+## Verification
+
+```bash
+uv run python -m unittest tests.test_webui_route_security tests.test_webui_password_auth
+uv run python -m unittest tests.test_webui_backend_utils tests.test_webui_server
 ```
-webui/
-├── webui_server.py      # Server bootstrap + static file serving (port 0.0.0.0:8001)
-├── routes.py            # Unified route registration hub
-├── auth.py              # Cookie-based session auth
-├── ws_auth.py           # WebSocket auth
-├── token_manager.py     # Session tokens
-├── rate_limiter.py      # Rate limiting
-├── anti_crawler.py      # Bot detection middleware
-├── api/                 # API handlers: replier.py, planner.py
-├── routers/             # Route modules: system.py
-├── chat_routes.py       # Chat endpoints
-├── config_routes.py     # Bot/model config CRUD
-├── model_routes.py      # Model provider management
-├── knowledge_routes.py  # [已移除] LPMM knowledge endpoints — 返回空占位
-├── emoji_routes.py      # Emoji management (1311 lines)
-├── plugin_routes.py     # Plugin management (2060 lines)
-├── annual_report_routes.py  # Statistics report (938 lines)
-└── utils/               # Shared utilities
-```
-
-## WHERE TO LOOK
-| Task | Location |
-|------|----------|
-| Add API route | `routes.py` (register here) + relevant `*_routes.py` |
-| Auth flow | `auth.py` + `token_manager.py` + `ws_auth.py` |
-| Config API (bot/model) | `config_routes.py` — schema-driven CRUD |
-| Model provider proxy | `model_routes.py` — LLM API passthrough |
-| Emoji upload/management | `emoji_routes.py` |
-| Plugin CRUD | `plugin_routes.py` (largest file) |
-| Statistics/report | `annual_report_routes.py` + `chat/utils/statistic.py` |
-
-## CONVENTIONS
-- **API prefix**: all routes under `/api/webui/`.
-- **Auth**: HttpOnly Cookie sessions. Frontend sends `credentials: 'include'`.
-- **WebSocket**: `/ws/logs` for log streaming, `/ws/chat` for chat relay.
-- **Static files**: served from `webui/dist/` (built by `cd webui && bun run build`).
-
-## ANTI-PATTERNS
-- **Route ordering**: MUST call `_register_api_routes()` BEFORE `_setup_static_files()` in `webui_server.py:33`. Static catch-all breaks API routes if registered first.
-- **401→502 translation**: `model_routes.py:137` — provider 401/403 must return 502. Frontend `fetchWithAuth` treats 401 as WebUI auth failure (logs user out).
-- **Anti-crawler false positives**: `anti_crawler.py:43` — `bot`, `curl`, `python-requests`, `httpx`, `aiohttp` keywords removed to avoid blocking legit clients.
-
-## NOTES
-- Independent from internal API server (`src/common/server.py`, 127.0.0.1:8080). Two FastAPI servers run concurrently.
-- CORS enabled for dev (Vite dev server at :7999).

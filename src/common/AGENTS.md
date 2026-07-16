@@ -1,49 +1,34 @@
-# src/common/ — Infrastructure
+# src/common - Shared Infrastructure
 
-Shared foundation: networking, database, logging, data models. Used by all other `src/` subsystems.
+## Scope
+`src/common/` contains infrastructure shared across chat, memory, plugins, model clients, and the WebUI. Keep domain-specific planning, memory, and UI behavior in their owning packages rather than adding it here.
 
-## STRUCTURE
+## Directory Map
+- `logger.py`: structlog configuration, redaction, `get_logger()`, startup, and shutdown.
+- `database/`: the shared Peewee SQLite connection and persistent ORM models.
+- `data_models/`: dataclass-based transport and domain models built on `BaseDataModel`.
+- `message/api.py`: `maim_message` server integration and message handler registration.
+- `message_repository.py`: conversion and queries around persisted messages.
+- `prompt_loader.py`: prompt file I/O, metadata parsing, section parsing, and cache revision tracking.
+- `prompt_manager.py`: canonical prompt registry, formatting, aliases, scoped overrides, and hot reload.
+- `server.py` and `tcp_connector.py`: internal adapter/API transport, separate from the WebUI server.
+- `agreement.py`, `remote.py`, `toml_utils.py`, and `knowledge_utils/`: shared policy and utility code.
+
+## Data and Prompt Boundaries
+The current files are `message_data_model.py`, `message_component_model.py`, `info_data_model.py`, `llm_data_model.py`, and `database_data_model.py`; do not import old shorthand modules such as `data_models.message` or `data_models.llm`. These models are dataclasses, not Pydantic schemas. Peewee table definitions belong in `database/database_model.py`; conversion objects belong in `data_models/database_data_model.py`.
+
+Business code should obtain prompt text through the singleton `prompt_manager`. Keep filesystem parsing and cache behavior in `prompt_loader.py`. Prompt IDs derive from paths under `prompts/`; metadata and `###SECTION` declarations must satisfy `prompts/README.md` and the prompt contract tests.
+
+## Service and Safety Rules
+- Acquire loggers with `get_logger(name)` and use structured context for new security-sensitive events. Never log credentials, raw tokens, or private upstream bodies.
+- The internal `Server` uses `HOST` and `PORT`; it is not `src/webui/webui_server.py`. The message-injection endpoint must remain opt-in and authenticated when exposed beyond loopback.
+- Runtime data belongs under `data/`. Schema changes require an explicit compatibility or migration plan because there is no general migration framework.
+- Preserve existing path, URL, and TOML validation helpers instead of adding ad hoc string checks.
+
+## Verification
+Use focused standard-library tests:
+
+```bash
+uv run python -m unittest tests.test_common_data_models tests.test_common_database_models
+uv run python -m unittest tests.test_common_logger tests.test_common_server tests.test_unified_prompt_manager
 ```
-common/
-├── server.py              # FastAPI internal API server (uvicorn, 127.0.0.1:8080)
-├── tcp_connector.py       # TCP connector for adapter communication
-├── remote.py              # Telemetry heartbeat task
-├── message_repository.py  # Message storage abstraction
-├── logger.py              # structlog setup (994 lines), get_logger(), initialize_logging()
-├── toml_utils.py          # TOML read/write helpers
-├── prompt_loader.py       # Layer 1: 文件 I/O、PROMPT_META 契约、严格 ###SECTION 解析 + LRU 缓存
-├── prompt_manager.py      # Layer 2: 单例管理器、命名空间、元数据查询、上下文覆盖与热重载
-├── message/
-│   └── api.py             # MessageServer (maim_message wrapper) — QQ msg broker
-├── database/
-│   ├── database.py        # peewee SQLite connection manager
-│   └── database_model.py  # ORM models: Messages, ActionRecords, LLMUsage, OnlineTime...
-├── data_models/           # Pydantic v2 models (7 files)
-│   ├── message.py         # MessageRecv, MessageSending, ChatMessageContext
-│   ├── llm.py             # LLM request/response types
-│   ├── database.py        # DB row models
-│   └── info.py            # UserInfo, GroupInfo, ChatStreamInfo
-└── server/                # Server utilities
-```
-
-## WHERE TO LOOK
-| Task | Location |
-|------|----------|
-| Add DB table | `database/database_model.py` — add peewee Model class |
-| Add Pydantic model | `data_models/` — match domain (message/llm/info/database) |
-| Logging config | `logger.py` — `initialize_logging()`, `get_logger(name)`, `shutdown_logging()` |
-| Internal API server | `server.py` — add routes here (NOT WebUI routes) |
-| Message broker | `message/api.py` — MessageServer, message handler registration |
-| Telemetry | `remote.py` — TelemetryHeartBeatTask |
-| Prompt file I/O | `prompt_loader.py` — `load_prompt_document()`, `load_prompt_template()`, `parse_prompt_document()`, `parse_prompt_sections()` |
-| Prompt manager | `prompt_manager.py` — `load_prompts()`, `get_prompt()`, `get_prompt_metadata()`, `format_prompt()`, `async_message_scope()` |
-
-## CONVENTIONS
-- **Logger**: structlog-based. Get via `from src.common.logger import get_logger; logger = get_logger("prefix")`.
-- **DB**: peewee ORM + SQLite. No migrations framework — models define schema directly.
-- **Data models**: Pydantic v2 for validation. DB models (peewee) separate from API models (Pydantic).
-- **Two servers**: `server.py` (internal API, 8080) is distinct from `src/webui/webui_server.py` (WebUI, 8001). Don't confuse them.
-
-## ANTI-PATTERNS
-- **Internal vs WebUI server**: `server.py` is for plugin/internal RPC. WebUI routes go in `src/webui/`. Adding WebUI routes to `server.py` breaks separation.
-- **No migrations**: schema changes require manual DB recreation or migration scripts. `data/` is gitignored.
