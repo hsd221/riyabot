@@ -319,8 +319,9 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         template = (Path(__file__).resolve().parents[1] / "template" / "bot_config_template.toml").read_text(
             encoding="utf-8"
         )
-        self.assertIn('version = "7.5.5"', template)
+        self.assertIn('version = "7.5.6"', template)
         self.assertNotIn("private_tool_pipeline", template)
+        self.assertNotIn("visual_style", template)
 
     async def test_native_turn_binds_reply_handler_and_loop_start_time(self) -> None:
         chat = make_chat()

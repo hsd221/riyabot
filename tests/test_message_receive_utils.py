@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import asyncio
+import io
 import json
 import sys
 import unittest
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from maim_message import BaseMessageInfo, GroupInfo, MessageBase, Seg, UserInfo
 from peewee import SqliteDatabase
+from PIL import Image
 
 from src.chat.message_receive import media_background
 from src.chat.message_receive.chat_stream import ChatStream
@@ -32,6 +34,14 @@ from src.common.data_models.message_component_model import (
 from src.common.database.database_model import Emoji, EmojiDescriptionCache, ImageDescriptions, Images, Messages
 from src.plugin_system.base.base_command import BaseCommand
 from src.plugin_system.base.component_types import EventType, MaiMessages
+
+
+def animated_png_base64() -> str:
+    first = Image.new("RGBA", (4, 3), color=(220, 30, 40, 255))
+    second = Image.new("RGBA", (4, 3), color=(30, 220, 40, 255))
+    buffer = io.BytesIO()
+    first.save(buffer, format="PNG", save_all=True, append_images=[second], duration=100, loop=0)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def make_stream(*, platform: str = "qq", group_id: str | None = "group-1") -> ChatStream:
@@ -302,7 +312,16 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
             record_time=1.0,
         )
 
-        self.assertEqual(media_background._load_cached_media_result("image", media_hash), "[图片：cached image]")
+        self.assertIsNone(media_background._load_cached_media_result("image", media_hash))
+        self.assertIsNone(media_background._load_cached_media_result("emoji", media_hash))
+
+        ImageDescriptions.create(
+            type=utils_image.VISION_DESCRIPTION_CACHE_TYPE,
+            image_description_hash=media_hash,
+            description="unified vision",
+            timestamp=1.0,
+        )
+        self.assertEqual(media_background._load_cached_media_result("image", media_hash), "[图片：unified vision]")
         self.assertEqual(
             media_background._load_cached_media_result("emoji", media_hash),
             f"[表情包：{semantic_description}]",
@@ -327,12 +346,12 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(media_background._load_cached_media_result("emoji", "legacy-static"))
 
-    def test_load_cached_media_result_ignores_stale_gif_cache_and_strips_current_marker(self) -> None:
-        gif_data = base64.b64encode(b"GIF89a-test-data").decode("ascii")
-        media_hash = media_background._hash_media_data(gif_data)
+    def test_load_cached_media_result_ignores_stale_animated_cache_and_strips_current_marker(self) -> None:
+        animated_data = animated_png_base64()
+        media_hash = media_background._hash_media_data(animated_data)
         Emoji.create(
-            full_path="/tmp/stale.gif",
-            format="gif",
+            full_path="/tmp/stale.png",
+            format="png",
             emoji_hash=media_hash,
             description="旧拼图描述",
             emotion="旧情绪",
@@ -345,7 +364,7 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
             timestamp=1.0,
         )
 
-        self.assertIsNone(media_background._load_cached_media_result("emoji", media_hash, gif_data))
+        self.assertIsNone(media_background._load_cached_media_result("emoji", media_hash, animated_data))
 
         cache_record = EmojiDescriptionCache.get(EmojiDescriptionCache.emoji_hash == media_hash)
         semantic_description = (
@@ -355,9 +374,15 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         cache_record.description = utils_image.write_gif_description_cache(semantic_description)
         cache_record.emotion_tags = "新版情绪"
         cache_record.save()
+        ImageDescriptions.create(
+            type=utils_image.VISION_DESCRIPTION_CACHE_TYPE,
+            image_description_hash=media_hash,
+            description="unified animated vision",
+            timestamp=1.0,
+        )
 
         self.assertEqual(
-            media_background._load_cached_media_result("emoji", media_hash, gif_data),
+            media_background._load_cached_media_result("emoji", media_hash, animated_data),
             f"[表情包：{semantic_description}]",
         )
 

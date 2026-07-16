@@ -62,7 +62,23 @@ def make_image_manager() -> utils_image.ImageManager:
         generate_response_for_image=AsyncMock(),
         generate_response_for_images=AsyncMock(),
     )
+    manager._vision_tasks = {}
     return manager
+
+
+def make_observation(
+    image_b64: str,
+    description: str,
+    *,
+    image_format: str = "png",
+    is_animated: bool = False,
+) -> utils_image.VisualObservation:
+    return utils_image.VisualObservation(
+        description=description,
+        image_hash=hashlib.md5(base64.b64decode(image_b64)).hexdigest(),
+        image_format=image_format,
+        is_animated=is_animated,
+    )
 
 
 class VoiceUtilsTest(unittest.IsolatedAsyncioTestCase):
@@ -204,6 +220,7 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
     async def test_get_emoji_description_uses_manager_cache_table_or_vlm_flow(self) -> None:
         manager = make_image_manager()
         image_b64 = png_base64()
+        manager.recognize_image = AsyncMock(return_value=make_observation(image_b64, "统一视觉描述"))
         registered_description = (
             "情感：开心、好笑；适用场景：当朋友讲笑话时，用于表示被逗乐；"
             "表达意图：积极回应；画面内容：小狗拍桌大笑；画面文字：哈哈哈；风格/梗：夸张反应图"
@@ -243,7 +260,7 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
         )
         fake_semantic_llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=(semantic_payload, None)))
         manager = make_image_manager()
-        manager.vlm.generate_response_for_image = AsyncMock(return_value=("详细描述", None))
+        manager.recognize_image = AsyncMock(return_value=make_observation(image_b64, "详细视觉描述"))
         manager._save_emoji_file_if_needed = AsyncMock()
         with (
             patch("src.chat.emoji_system.emoji_manager.get_emoji_manager", return_value=fake_emoji_manager),
@@ -262,15 +279,25 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
                 "画面文字：好耶；风格/梗：夸张庆祝反应图]",
             )
 
-        manager.vlm.generate_response_for_image.assert_awaited_once()
+        manager.recognize_image.assert_awaited_once_with(image_b64)
+        manager.vlm.generate_response_for_image.assert_not_awaited()
         fake_semantic_llm.generate_response_async.assert_awaited_once()
         manager._save_emoji_file_if_needed.assert_awaited_once()
 
+        manager.recognize_image = AsyncMock(side_effect=ValueError("invalid image"))
         self.assertEqual(await manager.get_emoji_description("not-base64"), "[表情包(处理失败)]")
 
-    async def test_get_emoji_description_sends_gif_frames_as_ordered_png_images(self) -> None:
+    async def test_get_emoji_description_uses_unified_animated_observation_before_semantic_processing(self) -> None:
         manager = make_image_manager()
-        manager.vlm.generate_response_for_images = AsyncMock(return_value=("逐帧与整体描述", None))
+        image_b64 = gif_base64()
+        manager.recognize_image = AsyncMock(
+            return_value=make_observation(
+                image_b64,
+                "角色先低头，随后连续点头并露出笑容。",
+                image_format="gif",
+                is_animated=True,
+            )
+        )
         manager._save_emoji_file_if_needed = AsyncMock()
         fake_emoji_manager = SimpleNamespace(get_emoji_description_by_hash=AsyncMock(return_value="旧描述"))
         semantic_payload = json.dumps(
@@ -298,23 +325,23 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
             patch.object(utils_image, "LLMRequest", return_value=fake_semantic_llm),
         ):
             self.assertEqual(
-                await manager.get_emoji_description(gif_base64()),
+                await manager.get_emoji_description(image_b64),
                 "[表情包：情感：开心；适用场景：当聊天气氛轻松时，用于表示开心回应；"
                 "表达意图：积极接住对方的话题；画面内容：角色连续点头并露出笑容；"
                 "画面文字：无文字；风格/梗：循环动态反应图]",
             )
 
-        args = manager.vlm.generate_response_for_images.await_args.args
-        self.assertIn("分别概括每一帧", args[0])
-        self.assertIn("整体", args[0])
-        self.assertEqual([image_format for image_format, _ in args[1]], ["png", "png"])
-        self.assertEqual(manager.vlm.generate_response_for_images.await_args.kwargs["max_tokens"], 512)
+        manager.recognize_image.assert_awaited_once_with(image_b64)
+        manager.vlm.generate_response_for_images.assert_not_awaited()
         self.assertIn("情感：开心；适用场景：", utils_image.read_gif_description_cache(stale_cache.description))
         fake_emoji_manager.get_emoji_description_by_hash.assert_not_awaited()
         manager.vlm.generate_response_for_image.assert_not_awaited()
 
-    async def test_get_emoji_description_upgrades_legacy_registered_description_without_vlm(self) -> None:
+    async def test_get_emoji_description_ignores_legacy_registered_visual_description(self) -> None:
         manager = make_image_manager()
+        image_b64 = png_base64()
+        observation = make_observation(image_b64, "角色低头趴在桌面上，旁边写着‘又来’。")
+        manager.recognize_image = AsyncMock(return_value=observation)
         manager._save_emoji_file_if_needed = AsyncMock()
         fake_emoji_manager = SimpleNamespace(
             get_emoji_description_by_hash=AsyncMock(return_value="[表情包：旧注册视觉描述]")
@@ -342,7 +369,7 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(utils_image, "LLMRequest", return_value=fake_semantic_llm),
         ):
-            result = await manager.get_emoji_description(png_base64())
+            result = await manager.get_emoji_description(image_b64)
 
         self.assertEqual(
             result,
@@ -350,11 +377,23 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
             "表达意图：吐槽当前处境；画面内容：角色低头趴在桌面上；"
             "画面文字：又来；风格/梗：夸张反应图]",
         )
+        manager.recognize_image.assert_awaited_once_with(image_b64)
         manager.vlm.generate_response_for_image.assert_not_awaited()
-        self.assertIn("旧注册视觉描述", fake_semantic_llm.generate_response_async.await_args.args[0])
+        semantic_prompt = fake_semantic_llm.generate_response_async.await_args.args[0]
+        self.assertIn(observation.description, semantic_prompt)
+        self.assertNotIn("旧注册视觉描述", semantic_prompt)
 
     async def test_get_emoji_description_reuses_versioned_gif_cache_without_exposing_marker(self) -> None:
         manager = make_image_manager()
+        image_b64 = gif_base64()
+        manager.recognize_image = AsyncMock(
+            return_value=make_observation(
+                image_b64,
+                "角色缓慢趴到桌上。",
+                image_format="gif",
+                is_animated=True,
+            )
+        )
         manager._save_emoji_file_if_needed = AsyncMock()
         fake_emoji_manager = SimpleNamespace(get_emoji_description_by_hash=AsyncMock(return_value="旧描述"))
         semantic_description = (
@@ -370,17 +409,18 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
             patch("src.chat.emoji_system.emoji_manager.get_emoji_manager", return_value=fake_emoji_manager),
             patch.object(utils_image.EmojiDescriptionCache, "get_or_none", return_value=cache_record),
         ):
-            result = await manager.get_emoji_description(gif_base64())
+            result = await manager.get_emoji_description(image_b64)
 
         self.assertEqual(result, f"[表情包：{semantic_description}]")
+        manager.recognize_image.assert_awaited_once_with(image_b64)
         manager.vlm.generate_response_for_images.assert_not_awaited()
         fake_emoji_manager.get_emoji_description_by_hash.assert_not_awaited()
 
-    async def test_describe_gif_frames_batches_long_sequences_and_builds_overall_summary(self) -> None:
+    async def test_describe_gif_frames_reuses_the_animated_prompt_without_an_overall_summary_call(self) -> None:
         frames = [("png", f"frame-{index}") for index in range(1, 18)]
         vlm = SimpleNamespace(
-            generate_response_for_images=AsyncMock(side_effect=[("第1至16帧概括", None), ("第17帧概括", None)]),
-            generate_response_async=AsyncMock(return_value=("完整动作概括", None)),
+            generate_response_for_images=AsyncMock(side_effect=[("第1至16帧描述", None), ("第17帧描述", None)]),
+            generate_response_async=AsyncMock(),
         )
 
         description = await utils_image.describe_gif_frames(vlm, frames, temperature=0.4)
@@ -388,15 +428,10 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
         image_calls = vlm.generate_response_for_images.await_args_list
         self.assertEqual([len(call.args[1]) for call in image_calls], [16, 1])
         self.assertEqual([call.kwargs["start_index"] for call in image_calls], [1, 17])
-        self.assertEqual([call.kwargs["max_tokens"] for call in image_calls], [1152, 512])
-        self.assertIn("第1至16帧概括", image_calls[1].args[0])
-        overall_prompt = vlm.generate_response_async.await_args.args[0]
-        self.assertIn("第1至16帧概括", overall_prompt)
-        self.assertIn("第17帧概括", overall_prompt)
-        self.assertEqual(
-            description,
-            "逐帧概括：\n第1至16帧概括\n\n第17帧概括\n\n整体概括：\n完整动作概括",
-        )
+        self.assertEqual([call.kwargs["max_tokens"] for call in image_calls], [2304, 1024])
+        self.assertIn("第1至16帧描述", image_calls[1].args[0])
+        vlm.generate_response_async.assert_not_awaited()
+        self.assertEqual(description, "第1至16帧描述\n第17帧描述")
 
     async def test_audit_gif_frames_requires_every_batch_to_explicitly_pass(self) -> None:
         frames = [("png", f"frame-{index}") for index in range(17)]
@@ -422,44 +457,38 @@ class ImageManagerEmojiTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ImageManagerDescriptionAndProcessTest(unittest.IsolatedAsyncioTestCase):
-    async def test_get_image_description_uses_existing_cache_or_generates_and_persists_new_description(self) -> None:
+    async def test_get_image_description_uses_unified_observation_for_existing_and_new_records(self) -> None:
         manager = make_image_manager()
         image_b64 = png_base64()
+        manager.recognize_image = AsyncMock(return_value=make_observation(image_b64, "统一图片描述"))
         existing = SimpleNamespace(description="已有描述", count=2, save=Mock())
         with patch.object(utils_image.Images, "get_or_none", return_value=existing):
-            self.assertEqual(await manager.get_image_description(image_b64), "[图片：已有描述]")
+            self.assertEqual(await manager.get_image_description(image_b64), "[图片：统一图片描述]")
 
         self.assertEqual(existing.count, 3)
+        self.assertEqual(existing.description, "统一图片描述")
         existing.save.assert_called_once()
-
-        with (
-            patch.object(utils_image.Images, "get_or_none", return_value=None),
-            patch.object(manager, "_get_description_from_db", return_value="备用缓存"),
-        ):
-            self.assertEqual(await manager.get_image_description(image_b64), "[图片：备用缓存]")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             manager.IMAGE_DIR = temp_dir
-            manager.vlm.generate_response_for_image = AsyncMock(return_value=("新描述", None))
             with (
                 patch.object(utils_image.Images, "get_or_none", return_value=None),
-                patch.object(manager, "_get_description_from_db", return_value=None),
                 patch.object(utils_image.Images, "create") as create_image,
-                patch.object(manager, "_save_description_to_db") as save_description,
                 patch.object(utils_image.time, "time", return_value=1234.0),
                 patch.object(utils_image.uuid, "uuid4", return_value="uuid-1"),
             ):
-                self.assertEqual(await manager.get_image_description(image_b64), "[图片：新描述]")
+                self.assertEqual(await manager.get_image_description(image_b64), "[图片：统一图片描述]")
 
-            manager.vlm.generate_response_for_image.assert_awaited_once()
+            manager.vlm.generate_response_for_image.assert_not_awaited()
             create_image.assert_called_once()
+            self.assertEqual(create_image.call_args.kwargs["description"], "统一图片描述")
             self.assertTrue(
                 (
                     Path(temp_dir) / "image" / f"1234_{hashlib.md5(base64.b64decode(image_b64)).hexdigest()[:8]}.png"
                 ).exists()
             )
-            save_description.assert_called_once()
 
+        manager.recognize_image = AsyncMock(side_effect=ValueError("invalid image"))
         self.assertEqual(await manager.get_image_description("not-base64"), "[图片(处理失败)]")
 
     def test_extract_gif_frames_returns_ordered_png_frames_or_empty_for_invalid_input(self) -> None:
@@ -496,25 +525,69 @@ class ImageManagerDescriptionAndProcessTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_frame.getpixel((0, 0)), (255, 0, 0, 255))
         self.assertEqual(second_frame.getpixel((1, 1)), (0, 255, 0, 255))
 
-    async def test_process_image_reuses_existing_records_or_creates_new_and_runs_vlm_processing(self) -> None:
+    async def test_process_image_recognizes_before_reusing_and_updating_existing_record(self) -> None:
         manager = make_image_manager()
         image_b64 = png_base64()
-        existing = SimpleNamespace(image_id="", count=None, vlm_processed=None, save=Mock())
-        with patch.object(utils_image.Images, "get_or_none", return_value=existing):
+        observation = make_observation(image_b64, "统一视觉描述")
+        events: list[str] = []
+
+        async def recognize_image(_: str) -> utils_image.VisualObservation:
+            events.append("recognize")
+            return observation
+
+        existing = SimpleNamespace(
+            image_id="",
+            count=None,
+            description=None,
+            vlm_processed=None,
+            save=Mock(side_effect=lambda: events.append("save")),
+        )
+        manager.recognize_image = AsyncMock(side_effect=recognize_image)
+
+        def get_existing_image(*_args: object, **_kwargs: object) -> SimpleNamespace:
+            events.append("lookup")
+            return existing
+
+        with (
+            patch.object(utils_image.Images, "get_or_none", side_effect=get_existing_image),
+            patch.object(utils_image.Images, "get", return_value=existing),
+            patch.object(utils_image.uuid, "uuid4", return_value="existing-id"),
+        ):
             image_id, marker = await manager.process_image(image_b64)
 
-        self.assertTrue(image_id)
-        self.assertEqual(marker, f"[picid:{image_id}]")
+        self.assertEqual((image_id, marker), ("existing-id", "[picid:existing-id]"))
+        self.assertEqual(events, ["recognize", "lookup", "save"])
         self.assertEqual(existing.count, 1)
-        self.assertFalse(existing.vlm_processed)
+        self.assertEqual(existing.description, observation.description)
+        self.assertTrue(existing.vlm_processed)
         existing.save.assert_called_once()
+        manager.recognize_image.assert_awaited_once_with(image_b64)
+
+    async def test_process_image_recognizes_before_creating_a_fully_processed_record(self) -> None:
+        manager = make_image_manager()
+        image_b64 = png_base64()
+        observation = make_observation(image_b64, "统一视觉描述")
+        events: list[str] = []
+
+        async def recognize_image(_: str) -> utils_image.VisualObservation:
+            events.append("recognize")
+            return observation
+
+        manager.recognize_image = AsyncMock(side_effect=recognize_image)
+
+        def find_image(*_args: object, **_kwargs: object) -> None:
+            events.append("lookup")
+            return None
+
+        def create_image(*_args: object, **_kwargs: object) -> SimpleNamespace:
+            events.append("create")
+            return SimpleNamespace()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             manager.IMAGE_DIR = temp_dir
-            manager._process_image_with_vlm = AsyncMock()
             with (
-                patch.object(utils_image.Images, "get_or_none", return_value=None),
-                patch.object(utils_image.Images, "create") as create_image,
+                patch.object(utils_image.Images, "get_or_none", side_effect=find_image),
+                patch.object(utils_image.Images, "create", side_effect=create_image) as create_image_mock,
                 patch.object(utils_image.uuid, "uuid4", return_value="new-id"),
                 patch.object(utils_image.time, "time", return_value=55.0),
             ):
@@ -522,47 +595,24 @@ class ImageManagerDescriptionAndProcessTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual((image_id, marker), ("new-id", "[picid:new-id]"))
             self.assertTrue((Path(temp_dir) / "images" / "new-id.png").exists())
-            create_image.assert_called_once()
-            manager._process_image_with_vlm.assert_awaited_once_with("new-id", image_b64)
+            create_image_mock.assert_called_once_with(
+                image_id="new-id",
+                emoji_hash=observation.image_hash,
+                path=str(Path(temp_dir) / "images" / "new-id.png"),
+                type="image",
+                description=observation.description,
+                timestamp=55.0,
+                vlm_processed=True,
+                count=1,
+            )
+
+        self.assertEqual(events, ["recognize", "lookup", "create"])
+        manager.recognize_image.assert_awaited_once_with(image_b64)
+
+    async def test_process_image_returns_a_generic_marker_for_invalid_input(self) -> None:
+        manager = make_image_manager()
 
         self.assertEqual(await manager.process_image("not-base64"), ("", "[图片]"))
-
-    async def test_process_image_with_vlm_reuses_existing_description_cache_or_calls_model(self) -> None:
-        manager = make_image_manager()
-        image_b64 = png_base64()
-        image = SimpleNamespace(id=1, description="", vlm_processed=False, save=Mock())
-        other = SimpleNamespace(id=2, description="复用描述")
-        with (
-            patch.object(utils_image.Images, "get", return_value=image),
-            patch.object(utils_image.Images, "get_or_none", return_value=other),
-            patch.object(manager, "_save_description_to_db") as save_description,
-        ):
-            await manager._process_image_with_vlm("image-id", image_b64)
-
-        self.assertEqual(image.description, "复用描述")
-        self.assertTrue(image.vlm_processed)
-        image.save.assert_called_once()
-        save_description.assert_called_once()
-
-        image = SimpleNamespace(id=1, description="", vlm_processed=False, save=Mock())
-        manager.vlm.generate_response_for_image = AsyncMock(return_value=("模型描述", None))
-        with (
-            patch.object(utils_image.Images, "get", return_value=image),
-            patch.object(utils_image.Images, "get_or_none", return_value=None),
-            patch.object(manager, "_get_description_from_db", side_effect=[None, None]),
-            patch.object(manager, "_save_description_to_db") as save_description,
-            patch.object(
-                utils_image.global_config,
-                "personality",
-                SimpleNamespace(visual_style="视觉风格"),
-            ),
-        ):
-            await manager._process_image_with_vlm("image-id", image_b64)
-
-        self.assertEqual(image.description, "模型描述")
-        self.assertTrue(image.vlm_processed)
-        manager.vlm.generate_response_for_image.assert_awaited_once()
-        save_description.assert_called_once()
 
 
 if __name__ == "__main__":

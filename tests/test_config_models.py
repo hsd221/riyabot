@@ -16,6 +16,7 @@ from src.config.official_configs import (
     KeywordRuleConfig,
     MemoryConfig,
     MessageReceiveConfig,
+    PersonalityConfig,
 )
 
 
@@ -150,6 +151,16 @@ class ConfigBaseTest(unittest.TestCase):
 
         self.assertEqual(str(config), "NestedConfig(name=inner, count=2)")
 
+    def test_removed_visual_style_is_ignored_when_loading_legacy_personality_config(self) -> None:
+        config = PersonalityConfig.from_dict(
+            {
+                "personality": "测试人格",
+                "visual_style": "旧识图规则",
+            }
+        )
+
+        self.assertFalse(hasattr(config, "visual_style"))
+
 
 class ApiAdaConfigTest(unittest.TestCase):
     def test_api_provider_validates_required_credentials_and_allows_gemini_without_base_url(self) -> None:
@@ -230,7 +241,9 @@ class OfficialConfigTest(unittest.TestCase):
         self.assertEqual(config.get_talk_value(chat_id=None), 0.0000001)
 
     def test_chat_config_prefers_specific_rules_and_ignores_invalid_rule_shapes(self) -> None:
-        fake_manager = SimpleNamespace(get_stream_id=lambda platform, raw_id, is_group: f"{platform}:{raw_id}:{is_group}")
+        fake_manager = SimpleNamespace(
+            get_stream_id=lambda platform, raw_id, is_group: f"{platform}:{raw_id}:{is_group}"
+        )
         config = ChatConfig(
             talk_value=0.25,
             talk_value_rules=[
@@ -251,7 +264,9 @@ class OfficialConfigTest(unittest.TestCase):
             self.assertEqual(config._parse_stream_config_to_chat_id("qq:123:group"), "qq:123:True")
             self.assertEqual(config._parse_stream_config_to_chat_id("qq:999:private"), "qq:999:False")
             self.assertIsNone(config._parse_stream_config_to_chat_id("bad-format"))
-            first = ChatConfig(talk_value=0.25, talk_value_rules=[{"target": "qq:123:group", "time": "12:00-13:00", "value": 0.75}])
+            first = ChatConfig(
+                talk_value=0.25, talk_value_rules=[{"target": "qq:123:group", "time": "12:00-13:00", "value": 0.75}]
+            )
             first._now_minutes = lambda: 12 * 60 + 30
             self.assertEqual(first.get_talk_value("qq:123:True"), 0.75)
             self.assertEqual(config.get_talk_value("qq:123:True"), 0.0000001)
@@ -272,7 +287,9 @@ class OfficialConfigTest(unittest.TestCase):
 
         no_rule = ChatConfig(talk_value=0.25, talk_value_rules=[])
         self.assertEqual(no_rule.get_talk_value(None), 0.25)
-        zero_fallback = ChatConfig(talk_value=0, talk_value_rules=[{"target": "", "time": "00:00-01:00", "value": "bad"}])
+        zero_fallback = ChatConfig(
+            talk_value=0, talk_value_rules=[{"target": "", "time": "00:00-01:00", "value": "bad"}]
+        )
         zero_fallback._now_minutes = lambda: 30
         self.assertEqual(zero_fallback.get_talk_value(None), 0.0000001)
 
@@ -280,7 +297,9 @@ class OfficialConfigTest(unittest.TestCase):
             self.assertEqual(ChatConfig()._now_minutes(), 184)
 
     def test_expression_config_resolves_specific_global_defaults_and_invalid_items(self) -> None:
-        fake_manager = SimpleNamespace(get_stream_id=lambda platform, raw_id, is_group: f"{platform}:{raw_id}:{is_group}")
+        fake_manager = SimpleNamespace(
+            get_stream_id=lambda platform, raw_id, is_group: f"{platform}:{raw_id}:{is_group}"
+        )
         config = ExpressionConfig(
             learning_list=[
                 [],
@@ -318,7 +337,9 @@ class OfficialConfigTest(unittest.TestCase):
         self.assertIsNone(broken_global._get_global_config())
 
     def test_behavior_config_resolves_specific_global_defaults_and_invalid_items(self) -> None:
-        fake_manager = SimpleNamespace(get_stream_id=lambda platform, raw_id, is_group: f"{platform}:{raw_id}:{is_group}")
+        fake_manager = SimpleNamespace(
+            get_stream_id=lambda platform, raw_id, is_group: f"{platform}:{raw_id}:{is_group}"
+        )
         config = BehaviorConfig(
             learning_list=[
                 [],

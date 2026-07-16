@@ -40,7 +40,8 @@ PROMPT_IDS = {
     "media.emoji.replace_decision",
     "media.emoji.selection",
     "media.emoji.semantic_description",
-    "media.emoji.vision_description",
+    "media.vision.animated",
+    "media.vision.static",
     "memory.atom_extraction",
     "memory.knowledge_query",
     "memory.noise_insight",
@@ -56,7 +57,6 @@ SECTION_NAMES = {
     "chat.private.pfc.action_decision": {"initial_reply", "follow_up", "end_decision"},
     "chat.private.pfc.reply_generation": {"direct_reply", "send_new_message", "farewell"},
     "learning.jargon.previous_meaning": {"context", "instruction"},
-    "media.emoji.vision_description": {"gif", "gif_batch", "gif_overall", "static", "static_detailed"},
     "memory.retrieval": {"question", "react_head", "final"},
     "shared.moderation": {"standard", "strict"},
 }

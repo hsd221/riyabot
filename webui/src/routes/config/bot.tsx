@@ -285,7 +285,6 @@ export function BotConfigPage() {
       multiple_reply_style: personality.multiple_reply_style ?? [],
       multiple_probability: personality.multiple_probability ?? 0,
       plan_style: personality.plan_style ?? '',
-      visual_style: personality.visual_style ?? '',
       states: personality.states ?? [],
       state_probability: personality.state_probability ?? 0,
     })

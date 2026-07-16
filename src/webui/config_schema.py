@@ -293,7 +293,6 @@ class ConfigSchemaGenerator:
                     "personality",
                     "reply_style",
                     "plan_style",
-                    "visual_style",
                     "private_plan_style",
                     "reaction",
                     "filtration_prompt",

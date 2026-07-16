@@ -17,7 +17,6 @@ import {
 import {
   BadgePercent,
   Brain,
-  Eye,
   MessageCircle,
   Plus,
   Sparkles,
@@ -261,15 +260,6 @@ export const PersonalitySection = React.memo(function PersonalitySection({
             placeholder="当前实例的说话规则和行为风格"
             rows={5}
           />
-          <MobileTextareaBlock
-            icon={<Eye className="h-4 w-4" />}
-            iconClassName="ios-symbol-green"
-            label="识图规则"
-            value={config.visual_style}
-            onChange={(value) => onChange({ ...config, visual_style: value })}
-            placeholder="识图时的处理规则"
-            rows={3}
-          />
         </div>
 
         <div className="ios-group overflow-hidden">
@@ -450,19 +440,6 @@ export const PersonalitySection = React.memo(function PersonalitySection({
                 }
                 placeholder="当前实例的说话规则和行为风格"
                 rows={5}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="visual_style">识图规则</Label>
-              <Textarea
-                id="visual_style"
-                value={config.visual_style}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  onChange({ ...config, visual_style: e.target.value })
-                }
-                placeholder="识图时的处理规则"
-                rows={3}
               />
             </div>
 

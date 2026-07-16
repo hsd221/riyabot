@@ -16,7 +16,6 @@ export interface PersonalityConfig {
   multiple_reply_style: string[]
   multiple_probability: number
   plan_style: string
-  visual_style: string
   states: string[]
   state_probability: number
 }

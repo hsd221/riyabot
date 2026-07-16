@@ -54,9 +54,6 @@ class PersonalityConfig(ConfigBase):
     plan_style: str = ""
     """说话规则，行为风格"""
 
-    visual_style: str = ""
-    """图片提示词"""
-
     states: list[str] = field(default_factory=lambda: [])
     """状态列表，用于随机替换personality"""
 

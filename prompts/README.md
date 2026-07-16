@@ -5,7 +5,7 @@
 例如：
 
 - `prompts/chat/group/planner.prompt` 对应 `chat.group.planner`
-- `prompts/media/emoji/vision_description.prompt` 的 `static` 分段对应 `media.emoji.vision_description.static`
+- `prompts/media/vision/static.prompt` 对应 `media.vision.static`
 
 ## 层级模型
 
@@ -36,7 +36,7 @@
 | --- | --- |
 | `chat/` | 群聊、私聊、PFC、回复与表达器 |
 | `learning/` | 行为、表达方式和黑话学习 |
-| `media/` | 音频转写、表情包识别与选择 |
+| `media/` | 静态/动态图像识别、音频转写与表情包下游处理 |
 | `memory/` | 记忆抽取、检索、判断与知识查询 |
 | `shared/` | 多条业务链共用的审核和工具提示词 |
 
@@ -187,7 +187,7 @@ variants: light, standard
 | `inference1` | 结合真实聊天上下文得到的词义推断 JSON。 |
 | `inference2` | 仅根据词条字面和通用语言知识得到的词义推断 JSON。 |
 
-### 音频与表情包
+### 图像、音频与表情包
 
 | 占位符 | 含义与来源 |
 | --- | --- |
@@ -197,12 +197,10 @@ variants: light, standard
 | `emoji_list` | 为替换决策抽样出的旧表情包编号、描述和使用信息列表。 |
 | `available_emotions` | 当前表情包库真实存在、允许选择的情感标签集合。 |
 | `description` | 视觉模型生成的原始表情包描述，供多维语义压缩器整理。 |
-| `frame_count` | 动态表情包的总帧数。 |
+| `frame_count` | 动态图像的总帧数。 |
 | `frame_start` | 当前批次第一帧的全局序号。 |
 | `frame_end` | 当前批次最后一帧的全局序号。 |
-| `previous_batch_summary` | 上一批 GIF 逐帧概括，只用于衔接当前批次首帧。 |
-| `previous_summary` | 分批处理 GIF 时已经形成的整体概括。 |
-| `batch_summary` | 当前新增批次的逐帧概括，用于更新整体概括。 |
+| `previous_batch_description` | 上一批动态画面的原始视觉描述，只用于衔接当前批次首帧。 |
 
 ### 记忆检索与噪声审阅
 

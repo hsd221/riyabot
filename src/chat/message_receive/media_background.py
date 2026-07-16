@@ -6,9 +6,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from src.chat.emoji_system.emoji_description import is_semantic_emoji_description
-from src.chat.utils.utils_image import get_image_manager, is_gif_base64_data, read_gif_description_cache
+from src.chat.utils.utils_image import (
+    VISION_DESCRIPTION_CACHE_TYPE,
+    get_image_manager,
+    is_animated_image_base64_data,
+    read_gif_description_cache,
+)
 from src.chat.utils.utils_voice import get_voice_text
-from src.common.database.database_model import Emoji, EmojiDescriptionCache, ImageDescriptions, Images, Messages
+from src.common.database.database_model import Emoji, EmojiDescriptionCache, ImageDescriptions, Messages
 from src.common.logger import get_logger
 
 logger = get_logger("chat_media_background")
@@ -87,27 +92,26 @@ def _format_cached_result(kind: str, description: str | None) -> Optional[str]:
 def _load_cached_media_result(kind: str, media_hash: str, media_data: Optional[str] = None) -> Optional[str]:
     """Best-effort persistent cache lookup for media tasks.
 
-    This avoids re-running VLM for image/emoji descriptions after restart. Voice
-    transcription has no existing persistent cache in this codebase yet.
+    Image and emoji tasks may only reuse business caches after the shared raw
+    visual observation exists. Voice transcription has no persistent cache yet.
     """
     try:
-        if kind == "image":
-            image_record = (
-                Images.select()
-                .where((Images.emoji_hash == media_hash) & (Images.description.is_null(False)))
-                .order_by(Images.timestamp.desc())
-                .first()
-            )
-            if result := _format_cached_result("image", getattr(image_record, "description", None)):
-                return result
+        if kind not in {"image", "emoji"}:
+            return None
 
-            description_record = ImageDescriptions.get_or_none(
-                (ImageDescriptions.image_description_hash == media_hash) & (ImageDescriptions.type == "image")
-            )
-            return _format_cached_result("image", getattr(description_record, "description", None))
+        vision_record = ImageDescriptions.get_or_none(
+            (ImageDescriptions.image_description_hash == media_hash)
+            & (ImageDescriptions.type == VISION_DESCRIPTION_CACHE_TYPE)
+        )
+        vision_description = getattr(vision_record, "description", None)
+        if not vision_description or not str(vision_description).strip():
+            return None
+
+        if kind == "image":
+            return _format_cached_result("image", vision_description)
 
         if kind == "emoji":
-            if media_data and is_gif_base64_data(media_data):
+            if media_data and is_animated_image_base64_data(media_data):
                 cache_record = EmojiDescriptionCache.get_or_none(EmojiDescriptionCache.emoji_hash == media_hash)
                 cached_description = read_gif_description_cache(getattr(cache_record, "description", None))
                 if not cached_description or not is_semantic_emoji_description(cached_description):
@@ -123,12 +127,6 @@ def _load_cached_media_result(kind: str, media_hash: str, media_data: Optional[s
             cached_description = getattr(cache_record, "description", None)
             if cached_description and is_semantic_emoji_description(cached_description):
                 return _format_cached_result("emoji", cached_description)
-            if cached_description:
-                return None
-            if registered_description:
-                return None
-            if cache_record and cache_record.emotion_tags:
-                return _format_cached_result("emoji", str(cache_record.emotion_tags).replace("，", ","))
     except Exception as e:
         logger.debug(f"读取{kind}持久缓存失败，继续后台识别: {e}")
 

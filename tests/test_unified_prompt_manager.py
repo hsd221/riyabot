@@ -87,6 +87,22 @@ class UnifiedPromptManagerTest(unittest.IsolatedAsyncioTestCase):
     def test_removed_brain_planner_alias_is_not_mapped_to_incompatible_template(self) -> None:
         self.assertNotIn("brain_planner_prompt_react", LEGACY_PROMPT_ALIASES)
 
+    def test_removed_image_prompt_aliases_do_not_reintroduce_parallel_vision_paths(self) -> None:
+        removed_aliases = {
+            "emoji_vlm_description.gif",
+            "emoji_vlm_description.gif_batch",
+            "emoji_vlm_description.gif_overall",
+            "emoji_vlm_description.static",
+            "emoji_vlm_description.static_detailed",
+            "gif",
+            "gif_batch",
+            "gif_overall",
+            "static",
+            "static_detailed",
+        }
+
+        self.assertTrue(removed_aliases.isdisjoint(LEGACY_PROMPT_ALIASES))
+
     def test_manager_exposes_file_metadata_for_canonical_sections_and_legacy_aliases(self) -> None:
         manager = PromptManager(aliases=LEGACY_PROMPT_ALIASES)
         manager.load_prompts()
