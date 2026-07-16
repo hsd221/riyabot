@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import tomlkit
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -21,8 +23,6 @@ _RUNTIME_FILES = [
     _PROJECT_ROOT / "data" / "RiyaBot.db",
     _PROJECT_ROOT / "data" / "RiyaBot.db-shm",
     _PROJECT_ROOT / "data" / "RiyaBot.db-wal",
-    _PROJECT_ROOT / "template" / "compare" / "bot_config_template.toml",
-    _PROJECT_ROOT / "template" / "compare" / "model_config_template.toml",
 ]
 _PREEXISTING_RUNTIME_FILES = {path for path in _RUNTIME_FILES if path.exists()}
 
@@ -32,11 +32,7 @@ def _cleanup_runtime_files() -> None:
         if path in _PREEXISTING_RUNTIME_FILES or not path.exists():
             continue
         path.unlink()
-    for directory in (
-        _PROJECT_ROOT / "config",
-        _PROJECT_ROOT / "data",
-        _PROJECT_ROOT / "template" / "compare",
-    ):
+    for directory in (_PROJECT_ROOT / "config", _PROJECT_ROOT / "data"):
         try:
             directory.rmdir()
         except OSError:
@@ -58,6 +54,7 @@ from src.memory.prompt_integration import (
     build_memory_retrieval_prompt,
 )
 from src.memory.dream_weaver import DreamWeaver, _validate_insights
+from src.config.config import generate_default_bot_config
 from src.chat.brain_chat.PFC.pfc_KnowledgeFetcher import (
     collect_knowledge_atom_ids,
     format_knowledge_evidence,
@@ -421,7 +418,8 @@ def test_inline_prompts_and_profile_injection_are_conservative() -> None:
     group_replyer = (_PROJECT_ROOT / "src" / "chat" / "replyer" / "group_generator.py").read_text(encoding="utf-8")
     private_replyer = (_PROJECT_ROOT / "src" / "chat" / "replyer" / "private_generator.py").read_text(encoding="utf-8")
     official_configs = (_PROJECT_ROOT / "src" / "config" / "official_configs.py").read_text(encoding="utf-8")
-    bot_template = (_PROJECT_ROOT / "template" / "bot_config_template.toml").read_text(encoding="utf-8")
+    generated_bot_config = generate_default_bot_config()
+    bot_defaults = tomlkit.parse(generated_bot_config)
 
     assert "如果上方出现相关用户画像与记忆" not in planner_source
     assert "若上方出现 <CONTEXT_EVIDENCE>" in planner_prompt
@@ -453,7 +451,8 @@ def test_inline_prompts_and_profile_injection_are_conservative() -> None:
     assert "请你**记住上面的知识**" not in private_replyer
     assert "enable: bool = False" in official_configs
     assert 'lpmm_mode: Literal["classic", "agent"] = "agent"' in official_configs
-    assert "enable = false # 是否启用旧知识入口的按需记忆查询兼容桥" in bot_template
+    assert bot_defaults["lpmm_knowledge"]["enable"] is False
+    assert "旧知识入口的按需记忆查询兼容桥" in generated_bot_config
 
 
 def test_pfc_knowledge_evidence_skips_removed_lpmm_placeholder() -> None:

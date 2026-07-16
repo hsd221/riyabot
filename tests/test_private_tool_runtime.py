@@ -1,6 +1,5 @@
 import asyncio
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -11,6 +10,7 @@ from src.chat.heart_flow.turn_scheduler import TurnDecision
 from src.chat.message_receive.chat_stream import ChatStream
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.message_data_model import ReplySetModel
+from src.config import config as config_module
 from src.config.official_configs import ChatConfig, ExperimentalConfig
 from src.llm_models.payload_content import ToolCall
 
@@ -314,14 +314,12 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ChatConfig().group_message_buffer_seconds, 3.0)
         self.assertEqual(ChatConfig().private_message_buffer_seconds, 1.5)
 
-    def test_private_tool_pipeline_flag_is_removed_from_schema_and_template(self) -> None:
+    def test_private_tool_pipeline_flag_is_removed_from_schema_and_generated_defaults(self) -> None:
         self.assertFalse(hasattr(ExperimentalConfig(), "private_tool_pipeline"))
-        template = (Path(__file__).resolve().parents[1] / "template" / "bot_config_template.toml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('version = "7.5.6"', template)
-        self.assertNotIn("private_tool_pipeline", template)
-        self.assertNotIn("visual_style", template)
+        generated = config_module.generate_default_bot_config()
+        self.assertIn(f'version = "{config_module.BOT_CONFIG_VERSION}"', generated)
+        self.assertNotIn("private_tool_pipeline", generated)
+        self.assertNotIn("visual_style", generated)
 
     async def test_native_turn_binds_reply_handler_and_loop_start_time(self) -> None:
         chat = make_chat()

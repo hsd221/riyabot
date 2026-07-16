@@ -22,4 +22,4 @@ Tests use standard-library `unittest`, including `IsolatedAsyncioTestCase`; name
 Use Conventional Commit prefixes (`feat:`, `fix:`, `refactor:`, `chore:`). Keep PRs focused; explain behavior and motivation, affected configuration/API/data boundaries, validation commands, and linked issues. Include screenshots or recordings for WebUI changes. Discuss substantial features in an issue first.
 
 ## Configuration and Safety Notes
-Create local `.env` and TOML configuration from `template/`. Never commit credentials, tokens, private databases, runtime configuration, or logs. Treat plugin input, model output, uploads, and remote responses as untrusted. Document migrations for configuration schemas, plugin APIs, databases, Docker paths, or authentication.
+Create local `.env` from `template/template.env`; core TOML files are generated from the Python definitions under `src/config/`. Never commit credentials, tokens, private databases, runtime configuration, or logs. Treat plugin input, model output, uploads, and remote responses as untrusted. Document migrations for configuration schemas, plugin APIs, databases, Docker paths, or authentication.

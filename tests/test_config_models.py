@@ -405,7 +405,7 @@ class OfficialConfigTest(unittest.TestCase):
 
         config._now_minutes = lambda: 12 * 60
         self.assertFalse(config.is_in_dream_time())
-        self.assertTrue(DreamConfig().is_in_dream_time())
+        self.assertTrue(DreamConfig(dream_time_ranges=[]).is_in_dream_time())
 
         with patch.object(time, "localtime", return_value=SimpleNamespace(tm_hour=1, tm_min=2)):
             self.assertEqual(DreamConfig()._now_minutes(), 62)

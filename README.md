@@ -35,7 +35,10 @@ uv sync
 
 ### 准备配置
 
-运行前需要从 `template/` 复制配置模板到本地 `config/`，并按自己的模型、适配器和 bot 信息修改。`config/`、`data/`、`logs/` 属于运行时目录，不应该提交到仓库。
+首次启动会根据 `src/config/` 中的 Python 配置定义自动生成 `config/bot_config.toml` 和
+`config/model_config.toml`，无需手工复制核心 TOML 模板。初始模型配置不会预置厂商、模型或密钥，请在
+WebUI 首次配置向导中填写 bot 信息并完成模型管理与任务分配。`config/`、`data/`、`logs/` 属于运行时目录，
+不应该提交到仓库。
 
 ### 启动后端
 
@@ -43,7 +46,7 @@ uv sync
 python bot.py
 ```
 
-首次启动可能需要确认 EULA 和隐私协议，并准备可用的本地 TOML 配置。
+首次启动可能需要确认 EULA 和隐私协议；首次配置完成前只会启动 WebUI。
 
 ### 启动 WebUI
 
@@ -99,12 +102,12 @@ docker compose up -d
 │   ├── chat/               # 群聊/私聊行为、回复生成、规划逻辑
 │   ├── plugin_system/      # 插件 SDK 与组件注册
 │   ├── common/             # 日志、数据库、Prompt、基础设施
-│   ├── config/             # TOML 配置结构
+│   ├── config/             # TOML 配置定义、生成与升级
 │   └── webui/              # FastAPI WebUI 后端
 ├── webui/                  # React 19 + Vite 管理面板
 ├── prompts/                # 外部 Prompt 模板
 ├── plugins/                # 外部插件目录
-├── template/               # 配置模板
+├── template/               # .env 启动环境模板
 ├── docs-src/               # 文档源文件
 └── docker-compose.yml      # 容器化部署示例
 ```

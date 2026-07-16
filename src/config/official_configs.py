@@ -28,10 +28,10 @@ class BotConfig(ConfigBase):
     nickname: str
     """昵称"""
 
-    platforms: list[str] = field(default_factory=lambda: [])
+    platforms: list[str] = field(default_factory=lambda: ["wx:114514", "xx:1919810"])
     """其他平台列表"""
 
-    alias_names: list[str] = field(default_factory=lambda: [])
+    alias_names: list[str] = field(default_factory=lambda: ["Riya", "小璃"])
     """别名列表"""
 
 
@@ -42,22 +42,32 @@ class PersonalityConfig(ConfigBase):
     personality: str
     """人格"""
 
-    reply_style: str = ""
+    reply_style: str = "请不要刻意突出自身学科背景。可以参考贴吧，知乎和微博的回复风格。"
     """默认表达风格"""
 
     multiple_reply_style: list[str] = field(default_factory=lambda: [])
     """可选的多种表达风格列表，当配置不为空时可按概率随机替换 reply_style"""
 
-    multiple_probability: float = 0.0
+    multiple_probability: float = 0.3
     """每次构建回复时，从 multiple_reply_style 中随机替换 reply_style 的概率（0.0-1.0）"""
 
-    plan_style: str = ""
+    plan_style: str = """1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用
+2.如果相同的action已经被执行，请不要重复执行该action
+3.如果有人对你感到厌烦，请减少回复
+4.如果有人在追问你，或者话题没有说完，请你继续回复
+5.请分析哪些对话是和你说的，哪些是其他人之间的互动，不要误认为其他人之间的互动是和你说的"""
     """说话规则，行为风格"""
 
-    states: list[str] = field(default_factory=lambda: [])
+    states: list[str] = field(
+        default_factory=lambda: [
+            "是一个女大学生，喜欢上网聊天，会刷小红书。",
+            "是一个大二心理学生，会刷贴吧和中国知网。",
+            "是一个赛博网友，最近很想吐槽人。",
+        ]
+    )
     """状态列表，用于随机替换personality"""
 
-    state_probability: float = 0.0
+    state_probability: float = 0.3
     """状态概率，每次构建人格时替换personality的概率"""
 
 
@@ -79,7 +89,7 @@ class ChatConfig(ConfigBase):
     private_message_buffer_seconds: float = 1.5
     """私聊首条消息进入 TurnGate 后的固定等待时长，0 为关闭"""
 
-    max_context_size: int = 18
+    max_context_size: int = 30
     """上下文长度"""
 
     mentioned_bot_reply: bool = True
@@ -97,7 +107,14 @@ class ChatConfig(ConfigBase):
     enable_talk_value_rules: bool = True
     """是否启用动态发言频率规则"""
 
-    talk_value_rules: list[dict] = field(default_factory=lambda: [])
+    talk_value_rules: list[dict] = field(
+        default_factory=lambda: [
+            {"target": "", "time": "00:00-08:59", "value": 0.8},
+            {"target": "", "time": "09:00-22:59", "value": 1.0},
+            {"target": "qq:1919810:group", "time": "20:00-23:59", "value": 0.6},
+            {"target": "qq:114514:private", "time": "00:00-23:59", "value": 0.3},
+        ]
+    )
     """
     思考频率规则列表，支持按聊天流/按日内时段配置。
     规则格式：{ target="platform:id:type" 或 "", time="HH:MM-HH:MM", value=0.5 }
@@ -255,7 +272,7 @@ class MemoryConfig(ConfigBase):
     max_agent_iterations: int = 5
     """Agent最多迭代轮数（最低为1）"""
 
-    agent_timeout_seconds: float = 120.0
+    agent_timeout_seconds: float = 180.0
     """Agent超时时间（秒）"""
 
     global_memory: bool = False
@@ -294,7 +311,7 @@ class MemoryConfig(ConfigBase):
     qdrant_url: str = ""
     """Qdrant 服务器 URL，为空字符串时使用本地嵌入模式"""
 
-    qdrant_api_key: Optional[str] = field(default=None, repr=False)
+    qdrant_api_key: Optional[str] = field(default="", repr=False)
     """Qdrant API 密钥（可选，空字符串等价于 None）"""
 
     qdrant_local_path: str = "data/qdrant"
@@ -324,7 +341,13 @@ class MemoryConfig(ConfigBase):
 class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
-    learning_list: list[list] = field(default_factory=lambda: [])
+    learning_list: list[list] = field(
+        default_factory=lambda: [
+            ["", "enable", "enable", "enable"],
+            ["qq:1919810:group", "enable", "enable", "enable"],
+            ["qq:114514:private", "enable", "disable", "disable"],
+        ]
+    )
     """
     表达学习配置列表，支持按聊天流配置
     格式: [["chat_stream_id", "use_expression", "enable_learning", "enable_jargon_learning"], ...]
@@ -343,13 +366,15 @@ class ExpressionConfig(ConfigBase):
     - 第四位: 是否启用jargon学习 ("enable"/"disable")
     """
 
-    expression_groups: list[list[str]] = field(default_factory=list)
+    expression_groups: list[list[str]] = field(
+        default_factory=lambda: [["qq:1919810:private", "qq:114514:private", "qq:1111111:group"]]
+    )
     """
     表达学习互通组
     格式: [["qq:12345:group", "qq:67890:private"]]
     """
 
-    expression_self_reflect: bool = False
+    expression_self_reflect: bool = True
     """是否启用自动表达优化"""
 
     expression_manual_reflect: bool = False
@@ -366,36 +391,36 @@ class ExpressionConfig(ConfigBase):
     如果列表为空，则所有聊天流都可以进行表达反思（前提是 reflect = true）
     """
 
-    all_global_jargon: bool = False
+    all_global_jargon: bool = True
     """是否将所有新增的jargon项目默认为全局（is_global=True），chat_id记录第一次存储时的id。注意，此功能关闭后，已经记录的全局黑话不会改变，需要手动删除"""
 
     enable_jargon_explanation: bool = True
     """是否在回复前尝试对上下文中的黑话进行解释（关闭可减少一次LLM调用，仅影响回复前的黑话匹配与解释，不影响黑话学习）"""
 
-    jargon_mode: Literal["context", "planner"] = "context"
+    jargon_mode: Literal["context", "planner"] = "planner"
     """
     黑话解释来源模式：
     - "context": 使用上下文自动匹配黑话并解释（原有模式）
     - "planner": 仅使用 Planner 在 reply 动作中给出的 unknown_words 列表进行黑话检索
     """
 
-    expression_checked_only: bool = False
+    expression_checked_only: bool = True
     """
     是否仅选择已检查且未拒绝的表达方式
     当设置为 true 时，只有 checked=True 且 rejected=False 的表达方式才会被选择
     当设置为 false 时，保留旧的筛选原则（仅排除 rejected=True 的表达方式）
     """
 
-    expression_auto_check_interval: int = 3600
+    expression_auto_check_interval: int = 600
     """
     表达方式自动检查的间隔时间（单位：秒）
-    默认值：3600秒（1小时）
+    默认值：600秒（10分钟）
     """
 
-    expression_auto_check_count: int = 10
+    expression_auto_check_count: int = 20
     """
     每次自动检查时随机选取的表达方式数量
-    默认值：10条
+    默认值：20条
     """
 
     expression_auto_check_custom_criteria: list[str] = field(default_factory=list)
@@ -532,13 +557,21 @@ class ExpressionConfig(ConfigBase):
 class BehaviorConfig(ConfigBase):
     """行为学习配置类"""
 
-    learning_list: list[list] = field(default_factory=lambda: [["", "enable", "enable"]])
+    learning_list: list[list] = field(
+        default_factory=lambda: [
+            ["", "enable", "enable"],
+            ["qq:1919810:group", "enable", "enable"],
+            ["qq:114514:private", "enable", "disable"],
+        ]
+    )
     """
     行为学习配置列表，支持按聊天流配置
     格式: [["chat_stream_id", "use_behavior", "enable_learning"], ...]
     """
 
-    behavior_groups: list[list[str]] = field(default_factory=list)
+    behavior_groups: list[list[str]] = field(
+        default_factory=lambda: [["qq:1919810:private", "qq:114514:private", "qq:1111111:group"]]
+    )
     """
     行为学习互通组
     格式: [["qq:12345:group", "qq:67890:private"]]
@@ -610,7 +643,7 @@ class BehaviorConfig(ConfigBase):
 class ToolConfig(ConfigBase):
     """工具配置类"""
 
-    enable_tool: bool = False
+    enable_tool: bool = True
     """是否在聊天中启用工具"""
 
 
@@ -626,16 +659,16 @@ class VoiceConfig(ConfigBase):
 class EmojiConfig(ConfigBase):
     """表情包配置类"""
 
-    emoji_chance: float = 0.6
+    emoji_chance: float = 0.4
     """发送表情包的基础概率"""
 
-    max_reg_num: int = 200
+    max_reg_num: int = 100
     """表情包最大注册数量"""
 
     do_replace: bool = True
     """达到最大注册数量时替换旧表情包"""
 
-    check_interval: int = 120
+    check_interval: int = 10
     """表情包检查间隔（分钟）"""
 
     steal_emoji: bool = True
@@ -681,10 +714,41 @@ class KeywordRuleConfig(ConfigBase):
 class KeywordReactionConfig(ConfigBase):
     """关键词配置类"""
 
-    keyword_rules: list[KeywordRuleConfig] = field(default_factory=lambda: [])
+    keyword_rules: list[KeywordRuleConfig] = field(
+        default_factory=lambda: [
+            KeywordRuleConfig(
+                keywords=["人机", "bot", "机器", "入机", "robot", "机器人", "ai", "AI"],
+                reaction="有人说你是人机或者机器人，否定这一事实，攻击或反问他。注意，只有认为你是机器人才回复，否则不要否认",
+            ),
+            KeywordRuleConfig(keywords=["测试关键词回复", "test"], reaction="回答测试成功"),
+        ]
+    )
     """关键词规则列表"""
 
-    regex_rules: list[KeywordRuleConfig] = field(default_factory=lambda: [])
+    regex_rules: list[KeywordRuleConfig] = field(
+        default_factory=lambda: [
+            KeywordRuleConfig(
+                regex=[r"^(?P<n>\S{1,20})是这样的$"],
+                reaction=(
+                    "请按照以下模板造句：[n]是这样的，xx只要xx就可以，可是[n]要考虑的事情就很多了，"
+                    "比如什么时候xx，什么时候xx，什么时候xx。（请自由发挥替换xx部分，只需保持句式结构，"
+                    "同时表达一种将[n]过度重视的反讽意味）"
+                ),
+            ),
+            KeywordRuleConfig(
+                regex=[r"(?:[^，。.\s]+，\s*)?我(?:也)?[没沒]要求你\s*(?P<action>.+?)[.。,，]?$"],
+                reaction=(
+                    "进行一次“八岐大蛇定型文”补完。暂时忽略回复风格，进入“粉絲吐槽”模式。请严格按照以下"
+                    "“填空模板”，围绕“[action]”进行创作，使其充满滑稽的夸张感和天马行空的联想：我没要求你"
+                    "[action]，我不是(与action关联的、宽容的角色)。可是，(与action相关的具体负面行为)是什么"
+                    "意思？你的(与action相关的某种观念)怎么了？你才(与action相关的某个状态或时间点)吧？再这样"
+                    "下去，你(一个中期的、等比级数式的滑稽推演)，(一个后期的、等比级数式的滑稽推演)，最后就"
+                    "变成(一个与主题相关的、夸张的最终形态)了。作为(与最终形态相关的、克星或权威身份)，我可能"
+                    "得(对你执行一个天罚般的行动)。真的。"
+                ),
+            ),
+        ]
+    )
     """正则表达式规则列表"""
 
     def __post_init__(self):
@@ -730,10 +794,10 @@ class ResponseSplitterConfig(ConfigBase):
     enable: bool = True
     """是否启用回复分割器"""
 
-    max_length: int = 256
+    max_length: int = 512
     """回复允许的最大长度"""
 
-    max_sentence_num: int = 3
+    max_sentence_num: int = 8
     """回复允许的最大句子数"""
 
     enable_kaomoji_protection: bool = False
@@ -782,10 +846,24 @@ class LogConfig(ConfigBase):
     max_log_field_length: int = 2000
     """普通日志字段最大长度"""
 
-    suppress_libraries: list[str] = field(default_factory=lambda: [])
+    suppress_libraries: list[str] = field(
+        default_factory=lambda: [
+            "faiss",
+            "httpx",
+            "urllib3",
+            "asyncio",
+            "websockets",
+            "httpcore",
+            "requests",
+            "peewee",
+            "openai",
+            "uvicorn",
+            "jieba",
+        ]
+    )
     """完全屏蔽的第三方库日志列表"""
 
-    library_log_levels: dict[str, str] = field(default_factory=lambda: {})
+    library_log_levels: dict[str, str] = field(default_factory=lambda: {"aiohttp": "WARNING"})
     """特定第三方库日志级别"""
 
 
@@ -802,7 +880,7 @@ class WebUIConfig(ConfigBase):
     mode: Literal["development", "production"] = "production"
     """运行模式：development(开发) 或 production(生产)"""
 
-    anti_crawler_mode: Literal["false", "strict", "loose", "basic"] = "basic"
+    anti_crawler_mode: Literal["false", "strict", "loose", "basic"] = "loose"
     """防爬虫模式：false(禁用) / strict(严格) / loose(宽松) / basic(基础-只记录不阻止)"""
 
     allowed_ips: str = "127.0.0.1"
@@ -825,10 +903,10 @@ class DebugConfig(ConfigBase):
     show_prompt: bool = False
     """是否显示prompt"""
 
-    show_replyer_prompt: bool = True
+    show_replyer_prompt: bool = False
     """是否显示回复器prompt"""
 
-    show_replyer_reasoning: bool = True
+    show_replyer_reasoning: bool = False
     """是否显示回复器推理"""
 
     show_jargon_prompt: bool = False
@@ -848,7 +926,9 @@ class DebugConfig(ConfigBase):
 class ExperimentalConfig(ConfigBase):
     """实验功能配置类"""
 
-    private_plan_style: str = ""
+    private_plan_style: str = """1.逐一判断当前提供的行为选项是否真的符合聊天内容，只执行有直接依据的选项
+2.如果相同的内容已经被执行，请不要重复执行
+3.某句话如果已经被回复过，不要重复回复"""
     """私聊说话规则，行为风格（实验性功能）"""
 
     chat_prompts: list[str] = field(default_factory=lambda: [])
@@ -927,7 +1007,7 @@ class LPMMKnowledgeConfig(ConfigBase):
     qa_relation_search_top_k: int = 10
     """QA关系搜索的Top K数量"""
 
-    qa_relation_threshold: float = 0.75
+    qa_relation_threshold: float = 0.5
     """QA关系搜索的相似度阈值"""
 
     qa_paragraph_search_top_k: int = 1000
@@ -942,7 +1022,7 @@ class LPMMKnowledgeConfig(ConfigBase):
     qa_ppr_damping: float = 0.8
     """QA PageRank阻尼系数"""
 
-    qa_res_top_k: int = 10
+    qa_res_top_k: int = 3
     """QA最终结果的Top K数量"""
 
     embedding_dimension: int = 1024
@@ -965,14 +1045,14 @@ class LPMMKnowledgeConfig(ConfigBase):
 class DreamConfig(ConfigBase):
     """Dream配置类"""
 
-    interval_minutes: int = 30
-    """做梦时间间隔（分钟），默认30分钟"""
+    interval_minutes: int = 60
+    """做梦时间间隔（分钟），默认60分钟"""
 
     max_iterations: int = 20
     """做梦最大轮次，默认20轮"""
 
-    first_delay_seconds: int = 60
-    """程序启动后首次做梦前的延迟时间（秒），默认60秒"""
+    first_delay_seconds: int = 1800
+    """程序启动后首次做梦前的延迟时间（秒），默认1800秒"""
 
     dream_send: str = ""
     """
@@ -981,7 +1061,7 @@ class DreamConfig(ConfigBase):
     为空字符串时不推送。
     """
 
-    dream_time_ranges: list[str] = field(default_factory=lambda: [])
+    dream_time_ranges: list[str] = field(default_factory=lambda: ["23:00-10:00"])
     """
     做梦时间段配置列表，格式：["HH:MM-HH:MM", ...]
     如果列表为空，则表示全天允许做梦。

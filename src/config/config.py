@@ -9,11 +9,12 @@ from tomlkit import TOMLDocument
 from tomlkit.items import Table, KeyType
 from dataclasses import field, dataclass, fields
 from rich.traceback import install
-from typing import ClassVar, List, Optional
+from typing import Any, Callable, ClassVar, List, Optional
 
 from src.common.logger import get_logger
 from src.common.toml_utils import format_toml_string
 from src.config.config_base import ConfigBase
+from src.config.config_generation import render_config_toml
 from src.config.official_configs import (
     BotConfig,
     PersonalityConfig,
@@ -57,11 +58,28 @@ logger = get_logger("config")
 # 获取当前文件所在目录的父目录的父目录（即RiyaBot项目根目录）
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
-TEMPLATE_DIR = os.path.join(PROJECT_ROOT, "template")
 
 # 考虑到，实际上配置文件中的mai_version是不会自动更新的,所以采用硬编码
 # 对该字段的更新，请严格参照语义化版本规范：https://semver.org/lang/zh-CN/
 MMC_VERSION = "0.13.0"
+BOT_CONFIG_VERSION = "7.5.6"
+MODEL_CONFIG_VERSION = "1.12.0"
+
+
+@dataclass(frozen=True)
+class DefaultValueMigration:
+    """仅当用户仍保留旧默认值时，才随配置版本更新该字段。"""
+
+    target_version: str
+    path: tuple[str, ...]
+    old_value: Any
+    new_value: Any
+
+
+DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[DefaultValueMigration, ...]] = {
+    "bot_config": (),
+    "model_config": (),
+}
 
 _CREATED_CONFIG_FILES: list[str] = []
 _MAX_CONFIG_FILE_BYTES = 8 * 1024 * 1024
@@ -69,7 +87,7 @@ _MAX_WEBUI_CONFIG_BYTES = 1024 * 1024
 
 
 def get_created_config_files() -> list[str]:
-    """返回本次启动期间由模板新创建的配置文件。"""
+    """返回本次启动期间由 Python 默认定义新创建的配置文件。"""
     return list(_CREATED_CONFIG_FILES)
 
 
@@ -274,36 +292,6 @@ def set_value_by_path(d, path, value):
         d[path[-1]] = value
 
 
-def compare_default_values(new, old, path=None, logs=None, changes=None):
-    # 递归比较两个dict，找出默认值变化项
-    if path is None:
-        path = []
-    if logs is None:
-        logs = []
-    if changes is None:
-        changes = []
-    for key in new:
-        if key == "version":
-            continue
-        if key in old:
-            if isinstance(new[key], (dict, Table)) and isinstance(old[key], (dict, Table)):
-                compare_default_values(new[key], old[key], path + [str(key)], logs, changes)
-            elif new[key] != old[key]:
-                logs.append(f"默认值变化: {'.'.join(path + [str(key)])}  旧默认值: {old[key]}  新默认值: {new[key]}")
-                changes.append((path + [str(key)], old[key], new[key]))
-    return logs, changes
-
-
-def _get_version_from_toml(toml_path) -> Optional[str]:
-    """从TOML文件中获取版本号"""
-    if not os.path.lexists(toml_path):
-        return None
-    doc = _read_toml_file(str(toml_path))
-    if "inner" in doc and "version" in doc["inner"]:  # type: ignore
-        return doc["inner"]["version"]  # type: ignore
-    return None
-
-
 def _version_tuple(v):
     """将版本字符串转换为元组以便比较"""
     if v is None:
@@ -332,157 +320,101 @@ def _update_dict(target: TOMLDocument | dict | Table, source: TOMLDocument | dic
                     target[key] = value
 
 
-def _is_blank_model_template(config_data: TOMLDocument | dict) -> bool:
-    """判断 model_config 模板是否为首次配置用的空白模板。"""
-    return config_data.get("api_providers") == [] and config_data.get("models") == []
+def _get_version_from_document(config: TOMLDocument | dict) -> Optional[str]:
+    inner = config.get("inner")
+    if isinstance(inner, dict) and "version" in inner:
+        return str(inner["version"])
+    return None
 
 
-def _update_config_generic(config_name: str, template_name: str):
-    """
-    通用的配置文件更新函数
+def _apply_default_value_migrations(
+    config_name: str,
+    config: TOMLDocument,
+    old_version: Optional[str],
+    new_version: str,
+) -> None:
+    for migration in sorted(
+        DEFAULT_VALUE_MIGRATIONS.get(config_name, ()),
+        key=lambda item: _version_tuple(item.target_version),
+    ):
+        target_version = _version_tuple(migration.target_version)
+        if not (_version_tuple(old_version) < target_version <= _version_tuple(new_version)):
+            continue
+        if get_value_by_path(config, migration.path) != migration.old_value:
+            continue
+        set_value_by_path(config, migration.path, migration.new_value)
+        logger.info(
+            f"已自动将{config_name}配置 {'.'.join(migration.path)} "
+            f"从旧默认值 {migration.old_value} 更新为 {migration.new_value}"
+        )
 
-    Args:
-        config_name: 配置文件名（不含扩展名），如 'bot_config' 或 'model_config'
-        template_name: 模板文件名（不含扩展名），如 'bot_config_template' 或 'model_config_template'
-    """
-    # 获取根目录路径
+
+def _update_config_generic(config_name: str, generate_default: Callable[[], str]) -> None:
+    """用 Python 默认定义创建或升级一份运行时 TOML 配置。"""
+    generated_text = generate_default()
+    if not isinstance(generated_text, str):
+        raise TypeError("配置生成器必须返回 TOML 字符串")
+    generated_config = tomlkit.loads(generated_text)
+    new_version = _get_version_from_document(generated_config)
+    if not new_version:
+        raise RuntimeError(f"{config_name} 的 Python 默认配置缺少 inner.version")
+
+    config_path = os.path.join(CONFIG_DIR, f"{config_name}.toml")
     old_config_dir = os.path.join(CONFIG_DIR, "old")
-    compare_dir = os.path.join(TEMPLATE_DIR, "compare")
-
-    # 定义文件路径
-    template_path = os.path.join(TEMPLATE_DIR, f"{template_name}.toml")
-    old_config_path = os.path.join(CONFIG_DIR, f"{config_name}.toml")
-    new_config_path = os.path.join(CONFIG_DIR, f"{config_name}.toml")
-    compare_path = os.path.join(compare_dir, f"{template_name}.toml")
-
     _prepare_config_storage(CONFIG_DIR)
-    _secure_directory(compare_dir)
-    _secure_regular_file(template_path)
 
-    template_version = _get_version_from_toml(template_path)
-    compare_version = _get_version_from_toml(compare_path)
-
-    # 检查配置文件是否存在
-    if not os.path.lexists(old_config_path):
-        logger.info(f"{config_name}.toml配置文件不存在，从模板创建新配置")
-        _copy_file_secure(template_path, old_config_path, mode=0o600)
+    if not os.path.lexists(config_path):
+        logger.info(f"{config_name}.toml配置文件不存在，根据 Python 默认定义创建新配置")
+        _atomic_write_text(config_path, generated_text)
         created_file = f"{config_name}.toml"
         _CREATED_CONFIG_FILES.append(created_file)
-        _mark_webui_setup_required(f"{created_file} 已从模板创建")
-        logger.info(f"已创建新{config_name}配置文件，可在 WebUI 首次配置向导中继续填写: {old_config_path}")
+        _mark_webui_setup_required(f"{created_file} 已根据 Python 默认配置创建")
+        logger.info(f"已创建新{config_name}配置文件，可在 WebUI 首次配置向导中继续填写: {config_path}")
         return
-    _secure_regular_file(old_config_path, mode=0o600)
 
-    compare_config = None
-    new_config = None
-    old_config = None
+    _secure_regular_file(config_path, mode=0o600)
+    old_config = _read_toml_file(config_path)
+    old_version = _get_version_from_document(old_config)
+    if old_version == new_version:
+        logger.info(f"检测到{config_name}配置文件版本号相同 (v{old_version})，跳过更新")
+        return
+    if old_version and _version_tuple(old_version) > _version_tuple(new_version):
+        logger.warning(f"检测到{config_name}配置文件版本 v{old_version} 高于当前程序定义 v{new_version}，跳过降级")
+        return
 
-    # 先读取 compare 下的模板（如果有），用于默认值变动检测
-    if os.path.lexists(compare_path):
-        _secure_regular_file(compare_path)
-        compare_config = _read_toml_file(compare_path)
-
-    # 读取当前模板
-    new_config = _read_toml_file(template_path)
-
-    # 检查默认值变化并处理（只有 compare_config 存在时才做）
-    if compare_config and not (config_name == "model_config" and _is_blank_model_template(new_config)):
-        # 读取旧配置
-        old_config = _read_toml_file(old_config_path)
-        logs, changes = compare_default_values(new_config, compare_config)
-        if logs:
-            logger.info(f"检测到{config_name}模板默认值变动如下：")
-            for log in logs:
-                logger.info(log)
-            # 检查旧配置是否等于旧默认值，如果是则更新为新默认值
-            config_updated = False
-            for path, old_default, new_default in changes:
-                old_value = get_value_by_path(old_config, path)
-                if old_value == old_default:
-                    set_value_by_path(old_config, path, new_default)
-                    logger.info(
-                        f"已自动将{config_name}配置 {'.'.join(path)} 的值从旧默认值 {old_default} 更新为新默认值 {new_default}"
-                    )
-                    config_updated = True
-
-            # 如果配置有更新，立即保存到文件
-            if config_updated:
-                _atomic_write_text(old_config_path, format_toml_string(old_config))
-                logger.info(f"已保存更新后的{config_name}配置文件")
-        else:
-            logger.info(f"未检测到{config_name}模板默认值变动")
-    elif compare_config:
-        logger.info(f"检测到{config_name}使用空白模型模板，跳过默认值自动迁移")
-
-    # 检查 compare 下没有模板，或新模板版本更高，则复制
-    if not os.path.lexists(compare_path):
-        _copy_file_secure(template_path, compare_path, mode=0o644)
-        logger.info(f"已将{config_name}模板文件复制到: {compare_path}")
-    elif _version_tuple(template_version) > _version_tuple(compare_version):
-        _copy_file_secure(template_path, compare_path, mode=0o644)
-        logger.info(f"{config_name}模板版本较新，已替换compare下的模板: {compare_path}")
+    if old_version:
+        logger.info(f"检测到{config_name}版本号不同: 旧版本 v{old_version} -> 新版本 v{new_version}")
     else:
-        logger.debug(f"compare下的{config_name}模板版本不低于当前模板，无需替换: {compare_path}")
+        logger.info(f"已有{config_name}配置文件未检测到版本号，可能是旧版本，将进行更新")
 
-    # 读取旧配置文件和模板文件（如果前面没读过 old_config，这里再读一次）
-    if old_config is None:
-        old_config = _read_toml_file(old_config_path)
-    # new_config 已经读取
+    _apply_default_value_migrations(config_name, old_config, old_version, new_version)
 
-    # 检查version是否相同
-    if old_config and "inner" in old_config and "inner" in new_config:
-        old_version = old_config["inner"].get("version")  # type: ignore
-        new_version = new_config["inner"].get("version")  # type: ignore
-        if old_version and new_version and old_version == new_version:
-            logger.info(f"检测到{config_name}配置文件版本号相同 (v{old_version})，跳过更新")
-            return
-        else:
-            logger.info(
-                f"\n----------------------------------------\n检测到{config_name}版本号不同: 旧版本 v{old_version} -> 新版本 v{new_version}\n----------------------------------------"
-            )
-    else:
-        logger.info(f"已有{config_name}配置文件未检测到版本号，可能是旧版本。将进行更新")
-
-    # 创建old目录（如果不存在）
-    _secure_directory(old_config_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    old_backup_path = os.path.join(old_config_dir, f"{config_name}_{timestamp}.toml")
+    backup_path = os.path.join(old_config_dir, f"{config_name}_{timestamp}.toml")
+    _copy_file_secure(config_path, backup_path, mode=0o600)
+    logger.info(f"已备份旧{config_name}配置文件到: {backup_path}")
 
-    # 移动旧配置文件到old目录
-    os.replace(old_config_path, old_backup_path)
-    os.chmod(old_backup_path, 0o600)
-    logger.info(f"已备份旧{config_name}配置文件到: {old_backup_path}")
+    logger.info(f"{config_name}配置项变动如下：")
+    if logs := compare_dicts(generated_config, old_config):
+        for log in logs:
+            logger.info(log)
+    else:
+        logger.info("无新增或删减项")
 
-    # 复制模板文件到配置目录
-    _copy_file_secure(template_path, new_config_path, mode=0o600)
-    logger.info(f"已创建新{config_name}配置文件: {new_config_path}")
-
-    # 输出新增和删减项及注释
-    if old_config:
-        logger.info(f"{config_name}配置项变动如下：\n----------------------------------------")
-        if logs := compare_dicts(new_config, old_config):
-            for log in logs:
-                logger.info(log)
-        else:
-            logger.info("无新增或删减项")
-
-    # 将旧配置的值更新到新配置中
     logger.info(f"开始合并{config_name}新旧配置...")
-    _update_dict(new_config, old_config)
-
-    # 保存更新后的配置（保留注释和格式，数组多行格式化）
-    _atomic_write_text(new_config_path, format_toml_string(new_config))
+    _update_dict(generated_config, old_config)
+    _atomic_write_text(config_path, format_toml_string(generated_config))
     logger.info(f"{config_name}配置文件更新完成，建议检查新配置文件中的内容，以免丢失重要信息")
 
 
-def update_config():
-    """更新bot_config.toml配置文件"""
-    _update_config_generic("bot_config", "bot_config_template")
+def update_config() -> None:
+    """更新 bot_config.toml 配置文件。"""
+    _update_config_generic("bot_config", generate_default_bot_config)
 
 
-def update_model_config():
-    """更新model_config.toml配置文件"""
-    _update_config_generic("model_config", "model_config_template")
+def update_model_config() -> None:
+    """更新 model_config.toml 配置文件。"""
+    _update_config_generic("model_config", generate_default_model_config)
 
 
 @dataclass
@@ -633,6 +565,58 @@ class APIAdapterConfig(ConfigBase):
         if provider_name not in self.api_providers_dict:
             raise KeyError(f"API提供商 '{provider_name}' 不存在")
         return self.api_providers_dict[provider_name]
+
+
+def _create_default_bot_config() -> Config:
+    return Config(
+        bot=BotConfig(platform="qq", qq_account="1145141919810", nickname="璃夜"),
+        personality=PersonalityConfig(
+            personality="是一个大二在读女大学生，现在正在上网和群友聊天，有时有点攻击性，有时比较温柔"
+        ),
+        relationship=RelationshipConfig(),
+        chat=ChatConfig(),
+        message_receive=MessageReceiveConfig(),
+        emoji=EmojiConfig(),
+        expression=ExpressionConfig(),
+        keyword_reaction=KeywordReactionConfig(),
+        chinese_typo=ChineseTypoConfig(),
+        response_post_process=ResponsePostProcessConfig(),
+        response_splitter=ResponseSplitterConfig(),
+        telemetry=TelemetryConfig(),
+        log=LogConfig(),
+        webui=WebUIConfig(),
+        experimental=ExperimentalConfig(),
+        maim_message=MaimMessageConfig(),
+        lpmm_knowledge=LPMMKnowledgeConfig(),
+        tool=ToolConfig(),
+        memory=MemoryConfig(),
+        debug=DebugConfig(),
+        voice=VoiceConfig(),
+        dream=DreamConfig(),
+    )
+
+
+def _create_default_model_task_config() -> ModelTaskConfig:
+    return ModelTaskConfig(
+        utils=TaskConfig(max_tokens=4096, temperature=0.2, selection_strategy="random"),
+        replyer=TaskConfig(max_tokens=2048, slow_threshold=25.0, selection_strategy="random"),
+        vlm=TaskConfig(max_tokens=256, selection_strategy="random"),
+        voice=TaskConfig(slow_threshold=12.0, selection_strategy="random"),
+        tool_use=TaskConfig(temperature=0.7, slow_threshold=10.0, selection_strategy="random"),
+        planner=TaskConfig(max_tokens=800, slow_threshold=12.0, selection_strategy="random"),
+        embedding=TaskConfig(slow_threshold=5.0, selection_strategy="random"),
+        memory_encoder=TaskConfig(max_tokens=800, temperature=0.2, slow_threshold=20.0, selection_strategy="random"),
+        memory_weaver=TaskConfig(max_tokens=800, temperature=0.2, slow_threshold=20.0, selection_strategy="random"),
+    )
+
+
+def generate_default_bot_config() -> str:
+    return render_config_toml(_create_default_bot_config(), BOT_CONFIG_VERSION)
+
+
+def generate_default_model_config() -> str:
+    default_config = APIAdapterConfig(models=[], model_task_config=_create_default_model_task_config())
+    return render_config_toml(default_config, MODEL_CONFIG_VERSION)
 
 
 def load_config(config_path: str) -> Config:
