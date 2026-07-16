@@ -136,7 +136,7 @@ async def generate_reply(
                 extra_info = action_data.get("extra_info", "")
             if not reply_reason:
                 reply_reason = action_data.get("reason", "")
-            # 仅在 reply 场景下使用的未知词语解析（Planner JSON 中下发）
+            # 仅在 reply 场景下从兼容 action_data 解析未知词语。
             if unknown_words is None:
                 uw = action_data.get("unknown_words")
                 if isinstance(uw, list):

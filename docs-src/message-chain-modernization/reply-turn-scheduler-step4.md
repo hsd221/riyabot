@@ -1,4 +1,8 @@
-# 回复触发调度器第 4 步
+# 回复触发调度器第 4 步（历史方案）
+
+> 本文记录引入 TurnGate 时的过渡设计。当前消息主链已统一为原生 Tool Calls：
+> `reply` 是内置 Tool，无 Tool Call 即结束本轮；不再产生 `wait`、`complete_talk` 或 `no_reply` 规划结果。
+> 下文保留的 Action 术语只用于说明当时的迁移背景，不是当前实现契约。
 
 ## 目标
 

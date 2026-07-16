@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -309,12 +310,17 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         chat._observe.assert_awaited_once_with(recent_messages_list=[message])
         self.assertEqual(chat.last_read_time, 10.0)
 
-    def test_native_private_pipeline_is_enabled_by_default(self) -> None:
-        self.assertTrue(ExperimentalConfig().private_tool_pipeline)
-
     def test_message_buffer_defaults_differ_for_group_and_private_chat(self) -> None:
         self.assertEqual(ChatConfig().group_message_buffer_seconds, 3.0)
         self.assertEqual(ChatConfig().private_message_buffer_seconds, 1.5)
+
+    def test_private_tool_pipeline_flag_is_removed_from_schema_and_template(self) -> None:
+        self.assertFalse(hasattr(ExperimentalConfig(), "private_tool_pipeline"))
+        template = (Path(__file__).resolve().parents[1] / "template" / "bot_config_template.toml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('version = "7.5.5"', template)
+        self.assertNotIn("private_tool_pipeline", template)
 
     async def test_native_turn_binds_reply_handler_and_loop_start_time(self) -> None:
         chat = make_chat()
@@ -335,6 +341,9 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result, expected)
         kwargs = chat.tool_pipeline.run.await_args.kwargs
         self.assertEqual(kwargs["loop_start_time"], 1.0)
+        self.assertEqual(kwargs["context_end_time"], 1.0)
+        self.assertEqual(kwargs["cycle_timers"], {})
+        self.assertEqual(kwargs["thinking_id"], "tid-1")
         reply_handler = kwargs["reply_handler"]
         tool_call = ToolCall("call-1", "reply", {"target_message_id": "m1", "reply_reason": "answer"})
         decision = make_decision(make_message())
@@ -352,7 +361,7 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         decision = make_decision(message)
         decision.tool_calls = [reply_call]
         planner = SimpleNamespace(plan=AsyncMock(return_value=decision))
-        registry = SimpleNamespace(execute_plugin=AsyncMock())
+        registry = SimpleNamespace(execute=AsyncMock())
         chat.tool_pipeline = private_tool_pipeline.PrivateToolPipeline(planner=planner, tool_registry=registry)
 
         reply_set = ReplySetModel()
@@ -383,16 +392,17 @@ class PrivateTurnGateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.reply_sent)
         self.assertEqual(result.reply_text, "hello")
         self.assertFalse(result.should_continue)
-        registry.execute_plugin.assert_not_awaited()
+        registry.execute.assert_not_awaited()
         chat._send_and_store_reply.assert_awaited_once()
 
 
 class BrainChattingPipelineInitializationTest(unittest.TestCase):
-    def test_initialization_selects_native_pipeline_or_legacy_actions_from_config(self) -> None:
+    def test_initialization_always_builds_unified_tool_pipeline_with_legacy_action_adapter(self) -> None:
         manager = SimpleNamespace(
             get_stream=Mock(return_value=make_stream()),
             get_stream_name=Mock(return_value="Alice"),
         )
+        action_manager = object()
         registry = object()
         planner = object()
         pipeline = object()
@@ -401,57 +411,29 @@ class BrainChattingPipelineInitializationTest(unittest.TestCase):
             patch.object(brain_chat, "get_chat_manager", return_value=manager),
             patch.object(brain_chat.expression_learner_manager, "get_expression_learner", return_value=object()),
             patch.object(brain_chat, "_HAS_MEMORY_ARCHIVE", False),
-            patch.object(
-                brain_chat.global_config,
-                "experimental",
-                SimpleNamespace(private_tool_pipeline=True),
-            ),
-            patch.object(brain_chat, "PrivateToolRegistry", return_value=registry) as registry_class,
+            patch.object(brain_chat, "ActionManager", return_value=action_manager) as action_manager_class,
+            patch.object(brain_chat, "ChatToolRegistry", return_value=registry) as registry_class,
             patch.object(brain_chat, "PrivateToolPlanner", return_value=planner) as planner_class,
             patch.object(brain_chat, "PrivateToolPipeline", return_value=pipeline) as pipeline_class,
-            patch.object(brain_chat, "ActionManager") as action_manager_class,
-            patch.object(brain_chat, "BrainPlanner") as legacy_planner_class,
-            patch.object(brain_chat, "ActionModifier") as action_modifier_class,
         ):
-            native_chat = brain_chat.BrainChatting("stream-1")
+            chat = brain_chat.BrainChatting("stream-1")
 
-        self.assertIs(native_chat.tool_pipeline, pipeline)
-        self.assertIsNone(native_chat.action_manager)
-        registry_class.assert_called_once_with(chat_id="stream-1")
-        planner_class.assert_called_once_with(chat_id="stream-1", tool_registry=registry)
+        self.assertIs(chat.action_manager, action_manager)
+        self.assertIs(chat.tool_registry, registry)
+        self.assertIs(chat.tool_pipeline, pipeline)
+        action_manager_class.assert_called_once_with()
+        registry_class.assert_called_once_with(
+            chat_id="stream-1",
+            chat_scope="private",
+            action_manager=action_manager,
+            chat_stream=chat.chat_stream,
+        )
+        planner_class.assert_called_once_with(
+            chat_id="stream-1",
+            tool_registry=registry,
+            action_manager=action_manager,
+        )
         pipeline_class.assert_called_once_with(planner=planner, tool_registry=registry)
-        action_manager_class.assert_not_called()
-        legacy_planner_class.assert_not_called()
-        action_modifier_class.assert_not_called()
-
-        legacy_manager = object()
-        legacy_planner = object()
-        legacy_modifier = object()
-        with (
-            patch.object(brain_chat, "get_chat_manager", return_value=manager),
-            patch.object(brain_chat.expression_learner_manager, "get_expression_learner", return_value=object()),
-            patch.object(brain_chat, "_HAS_MEMORY_ARCHIVE", False),
-            patch.object(
-                brain_chat.global_config,
-                "experimental",
-                SimpleNamespace(private_tool_pipeline=False),
-            ),
-            patch.object(brain_chat, "PrivateToolRegistry") as registry_class,
-            patch.object(brain_chat, "PrivateToolPlanner") as planner_class,
-            patch.object(brain_chat, "PrivateToolPipeline") as pipeline_class,
-            patch.object(brain_chat, "ActionManager", return_value=legacy_manager),
-            patch.object(brain_chat, "BrainPlanner", return_value=legacy_planner),
-            patch.object(brain_chat, "ActionModifier", return_value=legacy_modifier),
-        ):
-            legacy_chat = brain_chat.BrainChatting("stream-1")
-
-        self.assertIsNone(legacy_chat.tool_pipeline)
-        self.assertIs(legacy_chat.action_manager, legacy_manager)
-        self.assertIs(legacy_chat.action_planner, legacy_planner)
-        self.assertIs(legacy_chat.action_modifier, legacy_modifier)
-        registry_class.assert_not_called()
-        planner_class.assert_not_called()
-        pipeline_class.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -216,6 +216,7 @@ class LLMRequest:
             temperature=temperature,
             max_tokens=max_tokens,
             tool_options=tool_built,
+            raise_when_empty=raise_when_empty,
         )
 
         self._log_response_debug(response, model_info, time.time() - start_time)
@@ -266,6 +267,7 @@ class LLMRequest:
             temperature=temperature,
             max_tokens=max_tokens,
             tool_options=tool_built,
+            raise_when_empty=raise_when_empty,
         )
 
         time_cost = time.time() - start_time
@@ -383,6 +385,7 @@ class LLMRequest:
         max_tokens: Optional[int],
         embedding_input: str | None,
         audio_base64: str | None,
+        raise_when_empty: bool = True,
     ) -> APIResponse:
         """
         在单个模型上执行请求，包含针对临时错误的重试逻辑。
@@ -438,6 +441,8 @@ class LLMRequest:
                         extra_params=model_info.extra_params,
                     )
             except EmptyResponseException as e:
+                if not raise_when_empty:
+                    return APIResponse()
                 # 空回复：通常为临时问题，单独记录并重试
                 original_error_info = self._get_original_error_info(e)
                 retry_remain -= 1
@@ -571,6 +576,7 @@ class LLMRequest:
         max_tokens: Optional[int] = None,
         embedding_input: str | None = None,
         audio_base64: str | None = None,
+        raise_when_empty: bool = True,
     ) -> Tuple[APIResponse, ModelInfo]:
         """
         调度器函数，负责模型选择、故障切换。
@@ -601,6 +607,7 @@ class LLMRequest:
                     max_tokens=max_tokens,
                     embedding_input=embedding_input,
                     audio_base64=audio_base64,
+                    raise_when_empty=raise_when_empty,
                 )
                 total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
                 if response_usage := response.usage:

@@ -74,9 +74,17 @@ class BrainPowerData(BaseModel):
     most_expensive_cost: float = Field(0.0, description="最昂贵的一次思考花费")
     most_expensive_time: Optional[str] = Field(None, description="最昂贵思考的时间")
     top_token_consumers: List[Dict[str, Any]] = Field(default_factory=list, description="烧钱大户TOP3")
-    silence_rate: float = Field(0.0, description="高冷指数(沉默率)")
+    silence_rate: float = Field(
+        0.0,
+        description="历史 no_reply Action 占动作记录的比例；原生 Tool 链路不再记录新的沉默事件",
+        deprecated=True,
+    )
     total_actions: int = Field(0, description="总动作数")
-    no_reply_count: int = Field(0, description="选择沉默的次数")
+    no_reply_count: int = Field(
+        0,
+        description="迁移前遗留的 no_reply Action 记录数；仅供历史报告兼容",
+        deprecated=True,
+    )
     avg_interest_value: float = Field(0.0, description="平均兴趣值")
     max_interest_value: float = Field(0.0, description="最高兴趣值")
     max_interest_time: Optional[str] = Field(None, description="最高兴趣值时间")
@@ -438,7 +446,7 @@ async def get_brain_power(year: int = 2025) -> BrainPowerData:
         )
         data.top_reply_models = [{"model": row["model"], "count": row["count"]} for row in reply_model_query.dicts()]
 
-        # 6. 高冷指数 (沉默率) - 基于 ActionRecords
+        # 仅兼容迁移前的 no_reply ActionRecords；新 Tool 链路的静默不落库。
         total_actions = (
             ActionRecords.select().where((ActionRecords.time >= start_ts) & (ActionRecords.time <= end_ts)).count()
         )

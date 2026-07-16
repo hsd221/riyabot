@@ -1,12 +1,11 @@
-import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.chat.planner_actions import action_manager, action_modifier, planner as group_planner
 from src.common.data_models.database_data_model import DatabaseMessages
-from src.common.data_models.info_data_model import ActionPlannerInfo, TargetPersonInfo
-from src.common.prompt_loader import load_prompt_template
+from src.common.data_models.info_data_model import ActionPlannerInfo
+from src.llm_models.payload_content import ToolCall
 from src.plugin_system.base.component_types import ActionActivationType, ActionInfo, ComponentType
 
 
@@ -252,88 +251,382 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         planner.plan_log = []
         return planner
 
-    def test_parse_single_action_resolves_targets_questions_self_messages_and_invalid_actions(self) -> None:
+    async def test_group_planner_prompt_builds_with_runtime_fields(self) -> None:
         planner = self.make_planner()
-        planner._is_message_from_self = Mock(return_value=False)
-        latest = make_db_message("db-102", text="latest")
-        message_id_list = [("m101", make_db_message("db-101", text="hello")), ("m102", latest)]
+        planner._build_planner_memory_context = AsyncMock(return_value="<CONTEXT_EVIDENCE>memory</CONTEXT_EVIDENCE>")
+        message_ids = [("m101", make_db_message("db-101"))]
+
+        with (
+            patch.object(
+                group_planner.global_config,
+                "bot",
+                SimpleNamespace(nickname="Riya", alias_names=["小夜"]),
+            ),
+            patch.object(
+                group_planner.global_config,
+                "personality",
+                SimpleNamespace(plan_style="只在有直接依据时调用工具。"),
+            ),
+        ):
+            prompt, returned_ids = await planner.build_planner_prompt(
+                chat_content_block="[m101] Alice: hello",
+                message_id_list=message_ids,
+            )
+
+        self.assertIs(returned_ids, message_ids)
+        self.assertIn("[m101] Alice: hello", prompt)
+        self.assertIn("<CONTEXT_EVIDENCE>memory</CONTEXT_EVIDENCE>", prompt)
+        self.assertIn("你的名字是Riya,也有人叫你小夜", prompt)
+        self.assertIn("无 Tool Call", prompt)
+        self.assertNotIn("{chat_content_block}", prompt)
+
+    async def test_native_tool_calls_replace_action_json_protocol(self) -> None:
+        from src.chat.chat_tool_registry import ToolSource
+
+        planner = self.make_planner()
         plugin_info = make_action_info("plugin")
+        definitions = [
+            {"name": "reply", "description": "reply", "parameters": []},
+            {"name": "plugin", "description": "plugin", "parameters": []},
+        ]
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=definitions),
+            get_source=Mock(side_effect=lambda name: ToolSource.BUILTIN if name == "reply" else ToolSource.ACTION),
+            execute=AsyncMock(),
+        )
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                return_value=(
+                    "",
+                    (
+                        "需要回应 m101",
+                        "planner-model",
+                        [
+                            ToolCall(
+                                "call-1",
+                                "reply",
+                                {"target_message_id": "m101", "reply_reason": "回答问题"},
+                            ),
+                            ToolCall(
+                                "call-2",
+                                "plugin",
+                                {"target_message_id": "m101", "reason": "执行插件", "value": "x"},
+                            ),
+                        ],
+                    ),
+                )
+            )
+        )
+        message = make_db_message("db-101")
 
-        reply = planner._parse_single_action(
-            {
-                "action": "reply",
-                "target_message_id": "m101",
-                "question": "  需要查什么  ",
-                "extra": 1,
-            },
-            message_id_list,
-            [("plugin", plugin_info)],
-            "因为 m101",
-        )[0]
-        self.assertEqual(reply.action_type, "reply")
-        self.assertEqual(reply.reasoning, "因为 消息（hello）")
-        self.assertEqual(reply.action_data["question"], "需要查什么")
-        self.assertEqual(reply.action_data["target_message_id"], "m101")
-        self.assertEqual(reply.action_message.message_id, "db-101")
-        self.assertEqual(reply.available_actions, {"plugin": plugin_info})
-        self.assertEqual(reply.action_reasoning, "因为 m101")
+        with patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)):
+            reasoning, actions, raw, raw_reasoning, duration = await planner._execute_main_planner(
+                prompt="planner prompt",
+                message_id_list=[("m101", message)],
+                filtered_actions={"plugin": plugin_info},
+                available_actions={"plugin": plugin_info},
+                loop_start_time=123.0,
+            )
 
-        missing_target = planner._parse_single_action(
-            {"action": "reply", "target_message_id": "missing", "question": None},
-            message_id_list,
-            [("plugin", plugin_info)],
-        )[0]
-        self.assertEqual(missing_target.action_type, "reply")
-        self.assertIs(missing_target.action_message, latest)
-        self.assertNotIn("question", missing_target.action_data)
+        self.assertEqual([action.action_type for action in actions], ["reply", "plugin"])
+        self.assertTrue(all(action.action_message is message for action in actions))
+        self.assertEqual(actions[1].action_data["value"], "x")
+        self.assertNotIn("reason", actions[1].action_data)
+        self.assertEqual(actions[0].action_data["loop_start_time"], 123.0)
+        self.assertEqual(actions[0].action_reasoning, "回答问题")
+        self.assertEqual(actions[1].action_reasoning, "执行插件")
+        self.assertIn("消息（hello）", reasoning)
+        self.assertEqual(raw, "")
+        self.assertEqual(raw_reasoning, "需要回应 m101")
+        self.assertIsNotNone(duration)
+        planner.planner_llm.generate_response_async.assert_awaited_once_with(
+            prompt="planner prompt",
+            tools=definitions,
+            raise_when_empty=False,
+        )
+        planner.tool_registry.execute.assert_not_awaited()
 
-        invalid_question = planner._parse_single_action(
-            {"action": "reply", "target_message_id": "m101", "question": ["bad"]},
-            message_id_list,
-            [("plugin", plugin_info)],
-        )[0]
-        self.assertNotIn("question", invalid_question.action_data)
+    async def test_information_tool_result_is_replanned_and_no_call_means_silence(self) -> None:
+        from src.chat.chat_tool_registry import ToolExecutionResult, ToolSource
 
-        planner._is_message_from_self = Mock(return_value=True)
-        self_target = planner._parse_single_action(
-            {"action": "reply", "target_message_id": "m101"},
-            message_id_list,
-            [("plugin", plugin_info)],
-        )[0]
-        self.assertEqual(self_target.action_type, "no_reply")
-        self.assertIsNone(self_target.action_message)
-        self.assertIn("来自机器人自身", self_target.reasoning)
-
-        planner._is_message_from_self = Mock(return_value=False)
-        invalid = planner._parse_single_action(
-            {"action": "bad_action", "target_message_id": "m101"},
-            message_id_list,
-            [("plugin", plugin_info)],
-        )[0]
-        self.assertEqual(invalid.action_type, "no_reply")
-        self.assertIn("bad_action", invalid.reasoning)
-
-    def test_extract_json_from_markdown_supports_fenced_arrays_comments_and_incomplete_blocks(self) -> None:
         planner = self.make_planner()
-        content = """
-        这里是理由
-        ```json
-        // comment
-        [{"action": "reply"}, {"action": "plugin"}]
-        ```
-        """
-        json_objects, reasoning = planner._extract_json_from_markdown(content)
+        definitions = [
+            {"name": "reply", "description": "reply", "parameters": []},
+            {"name": "lookup", "description": "lookup", "parameters": []},
+        ]
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=definitions),
+            get_source=Mock(side_effect=lambda name: ToolSource.TOOL if name == "lookup" else ToolSource.BUILTIN),
+            execute=AsyncMock(
+                return_value=ToolExecutionResult(
+                    call_id="call-lookup",
+                    tool_name="lookup",
+                    success=True,
+                    content="reference answer",
+                )
+            ),
+        )
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                side_effect=[
+                    (
+                        "",
+                        ("先查询", "planner-model", [ToolCall("call-lookup", "lookup", {"query": "MaiBot"})]),
+                    ),
+                    ("", ("无需回复", "planner-model", [])),
+                ]
+            )
+        )
 
-        self.assertEqual([item["action"] for item in json_objects], ["reply", "plugin"])
-        self.assertEqual(reasoning, "这里是理由")
+        with patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)):
+            reasoning, actions, *_ = await planner._execute_main_planner(
+                prompt="planner prompt",
+                message_id_list=[("m101", make_db_message("db-101"))],
+                filtered_actions={},
+                available_actions={},
+                loop_start_time=0.0,
+            )
 
-        incomplete, incomplete_reason = planner._extract_json_from_markdown('理由\n```json\n{"action": "no_reply"}')
-        self.assertEqual(incomplete, [{"action": "no_reply"}])
-        self.assertEqual(incomplete_reason, "理由")
+        self.assertEqual(actions, [])
+        self.assertEqual(reasoning, "无需回复")
+        self.assertEqual(planner.planner_llm.generate_response_async.await_count, 2)
+        second_prompt = planner.planner_llm.generate_response_async.await_args_list[1].kwargs["prompt"]
+        self.assertIn("reference answer", second_prompt)
+        planner.tool_registry.execute.assert_awaited_once()
 
-        empty, empty_reason = planner._extract_json_from_markdown("没有 json")
-        self.assertEqual(empty, [])
-        self.assertEqual(empty_reason, "")
+    async def test_successful_query_results_are_only_forwarded_to_reply(self) -> None:
+        from src.chat.chat_tool_registry import ToolExecutionResult, ToolSource
+
+        planner = self.make_planner()
+        plugin_info = make_action_info("plugin")
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=[]),
+            get_source=Mock(
+                side_effect=lambda name: {
+                    "lookup": ToolSource.TOOL,
+                    "reply": ToolSource.BUILTIN,
+                    "plugin": ToolSource.ACTION,
+                }.get(name)
+            ),
+            allows_parallel=Mock(return_value=True),
+            execute=AsyncMock(
+                side_effect=[
+                    ToolExecutionResult("lookup-ok", "lookup", True, "reference answer"),
+                    ToolExecutionResult("lookup-failed", "lookup", False, "private failure"),
+                ]
+            ),
+        )
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                side_effect=[
+                    (
+                        "",
+                        (
+                            "先查询",
+                            "planner-model",
+                            [
+                                ToolCall("lookup-ok", "lookup", {"query": "MaiBot"}),
+                                ToolCall("lookup-failed", "lookup", {"query": "secret"}),
+                            ],
+                        ),
+                    ),
+                    (
+                        "",
+                        (
+                            "使用查询结果",
+                            "planner-model",
+                            [
+                                ToolCall(
+                                    "reply-call",
+                                    "reply",
+                                    {
+                                        "target_message_id": "m101",
+                                        "reply_reason": "依据查询结果回答",
+                                        "quote": True,
+                                        "unknown_adapter": "drop",
+                                    },
+                                ),
+                                ToolCall(
+                                    "plugin-call",
+                                    "plugin",
+                                    {
+                                        "target_message_id": "m101",
+                                        "reason": "执行插件",
+                                        "value": "payload",
+                                        "extra_info": "drop",
+                                    },
+                                ),
+                            ],
+                        ),
+                    ),
+                ]
+            )
+        )
+
+        with patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)):
+            _, actions, *_ = await planner._execute_main_planner(
+                prompt="planner prompt",
+                message_id_list=[("m101", make_db_message("db-101"))],
+                filtered_actions={"plugin": plugin_info},
+                available_actions={"plugin": plugin_info},
+                loop_start_time=123.0,
+            )
+
+        reply, plugin = actions
+        self.assertEqual(reply.action_reasoning, "依据查询结果回答")
+        self.assertEqual(set(reply.action_data), {"quote", "loop_start_time", "extra_info"})
+        self.assertIn("reference answer", reply.action_data["extra_info"])
+        self.assertNotIn("private failure", reply.action_data["extra_info"])
+        self.assertEqual(plugin.action_reasoning, "执行插件")
+        self.assertEqual(plugin.action_data, {"value": "payload", "loop_start_time": 123.0})
+
+    def test_effect_calls_reject_invalid_or_self_targets_and_dynamically_disabled_actions(self) -> None:
+        from src.chat.chat_tool_registry import ToolSource
+
+        planner = self.make_planner()
+        plugin_info = make_action_info("plugin")
+        planner._is_message_from_self = Mock(side_effect=lambda message: message.message_id == "self-db")
+        planner.tool_registry = SimpleNamespace(
+            get_source=Mock(side_effect=lambda name: ToolSource.BUILTIN if name == "reply" else ToolSource.ACTION),
+            is_available=Mock(side_effect=lambda name: name != "disabled"),
+            allows_parallel=Mock(return_value=True),
+        )
+        calls = [
+            ToolCall("missing", "reply", {"target_message_id": "m404", "reply_reason": "missing"}),
+            ToolCall("self", "reply", {"target_message_id": "m-self", "reply_reason": "self"}),
+            ToolCall("disabled", "disabled", {"target_message_id": "m-user", "reason": "disabled"}),
+        ]
+
+        actions = planner._tool_calls_to_actions(
+            calls,
+            message_id_list=[
+                ("m-self", make_db_message("self-db")),
+                ("m-user", make_db_message("user-db")),
+            ],
+            available_actions={"disabled": plugin_info},
+            planner_reasoning="fallback",
+            loop_start_time=1.0,
+            tool_results=[],
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_non_parallel_action_is_the_only_effect_selected(self) -> None:
+        from src.chat.chat_tool_registry import ToolSource
+
+        planner = self.make_planner()
+        exclusive_info = make_action_info("exclusive", parallel_action=False)
+        planner._is_message_from_self = Mock(return_value=False)
+        planner.tool_registry = SimpleNamespace(
+            get_source=Mock(side_effect=lambda name: ToolSource.BUILTIN if name == "reply" else ToolSource.ACTION),
+            is_available=Mock(return_value=True),
+            allows_parallel=Mock(side_effect=lambda name: name != "exclusive"),
+        )
+        message = make_db_message()
+
+        actions = planner._tool_calls_to_actions(
+            [
+                ToolCall("reply", "reply", {"target_message_id": "m1", "reply_reason": "reply"}),
+                ToolCall(
+                    "exclusive",
+                    "exclusive",
+                    {"target_message_id": "m1", "reason": "exclusive", "value": "x"},
+                ),
+            ],
+            message_id_list=[("m1", message)],
+            available_actions={"exclusive": exclusive_info},
+            planner_reasoning="fallback",
+            loop_start_time=1.0,
+            tool_results=[],
+        )
+
+        self.assertEqual([action.action_type for action in actions], ["exclusive"])
+
+    async def test_query_round_limit_ends_with_silence(self) -> None:
+        from src.chat.chat_tool_registry import ToolExecutionResult, ToolSource
+
+        planner = self.make_planner()
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=[]),
+            get_source=Mock(return_value=ToolSource.TOOL),
+            execute=AsyncMock(
+                side_effect=lambda call, **_kwargs: ToolExecutionResult(
+                    call.call_id,
+                    call.func_name,
+                    True,
+                    "result",
+                )
+            ),
+        )
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                side_effect=[
+                    ("", (f"round {index}", "planner-model", [ToolCall(f"call-{index}", "lookup", {})]))
+                    for index in range(3)
+                ]
+            )
+        )
+
+        with patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)):
+            _, actions, *_ = await planner._execute_main_planner(
+                prompt="planner prompt",
+                message_id_list=[],
+                filtered_actions={},
+                available_actions={},
+                loop_start_time=0.0,
+            )
+
+        self.assertEqual(actions, [])
+        self.assertEqual(planner.planner_llm.generate_response_async.await_count, 3)
+        self.assertEqual(planner.tool_registry.execute.await_count, 3)
+
+    async def test_query_tool_calls_are_capped_per_round(self) -> None:
+        from src.chat.chat_tool_registry import ToolExecutionResult, ToolSource
+
+        planner = self.make_planner()
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=[]),
+            get_source=Mock(return_value=ToolSource.TOOL),
+            execute=AsyncMock(
+                side_effect=lambda call, **_kwargs: ToolExecutionResult(
+                    call.call_id,
+                    call.func_name,
+                    True,
+                    "result",
+                )
+            ),
+        )
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                side_effect=[
+                    (
+                        "",
+                        (
+                            "query",
+                            "planner-model",
+                            [ToolCall(f"call-{index}", "lookup", {}) for index in range(8)],
+                        ),
+                    ),
+                    ("", ("done", "planner-model", [])),
+                ]
+            )
+        )
+
+        with patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)):
+            await planner._execute_main_planner(
+                prompt="planner prompt",
+                message_id_list=[],
+                filtered_actions={},
+                available_actions={},
+                loop_start_time=0.0,
+            )
+
+        self.assertLessEqual(planner.tool_registry.execute.await_count, 4)
 
     def test_filter_actions_by_activation_type_and_plan_logs_are_bounded(self) -> None:
         planner = self.make_planner()
@@ -355,12 +648,23 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
                 activation_type=ActionActivationType.KEYWORD,
                 keywords=["狗"],
             ),
+            "case_sensitive_miss": make_action_info(
+                "case_sensitive_miss",
+                activation_type=ActionActivationType.KEYWORD,
+                keywords=["MaiBot"],
+                case_sensitive=True,
+            ),
+            "case_insensitive_hit": make_action_info(
+                "case_insensitive_hit",
+                activation_type=ActionActivationType.KEYWORD,
+                keywords=["MAIBOT"],
+            ),
         }
 
         with patch.object(group_planner.random, "random", return_value=0.5):
-            filtered = planner._filter_actions_by_activation_type(actions, "今天聊猫")
+            filtered = planner._filter_actions_by_activation_type(actions, "今天聊猫和maibot")
 
-        self.assertEqual(set(filtered), {"always", "random_hit", "keyword"})
+        self.assertEqual(set(filtered), {"always", "random_hit", "keyword", "case_insensitive_hit"})
 
         for index in range(22):
             planner.add_plan_log(f"reason-{index}", [])
@@ -372,153 +676,37 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         log_text = planner.get_plan_log_str(max_action_records=1, max_execution_records=1)
         self.assertIn("reason-21", log_text)
         self.assertIn("exec-21", log_text)
-        self.assertEqual(planner._create_no_reply("silent", actions)[0].action_type, "no_reply")
 
-    async def test_build_action_options_and_get_necessary_info_use_registered_actions(self) -> None:
+    async def test_planner_failure_ends_with_silence(self) -> None:
         planner = self.make_planner()
-        prompt = SimpleNamespace(
-            format=Mock(
-                side_effect=lambda **kwargs: (
-                    f"{kwargs['action_name']}|{kwargs['action_description']}|"
-                    f"{kwargs['parallel_text']}|{kwargs['action_parameters']}|{kwargs['action_require']}"
-                )
-            )
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=[]),
         )
-
-        with patch.object(group_planner.prompt_manager, "get_prompt", new=Mock(return_value=prompt)):
-            block = await planner._build_action_options_block(
-                {
-                    "plugin": make_action_info("plugin", parallel_action=False),
-                    "parallel": make_action_info("parallel", parallel_action=True),
-                }
-            )
-
-        self.assertIn("plugin|plugin desc|(当选择这个动作时，请不要选择其他动作)", block)
-        self.assertIn("parallel|parallel desc||", block)
-        self.assertIn('"value": "参数说明"', block)
-        self.assertIn("- 需要上下文", block)
-        self.assertEqual(await planner._build_action_options_block({}), "")
-
-        registered = {"plugin": make_action_info("plugin")}
-        with (
-            patch.object(group_planner, "get_chat_type_and_target_info", return_value=(True, TargetPersonInfo())),
-            patch(
-                "src.plugin_system.core.component_registry.component_registry.get_components_by_type",
-                return_value=registered,
-            ),
-        ):
-            is_group, target, available = planner.get_necessary_info()
-
-        self.assertTrue(is_group)
-        self.assertIsInstance(target, TargetPersonInfo)
-        self.assertEqual(available, registered)
-
-    async def test_build_action_options_renders_valid_json_for_parameterless_actions(self) -> None:
-        planner = self.make_planner()
-        parameterless_action = ActionInfo(
-            name="emoji",
-            component_type=ComponentType.ACTION,
-            description="send emoji",
-            action_parameters={},
-            action_require=["only when appropriate"],
-        )
-
-        with patch.object(
-            group_planner.prompt_manager,
-            "get_prompt",
-            new=Mock(return_value=load_prompt_template("chat.group.action")),
-        ):
-            block = await planner._build_action_options_block({"emoji": parameterless_action})
-
-        payload = json.loads(block[block.rfind("{") : block.rfind("}") + 1])
-        self.assertEqual(payload["action"], "emoji")
-        self.assertEqual(payload["target_message_id"], "m123")
-
-        parameterized_action = ActionInfo(
-            name="quote",
-            component_type=ComponentType.ACTION,
-            description="send quote",
-            action_parameters={"value": 'say "hello"\nnext line'},
-            action_require=[],
-        )
-        with patch.object(
-            group_planner.prompt_manager,
-            "get_prompt",
-            new=Mock(return_value=load_prompt_template("chat.group.action")),
-        ):
-            block = await planner._build_action_options_block({"quote": parameterized_action})
-
-        payload = json.loads(block[block.rfind("{") : block.rfind("}") + 1])
-        self.assertEqual(payload["value"], 'say "hello"\nnext line')
-
-    async def test_execute_main_planner_parses_actions_adds_loop_time_and_falls_back_on_errors(self) -> None:
-        planner = self.make_planner()
-        planner.planner_llm = SimpleNamespace(
-            generate_response_async=AsyncMock(
-                return_value=(
-                    (
-                        "理由 m101\n```json\n"
-                        '{"action":"reply","target_message_id":"m101"}\n'
-                        '{"action":"plugin","target_message_id":"m101"}\n'
-                        "```"
-                    ),
-                    ("raw reasoning", None, None),
-                )
-            )
-        )
-        available = {"plugin": make_action_info("plugin")}
-
-        with (
-            patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)),
-            patch.object(group_planner.random, "shuffle", side_effect=lambda values: None),
-        ):
-            reasoning, actions, raw, raw_reasoning, duration = await planner._execute_main_planner(
-                prompt="prompt",
-                message_id_list=[("m101", make_db_message("db-101"))],
-                filtered_actions=available,
-                available_actions=available,
-                loop_start_time=123.0,
-            )
-
-        self.assertEqual(reasoning, "理由 消息（hello）")
-        self.assertEqual([action.action_type for action in actions], ["reply", "plugin"])
-        self.assertEqual([action.action_data["loop_start_time"] for action in actions], [123.0, 123.0])
-        self.assertIn('"action":"reply"', raw)
-        self.assertEqual(raw_reasoning, "raw reasoning")
-        self.assertIsNotNone(duration)
-
         planner.planner_llm = SimpleNamespace(generate_response_async=AsyncMock(side_effect=RuntimeError("llm down")))
         reasoning, actions, raw, raw_reasoning, duration = await planner._execute_main_planner(
             prompt="prompt",
             message_id_list=[],
             filtered_actions={},
-            available_actions=available,
+            available_actions={},
             loop_start_time=0.0,
         )
 
         self.assertIn("LLM 请求失败", reasoning)
-        self.assertEqual(actions[0].action_type, "no_reply")
+        self.assertEqual(actions, [])
         self.assertIsNone(raw)
         self.assertIsNone(raw_reasoning)
-        self.assertIsNone(duration)
+        self.assertIsNotNone(duration)
 
     async def test_plan_respects_event_cancellation_modified_prompt_and_force_reply(self) -> None:
         planner = self.make_planner()
         action_info = make_action_info("plugin")
         force_message = make_db_message("force-db")
-        planner.get_necessary_info = Mock(return_value=(True, TargetPersonInfo(), {"plugin": action_info}))
         planner.build_planner_prompt = AsyncMock(return_value=("original prompt", [("m101", make_db_message())]))
         planner._execute_main_planner = AsyncMock(
             return_value=(
                 "reason",
-                [
-                    ActionPlannerInfo(
-                        action_type="no_reply",
-                        reasoning="silent",
-                        action_data={},
-                        action_message=None,
-                    )
-                ],
+                [],
                 "raw",
                 None,
                 1.0,
@@ -538,9 +726,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         ):
             cancelled = await planner.plan({"plugin": action_info}, loop_start_time=1.0)
 
-        self.assertEqual(cancelled[0].action_type, "no_reply")
-        self.assertEqual(cancelled[0].reasoning, "规划 hook 取消本轮规划")
-        self.assertEqual(cancelled[0].action_data["loop_start_time"], 1.0)
+        self.assertEqual(cancelled, [])
 
         modified_message = SimpleNamespace(
             _modify_flags=SimpleNamespace(modify_llm_prompt=True),
@@ -572,6 +758,50 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(actions[0].action_message, force_message)
         self.assertEqual(actions[0].reasoning, "用户提及了我，必须回复该消息")
         self.assertNotIn("no_reply", [action.action_type for action in actions])
+
+    async def test_force_reply_overrides_non_parallel_legacy_action(self) -> None:
+        planner = self.make_planner()
+        exclusive_info = make_action_info("exclusive", parallel_action=False)
+        force_message = make_db_message("force-db")
+        planner.tool_registry = SimpleNamespace(allows_parallel=Mock(return_value=False))
+        planner.build_planner_prompt = AsyncMock(return_value=("prompt", [("m1", make_db_message())]))
+        planner._execute_main_planner = AsyncMock(
+            return_value=(
+                "reason",
+                [
+                    ActionPlannerInfo(
+                        action_type="exclusive",
+                        reasoning="exclusive",
+                        action_data={"value": "x"},
+                        action_message=make_db_message(),
+                    )
+                ],
+                "raw",
+                None,
+                1.0,
+            )
+        )
+        fake_chat_config = SimpleNamespace(max_context_size=10)
+
+        with (
+            patch.object(group_planner.global_config, "chat", fake_chat_config),
+            patch.object(group_planner, "get_raw_msg_before_timestamp_with_chat", return_value=[make_db_message()]),
+            patch.object(
+                group_planner,
+                "build_readable_messages_with_id",
+                return_value=("chat", [("m1", make_db_message())]),
+            ),
+            patch.object(group_planner.events_manager, "handle_mai_events", new=AsyncMock(return_value=(True, None))),
+            patch.object(group_planner.PlanReplyLogger, "log_plan"),
+        ):
+            actions = await planner.plan(
+                {"exclusive": exclusive_info},
+                loop_start_time=2.0,
+                force_reply_message=force_message,
+            )
+
+        self.assertEqual([action.action_type for action in actions], ["reply"])
+        self.assertIs(actions[0].action_message, force_message)
 
 
 if __name__ == "__main__":

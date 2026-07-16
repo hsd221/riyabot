@@ -29,10 +29,10 @@ _ESCAPED_RIGHT_BRACE = "__MAIBOT_ESCAPED_RIGHT_BRACE__"
 
 LEGACY_PROMPT_ALIASES = {
     # 旧文件 ID
-    "action_prompt": "chat.group.action",
     "audio_transcription": "media.audio.transcription",
-    "brain_action_prompt": "chat.private.action",
-    "brain_planner_prompt_react": "chat.private.planner",
+    "chat.private.reply": "chat.private.reply.default",
+    "chat.private.reply_self": "chat.private.reply.self",
+    "chat.private.tool_planner": "chat.private.planner",
     "default_expressor_prompt": "chat.shared.expressor",
     "emoji_content_filter": "media.emoji.content_filter",
     "emoji_replace_decision": "media.emoji.replace_decision",
@@ -55,8 +55,8 @@ LEGACY_PROMPT_ALIASES = {
     "pfc_goal_analyzer_assess": "chat.private.pfc.goal_assessment",
     "pfc_reply_check": "chat.private.pfc.reply_check",
     "planner_prompt": "chat.group.planner",
-    "private_replyer_prompt": "chat.private.reply",
-    "private_replyer_self_prompt": "chat.private.reply_self",
+    "private_replyer_prompt": "chat.private.reply.default",
+    "private_replyer_self_prompt": "chat.private.reply.self",
     "reflect_judge": "learning.expression.reflect_judge",
     "tool_executor": "shared.tool_executor",
     # 旧分段 ID，以及旧管理器曾暴露的裸分段名
@@ -64,10 +64,6 @@ LEGACY_PROMPT_ALIASES = {
     "replyer_group.replyer_prompt": "chat.group.reply.standard",
     "replyer_prompt_0": "chat.group.reply.light",
     "replyer_prompt": "chat.group.reply.standard",
-    "planner_reply_action.without_quote": "chat.group.reply_action.without_quote",
-    "planner_reply_action.with_quote": "chat.group.reply_action.with_quote",
-    "without_quote": "chat.group.reply_action.without_quote",
-    "with_quote": "chat.group.reply_action.with_quote",
     "emoji_vlm_description.gif": "media.emoji.vision_description.gif",
     "emoji_vlm_description.gif_batch": "media.emoji.vision_description.gif_batch",
     "emoji_vlm_description.gif_overall": "media.emoji.vision_description.gif_overall",
@@ -356,9 +352,15 @@ class PromptManager:
             prompt_id for prompt_id in entries if prompt_id in self._prompts and prompt_id not in self._sources
         }
         if dynamic_override_ids:
-            entries = {prompt_id: value for prompt_id, value in entries.items() if prompt_id not in dynamic_override_ids}
-            sources = {prompt_id: value for prompt_id, value in sources.items() if prompt_id not in dynamic_override_ids}
-            metadata = {prompt_id: value for prompt_id, value in metadata.items() if prompt_id not in dynamic_override_ids}
+            entries = {
+                prompt_id: value for prompt_id, value in entries.items() if prompt_id not in dynamic_override_ids
+            }
+            sources = {
+                prompt_id: value for prompt_id, value in sources.items() if prompt_id not in dynamic_override_ids
+            }
+            metadata = {
+                prompt_id: value for prompt_id, value in metadata.items() if prompt_id not in dynamic_override_ids
+            }
 
         old_ids = {prompt_id for prompt_id, source in self._sources.items() if source.file_name == file_name}
         duplicate_ids = (self._prompts.keys() - old_ids) & entries.keys()

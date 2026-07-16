@@ -1,9 +1,4 @@
-"""
-核心动作插件
-
-将系统核心动作（reply、no_reply、emoji）转换为新插件系统格式
-这是系统的内置插件，提供基础的聊天交互功能
-"""
+"""内置表情 Action 插件；`reply` 由聊天 Tool 注册表提供。"""
 
 from typing import List, Tuple, Type
 
@@ -23,10 +18,8 @@ logger = get_logger("core_actions")
 class CoreActionsPlugin(BasePlugin):
     """核心动作插件
 
-    系统内置插件，提供基础的聊天交互功能：
-    - Reply: 回复动作
-    - NoReply: 不回复动作
-    - Emoji: 表情动作
+    当前仅注册 EmojiAction。`reply` 是 ChatToolRegistry 的内置 Tool，
+    无 Tool Call 直接表示静默，不再注册 no_reply Action。
 
     注意：插件基本信息优先从_manifest.json文件中读取
     """

@@ -96,7 +96,9 @@ class HelloWorldPlugin(BasePlugin):
 
 现在我们要给插件加入一个有用的功能，我们从最好玩的Action做起
 
-Action是一类可以让RiyaBot根据自身意愿选择使用的“动作”，在RiyaBot中，不论是“回复”还是“不回复”，或者“发送表情”以及“禁言”等等，都是通过Action实现的。
+Action是一类可以让RiyaBot根据聊天情境自主选择的兼容“动作”组件。Planner 会把 legacy `BaseAction` 转换为原生 Tool schema 提供给模型，再由 Action 执行器调用现有插件实现。
+
+回复不属于 Action：`reply` 是聊天系统内置 Tool；不回复也不是 `no_reply` Action，模型不发起任何 Tool Call 就表示本轮静默结束。Action 更适合扩展发送表情、禁言、发送语音或操作外部能力等行为。
 
 你可以通过编写动作，来拓展RiyaBot的能力，包括发送语音，截图，甚至操作文件，编写代码......
 

@@ -59,6 +59,7 @@ def make_hfc() -> heartFC_chat.HeartFChatting:
     chat.consecutive_no_reply_count = 0
     chat.questioned = False
     chat.action_manager = SimpleNamespace()
+    chat.tool_registry = SimpleNamespace(is_available=Mock(return_value=True))
     chat.turn_scheduler = SimpleNamespace()
     chat.message_archiver = None
     chat.topic_summarizer = None
@@ -311,6 +312,37 @@ class HeartFChattingLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
 
 class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_observe_counts_empty_plan_as_silence_without_storing_no_reply(self) -> None:
+        chat = make_hfc()
+        chat.action_modifier = SimpleNamespace(modify_actions=AsyncMock())
+        chat.action_manager = SimpleNamespace(get_using_actions=Mock(return_value={}))
+        chat.action_planner = SimpleNamespace(
+            plan=AsyncMock(return_value=[]),
+            add_plan_excute_log=Mock(),
+        )
+        chat.chat_stream.context = SimpleNamespace(get_template_name=Mock(return_value=None))
+        chat.start_cycle = Mock(return_value=({}, "tid"))
+        chat.end_cycle = Mock()
+        chat.print_cycle_info = Mock()
+        reflector = SimpleNamespace(check_and_ask=AsyncMock())
+
+        with (
+            patch.object(
+                heartFC_chat.expression_reflector_manager,
+                "get_or_create_reflector",
+                return_value=reflector,
+            ),
+            patch.object(heartFC_chat.reflect_tracker_manager, "get_tracker", return_value=None),
+            patch.object(heartFC_chat, "extract_and_distribute_messages", new=AsyncMock()),
+            patch.object(heartFC_chat.database_api, "store_action_info", new=AsyncMock()) as store_action,
+            patch.object(heartFC_chat.asyncio, "sleep", new=AsyncMock()),
+        ):
+            self.assertTrue(await chat._observe())
+
+        self.assertEqual(chat.consecutive_no_reply_count, 1)
+        store_action.assert_not_awaited()
+        chat.action_planner.add_plan_excute_log.assert_called_once_with(result="")
+
     async def test_handle_action_uses_manager_and_reports_factory_or_execute_errors(self) -> None:
         chat = make_hfc()
         handler = SimpleNamespace(execute=AsyncMock(return_value=(True, "done")))
@@ -328,6 +360,28 @@ class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):
             create_action=Mock(return_value=SimpleNamespace(execute=AsyncMock(side_effect=RuntimeError("run down"))))
         )
         self.assertEqual(await chat._handle_action("plugin", "why", {}, {}, "tid"), (False, ""))
+
+    async def test_execute_action_rechecks_dynamic_disable_before_handler_creation(self) -> None:
+        chat = make_hfc()
+        chat.tool_registry.is_available.return_value = False
+        chat._handle_action = AsyncMock(return_value=(True, "must not execute"))
+
+        result = await chat._execute_action(
+            ActionPlannerInfo(
+                action_type="plugin",
+                action_reasoning="why",
+                action_data={"value": "x"},
+                action_message=make_db_message(),
+            ),
+            [],
+            "tid",
+            {"plugin": make_action_info("plugin")},
+            {},
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("禁用", result["result"])
+        chat._handle_action.assert_not_awaited()
 
     async def test_send_response_obeys_quote_mode_and_sends_text_parts_only(self) -> None:
         chat = make_hfc()
@@ -367,22 +421,9 @@ class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(text_to_stream.await_args_list[0].kwargs["set_reply"])
 
-    async def test_execute_action_handles_no_reply_reply_plugin_and_failure_paths(self) -> None:
+    async def test_execute_action_handles_reply_plugin_and_failure_paths(self) -> None:
         chat = make_hfc()
         available_actions = {"plugin": make_action_info("plugin")}
-
-        with patch.object(heartFC_chat.database_api, "store_action_info", new=AsyncMock()) as store_action:
-            no_reply = await chat._execute_action(
-                ActionPlannerInfo(action_type="no_reply", reasoning="silent", action_data={}),
-                [],
-                "tid",
-                available_actions,
-                {},
-            )
-
-        self.assertEqual(no_reply, {"action_type": "no_reply", "success": True, "result": "选择不回复", "command": ""})
-        self.assertEqual(chat.consecutive_no_reply_count, 1)
-        store_action.assert_awaited_once()
 
         llm_response = SimpleNamespace(
             reply_set=ReplySetModel(reply_data=[ReplyContent(content_type=ReplyContentType.TEXT, content="hi")]),
@@ -406,6 +447,7 @@ class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):
                     action_data={
                         "unknown_words": ["  词  ", "", 1],
                         "quote": "yes",
+                        "extra_info": "planner reference",
                         "loop_start_time": 123.0,
                     },
                     action_message=make_db_message(),
@@ -422,6 +464,8 @@ class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generate.await_args.kwargs["reply_reason"], "planner reason")
         self.assertEqual(generate.await_args.kwargs["unknown_words"], ["词"])
         self.assertEqual(generate.await_args.kwargs["reply_time_point"], 123.0)
+        self.assertFalse(generate.await_args.kwargs["enable_tool"])
+        self.assertEqual(generate.await_args.kwargs["extra_info"], "planner reference")
         self.assertEqual(chat._send_and_store_reply.await_args.kwargs["quote_message"], True)
 
         with (
