@@ -2,7 +2,9 @@
 
 ## 📖 什么是Action
 
-Action是给璃夜在回复之外提供额外功能的智能组件，**由璃夜的决策系统自主选择是否使用**，具有随机性和拟人化的调用特点。Action不是直接响应用户命令，而是让璃夜根据聊天情境智能地选择合适的动作，使其行为更加自然和真实。
+Action是给璃夜在回复之外提供额外功能的兼容智能组件，**由璃夜的决策系统自主选择是否使用**。Planner 会把 legacy `BaseAction` 转换为原生 Tool schema 提供给模型，执行时仍通过 `ActionManager` 调用现有 Action 实现。
+
+`reply` 是聊天系统内置 Tool，不是 Action；模型不发起任何 Tool Call 就表示本轮静默结束，不存在模型侧的 `no_reply` Action。Action不是直接响应用户命令，而是让璃夜根据聊天情境选择额外行为。
 
 ### Action的特点
 
@@ -84,7 +86,7 @@ Action采用**两层决策机制**来优化性能和决策质量：
 | 激活类型 | 说明 | 使用场景 |
 | ----------- | ---------------------------------------- | ---------------------- |
 | [`NEVER`](#never-激活)     | 从不激活，Action对璃夜不可见               | 临时禁用某个Action      |
-| [`ALWAYS`](#always-激活)    | 永远激活，Action总是在璃夜的候选池中        | 核心功能，如回复、不回复 |
+| [`ALWAYS`](#always-激活)    | 永远激活，Action总是在璃夜的候选池中        | 始终可用的插件动作，如状态同步 |
 | `RANDOM`    | 基于随机概率决定是否激活                   | 增加行为随机性的功能     |
 | `KEYWORD`   | 当检测到特定关键词时激活                   | 明确触发条件的功能       |
 
@@ -105,15 +107,17 @@ class DisabledAction(BaseAction):
 
 `ActionActivationType.ALWAYS` 会使得 Action 永远会被激活，即一直在 Action 候选池中
 
-这种激活方式常用于核心功能，如回复或不回复。
+这种激活方式适合需要始终出现在候选池中的插件动作，例如状态同步或持续可用的外部能力。
 
 ```python
 class AlwaysActivatedAction(BaseAction):
+    action_name = "sync_status"
+    action_description = "同步当前聊天相关状态"
     activation_type = ActionActivationType.ALWAYS  # 永远激活
     
     async def execute(self) -> Tuple[bool, str]:
-        # 执行核心功能
-        return True, "执行了核心功能"
+        # 执行插件自己的扩展功能
+        return True, "状态同步完成"
 ```
 
 #### `RANDOM` 激活

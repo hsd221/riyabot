@@ -851,9 +851,6 @@ class DebugConfig(ConfigBase):
 class ExperimentalConfig(ConfigBase):
     """实验功能配置类"""
 
-    private_tool_pipeline: bool = True
-    """私聊使用原生工具调用管线；关闭后回退到旧 Action 链路"""
-
     private_plan_style: str = ""
     """私聊说话规则，行为风格（实验性功能）"""
 

@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from src.chat.chat_tool_registry import (
+    ChatToolRegistry,
+    MAX_TOOL_CALLS_PER_ROUND,
+    REPLY_TOOL_NAME,
+    ToolExecutionResult,
+    ToolSource,
+    append_bounded_tool_result,
+    has_tool_result_capacity,
+)
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.utils.chat_message_builder import build_readable_messages_with_id, get_raw_msg_before_timestamp_with_chat
@@ -13,22 +22,16 @@ from src.chat.utils.utils import get_chat_type_and_target_info
 from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
 from src.config.config import global_config, model_config
-from src.llm_models.utils_model import LLMRequest
 from src.llm_models.payload_content import ToolCall
-from src.llm_models.payload_content.tool_option import ToolParamType
+from src.llm_models.utils_model import LLMRequest
 from src.plugin_system.base.component_types import EventType
-from src.plugin_system.apis.tool_api import get_llm_available_tool_definitions
 from src.plugin_system.core.events_manager import events_manager
-from src.plugin_system.core.global_announcement_manager import global_announcement_manager
-from src.plugin_system.core.tool_use import ToolExecutor
 
 if TYPE_CHECKING:
+    from src.chat.planner_actions.action_manager import ActionManager
     from src.common.data_models.database_data_model import DatabaseMessages
 
 
-REPLY_TOOL_NAME = "reply"
-MAX_TOOL_RESULT_CHARS = 6000
-TOOL_RESULT_TRUNCATION_MARKER = "\n[工具结果已截断]"
 logger = get_logger("planner")
 
 
@@ -46,26 +49,6 @@ class PlannerDecision:
 
 
 @dataclass(slots=True)
-class ToolExecutionResult:
-    call_id: str
-    tool_name: str
-    success: bool
-    content: str
-    terminal: bool = False
-    reply_text: str = ""
-    loop_info: dict[str, Any] | None = None
-    should_continue: bool = False
-
-    def to_prompt_data(self) -> dict[str, Any]:
-        return {
-            "tool_call_id": self.call_id,
-            "tool_name": self.tool_name,
-            "success": self.success,
-            "content": self.content,
-        }
-
-
-@dataclass(slots=True)
 class PrivateTurnResult:
     should_continue: bool = False
     reply_sent: bool = False
@@ -75,127 +58,27 @@ class PrivateTurnResult:
     tool_results: list[ToolExecutionResult] = field(default_factory=list)
 
 
-class PrivateToolRegistry:
-    """私聊 Planner 的工具目录，统一内置 reply 与插件 Tool。"""
-
-    def __init__(self, chat_id: str, executor: ToolExecutor | None = None):
-        self.chat_id = chat_id
-        self.executor = executor or ToolExecutor(chat_id=chat_id, enable_cache=False)
-
-    @staticmethod
-    def _reply_definition() -> dict[str, Any]:
-        return {
-            "name": REPLY_TOOL_NAME,
-            "description": "仅在当前私聊确实需要发送消息时调用；实际文本由 Replyer 生成。",
-            "parameters": [
-                (
-                    "target_message_id",
-                    ToolParamType.STRING,
-                    "要回应的真实消息 ID，必须来自当前聊天记录中的 m+数字标识。",
-                    True,
-                    None,
-                ),
-                (
-                    "reply_reason",
-                    ToolParamType.STRING,
-                    "需要回复的原因和应覆盖的要点，不要在这里撰写最终回复文本。",
-                    True,
-                    None,
-                ),
-            ],
-        }
-
-    def _get_plugin_definitions(self) -> list[tuple[str, dict[str, Any]]]:
-        disabled_tools = set(global_announcement_manager.get_disabled_chat_tools(self.chat_id))
-        definitions: list[tuple[str, dict[str, Any]]] = []
-        for tool_name, definition in get_llm_available_tool_definitions():
-            if tool_name == REPLY_TOOL_NAME or tool_name in disabled_tools:
-                continue
-            normalized_definition = dict(definition)
-            normalized_definition["name"] = tool_name
-            definitions.append((tool_name, normalized_definition))
-        return definitions
-
-    def get_tool_definitions(self) -> list[dict[str, Any]]:
-        return [self._reply_definition(), *[definition for _, definition in self._get_plugin_definitions()]]
-
-    @staticmethod
-    def _normalize_content(content: Any) -> str:
-        if isinstance(content, str):
-            rendered = content
-        else:
-            try:
-                rendered = json.dumps(content, ensure_ascii=False)
-            except (TypeError, ValueError):
-                rendered = str(content)
-
-        if len(rendered) <= MAX_TOOL_RESULT_CHARS:
-            return rendered
-        content_limit = MAX_TOOL_RESULT_CHARS - len(TOOL_RESULT_TRUNCATION_MARKER)
-        return rendered[:content_limit] + TOOL_RESULT_TRUNCATION_MARKER
-
-    async def execute_plugin(self, tool_call: ToolCall) -> ToolExecutionResult:
-        if tool_call.func_name == REPLY_TOOL_NAME:
-            return ToolExecutionResult(
-                call_id=tool_call.call_id,
-                tool_name=tool_call.func_name,
-                success=False,
-                content="reply 是内置终止工具，不能按插件工具执行。",
-            )
-
-        available_tools = {tool_name for tool_name, _ in self._get_plugin_definitions()}
-        if tool_call.func_name not in available_tools:
-            return ToolExecutionResult(
-                call_id=tool_call.call_id,
-                tool_name=tool_call.func_name,
-                success=False,
-                content=f"工具 {tool_call.func_name} 当前不可用或已被禁用。",
-            )
-
-        safe_call = ToolCall(
-            call_id=tool_call.call_id,
-            func_name=tool_call.func_name,
-            args=dict(tool_call.args) if isinstance(tool_call.args, dict) else {},
-        )
-        try:
-            result = await self.executor.execute_tool_call(safe_call)
-        except Exception as exc:
-            return ToolExecutionResult(
-                call_id=tool_call.call_id,
-                tool_name=tool_call.func_name,
-                success=False,
-                content=f"工具执行失败: {exc}",
-            )
-
-        if not result:
-            return ToolExecutionResult(
-                call_id=tool_call.call_id,
-                tool_name=tool_call.func_name,
-                success=False,
-                content=f"工具 {tool_call.func_name} 不可用或没有返回结果。",
-            )
-
-        content = self._normalize_content(result.get("content", ""))
-        return ToolExecutionResult(
-            call_id=tool_call.call_id,
-            tool_name=tool_call.func_name,
-            success=True,
-            content=content,
-        )
-
-
 class PrivateToolPlanner:
     """用原生工具调用决定私聊本轮是否执行工具或回复。"""
 
-    def __init__(self, chat_id: str, tool_registry: PrivateToolRegistry):
+    def __init__(
+        self,
+        chat_id: str,
+        tool_registry: ChatToolRegistry,
+        action_manager: ActionManager,
+    ):
         self.chat_id = chat_id
         self.log_prefix = f"[{get_chat_manager().get_stream_name(chat_id) or chat_id}]"
         self.tool_registry = tool_registry
+        self.action_manager = action_manager
         self.planner_llm = LLMRequest(model_set=model_config.model_task_config.planner, request_type="planner")
         self.last_obs_time_mark = 0.0
 
-    def _load_context(self) -> tuple[str, dict[str, "DatabaseMessages"], str, float]:
-        snapshot_at = time.time()
+    def _load_context(
+        self,
+        context_end_time: float | None = None,
+    ) -> tuple[str, dict[str, "DatabaseMessages"], str, float]:
+        snapshot_at = context_end_time if context_end_time is not None else time.time()
         messages = get_raw_msg_before_timestamp_with_chat(
             chat_id=self.chat_id,
             timestamp=snapshot_at,
@@ -233,7 +116,7 @@ class PrivateToolPlanner:
         bot_name = global_config.bot.nickname
         bot_aliases = f"，也可以叫你{','.join(global_config.bot.alias_names)}" if global_config.bot.alias_names else ""
         return prompt_manager.format_prompt(
-            "chat.private.tool_planner",
+            "chat.private.planner",
             time_block=f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             name_block=f"你的名字是{bot_name}{bot_aliases}，请注意哪些是你自己的发言。",
             chat_target=chat_target,
@@ -248,9 +131,11 @@ class PrivateToolPlanner:
         *,
         tool_results: list[ToolExecutionResult] | None = None,
         loop_start_time: float = 0.0,
+        context_end_time: float | None = None,
+        refresh_actions: bool = True,
     ) -> PlannerDecision:
         tool_results = tool_results or []
-        chat_content, messages_by_id, chat_target, started_at = self._load_context()
+        chat_content, messages_by_id, chat_target, started_at = self._load_context(context_end_time=context_end_time)
         prompt = self._build_prompt(
             chat_content=chat_content,
             chat_target=chat_target,
@@ -278,6 +163,15 @@ class PrivateToolPlanner:
         if modified_message and modified_message._modify_flags.modify_llm_prompt:
             prompt = str(modified_message.llm_prompt)
 
+        if refresh_actions:
+            if self.action_manager is None:
+                self.tool_registry.set_available_actions({})
+            else:
+                self.action_manager.restore_actions()
+                self.tool_registry.refresh_available_actions(
+                    self.action_manager.get_using_actions(),
+                    chat_content=chat_content,
+                )
         tool_definitions = self.tool_registry.get_tool_definitions()
         try:
             llm_started_at = time.perf_counter()
@@ -300,7 +194,13 @@ class PrivateToolPlanner:
                 tool_results=list(tool_results),
             )
 
-        normalized_calls = list(tool_calls or [])
+        all_calls = list(tool_calls or [])
+        normalized_calls = all_calls[:MAX_TOOL_CALLS_PER_ROUND]
+        if len(all_calls) > MAX_TOOL_CALLS_PER_ROUND:
+            logger.warning(
+                f"{self.log_prefix} Planner 单轮返回 {len(all_calls)} 个 Tool Call，"
+                f"仅处理前 {MAX_TOOL_CALLS_PER_ROUND} 个"
+            )
         self.last_obs_time_mark = time.time()
         logger.info(
             f"{self.log_prefix} Planner 选择工具: "
@@ -351,7 +251,7 @@ class PrivateToolPipeline:
     def __init__(
         self,
         planner: PrivateToolPlanner,
-        tool_registry: PrivateToolRegistry,
+        tool_registry: ChatToolRegistry,
         max_rounds: int = 3,
     ):
         if max_rounds < 1:
@@ -365,43 +265,76 @@ class PrivateToolPipeline:
         *,
         reply_handler: Callable[[ToolCall, PlannerDecision], Awaitable[ToolExecutionResult]],
         loop_start_time: float = 0.0,
+        context_end_time: float | None = None,
+        cycle_timers: dict[str, float] | None = None,
+        thinking_id: str = "",
     ) -> PrivateTurnResult:
         decisions: list[PlannerDecision] = []
         tool_results: list[ToolExecutionResult] = []
         last_result: ToolExecutionResult | None = None
 
-        for _ in range(self.max_rounds):
+        for round_index in range(self.max_rounds):
             decision = await self.planner.plan(
                 tool_results=list(tool_results),
                 loop_start_time=loop_start_time,
+                context_end_time=context_end_time,
+                refresh_actions=round_index == 0,
             )
             decisions.append(decision)
             if not decision.tool_calls:
                 return PrivateTurnResult(decisions=decisions, tool_results=tool_results)
 
-            plugin_calls = [call for call in decision.tool_calls if call.func_name != REPLY_TOOL_NAME]
-            reply_calls = [call for call in decision.tool_calls if call.func_name == REPLY_TOOL_NAME]
+            bounded_calls = decision.tool_calls[:MAX_TOOL_CALLS_PER_ROUND]
+            if len(decision.tool_calls) > MAX_TOOL_CALLS_PER_ROUND:
+                logger.warning(
+                    f"Planner 单轮返回 {len(decision.tool_calls)} 个 Tool Call，仅执行前 {MAX_TOOL_CALLS_PER_ROUND} 个"
+                )
+            plugin_calls = [call for call in bounded_calls if call.func_name != REPLY_TOOL_NAME]
+            reply_calls = [call for call in bounded_calls if call.func_name == REPLY_TOOL_NAME]
+
+            exclusive_call = next(
+                (
+                    call
+                    for call in plugin_calls
+                    if self.tool_registry.get_source(call.func_name) == ToolSource.ACTION
+                    and not self.tool_registry.allows_parallel(call.func_name)
+                ),
+                None,
+            )
+            if exclusive_call is not None:
+                plugin_calls = [exclusive_call]
 
             if plugin_calls:
                 for tool_call in plugin_calls:
-                    last_result = await self.tool_registry.execute_plugin(tool_call)
-                    tool_results.append(last_result)
+                    if not has_tool_result_capacity(tool_results):
+                        logger.warning("私聊 Planner 工具结果回灌达到大小上限，停止执行后续工具")
+                        break
+                    last_result = await self.tool_registry.execute(
+                        tool_call,
+                        messages_by_id=decision.messages_by_id,
+                        reasoning=decision.reasoning or decision.content,
+                        cycle_timers=cycle_timers or {},
+                        thinking_id=thinking_id,
+                        loop_start_time=loop_start_time,
+                    )
+                    append_bounded_tool_result(tool_results, last_result)
                 if reply_calls:
                     deferred_reply = reply_calls[0]
-                    tool_results.append(
+                    append_bounded_tool_result(
+                        tool_results,
                         ToolExecutionResult(
                             call_id=deferred_reply.call_id,
                             tool_name=REPLY_TOOL_NAME,
                             success=False,
                             content="同一轮包含信息工具，reply 已延后；请根据工具结果重新决定是否回复。",
-                        )
+                        ),
                     )
                 continue
 
             reply_call = reply_calls[0]
             last_result = await reply_handler(reply_call, decision)
-            tool_results.append(last_result)
-            if last_result.terminal:
+            append_bounded_tool_result(tool_results, last_result)
+            if last_result.terminal or last_result.should_continue:
                 return PrivateTurnResult(
                     should_continue=last_result.should_continue,
                     reply_sent=last_result.success,

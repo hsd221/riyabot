@@ -1,5 +1,5 @@
 [inner]
-version = "7.5.4"
+version = "7.5.5"
 
 #----以下是给开发人员阅读的，如果你只是部署了璃夜，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -322,9 +322,6 @@ trust_xff = false # 是否启用X-Forwarded-For代理解析（默认false）
 secure_cookie = false # 是否启用安全Cookie（仅通过HTTPS传输，默认false）
 
 [experimental] #实验性功能
-# 私聊使用 Planner 原生工具调用链路；关闭后回退到旧 Action 链路
-private_tool_pipeline = true
-
 # 璃夜私聊的说话规则，行为风格（实验性功能）
 private_plan_style = """
 1.逐一判断当前提供的行为选项是否真的符合聊天内容，只执行有直接依据的选项

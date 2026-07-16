@@ -17,12 +17,17 @@
 4. **生命周期（`status`）**：`active` 仍在正式运行；`fallback` 只服务配置回退；`legacy` 仅保留旧架构兼容，不应作为新代码范例。
 5. **变体（`variants` / `###SECTION`）**：同一任务的固定变体使用文件内命名分段；运行时 ID 为“文件 ID + 分段名”。
 
-当前聊天主链路：
+当前消息主链路恰好由四个文件承担：
 
-- 群聊：`chat.group.planner` 先选择 `no_reply`、插件 action 或 `reply`；只有选择 `reply` 时才进入 `chat.group.reply.*`。
-- 私聊：`chat.private.tool_planner` 可直接静默结束、执行一个或多个插件工具，或调用内置 `reply`；进入 `reply` 后使用 `chat.private.reply`。
-- 私聊回退：`chat.private.planner` + `chat.private.action`，仅在 `experimental.private_tool_pipeline = false` 时使用；`chat.private.reply_self` 也只服务这条旧 Action 链路的续写场景。
-- `chat.shared.expressor` 是 `GeneratorAPI.rewrite_reply()` 显式使用的插件回复重写模板，不是消息主链路的自动后处理。
+- 群聊规划：`chat.group.planner`。Planner 可调用原生插件 Tool、由 legacy Action 适配的 Tool 或内置 `reply`；无 Tool Call 即保持静默并结束本轮。
+- 群聊回复：`chat.group.reply.*`。只有 Planner 调用 `reply` 时才进入 `light` 或 `standard` 分段。
+- 私聊规划：`chat.private.planner`。Planner 可先执行原生插件 Tool 或由 legacy Action 适配的 Tool 并读取结果，再决定是否调用内置 `reply`；无 Tool Call 即结束本轮。
+- 私聊回复：`chat.private.reply.default`。`chat.private.reply.self` 与它同属一个文件，只保留给显式续写兼容调用，不属于 Planner 自动消息主链。
+
+两个 Planner 的可用工具定义、参数 schema 和使用说明通过模型请求的原生 `tools` 参数传入，正文不再拼接 Action JSON fragment。legacy `BaseAction` 在模型侧也只是 Tool，仅在执行边界通过 `ActionManager.create_action(...).execute()` 保留旧插件兼容。`reply` 也是内置 Tool；模型普通文本不会发送给用户，所有实际行为都以 Tool Call 表达。
+
+- `chat.shared.expressor` 只由 `GeneratorAPI.rewrite_reply()` 显式调用，不是消息主链路的自动后处理。
+- `shared.tool_executor` 只由 `ToolExecutor.execute_from_chat_message()` 等显式工具判断 API 调用，不是四文件主链中的 Planner 或 Replyer。
 - `chat.private.pfc.*` 是旧 PFC 状态机模板，不属于当前私聊主链路。
 
 ## 目录职责
@@ -67,7 +72,7 @@ variants: light, standard
 | `plain_text` | 只返回自然语言正文，不附加结构化包裹。 |
 | `strict_json` | 只返回合法 JSON 对象或数组。 |
 | `reasoned_jsonl` | 先给简短理由，再在 JSON 代码块中逐行输出对象。 |
-| `native_tool` | 主要结果通过模型原生工具调用表达；无调用时按正文约定返回。 |
+| `native_tool` | 主要结果通过模型原生 Tool Call 表达；工具定义与参数 schema 由请求的 `tools` 参数提供，无调用时按正文约定结束或静默。 |
 | `label` | 只返回模板列出的单个标签或短决策值。 |
 | `transcript` | 只返回忠实音频转写。 |
 | `mixed` | 同一文件的不同 `variants` 使用不同输出协议，必须查看具体分段。 |
@@ -98,7 +103,7 @@ variants: light, standard
 | `persona_text` | 旧 PFC 链路使用的人格说明；语义接近 `identity`，但由 PFC 组件独立构建。 |
 | `chat_prompt` | 针对当前聊天配置的附加人设或说话规则；未配置时为空。 |
 | `reply_style` | 当前选中的回复风格，来自 `personality.reply_style` 或多风格随机选择结果。 |
-| `plan_style` | 规划器行为风格；群聊来自 `personality.plan_style`，私聊来自 `experimental.private_plan_style`。 |
+| `plan_style` | 对应聊天 Planner 的行为风格，由调用方根据当前配置构建。 |
 | `moderation_prompt` | 从 `shared.moderation.*` 注入的内容边界片段。 |
 | `keywords_reaction_prompt` | 回复器根据配置命中结果生成的候选反应提示，可能含目标消息的正则捕获文本；没有匹配规则时为空，并始终放在不可信输入层。 |
 | `expression_habits_block` | 表达学习器选出的候选表达习惯与行为参考，只是低优先级参考数据。 |
@@ -111,9 +116,8 @@ variants: light, standard
 | `sender_name` | 私聊对象的显示名，用于区分机器人与对方的发言。 |
 | `chat_target` | 当前聊天对象或由调用方拼好的聊天场景引导文本；具体形式由模板调用点决定。 |
 | `chat_target_2` | `chat.shared.expressor` 使用的简短场景短语，例如“正在群里聊天”或“和某人聊天”。 |
-| `chat_context_description` | 对聊天类型和对象的简短描述，例如“你现在正在一个群聊中”。 |
-| `chat_content` | 私聊原生工具 Planner 读取的带真实消息 ID 的聊天记录。 |
-| `chat_content_block` | Action Planner 使用的带消息 ID、动作标记等信息的完整聊天块。 |
+| `chat_content` | 私聊原生 Tool Planner 读取的带真实消息 ID 的聊天记录。 |
+| `chat_content_block` | 群聊原生 Tool Planner 使用的带消息 ID、动作标记等信息的完整聊天块。 |
 | `chat_history` | 供工具或记忆判断使用的最近聊天历史；是否预先做边界转义由调用方决定，模板始终把它视为不可信数据。 |
 | `chat_history_text` | 旧 PFC 组件使用的可读聊天历史，可能附带“新消息”分隔说明。 |
 | `chat_info` | Expressor 重写时使用的较短聊天上下文。 |
@@ -125,7 +129,7 @@ variants: light, standard
 | `context_block` | 表达反馈判定器读取的后续对话片段。 |
 | `chat_context` | 黑话解释整理器使用的当前聊天上下文。 |
 | `chat_observe_info` | 表达情境选择器使用的当前聊天观察摘要。 |
-| `target` | `chat.private.reply_self` 中机器人自己刚发送、需要续接的消息。 |
+| `target` | `chat.private.reply.self` 中机器人自己刚发送、需要续接的消息。 |
 | `target_message` | 当前要处理的目标消息正文；工具和记忆判断模板会与 `sender` 配对展示。 |
 | `reply_target_block` | 回复器根据发送者、文字和图片内容构建的完整“本轮回复目标”说明。 |
 | `planner_reasoning` | Planner 传给 Replyer 的回复原因或回答重点，不是最终回复文本。 |
@@ -139,9 +143,9 @@ variants: light, standard
 
 | 占位符 | 含义与来源 |
 | --- | --- |
-| `extra_info_block` | 插件、事件或调用方提供的额外参考信息；没有额外信息时为空。 |
-| `tool_info_block` | Replyer 可参考的工具结果文本，不代表新的高优先级指令。 |
-| `tool_results_block` | 私聊原生工具循环中本轮已执行工具的 JSON 结果列表；首轮为“无”。 |
+| `extra_info_block` | Planner 已完成的查询结果、插件、事件或调用方提供的额外参考信息；没有额外信息时为空。 |
+| `tool_info_block` | 显式 ToolExecutor API 提供给 Replyer 的兼容工具结果；四文件主链关闭 Replyer 二次工具调度时通常为空。 |
+| `tool_results_block` | 私聊原生 Tool Planner 循环中本轮已执行工具的 JSON 结果列表；首轮为“无”。 |
 | `knowledge_prompt` | 旧知识查询接口返回并格式化后的候选知识文本。 |
 | `knowledge_info_str` | 旧 PFC 链路使用的低优先级记忆证据块。 |
 | `memory_context_block` | 群聊 Planner 使用的短记忆候选证据。 |
@@ -151,18 +155,11 @@ variants: light, standard
 | `topic_summary` | 记忆 L1 生成的话题摘要，只用于帮助理解，不是新增事实来源。 |
 | `scene_profile` | 行为学习器使用的场景画像，只帮助定位互动场景。 |
 
-### Action、规划历史与旧 PFC 状态
+### 工具、规划历史与旧 PFC 状态
 
 | 占位符 | 含义与来源 |
 | --- | --- |
-| `action_name` | 插件 action 的注册名称，也是输出 JSON 中的 `action` 值。 |
-| `action_description` | 插件声明的 action 功能描述。 |
-| `action_require` | 插件声明的全部使用条件，已格式化为列表文本。 |
-| `action_parameters` | 插件 action 参数名及说明，已拼成 JSON 字段示例片段。 |
-| `parallel_text` | 群聊 action 是否允许与其他 action 并行的说明；允许并行时可为空。 |
-| `action_options_text` | 当前激活且可供 Planner 选择的插件 action 定义集合。 |
-| `reply_action_example` | 根据是否启用引用功能，从 `chat.group.reply_action.*` 取出的 reply 字段契约。 |
-| `actions_before_now_block` | Planner 最近的 action 选择、执行结果或思考记录，用于防止重复动作。 |
+| `actions_before_now_block` | 群聊 Planner 最近的工具选择、执行结果或思考记录，用于防止重复动作。 |
 | `action_history_summary` | 旧 PFC ActionPlanner 使用的近期行动状态摘要。 |
 | `action_history_text` | 旧 PFC GoalAnalyzer 使用的既往行动可读文本。 |
 | `last_action_context` | 旧 PFC 最近一次行动的详细规划、执行状态与失败原因。 |

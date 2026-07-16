@@ -152,8 +152,8 @@ async def test_media_background_enrichment() -> None:
             raise AssertionError("cached media should not be analyzed")
 
         bg._analyze_media = unexpected_analyze
-        bg._load_cached_media_result = (
-            lambda kind, media_hash, media_data=None: "[表情包：cached]" if kind == "emoji" else None
+        bg._load_cached_media_result = lambda kind, media_hash, media_data=None: (
+            "[表情包：cached]" if kind == "emoji" else None
         )
         bg.schedule_emoji_description_task("ZW1vamk=", "msg-cached-media")
 
@@ -371,7 +371,9 @@ def test_turn_scheduler() -> None:
     assert empty.sleep_seconds == 0.2
 
     mentioned = SimpleNamespace(is_mentioned=True, is_at=False)
-    decision = scheduler.decide_group_turn(stream_id="stream", recent_messages=[mentioned], consecutive_no_reply_count=0)
+    decision = scheduler.decide_group_turn(
+        stream_id="stream", recent_messages=[mentioned], consecutive_no_reply_count=0
+    )
     assert decision.should_observe is True
     assert decision.force_reply_message is mentioned
 
@@ -487,9 +489,7 @@ async def test_webui_send_uses_components() -> None:
         sender_module.get_webui_chat_broadcaster = lambda: (FakeBroadcaster(), "webui")
         assert await sender_module._send_message(message, show_log=False) is True
         assert FakeBroadcaster.payload["message_type"] == "rich"
-        assert FakeBroadcaster.payload["segments"] == [
-            {"type": "image", "data": "data:image/png;base64,aW1hZ2U="}
-        ]
+        assert FakeBroadcaster.payload["segments"] == [{"type": "image", "data": "data:image/png;base64,aW1hZ2U="}]
     finally:
         sender_module.get_webui_chat_broadcaster = original_get_broadcaster
 
@@ -565,7 +565,6 @@ async def test_event_non_intercept_task_cleanup() -> None:
 
 
 async def test_planner_hook_prompt_applied() -> None:
-    import src.chat.brain_chat.brain_planner as brain_planner_module
     import src.chat.planner_actions.planner as group_planner_module
 
     async def run_group_planner_case() -> None:
@@ -575,7 +574,6 @@ async def test_planner_hook_prompt_applied() -> None:
         planner.log_prefix = "[stream-plan]"
         planner.last_obs_time_mark = 0.0
         planner.plan_log = []
-        planner.get_necessary_info = lambda: (True, None, {})
         planner._filter_actions_by_activation_type = lambda available_actions, chat_content_block: available_actions
 
         async def build_prompt(**kwargs):
@@ -610,50 +608,7 @@ async def test_planner_hook_prompt_applied() -> None:
             group_planner_module.events_manager.handle_mai_events = original_events
             group_planner_module.PlanReplyLogger.log_plan = original_log_plan
 
-    async def run_brain_planner_case() -> None:
-        captured = {}
-        planner = brain_planner_module.BrainPlanner.__new__(brain_planner_module.BrainPlanner)
-        planner.chat_id = "stream-plan"
-        planner.log_prefix = "[stream-plan]"
-        planner.last_obs_time_mark = 0.0
-        planner.plan_log = []
-        planner.get_necessary_info = lambda: (False, None, {})
-        planner._filter_actions_by_activation_type = lambda available_actions, chat_content_block: available_actions
-
-        async def build_prompt(**kwargs):
-            return "original brain prompt", []
-
-        async def execute_prompt(**kwargs):
-            captured["brain_prompt"] = kwargs["prompt"]
-            return "reason", [], "raw", None, 0.0
-
-        planner.build_planner_prompt = build_prompt
-        planner._execute_main_planner = execute_prompt
-
-        modified = MaiMessages(llm_prompt="original brain prompt")
-        modified.modify_llm_prompt("modified brain prompt", suppress_warning=True)
-
-        original_get_raw = brain_planner_module.get_raw_msg_before_timestamp_with_chat
-        original_build_readable = brain_planner_module.build_readable_messages_with_id
-        original_events = brain_planner_module.events_manager.handle_mai_events
-        original_log_plan = brain_planner_module.PlanReplyLogger.log_plan
-        try:
-            brain_planner_module.get_raw_msg_before_timestamp_with_chat = lambda **kwargs: []
-            brain_planner_module.build_readable_messages_with_id = lambda **kwargs: ("", [])
-            brain_planner_module.events_manager.handle_mai_events = lambda *args, **kwargs: asyncio.sleep(
-                0, result=(True, modified)
-            )
-            brain_planner_module.PlanReplyLogger.log_plan = lambda **kwargs: None
-            await planner.plan(available_actions={})
-            assert captured["brain_prompt"] == "modified brain prompt"
-        finally:
-            brain_planner_module.get_raw_msg_before_timestamp_with_chat = original_get_raw
-            brain_planner_module.build_readable_messages_with_id = original_build_readable
-            brain_planner_module.events_manager.handle_mai_events = original_events
-            brain_planner_module.PlanReplyLogger.log_plan = original_log_plan
-
     await run_group_planner_case()
-    await run_brain_planner_case()
 
 
 def test_inbound_hook_application() -> None:
@@ -783,11 +738,13 @@ async def test_command_hooks() -> None:
         bot_module.component_registry = FakeComponentRegistry()
         bot_module.global_announcement_manager = FakeAnnouncementManager()
 
-        before_modified = MaiMessages(additional_data={
-            "execute_command": False,
-            "response": "blocked",
-            "continue_process": False,
-        })
+        before_modified = MaiMessages(
+            additional_data={
+                "execute_command": False,
+                "response": "blocked",
+                "continue_process": False,
+            }
+        )
         before_events = FakeEvents(before_modified=before_modified)
         bot_module.events_manager = before_events
         FakeCommand.executed = False

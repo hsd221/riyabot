@@ -84,6 +84,9 @@ class UnifiedPromptManagerTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(legacy_id=legacy_id):
                 self.assertEqual(manager.get_prompt(legacy_id), manager.get_prompt(canonical_id))
 
+    def test_removed_brain_planner_alias_is_not_mapped_to_incompatible_template(self) -> None:
+        self.assertNotIn("brain_planner_prompt_react", LEGACY_PROMPT_ALIASES)
+
     def test_manager_exposes_file_metadata_for_canonical_sections_and_legacy_aliases(self) -> None:
         manager = PromptManager(aliases=LEGACY_PROMPT_ALIASES)
         manager.load_prompts()
@@ -214,8 +217,7 @@ global
             root = Path(tmpdir)
             prompt_path = root / "multi.prompt"
             prompt_path.write_text(
-                "###SECTION: one\nONE\n###END_SECTION###\n"
-                "###SECTION: two\nTWO\n###END_SECTION###\n",
+                "###SECTION: one\nONE\n###END_SECTION###\n###SECTION: two\nTWO\n###END_SECTION###\n",
                 encoding="utf-8",
             )
 

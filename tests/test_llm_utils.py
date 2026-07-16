@@ -379,6 +379,38 @@ class LLMRequestHelpersTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(raised.exception.original_exception, EmptyResponseException)
 
+    async def test_generate_response_allows_empty_result_when_requested(self) -> None:
+        class EmptyClient(CapturingClient):
+            async def get_response(self, **kwargs):
+                self.calls.append(("response", kwargs))
+                raise EmptyResponseException("empty")
+
+        task = TaskConfig(
+            model_list=["model-a"],
+            max_tokens=64,
+            temperature=0.2,
+            selection_strategy="balance",
+        )
+        request = LLMRequest(task, request_type="planner")
+        provider = APIProvider(
+            name="provider-a",
+            base_url="https://api.example.test",
+            api_key="secret",
+            max_retry=2,
+            retry_interval=0,
+        )
+        model = ModelInfo(model_identifier="a", name="model-a", api_provider="provider-a")
+        client = EmptyClient()
+
+        with patch.object(request, "_select_model", return_value=(model, provider, client)):
+            content, (reasoning, model_name, tool_calls) = await request.generate_response_async(
+                "stay silent",
+                raise_when_empty=False,
+            )
+
+        self.assertEqual((content, reasoning, model_name, tool_calls), ("", "", "model-a", None))
+        self.assertEqual(len(client.calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

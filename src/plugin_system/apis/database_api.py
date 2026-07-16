@@ -340,11 +340,11 @@ async def store_action_info(
         record = await database_api.store_action_info(
             chat_stream=chat_stream,
             action_build_into_prompt=True,
-            action_prompt_display="执行了回复动作",
+            action_prompt_display="同步了当前状态",
             action_done=True,
             thinking_id="thinking_123",
-            action_data={"content": "Hello"},
-            action_name="reply_action"
+            action_data={"status": "online"},
+            action_name="sync_status"
         )
     """
     try:

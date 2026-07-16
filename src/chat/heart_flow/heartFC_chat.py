@@ -92,6 +92,7 @@ class HeartFChatting:
 
         self.action_manager = ActionManager()
         self.action_planner = ActionPlanner(chat_id=self.stream_id, action_manager=self.action_manager)
+        self.tool_registry = self.action_planner.tool_registry
         self.action_modifier = ActionModifier(action_manager=self.action_manager, chat_id=self.stream_id)
 
         # 循环控制内部状态
@@ -362,6 +363,8 @@ class HeartFChatting:
             logger.debug(
                 f"{self.log_prefix} 决定执行{len(action_to_use_info)}个动作: {' '.join([a.action_type for a in action_to_use_info])}"
             )
+            if not action_to_use_info:
+                self.consecutive_no_reply_count += 1
 
             # 3. 并行执行所有动作
             action_tasks = [
@@ -691,29 +694,7 @@ class HeartFChatting:
         """执行单个动作的通用函数"""
         try:
             with Timer(f"动作{action_planner_info.action_type}", cycle_timers):
-                # 直接当场执行no_reply逻辑
-                if action_planner_info.action_type == "no_reply":
-                    # 直接处理no_reply逻辑，不再通过动作系统
-                    reason = action_planner_info.reasoning or "选择不回复"
-                    # logger.info(f"{self.log_prefix} 选择不回复，原因: {reason}")
-
-                    # 增加连续 no_reply 计数
-                    self.consecutive_no_reply_count += 1
-
-                    await database_api.store_action_info(
-                        chat_stream=self.chat_stream,
-                        action_build_into_prompt=False,
-                        action_prompt_display=reason,
-                        action_done=True,
-                        thinking_id=thinking_id,
-                        action_data={},
-                        action_name="no_reply",
-                        action_reasoning=reason,
-                    )
-
-                    return {"action_type": "no_reply", "success": True, "result": "选择不回复", "command": ""}
-
-                elif action_planner_info.action_type == "reply":
+                if action_planner_info.action_type == "reply":
                     # 直接当场执行reply逻辑
                     self.questioned = False
                     # 刷新主动发言状态
@@ -745,6 +726,7 @@ class HeartFChatting:
                     # 从 Planner 的 action_data 中提取未知词语列表（仅在 reply 时使用）
                     unknown_words = None
                     quote_message = None
+                    extra_info = ""
                     if isinstance(action_planner_info.action_data, dict):
                         uw = action_planner_info.action_data.get("unknown_words")
                         if isinstance(uw, list):
@@ -768,6 +750,10 @@ class HeartFChatting:
                             elif isinstance(qm, (int, float)):
                                 quote_message = bool(qm)
 
+                        raw_extra_info = action_planner_info.action_data.get("extra_info")
+                        if isinstance(raw_extra_info, str):
+                            extra_info = raw_extra_info
+
                         logger.info(f"{self.log_prefix} {qm}引用回复设置: {quote_message}")
 
                     success, llm_response = await generator_api.generate_reply(
@@ -776,8 +762,9 @@ class HeartFChatting:
                         available_actions=available_actions,
                         chosen_actions=chosen_action_plan_infos,
                         reply_reason=planner_reasoning,
+                        extra_info=extra_info,
                         unknown_words=unknown_words,
-                        enable_tool=global_config.tool.enable_tool,
+                        enable_tool=False,
                         request_type="replyer",
                         from_plugin=False,
                         reply_time_point=action_planner_info.action_data.get("loop_start_time", time.time()),
@@ -830,6 +817,15 @@ class HeartFChatting:
 
                 else:
                     # 执行普通动作
+                    if not self.tool_registry.is_available(action_planner_info.action_type):
+                        logger.info(
+                            f"{self.log_prefix} Action {action_planner_info.action_type} 在执行前已被禁用，跳过"
+                        )
+                        return {
+                            "action_type": action_planner_info.action_type,
+                            "success": False,
+                            "result": f"Action {action_planner_info.action_type} 当前已被禁用。",
+                        }
                     with Timer("动作执行", cycle_timers):
                         success, result = await self._handle_action(
                             action=action_planner_info.action_type,

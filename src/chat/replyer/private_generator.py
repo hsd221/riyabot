@@ -878,7 +878,7 @@ class PrivateReplyer:
         # 使用统一的 is_bot_self 函数判断是否是机器人自己（支持多平台，包括 WebUI）
         if is_bot_self(platform, user_id):
             return prompt_manager.format_prompt(
-                "chat.private.reply_self",
+                "chat.private.reply.self",
                 expression_habits_block=expression_habits_block,
                 tool_info_block=tool_info,
                 knowledge_prompt=prompt_info,
@@ -900,7 +900,7 @@ class PrivateReplyer:
             ), selected_expressions
         else:
             return prompt_manager.format_prompt(
-                "chat.private.reply",
+                "chat.private.reply.default",
                 expression_habits_block=expression_habits_block,
                 tool_info_block=tool_info,
                 knowledge_prompt=prompt_info,
