@@ -41,7 +41,6 @@ services:
       - ./docker-config/mmc/.env:/RiyaBot/.env # 持久化env配置文件
       - ./docker-config/mmc:/RiyaBot/config # 持久化bot配置文件
       - ./docker-config/adapters:/RiyaBot/adapters-config # adapter配置文件夹映射
-      - ./data/RiyaBot/riyabot_statistics.html:/RiyaBot/riyabot_statistics.html #统计数据输出
       - ./data/RiyaBot:/RiyaBot/data # 共享目录
       - ./data/RiyaBot/plugins:/RiyaBot/plugins # 插件目录
       - ./data/RiyaBot/logs:/RiyaBot/logs # 日志目录

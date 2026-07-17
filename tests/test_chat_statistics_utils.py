@@ -15,7 +15,6 @@ class FakeQuery(list):
 def make_task() -> statistic.StatisticOutputTask:
     task = object.__new__(statistic.StatisticOutputTask)
     task.name_mapping = {}
-    task.record_file_path = "stats.html"
     task.stat_period = []
     return task
 
@@ -47,21 +46,35 @@ def make_stats() -> dict:
 
 
 class StatisticFormattingTest(unittest.TestCase):
-    def test_statistics_task_outputs_console_without_generating_html(self) -> None:
+    def test_legacy_static_html_report_generator_is_removed(self) -> None:
+        html_report_methods = (
+            "_generate_html_report",
+            "_generate_chart_data",
+            "_collect_interval_data",
+            "_generate_chart_tab",
+            "_generate_metrics_data",
+            "_collect_metrics_interval_data",
+            "_generate_metrics_tab",
+            "_get_chat_display_name_from_id",
+        )
+
+        for task_type in (statistic.StatisticOutputTask, statistic.AsyncStatisticOutputTask):
+            for method_name in html_report_methods:
+                self.assertFalse(hasattr(task_type, method_name), method_name)
+
+    def test_statistics_task_outputs_console_summary(self) -> None:
         task = make_task()
         collected = {"last_hour": make_stats()}
 
         with (
             patch.object(task, "_collect_all_statistics", return_value=collected),
             patch.object(task, "_statistic_console_output") as console_output,
-            patch.object(task, "_generate_html_report") as html_output,
         ):
             import asyncio
 
             asyncio.run(task.run())
 
         console_output.assert_called_once()
-        html_output.assert_not_called()
 
     def test_online_time_large_number_and_stat_formatters_cover_non_empty_and_empty_paths(self) -> None:
         self.assertEqual(statistic._format_online_time(59), "0分钟59秒")
@@ -70,7 +83,6 @@ class StatisticFormattingTest(unittest.TestCase):
         self.assertEqual(statistic._format_large_number(9999), "9999")
         self.assertEqual(statistic._format_large_number(10000), "10K")
         self.assertEqual(statistic._format_large_number(12345), "12K")
-        self.assertIn("<span", statistic._format_large_number(9999.5 + 1, html=True))
         self.assertEqual(statistic._format_large_number(12.5), "12.5")
         self.assertEqual(statistic._format_large_number(12.0), "12")
 
@@ -101,30 +113,11 @@ class StatisticFormattingTest(unittest.TestCase):
         self.assertEqual(task._format_module_classified_stat(empty), "")
         self.assertEqual(task._format_chat_stat(empty), "")
 
-    def test_convert_defaultdict_and_chat_display_name_fallbacks(self) -> None:
+    def test_convert_defaultdict_to_dict_recursively(self) -> None:
         task = make_task()
         nested = defaultdict(lambda: defaultdict(int))
         nested["outer"]["inner"] = 2
         self.assertEqual(task._convert_defaultdict_to_dict(nested), {"outer": {"inner": 2}})
-
-        fake_manager = SimpleNamespace(
-            streams={
-                "group": SimpleNamespace(
-                    group_info=SimpleNamespace(group_name=" Test Group "),
-                    user_info=None,
-                ),
-                "private": SimpleNamespace(
-                    group_info=None,
-                    user_info=SimpleNamespace(user_nickname=" Alice "),
-                ),
-            }
-        )
-        with patch("src.chat.message_receive.chat_stream.get_chat_manager", return_value=fake_manager):
-            self.assertEqual(task._get_chat_display_name_from_id("group"), "Test Group")
-            self.assertEqual(task._get_chat_display_name_from_id("private"), "Alice")
-            self.assertEqual(task._get_chat_display_name_from_id("g123"), "群聊123")
-            self.assertEqual(task._get_chat_display_name_from_id("u456"), "用户456")
-            self.assertEqual(task._get_chat_display_name_from_id("raw"), "raw")
 
 
 class StatisticCollectionTest(unittest.TestCase):
@@ -275,78 +268,6 @@ class StatisticCollectionTest(unittest.TestCase):
         self.assertEqual(collected["last_hour"][statistic.TOTAL_REPLY_CNT], 1)
         self.assertEqual(task.name_mapping["g100"][0], "Group")
         self.assertEqual(task.name_mapping["uuser-2"][0], "Bob")
-
-    def test_interval_and_metric_collectors_bucket_records_into_time_series(self) -> None:
-        now = datetime(2026, 1, 2, 12, 0, 0)
-        task = make_task()
-        llm_records = FakeQuery(
-            [
-                SimpleNamespace(
-                    timestamp=now - timedelta(minutes=90),
-                    cost=1.0,
-                    prompt_tokens=10,
-                    completion_tokens=20,
-                    model_assign_name="alias-a",
-                    model_name="model-a",
-                    request_type="replyer.main",
-                ),
-                SimpleNamespace(
-                    timestamp=now - timedelta(minutes=30),
-                    cost=2.0,
-                    prompt_tokens=20,
-                    completion_tokens=30,
-                    model_assign_name="",
-                    model_name="model-b",
-                    request_type="planner",
-                ),
-            ]
-        )
-        messages = FakeQuery(
-            [
-                SimpleNamespace(
-                    time=(now - timedelta(minutes=90)).timestamp(),
-                    chat_info_group_id="100",
-                    chat_info_group_name="Group",
-                    user_id="bot",
-                    user_nickname="Mai",
-                ),
-                SimpleNamespace(
-                    time=(now - timedelta(minutes=30)).timestamp(),
-                    chat_info_group_id=None,
-                    chat_info_group_name=None,
-                    user_id="user-1",
-                    user_nickname="Alice",
-                ),
-            ]
-        )
-        online = FakeQuery(
-            [
-                SimpleNamespace(
-                    start_timestamp=now - timedelta(hours=2),
-                    end_timestamp=now,
-                )
-            ]
-        )
-
-        with (
-            patch.object(statistic.LLMUsage, "select", return_value=llm_records),
-            patch.object(statistic.Messages, "select", return_value=messages),
-            patch.object(statistic.OnlineTime, "select", return_value=online),
-            patch.object(statistic.global_config, "bot", SimpleNamespace(qq_account="bot")),
-        ):
-            interval_data = task._collect_interval_data(now, hours=2, interval_minutes=60)
-            metrics = task._collect_metrics_interval_data(now, hours=2, interval_hours=1)
-
-        self.assertEqual(interval_data["total_cost_data"], [1.0, 2.0, 0])
-        self.assertEqual(interval_data["cost_by_model"]["alias-a"], [1.0, 0, 0])
-        self.assertEqual(interval_data["cost_by_module"]["planner"], [0, 2.0, 0])
-        self.assertEqual(interval_data["message_by_chat"]["Group"], [1, 0, 0])
-        self.assertEqual(interval_data["message_by_chat"]["Alice"], [0, 1, 0])
-
-        self.assertEqual(metrics["cost_per_100_messages"], [100.0, 200.0, 0.0])
-        self.assertEqual(metrics["cost_per_hour"], [1.0, 2.0, 0.0])
-        self.assertEqual(metrics["tokens_per_hour"], [30.0, 50.0, 0.0])
-        self.assertEqual(metrics["cost_per_100_replies"], [100.0, 0.0, 0.0])
 
 
 if __name__ == "__main__":

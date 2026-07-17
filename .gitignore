@@ -54,7 +54,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 maibot_statistics.html
-riyabot_statistics.html
 mongodb
 napcat
 run_dev.bat
