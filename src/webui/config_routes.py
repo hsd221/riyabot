@@ -40,7 +40,6 @@ from src.config.official_configs import (
     MemoryConfig,
     DebugConfig,
     VoiceConfig,
-    DreamConfig,
 )
 from src.config.api_ada_configs import (
     ModelTaskConfig,
@@ -83,10 +82,9 @@ BOT_SECTION_SCHEMAS = {
     "memory": MemoryConfig,
     "debug": DebugConfig,
     "voice": VoiceConfig,
-    "dream": DreamConfig,
 }
 
-LEGACY_BOT_SECTIONS = {"mood", "jargon"}
+LEGACY_BOT_SECTIONS = {"dream", "jargon", "mood"}
 MAX_CONFIG_FILE_BYTES = 2 * 1024 * 1024
 MAX_ADAPTER_CONFIG_BYTES = 1024 * 1024
 _MAX_ADAPTER_PATH_LENGTH = 4096
@@ -402,7 +400,6 @@ async def get_config_section_schema(section_name: str, _auth: bool = Depends(req
     - memory: MemoryConfig
     - debug: DebugConfig
     - voice: VoiceConfig
-    - dream: DreamConfig
     - model_task_config: ModelTaskConfig
     - api_provider: APIProvider
     - model_info: ModelInfo

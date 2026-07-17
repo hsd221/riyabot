@@ -11,7 +11,6 @@ import {
   TelemetrySection,
   WebUISection,
   ExperimentalSection,
-  DreamSection,
   FeaturesSection,
   ExpressionSection,
   BehaviorSection,
@@ -42,7 +41,6 @@ import {
   BrainCircuit,
   Check,
   ChevronRight,
-  CloudMoon,
   Filter,
   FlaskConical,
   Layers3,
@@ -85,7 +83,6 @@ import type {
   TelemetryConfig,
   WebUIConfig,
   ExperimentalConfig,
-  DreamConfig,
   ConfigSectionName,
 } from './bot/types'
 
@@ -116,7 +113,6 @@ type BotConfigTab =
   | 'voice'
   | 'service'
   | 'experimental'
-  | 'dream'
   | 'other'
 
 type ConfigTabItem = {
@@ -138,7 +134,7 @@ const CONFIG_TABS: ConfigTabItem[] = [
   {
     value: 'personality',
     label: '人格',
-    description: '特质、风格与状态',
+    description: '特质与表达风格',
     Icon: UserRound,
     color: 'ios-symbol-purple',
   },
@@ -206,13 +202,6 @@ const CONFIG_TABS: ConfigTabItem[] = [
     color: 'ios-symbol-purple',
   },
   {
-    value: 'dream',
-    label: 'Dream',
-    description: '梦境调度设置',
-    Icon: CloudMoon,
-    color: 'ios-symbol-teal',
-  },
-  {
     value: 'other',
     label: '其他',
     description: '日志与调试选项',
@@ -261,7 +250,6 @@ export function BotConfigPage() {
   const [telemetryConfig, setTelemetryConfig] = useState<TelemetryConfig | null>(null)
   const [webuiConfig, setWebuiConfig] = useState<WebUIConfig | null>(null)
   const [experimentalConfig, setExperimentalConfig] = useState<ExperimentalConfig | null>(null)
-  const [dreamConfig, setDreamConfig] = useState<DreamConfig | null>(null)
 
   // 用于标记初始加载和配置缓存
   const initialLoadRef = useRef(true)
@@ -282,11 +270,6 @@ export function BotConfigPage() {
     setPersonalityConfig({
       personality: personality.personality ?? '',
       reply_style: personality.reply_style ?? '',
-      multiple_reply_style: personality.multiple_reply_style ?? [],
-      multiple_probability: personality.multiple_probability ?? 0,
-      plan_style: personality.plan_style ?? '',
-      states: personality.states ?? [],
-      state_probability: personality.state_probability ?? 0,
     })
 
     const chat = (config.chat ?? {}) as Partial<ChatConfig>
@@ -407,21 +390,8 @@ export function BotConfigPage() {
     })
 
     const experimental = (config.experimental ?? {}) as Partial<ExperimentalConfig>
-    const legacyPersonality = (config.personality ?? {}) as Partial<ExperimentalConfig>
     setExperimentalConfig({
-      private_plan_style:
-        experimental.private_plan_style ?? legacyPersonality.private_plan_style ?? '',
       chat_prompts: experimental.chat_prompts ?? [],
-    })
-
-    const dream = (config.dream ?? {}) as Partial<DreamConfig>
-    setDreamConfig({
-      interval_minutes: dream.interval_minutes ?? 30,
-      max_iterations: dream.max_iterations ?? 20,
-      first_delay_seconds: dream.first_delay_seconds ?? 60,
-      dream_send: dream.dream_send ?? '',
-      dream_time_ranges: dream.dream_time_ranges ?? [],
-      dream_visible: dream.dream_visible ?? false,
     })
   }, [])
 
@@ -452,7 +422,6 @@ export function BotConfigPage() {
       telemetry: telemetryConfig,
       webui: webuiConfig,
       experimental: experimentalConfig,
-      dream: dreamConfig,
     }
   }, [
     botConfig,
@@ -475,7 +444,6 @@ export function BotConfigPage() {
     telemetryConfig,
     webuiConfig,
     experimentalConfig,
-    dreamConfig,
   ])
 
   // 加载配置
@@ -574,7 +542,6 @@ export function BotConfigPage() {
     initialLoadRef.current,
     triggerVisualAutoSave
   )
-  useConfigAutoSave(dreamConfig, 'dream', initialLoadRef.current, triggerVisualAutoSave)
 
   // 手动保存
   const saveConfig = async () => {
@@ -954,9 +921,6 @@ export function BotConfigPage() {
                 <TabsTrigger value="experimental" className="min-w-[4.5rem] px-3 py-2 text-xs">
                   实验
                 </TabsTrigger>
-                <TabsTrigger value="dream" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  Dream
-                </TabsTrigger>
                 <TabsTrigger value="other" className="min-w-[4.5rem] px-3 py-2 text-xs">
                   其他
                 </TabsTrigger>
@@ -1059,11 +1023,6 @@ export function BotConfigPage() {
                     onChange={setExperimentalConfig}
                   />
                 )}
-              </TabsContent>
-
-              {/* Dream 配置 */}
-              <TabsContent value="dream" className="mt-5 space-y-5 sm:mt-6">
-                {dreamConfig && <DreamSection config={dreamConfig} onChange={setDreamConfig} />}
               </TabsContent>
 
               {/* 其他配置 */}

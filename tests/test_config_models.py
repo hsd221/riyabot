@@ -10,7 +10,6 @@ from src.config.config_base import ConfigBase
 from src.config.official_configs import (
     BehaviorConfig,
     ChatConfig,
-    DreamConfig,
     ExpressionConfig,
     KeywordReactionConfig,
     KeywordRuleConfig,
@@ -156,10 +155,20 @@ class ConfigBaseTest(unittest.TestCase):
             {
                 "personality": "测试人格",
                 "visual_style": "旧识图规则",
+                "multiple_reply_style": ["旧可选风格"],
+                "multiple_probability": 1.0,
+                "plan_style": "旧 action 规则",
+                "states": ["旧随机人格"],
+                "state_probability": 1.0,
             }
         )
 
         self.assertFalse(hasattr(config, "visual_style"))
+        self.assertFalse(hasattr(config, "multiple_reply_style"))
+        self.assertFalse(hasattr(config, "multiple_probability"))
+        self.assertFalse(hasattr(config, "plan_style"))
+        self.assertFalse(hasattr(config, "states"))
+        self.assertFalse(hasattr(config, "state_probability"))
 
 
 class ApiAdaConfigTest(unittest.TestCase):
@@ -390,32 +399,6 @@ class OfficialConfigTest(unittest.TestCase):
             KeywordRuleConfig(regex=["("], reaction="bad")
         with self.assertRaisesRegex(ValueError, "规则必须是KeywordRuleConfig类型"):
             KeywordReactionConfig(keyword_rules=[object()])
-
-    def test_dream_config_time_ranges_and_validation_rules(self) -> None:
-        config = DreamConfig(dream_time_ranges=["23:00-02:00", "bad", 123])
-        config._now_minutes = lambda: 30
-
-        self.assertEqual(config._parse_range("09:30-10:45"), (570, 645))
-        self.assertIsNone(config._parse_range("bad"))
-        self.assertTrue(config._in_range(30, 23 * 60, 2 * 60))
-        self.assertFalse(config._in_range(12 * 60, 23 * 60, 2 * 60))
-        self.assertTrue(config._in_range(10 * 60, 9 * 60, 11 * 60))
-        self.assertFalse(config._in_range(12 * 60, 9 * 60, 11 * 60))
-        self.assertTrue(config.is_in_dream_time())
-
-        config._now_minutes = lambda: 12 * 60
-        self.assertFalse(config.is_in_dream_time())
-        self.assertTrue(DreamConfig(dream_time_ranges=[]).is_in_dream_time())
-
-        with patch.object(time, "localtime", return_value=SimpleNamespace(tm_hour=1, tm_min=2)):
-            self.assertEqual(DreamConfig()._now_minutes(), 62)
-
-        with self.assertRaisesRegex(ValueError, "interval_minutes 必须至少为1"):
-            DreamConfig(interval_minutes=0)
-        with self.assertRaisesRegex(ValueError, "max_iterations 必须至少为1"):
-            DreamConfig(max_iterations=0)
-        with self.assertRaisesRegex(ValueError, "first_delay_seconds 不能为负数"):
-            DreamConfig(first_delay_seconds=-1)
 
 
 if __name__ == "__main__":

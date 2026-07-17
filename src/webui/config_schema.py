@@ -292,8 +292,6 @@ class ConfigSchemaGenerator:
                 if field_type == FieldType.STRING and field.name in [
                     "personality",
                     "reply_style",
-                    "plan_style",
-                    "private_plan_style",
                     "reaction",
                     "filtration_prompt",
                 ]:

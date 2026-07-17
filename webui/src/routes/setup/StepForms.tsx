@@ -417,20 +417,6 @@ export function PersonalityForm({ config, onChange }: PersonalityFormProps) {
           例如：回复平淡一些，简短一些，说中文，参考贴吧、知乎和微博的回复风格
         </p>
       </div>
-
-      <div className="ios-group space-y-3 p-5">
-        <Label htmlFor="plan_style">群聊说话规则 *</Label>
-        <Textarea
-          id="plan_style"
-          placeholder="机器人在群聊中的行为风格和规则"
-          value={config.plan_style}
-          onChange={(e) => onChange({ ...config, plan_style: e.target.value })}
-          rows={4}
-        />
-        <p className="text-xs text-muted-foreground">
-          定义机器人在群聊中如何行动，例如回复频率、条件等
-        </p>
-      </div>
     </div>
   )
 }

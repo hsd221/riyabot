@@ -103,7 +103,6 @@ export async function loadPersonalityConfig(): Promise<PersonalityConfig> {
   return {
     personality: personalityConfig.personality || '',
     reply_style: personalityConfig.reply_style || '',
-    plan_style: personalityConfig.plan_style || '',
   }
 }
 

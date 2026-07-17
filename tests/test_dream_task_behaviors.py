@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
+from src.memory import dream_agent
 from src.memory.dream_agent import DreamTask
 from src.memory.layer1_summarizer import UnclosedTopicBridge
 from src.memory.schema import (
@@ -83,6 +84,17 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         if not memory_db.is_closed():
             memory_db.close()
         self.tmpdir.cleanup()
+
+    async def test_scheduler_uses_new_dream_task_defaults_without_legacy_config(self) -> None:
+        self.assertFalse(hasattr(dream_agent, "global_config"))
+        task = DreamTask(FakeStore())
+        task._check_idle = AsyncMock(return_value=False)
+
+        await task.run()
+
+        self.assertEqual(task.wait_before_start, 1800)
+        self.assertEqual(task.run_interval, 3600)
+        task._check_idle.assert_awaited_once_with()
 
     async def test_consolidate_persists_last_accessed_at_to_keep_dream_boost_effective(self) -> None:
         old_access = datetime.datetime.now() - datetime.timedelta(days=10)

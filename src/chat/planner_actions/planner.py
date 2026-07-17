@@ -382,7 +382,6 @@ class ActionPlanner:
                 actions_before_now_block=actions_before_now_block,
                 moderation_prompt=moderation_prompt_block,
                 name_block=name_block,
-                plan_style=global_config.personality.plan_style,
             )
 
             return prompt, message_id_list

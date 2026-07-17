@@ -90,6 +90,7 @@ class ConfigRoutesHelperTest(unittest.IsolatedAsyncioTestCase):
         config_data = {
             "mood": {"legacy": True},
             "jargon": {"legacy": True},
+            "dream": {"interval_minutes": 60},
             "bot": {
                 "platform": "qq",
                 "qq_account": "123",
@@ -99,7 +100,16 @@ class ConfigRoutesHelperTest(unittest.IsolatedAsyncioTestCase):
             "personality": {
                 "personality": "温和",
                 "reply_style": "简洁",
+                "multiple_reply_style": ["旧可选风格"],
+                "multiple_probability": 1.0,
+                "plan_style": "旧 action 规则",
+                "states": ["旧随机人格"],
+                "state_probability": 1.0,
                 "legacy_field": "remove-me",
+            },
+            "experimental": {
+                "private_plan_style": "旧 action 规则",
+                "chat_prompts": [],
             },
         }
 
@@ -107,8 +117,11 @@ class ConfigRoutesHelperTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("mood", config_data)
         self.assertNotIn("jargon", config_data)
+        self.assertNotIn("dream", config_data)
         self.assertNotIn("unknown_field", config_data["bot"])
         self.assertNotIn("legacy_field", config_data["personality"])
+        self.assertEqual(set(config_data["personality"]), {"personality", "reply_style"})
+        self.assertEqual(set(config_data["experimental"]), {"chat_prompts"})
 
 
 class StructuredConfigRoutesSecurityTest(unittest.IsolatedAsyncioTestCase):

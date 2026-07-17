@@ -34,7 +34,6 @@ export interface BotBasicConfig {
 export interface PersonalityConfig {
   personality: string
   reply_style: string
-  plan_style: string
 }
 
 // 步骤3：表情包配置

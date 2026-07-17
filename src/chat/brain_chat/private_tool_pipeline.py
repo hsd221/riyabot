@@ -122,7 +122,6 @@ class PrivateToolPlanner:
             chat_target=chat_target,
             chat_content=chat_content,
             tool_results_block=tool_results_block,
-            plan_style=global_config.experimental.private_plan_style,
             moderation_prompt=prompt_manager.format_prompt("shared.moderation.standard"),
         )
 

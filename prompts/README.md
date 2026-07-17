@@ -102,8 +102,7 @@ variants: light, standard
 | `identity` | 当前人格与身份说明，来自回复器构建的人设文本。 |
 | `persona_text` | 旧 PFC 链路使用的人格说明；语义接近 `identity`，但由 PFC 组件独立构建。 |
 | `chat_prompt` | 针对当前聊天配置的附加人设或说话规则；未配置时为空。 |
-| `reply_style` | 当前选中的回复风格，来自 `personality.reply_style` 或多风格随机选择结果。 |
-| `plan_style` | 对应聊天 Planner 的行为风格，由调用方根据当前配置构建。 |
+| `reply_style` | 当前回复风格，来自 `personality.reply_style`。 |
 | `moderation_prompt` | 从 `shared.moderation.*` 注入的内容边界片段。 |
 | `keywords_reaction_prompt` | 回复器根据配置命中结果生成的候选反应提示，可能含目标消息的正则捕获文本；没有匹配规则时为空，并始终放在不可信输入层。 |
 | `expression_habits_block` | 表达学习器选出的候选表达习惯与行为参考，只是低优先级参考数据。 |

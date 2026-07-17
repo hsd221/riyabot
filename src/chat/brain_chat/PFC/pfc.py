@@ -3,7 +3,6 @@ from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config
-import random
 from .chat_observer import ChatObserver
 from .pfc_utils import get_items_from_json
 from .conversation_info import ConversationInfo
@@ -61,14 +60,6 @@ class GoalAnalyzer:
     def _get_personality_prompt(self) -> str:
         """获取个性提示信息"""
         prompt_personality = global_config.personality.personality
-
-        # 检查是否需要随机替换为状态
-        if (
-            global_config.personality.states
-            and global_config.personality.state_probability > 0
-            and random.random() < global_config.personality.state_probability
-        ):
-            prompt_personality = random.choice(global_config.personality.states)
 
         bot_name = global_config.bot.nickname
         return f"你的名字是{bot_name},你{prompt_personality};"

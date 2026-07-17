@@ -2,7 +2,6 @@ import React from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Plus, Trash2 } from 'lucide-react'
 import type { ExperimentalConfig } from '../types'
 
@@ -32,33 +31,20 @@ export const ExperimentalSection = React.memo(function ExperimentalSection({
   }
 
   return (
-    <div className="ios-group p-4 sm:p-6 space-y-6">
+    <div className="ios-group space-y-6 p-4 sm:p-6">
       <div>
-        <h3 className="text-lg font-semibold mb-4">实验性功能</h3>
+        <h3 className="mb-4 text-lg font-semibold">实验性功能</h3>
         <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="private_plan_style">私聊说话规则</Label>
-            <Textarea
-              id="private_plan_style"
-              value={config.private_plan_style}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                onChange({ ...config, private_plan_style: e.target.value })
-              }
-              placeholder="私聊的说话规则和行为风格"
-              rows={5}
-            />
-          </div>
-
           <div className="grid gap-2">
             <div className="flex items-center justify-between">
               <div>
                 <Label>聊天额外 Prompt</Label>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="mt-1 text-xs text-muted-foreground">
                   格式：platform:id:type:prompt内容
                 </p>
               </div>
               <Button onClick={addChatPrompt} size="sm" variant="outline">
-                <Plus className="h-4 w-4 mr-1" />
+                <Plus className="mr-1 h-4 w-4" />
                 添加
               </Button>
             </div>

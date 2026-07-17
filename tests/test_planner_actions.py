@@ -265,7 +265,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 group_planner.global_config,
                 "personality",
-                SimpleNamespace(plan_style="只在有直接依据时调用工具。"),
+                SimpleNamespace(plan_style="LEGACY_GROUP_ACTION_RULE"),
             ),
         ):
             prompt, returned_ids = await planner.build_planner_prompt(
@@ -278,6 +278,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<CONTEXT_EVIDENCE>memory</CONTEXT_EVIDENCE>", prompt)
         self.assertIn("你的名字是Riya,也有人叫你小夜", prompt)
         self.assertIn("无 Tool Call", prompt)
+        self.assertNotIn("LEGACY_GROUP_ACTION_RULE", prompt)
         self.assertNotIn("{chat_content_block}", prompt)
 
     async def test_native_tool_calls_replace_action_json_protocol(self) -> None:

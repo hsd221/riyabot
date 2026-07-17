@@ -45,31 +45,6 @@ class PersonalityConfig(ConfigBase):
     reply_style: str = "请不要刻意突出自身学科背景。可以参考贴吧，知乎和微博的回复风格。"
     """默认表达风格"""
 
-    multiple_reply_style: list[str] = field(default_factory=lambda: [])
-    """可选的多种表达风格列表，当配置不为空时可按概率随机替换 reply_style"""
-
-    multiple_probability: float = 0.3
-    """每次构建回复时，从 multiple_reply_style 中随机替换 reply_style 的概率（0.0-1.0）"""
-
-    plan_style: str = """1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用
-2.如果相同的action已经被执行，请不要重复执行该action
-3.如果有人对你感到厌烦，请减少回复
-4.如果有人在追问你，或者话题没有说完，请你继续回复
-5.请分析哪些对话是和你说的，哪些是其他人之间的互动，不要误认为其他人之间的互动是和你说的"""
-    """说话规则，行为风格"""
-
-    states: list[str] = field(
-        default_factory=lambda: [
-            "是一个女大学生，喜欢上网聊天，会刷小红书。",
-            "是一个大二心理学生，会刷贴吧和中国知网。",
-            "是一个赛博网友，最近很想吐槽人。",
-        ]
-    )
-    """状态列表，用于随机替换personality"""
-
-    state_probability: float = 0.3
-    """状态概率，每次构建人格时替换personality的概率"""
-
 
 @dataclass
 class RelationshipConfig(ConfigBase):
@@ -926,11 +901,6 @@ class DebugConfig(ConfigBase):
 class ExperimentalConfig(ConfigBase):
     """实验功能配置类"""
 
-    private_plan_style: str = """1.逐一判断当前提供的行为选项是否真的符合聊天内容，只执行有直接依据的选项
-2.如果相同的内容已经被执行，请不要重复执行
-3.某句话如果已经被回复过，不要重复回复"""
-    """私聊说话规则，行为风格（实验性功能）"""
-
     chat_prompts: list[str] = field(default_factory=lambda: [])
     """
     为指定聊天添加额外的prompt配置列表
@@ -1039,103 +1009,3 @@ class LPMMKnowledgeConfig(ConfigBase):
 
     enable_ppr: bool = True
     """是否启用PPR，低配机器可关闭"""
-
-
-@dataclass
-class DreamConfig(ConfigBase):
-    """Dream配置类"""
-
-    interval_minutes: int = 60
-    """做梦时间间隔（分钟），默认60分钟"""
-
-    max_iterations: int = 20
-    """做梦最大轮次，默认20轮"""
-
-    first_delay_seconds: int = 1800
-    """程序启动后首次做梦前的延迟时间（秒），默认1800秒"""
-
-    dream_send: str = ""
-    """
-    做梦结果推送目标，格式为 "platform:user_id"
-    例如: "qq:123456" 表示在做梦结束后，将梦境文本额外发送给该QQ私聊用户。
-    为空字符串时不推送。
-    """
-
-    dream_time_ranges: list[str] = field(default_factory=lambda: ["23:00-10:00"])
-    """
-    做梦时间段配置列表，格式：["HH:MM-HH:MM", ...]
-    如果列表为空，则表示全天允许做梦。
-    如果配置了时间段，则只有在这些时间段内才会实际执行做梦流程。
-    时间段外，调度器仍会按间隔检查，但不会进入做梦流程。
-    
-    示例:
-    [
-        "09:00-22:00",      # 白天允许做梦
-        "23:00-02:00",      # 跨夜时间段（23:00到次日02:00）
-    ]
-    
-    支持跨夜区间，例如 "23:00-02:00" 表示从23:00到次日02:00。
-    """
-
-    def _now_minutes(self) -> int:
-        """返回本地时间的分钟数(0-1439)。"""
-        lt = time.localtime()
-        return lt.tm_hour * 60 + lt.tm_min
-
-    def _parse_range(self, range_str: str) -> Optional[tuple[int, int]]:
-        """解析 "HH:MM-HH:MM" 到 (start_min, end_min)。"""
-        try:
-            start_str, end_str = [s.strip() for s in range_str.split("-")]
-            sh, sm = [int(x) for x in start_str.split(":")]
-            eh, em = [int(x) for x in end_str.split(":")]
-            return sh * 60 + sm, eh * 60 + em
-        except Exception:
-            return None
-
-    def _in_range(self, now_min: int, start_min: int, end_min: int) -> bool:
-        """
-        判断 now_min 是否在 [start_min, end_min] 区间内。
-        支持跨夜：如果 start > end，则表示跨越午夜。
-        """
-        if start_min <= end_min:
-            return start_min <= now_min <= end_min
-        # 跨夜：例如 23:00-02:00
-        return now_min >= start_min or now_min <= end_min
-
-    def is_in_dream_time(self) -> bool:
-        """
-        检查当前时间是否在允许做梦的时间段内。
-        如果 dream_time_ranges 为空，则返回 True（全天允许）。
-        """
-        if not self.dream_time_ranges:
-            return True
-
-        now_min = self._now_minutes()
-
-        for time_range in self.dream_time_ranges:
-            if not isinstance(time_range, str):
-                continue
-            parsed = self._parse_range(time_range)
-            if not parsed:
-                continue
-            start_min, end_min = parsed
-            if self._in_range(now_min, start_min, end_min):
-                return True
-
-        return False
-
-    dream_visible: bool = False
-    """
-    做梦结果是否存储到上下文
-    - True: 将梦境发送给配置的用户后，也会存储到聊天上下文中，在后续对话中可见
-    - False: 仅发送梦境但不存储，不在后续对话上下文中出现
-    """
-
-    def __post_init__(self):
-        """验证配置值"""
-        if self.interval_minutes < 1:
-            raise ValueError(f"interval_minutes 必须至少为1，当前值: {self.interval_minutes}")
-        if self.max_iterations < 1:
-            raise ValueError(f"max_iterations 必须至少为1，当前值: {self.max_iterations}")
-        if self.first_delay_seconds < 0:
-            raise ValueError(f"first_delay_seconds 不能为负数，当前值: {self.first_delay_seconds}")

@@ -169,7 +169,7 @@ class ReplyerSharedHelpersTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(module.random, "random", return_value=0.0),
                 patch.object(module.random, "choice", return_value="困倦"),
             ):
-                self.assertEqual(await replyer.build_personality_prompt(), "你的名字是Mai,也有人叫你小麦，你困倦;")
+                self.assertEqual(await replyer.build_personality_prompt(), "你的名字是Mai,也有人叫你小麦，你友善;")
 
             with (
                 patch.object(module.global_config, "experimental", experimental),

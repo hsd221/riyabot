@@ -43,7 +43,7 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 private_tool_pipeline.global_config,
                 "experimental",
-                SimpleNamespace(private_plan_style="只在有直接依据时调用工具。"),
+                SimpleNamespace(private_plan_style="LEGACY_PRIVATE_ACTION_RULE"),
             ),
         ):
             prompt = planner._build_prompt(
@@ -57,6 +57,7 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reference answer", prompt)
         self.assertIn("你的名字是Riya，也可以叫你小夜", prompt)
         self.assertIn("无 Tool Call", prompt)
+        self.assertNotIn("LEGACY_PRIVATE_ACTION_RULE", prompt)
         self.assertNotIn("{tool_results_block}", prompt)
 
     def test_load_context_uses_frozen_turn_boundary(self) -> None:

@@ -13,11 +13,6 @@ export interface BotConfig {
 export interface PersonalityConfig {
   personality: string
   reply_style: string
-  multiple_reply_style: string[]
-  multiple_probability: number
-  plan_style: string
-  states: string[]
-  state_probability: number
 }
 
 export interface TalkValueRule {
@@ -176,17 +171,7 @@ export interface WebUIConfig {
 }
 
 export interface ExperimentalConfig {
-  private_plan_style: string
   chat_prompts: string[]
-}
-
-export interface DreamConfig {
-  interval_minutes: number
-  max_iterations: number
-  first_delay_seconds: number
-  dream_send: string
-  dream_time_ranges: string[]
-  dream_visible: boolean
 }
 
 /**
@@ -213,13 +198,12 @@ export interface AllBotConfigs {
   telemetryConfig: TelemetryConfig | null
   webuiConfig: WebUIConfig | null
   experimentalConfig: ExperimentalConfig | null
-  dreamConfig: DreamConfig | null
 }
 
 /**
  * 配置节名称到类型的映射
  */
-export type ConfigSectionName = 
+export type ConfigSectionName =
   | 'bot'
   | 'personality'
   | 'chat'
@@ -240,4 +224,3 @@ export type ConfigSectionName =
   | 'telemetry'
   | 'webui'
   | 'experimental'
-  | 'dream'

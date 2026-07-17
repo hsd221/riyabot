@@ -37,7 +37,7 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
         self.assertEqual(bot_document["bot"]["platform"], "qq")
         self.assertEqual(bot_document["bot"]["nickname"], "璃夜")
         self.assertEqual(bot_document["chat"]["max_context_size"], 30)
-        self.assertEqual(bot_document["dream"]["first_delay_seconds"], 1800)
+        self.assertNotIn("dream", bot_document)
         self.assertEqual(model_document["api_providers"], [])
         self.assertEqual(model_document["models"], [])
         self.assertEqual(model_document["model_task_config"]["utils"]["model_list"], [])
@@ -58,14 +58,9 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
         expected_bot_values = {
             ("bot", "platforms"): ["wx:114514", "xx:1919810"],
             ("bot", "alias_names"): ["Riya", "小璃"],
-            ("personality", "multiple_probability"): 0.3,
-            ("personality", "state_probability"): 0.3,
             ("chat", "max_context_size"): 30,
             ("memory", "agent_timeout_seconds"): 180.0,
             ("memory", "qdrant_api_key"): "",
-            ("dream", "interval_minutes"): 60,
-            ("dream", "first_delay_seconds"): 1800,
-            ("dream", "dream_time_ranges"): ["23:00-10:00"],
             ("tool", "enable_tool"): True,
             ("emoji", "emoji_chance"): 0.4,
             ("emoji", "max_reg_num"): 100,
@@ -94,9 +89,10 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
         self.assertEqual(len(bot_document["keyword_reaction"]["regex_rules"]), 2)
         self.assertEqual(bot_document["log"]["library_log_levels"], {"aiohttp": "WARNING"})
         self.assertIn("faiss", bot_document["log"]["suppress_libraries"])
-        self.assertIn("逐一判断", bot_document["experimental"]["private_plan_style"])
-        self.assertIn("思考**所有**", bot_document["personality"]["plan_style"])
-        self.assertIn('plan_style = """', bot_text)
+        self.assertEqual(set(bot_document["personality"]), {"personality", "reply_style"})
+        self.assertNotIn("private_plan_style", bot_document["experimental"])
+        self.assertNotIn("dream", bot_document)
+        self.assertNotIn("plan_style", bot_text)
         self.assertIn(
             "# 每个聊天流最大保存的Plan/Reply日志数量，超过此数量时会自动删除最老的日志\nplan_reply_log_max_per_chat",
             bot_text,

@@ -235,11 +235,10 @@ class MainSystem:
                     dream_weaver=dream_weaver,
                 )
                 await async_task_manager.add_task(dream_task)
-                dream_config = global_config.dream
                 logger.info(
                     "梦境维护任务已注册",
                     event_code="memory.dream.task_registered",
-                    interval_minutes=dream_config.interval_minutes,
+                    interval_seconds=dream_task.run_interval,
                 )
             except Exception:
                 logger.warning("梦境维护任务注册失败", event_code="memory.dream.task_register_failed", exc_info=True)

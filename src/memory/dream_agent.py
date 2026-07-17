@@ -18,7 +18,6 @@ from enum import Enum
 from typing import Any, Optional
 
 from src.common.logger import get_logger
-from src.config.config import global_config
 from src.manager.async_task_manager import AsyncTask
 from src.memory.atom import (
     MemoryAtom as MemoryAtomDC,
@@ -50,6 +49,12 @@ logger = get_logger("memory.dream")
 
 IDLE_THRESHOLD: int = 300
 """空闲判定阈值（秒），所有 ChatStream 的最后活动时间距今超过此值才算空闲"""
+
+DREAM_TASK_FIRST_DELAY_SECONDS: int = 1800
+"""程序启动后首次检查记忆维护任务前的延迟"""
+
+DREAM_TASK_POLL_INTERVAL_SECONDS: int = 3600
+"""记忆维护任务检查日、周、月周期是否到期的固定间隔"""
 
 CONSOLIDATION_BOOST: float = 0.15
 """梦境巩固提升量，传给 apply_dream_consolidation() 的 boost 参数"""
@@ -246,7 +251,7 @@ class DreamTask(AsyncTask):
     """梦境维护后台任务 — 闲时运行记忆巩固、仲裁、遗忘维护、洞见与噪声回收
 
     工作在系统空闲时段（所有 ChatStream 静默超过 IDLE_THRESHOLD 秒），
-    在允许的梦境时间段内（DreamConfig.is_in_dream_time()）执行以下操作：
+    由自身的日、周、月周期记录决定本轮是否需要执行：
 
     Phase 1 — Consolidation: 提升重要但正在衰减的记忆原子的权重
     Phase 2 — Conflict arbitration: 集中处理待观察冲突
@@ -274,11 +279,10 @@ class DreamTask(AsyncTask):
             graph_store: GraphStore 实例（可选，暂未实现时可为 None）
             dream_weaver: DreamWeaver 实例（可选，用于梦呓编织洞见生成）
         """
-        dream_cfg = global_config.dream
         super().__init__(
             task_name="dream_task",
-            wait_before_start=dream_cfg.first_delay_seconds,
-            run_interval=dream_cfg.interval_minutes * 60,
+            wait_before_start=DREAM_TASK_FIRST_DELAY_SECONDS,
+            run_interval=DREAM_TASK_POLL_INTERVAL_SECONDS,
         )
         self._store = store
         self._forgetting_manager = forgetting_manager
@@ -291,29 +295,22 @@ class DreamTask(AsyncTask):
         """执行一次梦境维护周期 — 自动判定周期类型并分发
 
         流程:
-        1. 检查是否在允许的梦境时间段内
-        2. 检查系统是否空闲
-        3. 判定当前应运行的周期类型（daily > weekly > monthly）
-        4. 分发到对应的周期处理器
+        1. 检查系统是否空闲
+        2. 判定当前应运行的周期类型（daily > weekly > monthly）
+        3. 分发到对应的周期处理器
         """
-        # 1. 检查梦境时间段
-        dream_cfg = global_config.dream
-        if not dream_cfg.is_in_dream_time():
-            logger.debug("不在维护时间段内，跳过本轮记忆维护")
-            return
-
-        # 2. 检查空闲状态
+        # 1. 检查空闲状态
         if not await self._check_idle():
             logger.debug("聊天流活跃中，跳过本轮记忆维护")
             return
 
-        # 3. 判定周期类型
+        # 2. 判定周期类型
         cycle_type = self._determine_cycle_type()
         if cycle_type is None:
             logger.debug("所有周期均未到期，跳过本轮记忆维护")
             return
 
-        # 4. 分发到对应的周期处理器
+        # 3. 分发到对应的周期处理器
         logger.info(f"开始记忆维护周期: type={cycle_type.value}")
         try:
             if cycle_type == DreamCycleType.DAILY:

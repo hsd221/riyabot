@@ -68,12 +68,8 @@ class GoalAnalyzerTest(unittest.IsolatedAsyncioTestCase):
             bot=SimpleNamespace(nickname="Mai"),
         )
         analyzer = pfc.GoalAnalyzer.__new__(pfc.GoalAnalyzer)
-        with (
-            patch.object(pfc, "global_config", fake_config),
-            patch.object(pfc.random, "random", return_value=0.0),
-            patch.object(pfc.random, "choice", return_value="困倦"),
-        ):
-            self.assertEqual(analyzer._get_personality_prompt(), "你的名字是Mai,你困倦;")
+        with patch.object(pfc, "global_config", fake_config):
+            self.assertEqual(analyzer._get_personality_prompt(), "你的名字是Mai,你温和;")
 
     async def test_update_goals_moves_similar_goal_to_front_and_limits_total(self) -> None:
         analyzer = self.make_analyzer()

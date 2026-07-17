@@ -703,20 +703,7 @@ class DefaultReplyer:
         else:
             bot_nickname = ""
 
-        # 获取基础personality
-        prompt_personality = global_config.personality.personality
-
-        # 检查是否需要随机替换为状态（personality 本体）
-        if (
-            global_config.personality.states
-            and global_config.personality.state_probability > 0
-            and random.random() < global_config.personality.state_probability
-        ):
-            # 随机选择一个状态替换personality
-            selected_state = random.choice(global_config.personality.states)
-            prompt_personality = selected_state
-
-        prompt_personality = f"{prompt_personality};"
+        prompt_personality = f"{global_config.personality.personality};"
         return f"你的名字是{bot_name}{bot_nickname}，你{prompt_personality}"
 
     def _parse_chat_prompt_config_to_chat_id(self, chat_prompt_str: str) -> Optional[tuple[str, str]]:
@@ -1034,16 +1021,7 @@ class DefaultReplyer:
         else:  # think_level == 1 或默认
             prompt_name = "chat.group.reply.standard"
 
-        # 根据配置构建最终的 reply_style：支持 multiple_reply_style 按概率随机替换
         reply_style = global_config.personality.reply_style
-        multi_styles = getattr(global_config.personality, "multiple_reply_style", None) or []
-        multi_prob = getattr(global_config.personality, "multiple_probability", 0.0) or 0.0
-        if multi_styles and multi_prob > 0 and random.random() < multi_prob:
-            try:
-                reply_style = random.choice(list(multi_styles))
-            except Exception:
-                # 兜底：即使 multiple_reply_style 配置异常也不影响正常回复
-                reply_style = global_config.personality.reply_style
 
         return (
             prompt_manager.format_prompt(
@@ -1144,15 +1122,7 @@ class DefaultReplyer:
 
         template_name = "chat.shared.expressor"
 
-        # 根据配置构建最终的 reply_style：支持 multiple_reply_style 按概率随机替换
         reply_style = global_config.personality.reply_style
-        multi_styles = getattr(global_config.personality, "multiple_reply_style", None) or []
-        multi_prob = getattr(global_config.personality, "multiple_probability", 0.0) or 0.0
-        if multi_styles and multi_prob > 0 and random.random() < multi_prob:
-            try:
-                reply_style = random.choice(list(multi_styles))
-            except Exception:
-                reply_style = global_config.personality.reply_style
 
         return prompt_manager.format_prompt(
             template_name,

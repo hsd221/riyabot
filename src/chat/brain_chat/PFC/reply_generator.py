@@ -2,7 +2,6 @@ from typing import Tuple, List, Dict, Any
 from src.common.logger import get_logger
 from src.llm_models.utils_model import LLMRequest
 from src.config.config import global_config
-import random
 from .chat_observer import ChatObserver
 from .reply_checker import ReplyChecker
 from .observation_info import ObservationInfo
@@ -32,14 +31,6 @@ class ReplyGenerator:
     def _get_personality_prompt(self) -> str:
         """获取个性提示信息"""
         prompt_personality = global_config.personality.personality
-
-        # 检查是否需要随机替换为状态
-        if (
-            global_config.personality.states
-            and global_config.personality.state_probability > 0
-            and random.random() < global_config.personality.state_probability
-        ):
-            prompt_personality = random.choice(global_config.personality.states)
 
         bot_name = global_config.BOT_NICKNAME
         return f"你的名字是{bot_name},你{prompt_personality};"
