@@ -107,6 +107,7 @@ def _model_to_dict(record: RawMessageArchive) -> dict[str, Any]:
         "dream_route": record.dream_route,
         "dream_significance": record.dream_significance,
         "dream_processed_at": record.dream_processed_at,
+        "dream_run_id": record.dream_run_id,
     }
 
 

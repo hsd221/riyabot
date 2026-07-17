@@ -194,6 +194,7 @@ class RawMessageArchive(BaseModel):
     dream_route = TextField(null=True, index=True)  # 梦境分诊路由: high/medium/low/skipped
     dream_significance = FloatField(null=True)  # 梦境分诊显著性评分
     dream_processed_at = DateTimeField(null=True)  # 梦境分诊完成时间
+    dream_run_id = IntegerField(null=True, index=True)  # 关联的 DreamRun.id；历史记录可为空
 
     class Meta:
         table_name = "raw_message_archive"
@@ -412,6 +413,11 @@ def _ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_raw_archive_dream_status_ts ON raw_message_archive(dream_status, timestamp)",
         ),
         (
+            "idx_raw_archive_dream_run_processed",
+            "CREATE INDEX IF NOT EXISTS idx_raw_archive_dream_run_processed "
+            "ON raw_message_archive(dream_run_id, dream_processed_at)",
+        ),
+        (
             "idx_raw_archive_unique_message",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_raw_archive_unique_message "
             "ON raw_message_archive(stream_id, message_id, chat_type)",
@@ -462,10 +468,12 @@ def _dedupe_raw_message_archive() -> int:
                 keep.dream_route = row.dream_route
                 keep.dream_significance = row.dream_significance
                 keep.dream_processed_at = row.dream_processed_at
+                keep.dream_run_id = row.dream_run_id
             elif keep.dream_processed_at is None and row.dream_processed_at is not None:
                 keep.dream_route = row.dream_route
                 keep.dream_significance = row.dream_significance
                 keep.dream_processed_at = row.dream_processed_at
+                keep.dream_run_id = row.dream_run_id
             row.delete_instance()
             removed += 1
         keep.save()
@@ -514,6 +522,7 @@ def _ensure_columns():
                 "dream_route": "ALTER TABLE raw_message_archive ADD COLUMN dream_route TEXT",
                 "dream_significance": "ALTER TABLE raw_message_archive ADD COLUMN dream_significance REAL",
                 "dream_processed_at": "ALTER TABLE raw_message_archive ADD COLUMN dream_processed_at DATETIME",
+                "dream_run_id": "ALTER TABLE raw_message_archive ADD COLUMN dream_run_id INTEGER",
             }
             for column, ddl in raw_column_defs.items():
                 if column not in raw_columns:

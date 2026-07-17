@@ -607,7 +607,13 @@ class DreamTask(AsyncTask):
     @staticmethod
     def _raw_archive_supports_dream_fields() -> bool:
         """确认 raw archive 表结构支持梦境分诊字段。"""
-        required_columns = {"dream_status", "dream_route", "dream_significance", "dream_processed_at"}
+        required_columns = {
+            "dream_status",
+            "dream_route",
+            "dream_significance",
+            "dream_processed_at",
+            "dream_run_id",
+        }
         try:
             if not memory_db.table_exists(RawMessageArchive):
                 return False
@@ -664,6 +670,7 @@ class DreamTask(AsyncTask):
         self,
         max_age_days: int | None = 1,
         batch_size: int | None = None,
+        dream_run_id: int | None = None,
     ) -> dict[str, int]:
         """扫描原始消息归档并按显著性分流。
 
@@ -695,13 +702,13 @@ class DreamTask(AsyncTask):
             try:
                 route, significance, emotion_tags = self._route_raw_message(record)
                 if route == "skipped":
-                    self._mark_raw_triaged(record, route, significance)
+                    self._mark_raw_triaged(record, route, significance, dream_run_id)
                     stats["skipped"] += 1
                     continue
 
                 created = self._record_raw_candidate(record, significance)
 
-                self._mark_raw_triaged(record, route, significance)
+                self._mark_raw_triaged(record, route, significance, dream_run_id)
                 if created:
                     stats[route] += 1
                 else:
@@ -709,7 +716,7 @@ class DreamTask(AsyncTask):
             except Exception as e:
                 logger.warning("原始消息分诊失败 id=%s: %s", getattr(record, "id", "?"), e)
                 try:
-                    self._mark_raw_triaged(record, "skipped", 0.0)
+                    self._mark_raw_triaged(record, "skipped", 0.0, dream_run_id)
                 except Exception:
                     pass
                 stats["skipped"] += 1
@@ -832,7 +839,12 @@ class DreamTask(AsyncTask):
         return True
 
     @staticmethod
-    def _mark_raw_triaged(record: RawMessageArchive, route: str, significance: float) -> None:
+    def _mark_raw_triaged(
+        record: RawMessageArchive,
+        route: str,
+        significance: float,
+        dream_run_id: int | None = None,
+    ) -> None:
         """标记 raw message 已被梦境分诊，防止重复处理。"""
         status = "skipped" if route == "skipped" else "triaged"
         RawMessageArchive.update(
@@ -840,6 +852,7 @@ class DreamTask(AsyncTask):
             dream_route=route,
             dream_significance=significance,
             dream_processed_at=datetime.datetime.now(),
+            dream_run_id=dream_run_id,
         ).where(RawMessageArchive.id == record.id).execute()
 
     # ── 核心维护阶段 ─────────────────────────────────────────────────
@@ -1698,7 +1711,7 @@ class DreamTask(AsyncTask):
         try:
             summary_ingested = self._ingest_topic_bridge_summaries(max_age_days=1)
             legacy_raw_archived = await self._archive_legacy_direct_raw_atoms()
-            triage_stats = await self._triage_raw_archive(max_age_days=1)
+            triage_stats = await self._triage_raw_archive(max_age_days=1, dream_run_id=dream_run_id)
             if summary_ingested:
                 triage_stats["summary_imported"] = summary_ingested
             if legacy_raw_archived:

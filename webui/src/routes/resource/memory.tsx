@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DreamRunCard } from '@/components/memory/dream-run-card'
+import { DreamRunMessageDialog } from '@/components/memory/dream-run-message-dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
@@ -201,32 +203,6 @@ function getStatusBadgeVariant(
   }
 }
 
-function getDreamRunTypeBadgeClass(runType: string): string {
-  switch (runType) {
-    case 'daily':
-      return TYPE_COLORS.episodic
-    case 'weekly':
-      return TYPE_COLORS.relational
-    case 'monthly':
-      return TYPE_COLORS.preference
-    default:
-      return getAtomTypeBadgeClass('unknown')
-  }
-}
-
-function getDreamRunTypeLabel(runType: string): string {
-  switch (runType) {
-    case 'daily':
-      return '每日'
-    case 'weekly':
-      return '每周'
-    case 'monthly':
-      return '每月'
-    default:
-      return runType
-  }
-}
-
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -292,6 +268,8 @@ export function MemoryPage() {
   const [dreamsTotal, setDreamsTotal] = useState(0)
   const [dreamLimit, setDreamLimit] = useState(20)
   const [dreamOffset, setDreamOffset] = useState(0)
+  const [selectedDream, setSelectedDream] = useState<DreamRunData | null>(null)
+  const [dreamDetailsOpen, setDreamDetailsOpen] = useState(false)
 
   // Insights
   const [insights, setInsights] = useState<InsightData[]>([])
@@ -460,6 +438,11 @@ export function MemoryPage() {
     } finally {
       setDetailLoading(false)
     }
+  }
+
+  const handleOpenDreamDetails = (dream: DreamRunData) => {
+    setSelectedDream(dream)
+    setDreamDetailsOpen(true)
   }
 
   const typeDistributionData = stats
@@ -984,34 +967,12 @@ export function MemoryPage() {
                         ) : (
                           <div className="space-y-3">
                             {recentDreams.map((dream) => (
-                              <div
+                              <DreamRunCard
                                 key={dream.id}
-                                className="ios-touch rounded-[16px] border border-border/45 bg-muted/35 p-4 hover:bg-accent/45"
-                              >
-                                <div className="mb-1 flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <Badge
-                                      variant="secondary"
-                                      className={getDreamRunTypeBadgeClass(dream.run_type)}
-                                    >
-                                      {getDreamRunTypeLabel(dream.run_type)}
-                                    </Badge>
-                                    <Badge variant={getStatusBadgeVariant(dream.status)}>
-                                      {dream.status}
-                                    </Badge>
-                                  </div>
-                                  <span className="text-xs text-muted-foreground">
-                                    {formatDateTime(dream.start_time)}
-                                  </span>
-                                </div>
-                                <p className="line-clamp-2 text-sm text-muted-foreground">
-                                  {truncateText(dream.summary, 80)}
-                                </p>
-                                <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                                  <span>处理: {dream.atoms_processed ?? 0}</span>
-                                  <span>创建: {dream.atoms_created ?? 0}</span>
-                                </div>
-                              </div>
+                                run={dream}
+                                variant="compact"
+                                onOpenDetails={handleOpenDreamDetails}
+                              />
                             ))}
                           </div>
                         )}
@@ -1283,8 +1244,8 @@ export function MemoryPage() {
                     共 {dreamsTotal} 条
                   </span>
                 </div>
-                <div className="ios-group overflow-hidden">
-                  {dreamsLoading ? (
+                {dreamsLoading ? (
+                  <div className="ios-group overflow-hidden">
                     <div className="space-y-0">
                       {Array.from({ length: 5 }).map((_, i) => (
                         <div key={i} className="ios-row">
@@ -1299,59 +1260,31 @@ export function MemoryPage() {
                         </div>
                       ))}
                     </div>
-                  ) : dreamsError ? (
+                  </div>
+                ) : dreamsError ? (
+                  <div className="ios-group overflow-hidden">
                     <div className="ios-row ios-row-plain min-h-[132px] !justify-center">
                       <ErrorState message={dreamsError} onRetry={loadDreams} />
                     </div>
-                  ) : dreams.length === 0 ? (
+                  </div>
+                ) : dreams.length === 0 ? (
+                  <div className="ios-group overflow-hidden">
                     <div className="ios-row ios-row-plain min-h-[132px] !justify-center text-center text-muted-foreground">
                       暂无梦境运行记录
                     </div>
-                  ) : (
-                    <>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-3">
                       {dreams.map((dream) => (
-                        <div
+                        <DreamRunCard
                           key={dream.id}
-                          className="ios-row min-h-[104px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between"
-                        >
-                          <div className="flex min-w-0 items-start gap-3">
-                            <span className="ios-symbol ios-symbol-sm ios-symbol-purple mt-0.5">
-                              <Sparkles className="h-4 w-4" />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                <Badge
-                                  variant="secondary"
-                                  className={getDreamRunTypeBadgeClass(dream.run_type)}
-                                >
-                                  {getDreamRunTypeLabel(dream.run_type)}
-                                </Badge>
-                                <Badge variant={getStatusBadgeVariant(dream.status)}>
-                                  {dream.status}
-                                </Badge>
-                                <span className="font-mono text-[12px] leading-4 text-muted-foreground/80">
-                                  #{dream.id}
-                                </span>
-                              </div>
-                              <p className="mt-2 line-clamp-2 text-[15px] font-medium leading-5 text-foreground">
-                                {truncateText(dream.summary, 100)}
-                              </p>
-                              <p className="mt-1 text-[12px] leading-4 text-muted-foreground">
-                                {formatDateTime(dream.start_time)} -{' '}
-                                {formatDateTime(dream.end_time)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 flex-wrap gap-2 pl-11 text-[13px] leading-5 text-muted-foreground sm:pl-0">
-                            <span className="rounded-full bg-muted/70 px-2.5 py-1">
-                              处理 {dream.atoms_processed ?? 0}
-                            </span>
-                            <span className="rounded-full bg-muted/70 px-2.5 py-1">
-                              创建 {dream.atoms_created ?? 0}
-                            </span>
-                          </div>
-                        </div>
+                          run={dream}
+                          onOpenDetails={handleOpenDreamDetails}
+                        />
                       ))}
+                    </div>
+                    <div className="ios-group mt-3 overflow-hidden">
                       {renderPagination(
                         dreamOffset,
                         dreamLimit,
@@ -1359,9 +1292,9 @@ export function MemoryPage() {
                         setDreamOffset,
                         setDreamLimit
                       )}
-                    </>
-                  )}
-                </div>
+                    </div>
+                  </>
+                )}
               </div>
             </TabsContent>
 
@@ -1520,6 +1453,12 @@ export function MemoryPage() {
           </Tabs>
         </div>
       </ScrollArea>
+      <DreamRunMessageDialog
+        key={selectedDream?.id ?? 'no-dream'}
+        run={selectedDream}
+        open={dreamDetailsOpen}
+        onOpenChange={setDreamDetailsOpen}
+      />
     </div>
   )
 }

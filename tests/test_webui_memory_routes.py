@@ -7,12 +7,12 @@ from fastapi import HTTPException
 from peewee import SqliteDatabase
 
 from src.webui import memory_routes
-from src.webui.memory_routes import DreamRun, InsightPool, MemoryAtom, NoisePool
+from src.webui.memory_routes import DreamRun, InsightPool, MemoryAtom, NoisePool, RawMessageArchive
 
 
 class MemoryRoutesTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.models = [MemoryAtom, DreamRun, InsightPool, NoisePool]
+        self.models = [MemoryAtom, DreamRun, InsightPool, NoisePool, RawMessageArchive]
         self.db = SqliteDatabase(":memory:")
         self.bind_ctx = self.db.bind_ctx(self.models)
         self.bind_ctx.__enter__()
@@ -252,3 +252,117 @@ class MemoryRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(noise.total, 2)
         self.assertEqual(noise.items[0].content, "old noise")
         self.assertEqual(noise.items[0].ttl_days, 7)
+
+    async def test_dream_run_messages_return_exact_and_legacy_message_processing_details(self) -> None:
+        run = DreamRun.create(
+            run_type="daily",
+            start_time=datetime.datetime(2026, 1, 2, 8, 0),
+            end_time=datetime.datetime(2026, 1, 2, 8, 10),
+            status="completed",
+        )
+        other_run = DreamRun.create(
+            run_type="daily",
+            start_time=datetime.datetime(2026, 1, 3, 8, 0),
+            end_time=datetime.datetime(2026, 1, 3, 8, 10),
+            status="completed",
+        )
+        legacy = RawMessageArchive.create(
+            stream_id="group-1",
+            message_id="legacy-message",
+            user_id="user-a",
+            platform="qq",
+            nickname="小明",
+            cardname="钢琴学员",
+            group_id="10001",
+            group_name="练琴群",
+            content="我决定从今天开始每天练琴",
+            timestamp=datetime.datetime(2026, 1, 2, 7, 59).timestamp(),
+            chat_type="group",
+            dream_status="triaged",
+            dream_route="high",
+            dream_significance=0.85,
+            dream_processed_at=datetime.datetime(2026, 1, 2, 8, 2),
+        )
+        exact = RawMessageArchive.create(
+            stream_id="private-1",
+            message_id="exact-message",
+            user_id="user-b",
+            platform="qq",
+            nickname="小红",
+            content="哈哈哈",
+            timestamp=datetime.datetime(2026, 1, 2, 8, 3).timestamp(),
+            chat_type="private",
+            dream_status="skipped",
+            dream_route="skipped",
+            dream_significance=0.05,
+            dream_processed_at=datetime.datetime(2026, 1, 2, 9, 0),
+            dream_run_id=run.id,
+        )
+        RawMessageArchive.create(
+            stream_id="group-2",
+            message_id="other-run-message",
+            user_id="user-c",
+            content="不应出现在本次详情中",
+            timestamp=datetime.datetime(2026, 1, 2, 8, 4).timestamp(),
+            chat_type="group",
+            dream_status="triaged",
+            dream_route="medium",
+            dream_significance=0.55,
+            dream_processed_at=datetime.datetime(2026, 1, 2, 8, 4),
+            dream_run_id=other_run.id,
+        )
+
+        details = await memory_routes.get_dream_run_messages(
+            run.id,
+            limit=20,
+            offset=0,
+            _auth=True,
+        )
+
+        self.assertEqual(details.total, 2)
+        self.assertEqual([item.archive_id for item in details.items], [legacy.id, exact.id])
+        self.assertEqual(details.items[0].sender_name, "钢琴学员")
+        self.assertEqual(details.items[0].conversation_name, "练琴群")
+        self.assertEqual(details.items[0].route, "high")
+        self.assertEqual(details.items[0].outcome, "retained_as_candidate")
+        self.assertEqual(details.items[1].route, "skipped")
+        self.assertEqual(details.items[1].outcome, "skipped")
+
+        with self.assertRaises(HTTPException) as missing:
+            await memory_routes.get_dream_run_messages(
+                9999,
+                limit=20,
+                offset=0,
+                _auth=True,
+            )
+        self.assertEqual(missing.exception.status_code, 404)
+
+    async def test_weekly_dream_run_does_not_claim_legacy_daily_triage_messages(self) -> None:
+        run = DreamRun.create(
+            run_type="weekly",
+            start_time=datetime.datetime(2026, 1, 4, 8, 0),
+            end_time=datetime.datetime(2026, 1, 4, 8, 10),
+            status="completed",
+        )
+        RawMessageArchive.create(
+            stream_id="group-1",
+            message_id="legacy-daily-message",
+            user_id="user-a",
+            content="这条消息由旧版每日分诊处理",
+            timestamp=datetime.datetime(2026, 1, 4, 7, 59).timestamp(),
+            chat_type="group",
+            dream_status="triaged",
+            dream_route="high",
+            dream_significance=0.85,
+            dream_processed_at=datetime.datetime(2026, 1, 4, 8, 5),
+        )
+
+        details = await memory_routes.get_dream_run_messages(
+            run.id,
+            limit=20,
+            offset=0,
+            _auth=True,
+        )
+
+        self.assertEqual(details.total, 0)
+        self.assertEqual(details.items, [])

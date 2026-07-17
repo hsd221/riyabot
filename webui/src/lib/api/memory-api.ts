@@ -6,6 +6,7 @@ import type {
   MemoryStats,
   AtomData,
   DreamRunData,
+  DreamRunMessageData,
   InsightData,
   NoiseData,
 } from '@/types/memory'
@@ -92,6 +93,42 @@ export async function fetchDreamRuns(params?: {
 
   const data = await response.json()
   return data
+}
+
+/**
+ * 获取单次梦境逐消息处理详情
+ */
+export async function fetchDreamRunMessages(
+  runId: number,
+  params?: {
+    limit?: number
+    offset?: number
+    signal?: AbortSignal
+  }
+): Promise<{ items: DreamRunMessageData[]; total: number }> {
+  const queryParams = new URLSearchParams()
+
+  if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString())
+  if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString())
+
+  const qs = queryParams.toString()
+  const response = await fetchWithAuth(
+    `${API_BASE}/dream-runs/${runId}/messages${qs ? `?${qs}` : ''}`,
+    { signal: params?.signal }
+  )
+
+  if (!response.ok) {
+    let message = '获取梦境消息处理详情失败'
+    try {
+      const error = (await response.json()) as { detail?: string }
+      message = error.detail || message
+    } catch {
+      // 非 JSON 错误响应沿用安全的通用提示。
+    }
+    throw new Error(message)
+  }
+
+  return (await response.json()) as { items: DreamRunMessageData[]; total: number }
 }
 
 /**

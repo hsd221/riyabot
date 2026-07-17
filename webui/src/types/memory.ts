@@ -45,6 +45,26 @@ export interface DreamRunData {
 }
 
 /**
+ * 单次梦境对一条原始消息的处理详情
+ */
+export interface DreamRunMessageData {
+  archive_id: number
+  message_id: string
+  stream_id: string
+  user_id: string
+  platform: string
+  sender_name: string
+  conversation_name: string
+  content: string
+  message_timestamp: number
+  chat_type: string
+  route: string
+  significance: number | null
+  outcome: string
+  processed_at: string | null
+}
+
+/**
  * 洞见信息
  */
 export interface InsightData {

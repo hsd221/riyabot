@@ -1,5 +1,6 @@
 """记忆系统 API 路由"""
 
+import datetime
 import json
 from typing import Any, Optional
 
@@ -13,6 +14,7 @@ from src.memory.schema import (
     DreamRun,
     InsightPool,
     NoisePool,
+    RawMessageArchive,
     configure_memory_database,
     initialize_database,
     memory_db,
@@ -112,6 +114,32 @@ class DreamRunListResponse(BaseModel):
     total: int
 
 
+class DreamRunMessageData(BaseModel):
+    """单次梦境对一条原始消息的处理详情。"""
+
+    archive_id: int
+    message_id: str
+    stream_id: str
+    user_id: str
+    platform: str
+    sender_name: str
+    conversation_name: str
+    content: str
+    message_timestamp: float
+    chat_type: str
+    route: str
+    significance: Optional[float] = None
+    outcome: str
+    processed_at: Optional[str] = None
+
+
+class DreamRunMessageListResponse(BaseModel):
+    """梦境逐消息处理详情分页响应。"""
+
+    items: list[DreamRunMessageData]
+    total: int
+
+
 class InsightPoolData(BaseModel):
     """洞见数据"""
 
@@ -193,6 +221,36 @@ def _dream_run_to_dict(run: DreamRun) -> dict:
         "atoms_processed": run.atoms_processed,
         "atoms_created": run.atoms_created,
         "summary": run.summary,
+    }
+
+
+def _dream_message_to_dict(message: RawMessageArchive) -> dict:
+    """将原始消息的梦境处理状态转换为稳定的详情契约。"""
+    sender_name = message.cardname or message.nickname or message.user_id
+    if message.group_name or message.group_id:
+        conversation_name = message.group_name or message.group_id
+    elif message.chat_type == "private":
+        conversation_name = "私聊"
+    else:
+        conversation_name = message.stream_id
+
+    route = message.dream_route or "unknown"
+    outcome = "skipped" if route == "skipped" or message.dream_status == "skipped" else "retained_as_candidate"
+    return {
+        "archive_id": message.id,
+        "message_id": message.message_id,
+        "stream_id": message.stream_id,
+        "user_id": message.user_id,
+        "platform": message.platform,
+        "sender_name": sender_name,
+        "conversation_name": conversation_name,
+        "content": message.content,
+        "message_timestamp": message.timestamp,
+        "chat_type": message.chat_type,
+        "route": route,
+        "significance": message.dream_significance,
+        "outcome": outcome,
+        "processed_at": _format_datetime(message.dream_processed_at),
     }
 
 
@@ -327,6 +385,61 @@ async def get_dream_runs(
         )
     except Exception as e:
         raise internal_server_error(logger, "获取梦境运行记录失败", e) from None
+
+
+@router.get("/dream-runs/{run_id}/messages", response_model=DreamRunMessageListResponse)
+async def get_dream_run_messages(
+    run_id: int,
+    limit: int = Query(50, ge=1, le=200, description="返回数量"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    _auth: bool = Depends(require_auth),
+):
+    """获取一次梦境直接处理过的原始消息及处理结果。"""
+    try:
+        _ensure_memory_database_ready()
+        run = DreamRun.get_or_none(DreamRun.id == run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="梦境运行记录不存在")
+
+        message_filter = RawMessageArchive.dream_run_id == run.id
+        if run.run_type == "daily":
+            upper_bound = run.end_time
+            if upper_bound is None:
+                next_run = (
+                    DreamRun.select()
+                    .where(DreamRun.start_time > run.start_time)
+                    .order_by(DreamRun.start_time.asc())
+                    .first()
+                )
+                upper_bound = next_run.start_time if next_run is not None else datetime.datetime.now()
+
+            legacy_window = (
+                RawMessageArchive.dream_run_id.is_null(True)
+                & RawMessageArchive.dream_processed_at.is_null(False)
+                & (RawMessageArchive.dream_processed_at >= run.start_time)
+                & (RawMessageArchive.dream_processed_at <= upper_bound)
+            )
+            message_filter = message_filter | legacy_window
+
+        query = RawMessageArchive.select().where(message_filter)
+        total = query.count()
+        items = (
+            query.order_by(
+                RawMessageArchive.dream_processed_at.asc(),
+                RawMessageArchive.timestamp.asc(),
+                RawMessageArchive.id.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        return DreamRunMessageListResponse(
+            items=[DreamRunMessageData(**_dream_message_to_dict(item)) for item in items],
+            total=total,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise internal_server_error(logger, "获取梦境消息处理详情失败", e) from None
 
 
 @router.get("/insights", response_model=InsightPoolListResponse)

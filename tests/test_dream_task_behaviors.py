@@ -263,7 +263,7 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
 
         task = DreamTask(FakeStore())
 
-        stats = await task._triage_raw_archive(max_age_days=1)
+        stats = await task._triage_raw_archive(max_age_days=1, dream_run_id=37)
 
         self.assertEqual(stats, {"high": 1, "medium": 1, "low": 1, "skipped": 0})
         self.assertEqual(
@@ -273,6 +273,14 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
                 RawMessageArchive.get_by_id(low.id).dream_route,
             },
             {"high", "medium", "low"},
+        )
+        self.assertEqual(
+            {
+                RawMessageArchive.get_by_id(high.id).dream_run_id,
+                RawMessageArchive.get_by_id(medium.id).dream_run_id,
+                RawMessageArchive.get_by_id(low.id).dream_run_id,
+            },
+            {37},
         )
         self.assertEqual(MemoryAtom.select().count(), 0)
         self.assertEqual(EpisodicDetail.select().count(), 0)
@@ -857,8 +865,10 @@ class DreamTaskCycleTest(unittest.IsolatedAsyncioTestCase):
                 self,
                 max_age_days: int | None = 1,
                 batch_size: int | None = None,
+                dream_run_id: int | None = None,
             ) -> dict[str, int]:
                 events.append("triage_raw")
+                events.append(f"triage_run:{dream_run_id}")
                 return {"high": 1, "medium": 1, "low": 1, "skipped": 0}
 
             async def _archive_legacy_direct_raw_atoms(self, batch_size: int | None = None) -> int:
@@ -904,6 +914,7 @@ class DreamTaskCycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("归档2条旧版直写原子", final_summary)
         self.assertIn("archive_legacy_raw", events)
         self.assertIn("triage_raw", events)
+        self.assertIn("triage_run:1", events)
         self.assertIn("resolve_conflicts", events)
         self.assertIn("reassess", events)
         self.assertIn("privacy", events)
