@@ -194,7 +194,7 @@ variants: light, standard
 | `current_num` | 当前已存储的表情包数量。 |
 | `new_description` | 准备入库的新表情包语义描述。 |
 | `emoji_list` | 为替换决策抽样出的旧表情包编号、描述和使用信息列表。 |
-| `available_emotions` | 当前表情包库真实存在、允许选择的情感标签集合。 |
+| `emoji_candidates` | 本轮允许选择的表情包候选列表；每行包含临时候选 ID 和完整语义描述。 |
 | `description` | 视觉模型生成的原始表情包描述，供多维语义压缩器整理。 |
 | `frame_count` | 动态图像的总帧数。 |
 | `frame_start` | 当前批次第一帧的全局序号。 |
