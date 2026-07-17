@@ -1,6 +1,8 @@
 import asyncio
 import http
+import ipaddress
 import json
+import secrets
 from typing import Optional
 
 import websockets as Server
@@ -13,6 +15,29 @@ from .recv_handler.meta_event_handler import meta_event_handler
 from .recv_handler.notice_handler import notice_handler
 from .response_pool import check_timeout_response, put_response
 from .send_handler.nc_sending import nc_message_sender
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Only explicit loopback bind addresses may run without a token."""
+    normalized = host.strip().lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    normalized = normalized.split("%", maxsplit=1)[0]
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _plain_response(status_code: http.HTTPStatus, body: bytes) -> Server.Response:
+    return Server.Response(
+        status_code=status_code,
+        reason_phrase=status_code.phrase,
+        headers=Server.Headers([("Content-Type", "text/plain")]),
+        body=body,
+    )
 
 
 class OneBotAdapterRuntime:
@@ -166,14 +191,13 @@ class OneBotAdapterRuntime:
         del conn
         token = global_config.napcat_server.token
         if not token or token.strip() == "":
+            if not _is_loopback_host(str(global_config.napcat_server.host)):
+                return _plain_response(http.HTTPStatus.FORBIDDEN, b"Forbidden\n")
             return None
-        auth_header = request.headers.get("Authorization")
-        if auth_header != f"Bearer {token}":
-            return Server.Response(
-                status=http.HTTPStatus.UNAUTHORIZED,
-                headers=Server.Headers([("Content-Type", "text/plain")]),
-                body=b"Unauthorized\n",
-            )
+        auth_header = request.headers.get("Authorization") or ""
+        expected = f"Bearer {token}"
+        if not secrets.compare_digest(auth_header.encode("utf-8"), expected.encode("utf-8")):
+            return _plain_response(http.HTTPStatus.UNAUTHORIZED, b"Unauthorized\n")
         return None
 
     async def _napcat_with_restart(self) -> None:
@@ -204,9 +228,15 @@ class OneBotAdapterRuntime:
         logger.debug(f"日志等级: {global_config.debug.level}")
         logger.debug("日志文件: plugins/onebot_adapter/logs/adapter_*.log")
 
+        host = str(global_config.napcat_server.host)
+        token = global_config.napcat_server.token
+        if (not token or token.strip() == "") and not _is_loopback_host(host):
+            logger.error("NapCat WebSocket 非回环监听必须配置访问令牌")
+            raise RuntimeError("NapCat WebSocket 非回环监听必须配置访问令牌")
+
         async with Server.serve(
             self._message_recv,
-            global_config.napcat_server.host,
+            host,
             global_config.napcat_server.port,
             max_size=2**26,
             process_request=self._check_napcat_server_token,

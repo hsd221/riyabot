@@ -32,7 +32,7 @@ def apply_security_headers(response: Response, is_https: bool) -> None:
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
             "font-src 'self' data:",
-            "connect-src 'self' ws: wss: http://localhost:8001 http://127.0.0.1:8001",
+            "connect-src 'self' ws: wss:",
             "worker-src 'self' blob:",
         )
     )

@@ -29,7 +29,7 @@ class NapcatServerConfig(ConfigBase):
     """Napcat服务端的端口号"""
 
     token: str = ""
-    """Napcat服务端的访问令牌，若无则留空"""
+    """Napcat服务端的访问令牌，非回环监听时必须配置"""
 
     heartbeat_interval: int = 30
     """Napcat心跳间隔时间，单位为秒"""

@@ -134,6 +134,78 @@ class StructuredConfigRoutesSecurityTest(unittest.IsolatedAsyncioTestCase):
         self.config_dir_patch.stop()
         self.tmp.cleanup()
 
+    def _write_model_config(self) -> Path:
+        config_path = Path(self.tmp.name) / "model_config.toml"
+        config_path.write_text(
+            """# keep provider comments
+[[api_providers]]
+name = "primary"
+base_url = "https://primary.example/v1"
+api_key = "primary-super-secret"
+client_type = "openai"
+
+[[api_providers]]
+name = "secondary"
+base_url = "https://secondary.example/v1"
+api_key = "secondary-super-secret"
+client_type = "openai"
+""",
+            encoding="utf-8",
+        )
+        return config_path
+
+    async def test_model_config_reads_mask_provider_api_keys(self) -> None:
+        self._write_model_config()
+
+        response = await config_routes.get_model_config(_auth=True)
+        providers = response["config"]["api_providers"]
+
+        self.assertEqual(providers[0]["api_key"], "prim***cret")
+        self.assertEqual(providers[1]["api_key"], "seco***cret")
+        self.assertNotIn("primary-super-secret", repr(response))
+        self.assertNotIn("secondary-super-secret", repr(response))
+
+    async def test_full_model_config_save_preserves_masked_api_keys_and_accepts_replacements(self) -> None:
+        config_path = self._write_model_config()
+        masked_config = (await config_routes.get_model_config(_auth=True))["config"]
+        masked_config["api_providers"][0]["base_url"] = "https://changed.example/v1"
+
+        with patch.object(config_routes.APIAdapterConfig, "from_dict", return_value=None):
+            await config_routes.update_model_config(masked_config, _auth=True)
+
+        saved_content = config_path.read_text(encoding="utf-8")
+        self.assertIn("# keep provider comments", saved_content)
+        self.assertIn('api_key = "primary-super-secret"', saved_content)
+        self.assertIn('api_key = "secondary-super-secret"', saved_content)
+        self.assertIn('base_url = "https://changed.example/v1"', saved_content)
+
+        masked_config = (await config_routes.get_model_config(_auth=True))["config"]
+        masked_config["api_providers"][0]["api_key"] = "replacement-secret"
+        with patch.object(config_routes.APIAdapterConfig, "from_dict", return_value=None):
+            await config_routes.update_model_config(masked_config, _auth=True)
+
+        saved_content = config_path.read_text(encoding="utf-8")
+        self.assertIn('api_key = "replacement-secret"', saved_content)
+        self.assertNotIn('api_key = "primary-super-secret"', saved_content)
+
+    async def test_model_provider_section_save_restores_masked_keys_by_provider_name(self) -> None:
+        config_path = self._write_model_config()
+        providers = (await config_routes.get_model_config(_auth=True))["config"]["api_providers"]
+        reordered_providers = list(reversed(providers))
+
+        with patch.object(config_routes.APIAdapterConfig, "from_dict", return_value=None):
+            await config_routes.update_model_config_section("api_providers", reordered_providers, _auth=True)
+
+        saved_document = config_routes.tomlkit.loads(config_path.read_text(encoding="utf-8"))
+        saved_keys = {provider["name"]: provider["api_key"] for provider in saved_document["api_providers"]}
+        self.assertEqual(
+            saved_keys,
+            {
+                "primary": "primary-super-secret",
+                "secondary": "secondary-super-secret",
+            },
+        )
+
     async def test_schema_read_and_save_failures_are_sanitized_in_responses_and_logs(self) -> None:
         secret = 'api_key = "super-secret" at /private/model_config.toml'
 

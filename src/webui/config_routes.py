@@ -2,6 +2,7 @@
 配置管理API路由
 """
 
+import copy
 from dataclasses import fields
 import errno
 import os
@@ -13,7 +14,7 @@ from typing import Any, Annotated, Optional
 import tomlkit
 from fastapi import APIRouter, Body, Cookie, Depends, Header, HTTPException
 
-from src.common.logger import get_logger
+from src.common.logger import get_logger, redact_secret
 from src.webui.auth import verify_auth_token_from_cookie_or_header
 from src.common.toml_utils import _update_toml_doc, format_toml_string
 from src.config.config import Config, APIAdapterConfig, CONFIG_DIR, PROJECT_ROOT
@@ -281,11 +282,61 @@ def _save_structured_config(filename: str, config_data: Any, *, prune_bot: bool 
     if existing_document is None:
         document_to_save = config_data
     else:
+        if filename == "model_config.toml":
+            _restore_masked_model_api_keys(config_data, existing_document)
         _update_toml_doc(existing_document, config_data)
         if prune_bot:
             _prune_legacy_bot_config_keys(existing_document)
         document_to_save = existing_document
     _atomic_write_config(filename, _render_config_bytes(document_to_save), fingerprint)
+
+
+def _model_api_providers(config_data: Any) -> list[dict[str, Any]]:
+    if not isinstance(config_data, dict):
+        return []
+    providers = config_data.get("api_providers")
+    if not isinstance(providers, list):
+        return []
+    return [provider for provider in providers if isinstance(provider, dict)]
+
+
+def _mask_model_api_keys(config_data: Any) -> Any:
+    masked_config = copy.deepcopy(config_data)
+    for provider in _model_api_providers(masked_config):
+        api_key = provider.get("api_key")
+        if isinstance(api_key, str) and api_key:
+            provider["api_key"] = redact_secret(api_key)
+    return masked_config
+
+
+def _restore_masked_model_api_keys(config_data: Any, existing_config: Any) -> None:
+    existing_keys = []
+    existing_keys_by_name = {}
+    for provider in _model_api_providers(existing_config):
+        name = provider.get("name")
+        api_key = provider.get("api_key")
+        if not isinstance(api_key, str) or not api_key:
+            continue
+        existing_keys.append(api_key)
+        if isinstance(name, str):
+            existing_keys_by_name[name] = api_key
+
+    for provider in _model_api_providers(config_data):
+        submitted_key = provider.get("api_key")
+        if not isinstance(submitted_key, str) or not submitted_key:
+            continue
+
+        provider_name = provider.get("name")
+        named_key = existing_keys_by_name.get(provider_name) if isinstance(provider_name, str) else None
+        if named_key is not None and submitted_key == redact_secret(named_key):
+            provider["api_key"] = named_key
+            continue
+
+        matching_keys = {api_key for api_key in existing_keys if submitted_key == redact_secret(api_key)}
+        if len(matching_keys) == 1:
+            provider["api_key"] = matching_keys.pop()
+        elif len(matching_keys) > 1:
+            raise HTTPException(status_code=400, detail="脱敏 API Key 无法唯一匹配，请重新输入")
 
 
 def _has_orphaned_model_providers(section_name: str, section_data: Any, config_data: Any) -> bool:
@@ -446,7 +497,7 @@ async def get_model_config(_auth: bool = Depends(require_auth)):
     try:
         config_data, _ = _load_config_document("model_config.toml")
 
-        return {"success": True, "config": config_data}
+        return {"success": True, "config": _mask_model_api_keys(config_data)}
     except HTTPException:
         raise
     except Exception as e:
@@ -617,6 +668,9 @@ async def update_model_config_section(
         # 更新指定节
         if section_name not in config_data:
             raise HTTPException(status_code=404, detail=f"配置节 '{section_name}' 不存在")
+
+        if section_name == "api_providers":
+            _restore_masked_model_api_keys({"api_providers": section_data}, config_data)
 
         # 使用递归合并保留注释（对于字典类型）
         # 对于数组表（如 [[models]], [[api_providers]]），直接替换

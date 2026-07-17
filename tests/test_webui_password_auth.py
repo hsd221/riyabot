@@ -541,7 +541,11 @@ class WebUISecurityHardeningTest(unittest.TestCase):
 
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
-        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+        content_security_policy = response.headers["Content-Security-Policy"]
+        self.assertIn("frame-ancestors 'none'", content_security_policy)
+        self.assertIn("connect-src 'self' ws: wss:", content_security_policy)
+        self.assertNotIn("http://localhost:8001", content_security_policy)
+        self.assertNotIn("http://127.0.0.1:8001", content_security_policy)
         self.assertNotIn("Strict-Transport-Security", response.headers)
 
         secure_response = Response()

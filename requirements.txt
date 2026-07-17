@@ -7,7 +7,7 @@ google-genai>=1.39.1
 jieba>=0.42.1
 json-repair>=0.47.6
 loguru>=0.7.3
-maim-message
+maim-message>=0.6.0,<1.0
 matplotlib>=3.10.3
 numpy>=2.2.6
 openai>=1.95.0
@@ -32,5 +32,5 @@ urllib3>=2.5.0
 uvicorn>=0.35.0
 watchdog>=3.0.0
 websockets>=15.0.1
-msgpack
-zstandard
+msgpack>=1.1.2,<2.0
+zstandard>=0.25.0,<1.0

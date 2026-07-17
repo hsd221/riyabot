@@ -697,7 +697,7 @@ export function AdapterConfigPage() {
       `port = ${fillDefaults(config.napcat_server.port || 0, DEFAULT_CONFIG.napcat_server.port)}             # Napcat设定的端口`
     )
     lines.push(
-      `token = "${fillDefaults(config.napcat_server.token, DEFAULT_CONFIG.napcat_server.token)}"              # Napcat设定的访问令牌，若无则留空`
+      `token = "${fillDefaults(config.napcat_server.token, DEFAULT_CONFIG.napcat_server.token)}"              # Napcat设定的访问令牌，非回环监听时必须配置`
     )
     lines.push(
       `heartbeat_interval = ${fillDefaults(config.napcat_server.heartbeat_interval || 0, DEFAULT_CONFIG.napcat_server.heartbeat_interval)} # 与Napcat设置的心跳相同（按秒计）`
@@ -1759,10 +1759,10 @@ function NapcatServerSection({
                   napcat_server: { ...config.napcat_server, token: e.target.value },
                 })
               }
-              placeholder="留空表示无需令牌"
+              placeholder="仅回环监听可留空"
               className="text-sm md:text-base"
             />
-            <p className="text-xs text-muted-foreground">Napcat 设定的访问令牌，若无则留空</p>
+            <p className="text-xs text-muted-foreground">Napcat 设定的访问令牌，非回环监听时必须配置</p>
           </div>
 
           <div className="grid gap-2">
