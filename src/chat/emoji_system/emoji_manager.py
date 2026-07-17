@@ -23,6 +23,7 @@ from src.chat.emoji_system.emoji_description import (
     extract_semantic_emoji_emotions,
     is_semantic_emoji_description,
 )
+from src.chat.emoji_system.emoji_vector_index import EmojiVectorCandidate, emoji_vector_index
 from src.chat.utils.utils_image import (
     audit_gif_frames,
     get_image_manager,
@@ -401,6 +402,7 @@ class EmojiManager:
         self.emoji_num_max = global_config.emoji.max_reg_num
         self.emoji_num_max_reach_deletion = global_config.emoji.do_replace
         self.emoji_objects: list[MaiEmoji] = []  # 存储MaiEmoji对象的列表，使用类型注解明确列表元素类型
+        self.vector_index = emoji_vector_index
 
         logger.info("启动表情包管理器")
 
@@ -504,6 +506,51 @@ class EmojiManager:
         except Exception as e:
             logger.error(f"[错误] 获取表情包失败: {str(e)}")
             return None
+
+    async def get_emoji_candidates_by_vector(
+        self,
+        text_emotion: str,
+        *,
+        limit: int = 30,
+    ) -> Optional[List[Tuple["MaiEmoji", str, float]]]:
+        """按情感向量返回达到相似度阈值的表情候选。
+
+        ``None`` 表示向量能力不可用，空列表表示向量检索成功但没有达标候选。
+        """
+        try:
+            candidates = [
+                EmojiVectorCandidate(emoji.hash, tuple(emoji.emotion))
+                for emoji in self.emoji_objects
+                if not emoji.is_deleted and emoji.hash and emoji.emotion
+            ]
+            matches = await self.vector_index.search(
+                query_text=text_emotion,
+                candidates=candidates,
+                limit=limit,
+            )
+            if matches is None:
+                return None
+
+            emojis_by_hash = {emoji.hash: emoji for emoji in self.emoji_objects if not emoji.is_deleted and emoji.hash}
+            results: List[Tuple[MaiEmoji, str, float]] = []
+            for match in matches:
+                emoji = emojis_by_hash.get(match.emoji_hash)
+                if emoji is None:
+                    continue
+                results.append((emoji, "、".join(match.emotions), match.similarity))
+            return results
+        except Exception as e:
+            logger.warning(f"表情向量检索失败，将回退随机候选: {e}")
+            return None
+
+    async def _index_emoji_vector(self, emoji: "MaiEmoji") -> None:
+        """尽力写入表情情感向量；失败不影响表情本身入库。"""
+        try:
+            indexed = await self.vector_index.upsert(emoji.hash, emoji.emotion)
+            if not indexed:
+                logger.info(f"表情向量暂不可用，保留随机回退: hash={emoji.hash[:8]}")
+        except Exception as e:
+            logger.warning(f"表情向量注册失败，表情仍保持可用: hash={emoji.hash[:8]}, error={e}")
 
     def _levenshtein_distance(self, s1: str, s2: str) -> int:
         # sourcery skip: simplify-empty-collection-comparison, simplify-len-comparison, simplify-str-len-comparison
@@ -823,6 +870,10 @@ class EmojiManager:
                 self.emoji_objects = [e for e in self.emoji_objects if e.hash != emoji_hash]
                 # 更新计数
                 self.emoji_num -= 1
+                try:
+                    await self.vector_index.delete(emoji_hash)
+                except Exception as vector_error:
+                    logger.warning(f"删除表情向量失败，后续检索会自动清理: {vector_error}")
                 logger.info(f"[统计] 当前表情包数量: {self.emoji_num}")
 
                 return True
@@ -1097,6 +1148,7 @@ class EmojiManager:
                         logger.error(f"[错误] 删除替换失败文件时出错: {str(e)}")
                     return False
                 # 替换成功时，replace_a_emoji 内部已处理 new_emoji 的注册和添加到列表
+                await self._index_emoji_vector(new_emoji)
                 return True
             else:
                 # 直接注册
@@ -1105,6 +1157,7 @@ class EmojiManager:
                     # 注册成功后，添加到内存列表
                     self.emoji_objects.append(new_emoji)
                     self.emoji_num += 1
+                    await self._index_emoji_vector(new_emoji)
                     logger.info(f"[成功] 注册新表情包: {filename} (当前: {self.emoji_num}/{self.emoji_num_max})")
                     return True
                 else:

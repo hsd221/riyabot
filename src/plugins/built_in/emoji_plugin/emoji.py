@@ -30,7 +30,9 @@ class EmojiAction(BaseAction):
     action_description = "发送表情包辅助表达情绪"
 
     # 动作参数定义
-    action_parameters = {}
+    action_parameters = {
+        "emotion": "用1到5个简短词概括希望表情包表达的情感或语气，例如“轻松调侃”“温柔安慰”",
+    }
 
     # 动作使用场景
     action_require = [
@@ -50,8 +52,21 @@ class EmojiAction(BaseAction):
             # reason = self.action_data.get("reason", "表达当前情绪")
             reason = self.action_reasoning
 
-            # 2. 随机获取候选表情包，并为本轮选择分配临时 ID
-            sampled_emojis = await emoji_api.get_random(30)
+            # 2. 优先按 Planner 提供的简短情感词做向量检索；不可用时保持原随机回退。
+            emotion_query = " ".join(str(self.action_data.get("emotion") or "").split()).strip()[:64]
+            sampled_emojis = None
+            if emotion_query:
+                try:
+                    sampled_emojis = await emoji_api.get_by_emotion_vector(emotion_query, count=30)
+                except Exception as vector_error:
+                    logger.warning(f"{self.log_prefix} 表情向量检索异常，回退随机候选: {vector_error}")
+
+                if sampled_emojis == []:
+                    logger.info(f"{self.log_prefix} 没有表情包达到情感向量相似度阈值: {emotion_query}")
+                    return False, "没有表情包达到情感相似度阈值"
+
+            if sampled_emojis is None:
+                sampled_emojis = await emoji_api.get_random(30)
             if not sampled_emojis:
                 logger.warning(f"{self.log_prefix} 无法获取随机表情包")
                 return False, "无法获取随机表情包"

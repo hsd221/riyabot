@@ -33,6 +33,7 @@ def make_manager(emojis: list[SimpleNamespace] | None = None) -> SimpleNamespace
         emoji_num_max_reach_deletion=True,
         record_usage=Mock(),
         get_emoji_for_text=AsyncMock(),
+        get_emoji_candidates_by_vector=AsyncMock(),
         register_emoji_by_filename=AsyncMock(),
         get_emoji_from_manager=AsyncMock(),
         delete_emoji=AsyncMock(),
@@ -40,6 +41,41 @@ def make_manager(emojis: list[SimpleNamespace] | None = None) -> SimpleNamespace
 
 
 class EmojiApiLookupTest(unittest.IsolatedAsyncioTestCase):
+    async def test_get_by_emotion_vector_preserves_vector_availability_and_converts_matches(self) -> None:
+        matching = make_emoji("match", filename="match.png", description="轻松调侃", emotion=["调侃"])
+        unreadable = make_emoji("broken", filename="broken.png", description="损坏", emotion=["开心"])
+        manager = make_manager([matching, unreadable])
+        manager.get_emoji_candidates_by_vector.return_value = [
+            (matching, "轻松调侃", 0.91),
+            (unreadable, "开心", 0.82),
+        ]
+
+        with (
+            patch.object(emoji_api, "get_emoji_manager", return_value=manager),
+            patch.object(emoji_api, "image_path_to_base64", side_effect=["base64-match", ""]),
+        ):
+            result = await emoji_api.get_by_emotion_vector("轻松调侃", count=5)
+
+        self.assertEqual(result, [("base64-match", "轻松调侃", "轻松调侃")])
+        manager.get_emoji_candidates_by_vector.assert_awaited_once_with("轻松调侃", limit=5)
+        manager.record_usage.assert_called_once_with("match")
+
+        manager.get_emoji_candidates_by_vector.return_value = None
+        with patch.object(emoji_api, "get_emoji_manager", return_value=manager):
+            self.assertIsNone(await emoji_api.get_by_emotion_vector("不可用"))
+
+        manager.get_emoji_candidates_by_vector.return_value = []
+        with patch.object(emoji_api, "get_emoji_manager", return_value=manager):
+            self.assertEqual(await emoji_api.get_by_emotion_vector("无匹配"), [])
+
+    async def test_get_by_emotion_vector_validates_input(self) -> None:
+        with self.assertRaises(ValueError):
+            await emoji_api.get_by_emotion_vector("")
+        with self.assertRaises(TypeError):
+            await emoji_api.get_by_emotion_vector(123)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            await emoji_api.get_by_emotion_vector("开心", count=0)
+
     async def test_get_by_description_validates_input_and_converts_manager_match_to_base64(self) -> None:
         manager = make_manager()
         manager.get_emoji_for_text.return_value = ("/tmp/happy.png", "开心表情", "开心")

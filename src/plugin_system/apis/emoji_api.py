@@ -68,6 +68,41 @@ async def get_by_description(description: str) -> Optional[Tuple[str, str, str]]
         return None
 
 
+async def get_by_emotion_vector(emotion: str, count: int = 30) -> Optional[List[Tuple[str, str, str]]]:
+    """按简短情感描述进行向量检索，返回供 LLM 精选的候选表情。
+
+    ``None`` 表示向量能力不可用，调用方应回退随机候选；空列表表示
+    向量检索可用，但没有候选达到相似度阈值。
+    """
+    if not emotion:
+        raise ValueError("情感描述不能为空")
+    if not isinstance(emotion, str):
+        raise TypeError("情感描述必须是字符串类型")
+    if not isinstance(count, int):
+        raise TypeError("count 必须是整数类型")
+    if count <= 0:
+        raise ValueError("count 必须大于0")
+
+    try:
+        emoji_manager = get_emoji_manager()
+        matches = await emoji_manager.get_emoji_candidates_by_vector(emotion, limit=count)
+        if matches is None:
+            return None
+
+        results: List[Tuple[str, str, str]] = []
+        for emoji, matched_emotion, _similarity in matches:
+            emoji_base64 = image_path_to_base64(emoji.full_path)
+            if not emoji_base64:
+                logger.warning(f"[EmojiAPI] 向量候选无法转换为base64: {emoji.full_path}")
+                continue
+            emoji_manager.record_usage(emoji.hash)
+            results.append((emoji_base64, emoji.description, matched_emotion))
+        return results
+    except Exception as e:
+        logger.warning(f"[EmojiAPI] 情感向量检索不可用: {e}")
+        return None
+
+
 async def get_random(count: Optional[int] = 1) -> List[Tuple[str, str, str]]:
     """随机获取指定数量的表情包
 

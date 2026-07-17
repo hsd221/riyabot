@@ -66,6 +66,11 @@ def make_manager() -> emoji_manager.EmojiManager:
     manager.emoji_num_max_reach_deletion = True
     manager.vlm = SimpleNamespace()
     manager.llm_emotion_judge = SimpleNamespace()
+    manager.vector_index = SimpleNamespace(
+        upsert=AsyncMock(return_value=True),
+        delete=AsyncMock(return_value=True),
+        search=AsyncMock(),
+    )
     return manager
 
 
@@ -298,6 +303,14 @@ class EmojiManagerLookupTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await manager.get_emoji_tag_by_hash("happy"), ["开心", "快乐"])
         self.assertEqual(await manager.get_emoji_description_by_hash("happy"), "happy desc")
 
+        manager.vector_index.search.return_value = [
+            SimpleNamespace(emoji_hash="happy", emotions=("开心", "快乐"), similarity=0.93)
+        ]
+        vector_candidates = await manager.get_emoji_candidates_by_vector("轻松开心", limit=5)
+        self.assertEqual(vector_candidates, [(happy, "开心、快乐", 0.93)])
+        indexed_candidates = manager.vector_index.search.await_args.kwargs["candidates"]
+        self.assertEqual([candidate.emoji_hash for candidate in indexed_candidates], ["happy"])
+
         manager.emoji_objects = []
         db_record = SimpleNamespace(emotion="喜悦，偷笑", description="db desc")
         with patch.object(emoji_manager.Emoji, "get_or_none", return_value=db_record):
@@ -339,6 +352,7 @@ class EmojiManagerLookupTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await manager.delete_emoji("hash-1"))
         self.assertEqual(manager.emoji_objects, [])
         self.assertEqual(manager.emoji_num, 0)
+        manager.vector_index.delete.assert_awaited_once_with("hash-1")
 
         self.assertFalse(await manager.delete_emoji("missing"))
 
@@ -655,6 +669,8 @@ class EmojiDescriptionAndRegistrationTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(manager.emoji_num, 1)
                 self.assertEqual(manager.emoji_objects[0].hash, first_hash)
                 self.assertEqual(manager.emoji_objects[0].emotion, ["开心"])
+                manager.vector_index.upsert.assert_awaited_once_with(first_hash, ["开心"])
+                manager.vector_index.upsert.reset_mock()
 
                 duplicate = emoji_dir / "duplicate.png"
                 duplicate.write_bytes(first_bytes)
@@ -669,6 +685,8 @@ class EmojiDescriptionAndRegistrationTest(unittest.IsolatedAsyncioTestCase):
 
                 self.assertTrue(await manager.register_emoji_by_filename("replacement.png"))
                 manager.replace_a_emoji.assert_awaited_once()
+                replacement_hash = hashlib.md5(replacement.read_bytes()).hexdigest()
+                manager.vector_index.upsert.assert_awaited_once_with(replacement_hash, ["新"])
 
                 failed_desc = emoji_dir / "failed.png"
                 write_png(failed_desc, color=(255, 255, 0))
