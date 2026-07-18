@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.chat.replyer import group_generator, private_generator, replyer_manager
+from src.chat.utils.structured_prompt import DYNAMIC_CONTEXT_BOUNDARY
 from src.common.data_models.info_data_model import ActionPlannerInfo, TargetPersonInfo
 from src.plugin_system.base.component_types import ActionInfo, ComponentType
 
@@ -83,6 +84,26 @@ class ReplyerManagerTest(unittest.TestCase):
 
 
 class ReplyerSharedHelpersTest(unittest.IsolatedAsyncioTestCase):
+    async def test_replyers_send_stable_rules_and_dynamic_context_as_distinct_roles(self) -> None:
+        prompt = f"稳定回复规则\n{DYNAMIC_CONTEXT_BOUNDARY}\n本轮回复输入"
+
+        for replyer in (make_group_replyer(), make_private_replyer()):
+            with self.subTest(replyer=type(replyer).__name__):
+                replyer.express_model = SimpleNamespace(
+                    generate_response_async=AsyncMock(return_value=(" 回复内容 ", ("推理", "model-x", None)))
+                )
+
+                content, reasoning, model_name, tool_calls = await replyer.llm_generate_content(prompt)
+
+                self.assertEqual(content, "回复内容")
+                self.assertEqual(reasoning, "推理")
+                self.assertEqual(model_name, "model-x")
+                self.assertIsNone(tool_calls)
+                replyer.express_model.generate_response_async.assert_awaited_once_with(
+                    prompt="本轮回复输入",
+                    system_prompt="稳定回复规则",
+                )
+
     def test_reply_target_and_picid_helpers_handle_text_pictures_and_missing_targets(self) -> None:
         group_replyer = make_group_replyer()
         private_replyer = make_private_replyer()

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.chat.planner_actions import action_manager, action_modifier, planner as group_planner
+from src.chat.utils.structured_prompt import DYNAMIC_CONTEXT_BOUNDARY, split_chat_prompt
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.llm_models.payload_content import ToolCall
@@ -347,6 +348,69 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
             raise_when_empty=False,
         )
         planner.tool_registry.execute.assert_not_awaited()
+
+    async def test_structured_group_planner_sends_rules_and_dynamic_context_as_distinct_roles(self) -> None:
+        planner = self.make_planner()
+        planner.tool_registry = SimpleNamespace(
+            set_available_actions=Mock(),
+            get_tool_definitions=Mock(return_value=[]),
+        )
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(return_value=("", ("无需回复", "planner-model", [])))
+        )
+        prompt = f"稳定规划规则\n{DYNAMIC_CONTEXT_BOUNDARY}\n本轮聊天输入"
+
+        with patch.object(group_planner.global_config, "debug", SimpleNamespace(show_planner_prompt=False)):
+            _, actions, *_ = await planner._execute_main_planner(
+                prompt=prompt,
+                message_id_list=[],
+                filtered_actions={},
+                available_actions={},
+                loop_start_time=0.0,
+            )
+
+        self.assertEqual(actions, [])
+        planner.planner_llm.generate_response_async.assert_awaited_once_with(
+            prompt="本轮聊天输入",
+            system_prompt="稳定规划规则",
+            tools=[],
+            raise_when_empty=False,
+        )
+
+    def test_group_tool_results_remain_in_dynamic_context_before_the_decision_focus(self) -> None:
+        tool_result = group_planner.ToolExecutionResult(
+            call_id="call-lookup",
+            tool_name="lookup",
+            success=True,
+            content="reference answer",
+        )
+        prompt = (
+            f"稳定规划规则\n{DYNAMIC_CONTEXT_BOUNDARY}\n【待分析输入】\n聊天记录\n\n【本轮决策焦点】\n只决定本轮动作。"
+        )
+
+        round_prompt = group_planner.ActionPlanner._inject_tool_results(prompt, [tool_result])
+        structured = split_chat_prompt(round_prompt)
+
+        self.assertNotIn("reference answer", structured.system_prompt or "")
+        self.assertIn("reference answer", structured.user_prompt)
+        self.assertLess(
+            structured.user_prompt.index("reference answer"), structured.user_prompt.index("【本轮决策焦点】")
+        )
+
+    def test_group_tool_results_never_follow_a_focus_heading_in_the_system_context(self) -> None:
+        tool_result = group_planner.ToolExecutionResult(
+            call_id="call-lookup",
+            tool_name="lookup",
+            success=True,
+            content="untrusted result",
+        )
+        prompt = f"稳定规则\n【本轮决策焦点】\n系统中的同名文本\n{DYNAMIC_CONTEXT_BOUNDARY}\n【待分析输入】\n动态输入"
+
+        round_prompt = group_planner.ActionPlanner._inject_tool_results(prompt, [tool_result])
+        structured = split_chat_prompt(round_prompt)
+
+        self.assertNotIn("untrusted result", structured.system_prompt or "")
+        self.assertIn("untrusted result", structured.user_prompt)
 
     async def test_information_tool_result_is_replanned_and_no_call_means_silence(self) -> None:
         from src.chat.chat_tool_registry import ToolExecutionResult, ToolSource

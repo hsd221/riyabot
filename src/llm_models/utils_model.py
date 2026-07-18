@@ -10,7 +10,7 @@ from typing import Tuple, List, Dict, Optional, Callable, Any, Set
 from src.common.logger import get_logger
 from src.config.config import model_config
 from src.config.api_ada_configs import APIProvider, ModelInfo, TaskConfig
-from .payload_content.message import MessageBuilder, Message
+from .payload_content.message import MessageBuilder, Message, RoleType
 from .payload_content.resp_format import RespFormat
 from .payload_content.tool_option import ToolOption, ToolCall, ToolOptionBuilder, ToolParamType
 from .model_client.base_client import BaseClient, APIResponse, client_registry
@@ -189,6 +189,7 @@ class LLMRequest:
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         raise_when_empty: bool = True,
+        system_prompt: Optional[str] = None,
     ) -> Tuple[str, Tuple[str, str, Optional[List[ToolCall]]]]:
         """
         异步生成响应
@@ -198,15 +199,19 @@ class LLMRequest:
             max_tokens (int, optional): 最大token数
             tools (Optional[List[Dict[str, Any]]]): 工具列表
             raise_when_empty (bool): 当响应为空时是否抛出异常
+            system_prompt (str, optional): 独立的系统提示词；提供时会作为 system 消息发送
         Returns:
             (Tuple[str, str, str, Optional[List[ToolCall]]]): 响应内容、推理内容、模型名称、工具调用列表
         """
         start_time = time.time()
 
         def message_factory(client: BaseClient) -> List[Message]:
-            message_builder = MessageBuilder()
-            message_builder.add_text_content(prompt)
-            return [message_builder.build()]
+            del client
+            messages: List[Message] = []
+            if system_prompt:
+                messages.append(MessageBuilder().set_role(RoleType.System).add_text_content(system_prompt).build())
+            messages.append(MessageBuilder().add_text_content(prompt).build())
+            return messages
 
         tool_built = self._build_tool_options(tools)
 

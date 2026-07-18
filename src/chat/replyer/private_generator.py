@@ -19,6 +19,7 @@ from src.chat.message_receive.message import UserInfo, Seg, MessageRecv, Message
 from src.chat.message_receive.chat_stream import ChatStream
 from src.chat.message_receive.uni_message_sender import UniversalMessageSender
 from src.chat.utils.timer_calculator import Timer  # <--- Import Timer
+from src.chat.utils.structured_prompt import split_chat_prompt
 from src.chat.utils.utils import get_chat_type_and_target_info, is_bot_self
 from src.chat.utils.chat_message_builder import (
     build_readable_messages,
@@ -1034,8 +1035,9 @@ class PrivateReplyer:
             else:
                 logger.debug(f"\n{prompt}\n")
 
+            request_kwargs = split_chat_prompt(prompt).as_request_kwargs()
             content, (reasoning_content, model_name, tool_calls) = await self.express_model.generate_response_async(
-                prompt
+                **request_kwargs
             )
 
             content = content.strip()

@@ -9,7 +9,7 @@ from PIL import Image
 from src.config.api_ada_configs import APIProvider, ModelInfo, TaskConfig
 from src.llm_models import exceptions
 from src.llm_models.model_client.base_client import APIResponse, UsageRecord
-from src.llm_models.payload_content.message import MessageBuilder
+from src.llm_models.payload_content.message import MessageBuilder, RoleType
 from src.llm_models.payload_content.tool_option import ToolParamType
 from src.llm_models.utils import LLMUsageRecorder, compress_messages
 from src.llm_models import utils as llm_utils
@@ -238,6 +238,31 @@ class LLMRequestHelpersTest(unittest.IsolatedAsyncioTestCase):
             captured_messages[0].content,
             ["请分析动图", "第 17 帧：", ("png", "frame-1"), "第 18 帧：", ("png", "frame-2")],
         )
+
+    async def test_generate_response_async_sends_system_and_user_as_distinct_messages(self) -> None:
+        request = LLMRequest(self.task, request_type="reply")
+        captured_messages = []
+
+        async def fake_execute_request(**kwargs):
+            captured_messages.extend(kwargs["message_factory"](SimpleNamespace()))
+            return APIResponse(content="ok"), ModelInfo(
+                model_identifier="a",
+                name="model-a",
+                api_provider="provider-a",
+            )
+
+        with (
+            patch.object(request, "_execute_request", side_effect=fake_execute_request),
+            patch("src.llm_models.utils_model.llm_usage_recorder.record_usage_to_database"),
+        ):
+            content, _ = await request.generate_response_async(
+                "本轮动态输入",
+                system_prompt="稳定系统约束",
+            )
+
+        self.assertEqual(content, "ok")
+        self.assertEqual([message.role for message in captured_messages], [RoleType.System, RoleType.User])
+        self.assertEqual([message.content for message in captured_messages], ["稳定系统约束", "本轮动态输入"])
 
     def test_select_model_uses_balance_scores_exclusions_and_embedding_force_new_clients(self) -> None:
         request = LLMRequest(self.task, request_type="embedding")

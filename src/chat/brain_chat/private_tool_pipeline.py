@@ -18,6 +18,7 @@ from src.chat.chat_tool_registry import (
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.utils.chat_message_builder import build_readable_messages_with_id, get_raw_msg_before_timestamp_with_chat
+from src.chat.utils.structured_prompt import split_chat_prompt
 from src.chat.utils.utils import get_chat_type_and_target_info
 from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
@@ -174,8 +175,9 @@ class PrivateToolPlanner:
         tool_definitions = self.tool_registry.get_tool_definitions()
         try:
             llm_started_at = time.perf_counter()
+            request_kwargs = split_chat_prompt(prompt).as_request_kwargs()
             content, (reasoning, model_name, tool_calls) = await self.planner_llm.generate_response_async(
-                prompt=prompt,
+                **request_kwargs,
                 tools=tool_definitions,
                 raise_when_empty=False,
             )

@@ -3,7 +3,9 @@ import io
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+from src.config.api_ada_configs import ModelInfo
 from src.llm_models.exceptions import EmptyResponseException, RespParseException
 from src.llm_models.model_client import gemini_client, openai_client
 from src.llm_models.payload_content.message import MessageBuilder, RoleType
@@ -281,6 +283,33 @@ class GeminiClientAdapterTest(unittest.TestCase):
         client = gemini_client.GeminiClient.__new__(gemini_client.GeminiClient)
 
         self.assertEqual(client.get_support_image_formats(), ["png", "jpg", "jpeg", "webp", "heic", "heif"])
+
+
+class GeminiClientRequestTest(unittest.IsolatedAsyncioTestCase):
+    async def test_get_response_passes_system_messages_through_the_sdk_system_instruction_field(self) -> None:
+        generate_content = AsyncMock(return_value=SimpleNamespace())
+        client = gemini_client.GeminiClient.__new__(gemini_client.GeminiClient)
+        client.client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
+        messages = [
+            MessageBuilder().set_role(RoleType.System).add_text_content("stable rules").build(),
+            MessageBuilder().set_role(RoleType.User).add_text_content("current context").build(),
+        ]
+
+        response = await client.get_response(
+            model_info=ModelInfo(
+                model_identifier="gemini-test",
+                name="gemini-test",
+                api_provider="gemini-provider",
+            ),
+            message_list=messages,
+            async_response_parser=lambda _: (gemini_client.APIResponse(content="ok"), None),
+        )
+
+        self.assertEqual(response.content, "ok")
+        call = generate_content.await_args
+        self.assertEqual(call.kwargs["contents"][0].role, "user")
+        self.assertEqual(call.kwargs["contents"][0].parts[0].text, "current context")
+        self.assertEqual(call.kwargs["config"].system_instruction, ["stable rules"])
 
 
 if __name__ == "__main__":

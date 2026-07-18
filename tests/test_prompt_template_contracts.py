@@ -3,6 +3,7 @@ import string
 import unittest
 from pathlib import Path
 
+from src.chat.utils.structured_prompt import DYNAMIC_CONTEXT_BOUNDARY
 from src.common.prompt_loader import (
     list_prompt_templates,
     load_prompt,
@@ -182,16 +183,115 @@ class PromptTemplateContractTest(unittest.TestCase):
                 )
                 self.assertEqual(metadata.status, expected_status)
 
-    def test_active_chat_templates_keep_instruction_layers_in_order(self) -> None:
+    def test_message_mainline_separates_stable_instructions_from_dynamic_input(self) -> None:
+        expected_layers = (
+            "【任务】",
+            "【运行约束】",
+            "【输出协议】",
+            DYNAMIC_CONTEXT_BOUNDARY,
+            "【待分析输入】",
+        )
+
+        for name, section in LAYERED_MAINLINE_PROMPTS:
+            with self.subTest(prompt=name, section=section):
+                template = load_prompt_template(name)
+                if section is not None:
+                    template = parse_prompt_sections(template)[section]
+                self.assertEqual(template.count(DYNAMIC_CONTEXT_BOUNDARY), 1)
+                positions = [template.index(layer) for layer in expected_layers]
+                self.assertEqual(positions, sorted(positions))
+
+    def test_explicit_chat_api_templates_keep_instruction_layers_in_order(self) -> None:
         expected_layers = ("【任务】", "【运行约束】", "【待分析输入】", "【输出协议】")
 
-        for name, section in (*LAYERED_MAINLINE_PROMPTS, *LAYERED_EXPLICIT_API_PROMPTS):
+        for name, section in LAYERED_EXPLICIT_API_PROMPTS:
             with self.subTest(prompt=name, section=section):
                 template = load_prompt_template(name)
                 if section is not None:
                     template = parse_prompt_sections(template)[section]
                 positions = [template.index(layer) for layer in expected_layers]
                 self.assertEqual(positions, sorted(positions))
+
+    def test_mainline_role_boundary_keeps_trusted_rules_out_of_dynamic_context(self) -> None:
+        planner_fields = {
+            "chat.group.planner": {
+                "trusted": ("{name_block}", "{moderation_prompt}"),
+                "dynamic": (
+                    "{time_block}",
+                    "{chat_content_block}",
+                    "{memory_context_block}",
+                    "{actions_before_now_block}",
+                ),
+            },
+            "chat.private.planner": {
+                "trusted": ("{name_block}", "{moderation_prompt}"),
+                "dynamic": ("{time_block}", "{chat_target}", "{chat_content}", "{tool_results_block}"),
+            },
+        }
+        for name, fields in planner_fields.items():
+            with self.subTest(prompt=name):
+                template = load_prompt_template(name)
+                boundary = template.index(DYNAMIC_CONTEXT_BOUNDARY)
+                for field in fields["trusted"]:
+                    self.assertLess(template.index(field), boundary, field)
+                for field in fields["dynamic"]:
+                    self.assertGreater(template.index(field), boundary, field)
+
+        reply_fields = {
+            "trusted": ("{identity}", "{chat_prompt}", "{reply_style}", "{moderation_prompt}"),
+            "dynamic": (
+                "{time_block}",
+                "{dialogue_prompt}",
+                "{keywords_reaction_prompt}",
+                "{knowledge_prompt}",
+                "{tool_info_block}",
+                "{extra_info_block}",
+                "{expression_habits_block}",
+                "{jargon_explanation}",
+                "{memory_retrieval}",
+            ),
+        }
+        for name in ("chat.group.reply", "chat.private.reply"):
+            for section, template in parse_prompt_sections(load_prompt_template(name)).items():
+                with self.subTest(prompt=name, section=section):
+                    boundary = template.index(DYNAMIC_CONTEXT_BOUNDARY)
+                    for field in reply_fields["trusted"]:
+                        self.assertLess(template.index(field), boundary, field)
+                    for field in reply_fields["dynamic"]:
+                        self.assertGreater(template.index(field), boundary, field)
+                    if name == "chat.private.reply":
+                        self.assertGreater(template.index("{sender_name}"), boundary)
+
+    def test_mainline_dynamic_context_ends_with_the_current_decision_or_reply_focus(self) -> None:
+        for name in ("chat.group.planner", "chat.private.planner"):
+            with self.subTest(prompt=name):
+                template = load_prompt_template(name)
+                focus_position = template.index("【本轮决策焦点】")
+                self.assertGreater(focus_position, template.index(DYNAMIC_CONTEXT_BOUNDARY))
+                self.assertNotRegex(template[focus_position + len("【本轮决策焦点】") :], r"【[^】]+】")
+
+        group_sections = parse_prompt_sections(load_prompt_template("chat.group.reply"))
+        for section, template in group_sections.items():
+            with self.subTest(prompt="chat.group.reply", section=section):
+                focus_position = template.index("【本轮回复焦点】")
+                self.assertGreater(template.index("{reply_target_block}"), focus_position)
+                self.assertGreater(template.index("{planner_reasoning}"), focus_position)
+                self.assertGreater(focus_position, template.index("{memory_retrieval}"))
+                self.assertNotRegex(template[focus_position + len("【本轮回复焦点】") :], r"【[^】]+】")
+
+        private_sections = parse_prompt_sections(load_prompt_template("chat.private.reply"))
+        for section, template in private_sections.items():
+            with self.subTest(prompt="chat.private.reply", section=section):
+                focus_position = template.index("【本轮回复焦点】")
+                focus_fields = (
+                    ("{reply_target_block}", "{planner_reasoning}")
+                    if section == "default"
+                    else ("{target}", "{reason}")
+                )
+                for field in focus_fields:
+                    self.assertGreater(template.index(field), focus_position, field)
+                self.assertGreater(focus_position, template.index("{memory_retrieval}"))
+                self.assertNotRegex(template[focus_position + len("【本轮回复焦点】") :], r"【[^】]+】")
 
     def test_user_derived_identity_and_target_fields_stay_in_input_layer(self) -> None:
         untrusted_fields = {

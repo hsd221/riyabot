@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.chat.brain_chat import private_tool_pipeline
+from src.chat.utils.structured_prompt import DYNAMIC_CONTEXT_BOUNDARY
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.llm_models.payload_content import ToolCall
 
@@ -168,6 +169,37 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
         planner.planner_llm.generate_response_async.assert_awaited_once_with(
             prompt="planner prompt",
             tools=registry.get_tool_definitions.return_value,
+            raise_when_empty=False,
+        )
+
+    async def test_structured_private_planner_sends_rules_and_dynamic_context_as_distinct_roles(self) -> None:
+        planner = private_tool_pipeline.PrivateToolPlanner.__new__(private_tool_pipeline.PrivateToolPlanner)
+        planner.chat_id = "stream-1"
+        planner.log_prefix = "[stream-1]"
+        planner.tool_registry = SimpleNamespace(get_tool_definitions=Mock(return_value=[]))
+        planner.action_manager = None
+        planner.last_obs_time_mark = 0.0
+        planner.planner_llm = SimpleNamespace(
+            generate_response_async=AsyncMock(return_value=("", ("无需回复", "planner-model", [])))
+        )
+        planner._load_context = Mock(return_value=("history", {}, "Alice", 9.0))
+        planner._build_prompt = Mock(return_value=f"稳定规划规则\n{DYNAMIC_CONTEXT_BOUNDARY}\n本轮私聊输入")
+
+        with (
+            patch.object(
+                private_tool_pipeline.events_manager,
+                "handle_mai_events",
+                new=AsyncMock(return_value=(True, None)),
+            ),
+            patch.object(private_tool_pipeline.PlanReplyLogger, "log_plan"),
+        ):
+            decision = await planner.plan(refresh_actions=False)
+
+        self.assertEqual(decision.tool_calls, [])
+        planner.planner_llm.generate_response_async.assert_awaited_once_with(
+            prompt="本轮私聊输入",
+            system_prompt="稳定规划规则",
+            tools=[],
             raise_when_empty=False,
         )
 
