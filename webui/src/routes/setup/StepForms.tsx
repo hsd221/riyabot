@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Markdown } from '@/components/ui/markdown'
 import { useState } from 'react'
@@ -463,6 +464,26 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
         <p className="text-xs text-muted-foreground">机器人最多保存的表情包数量</p>
       </div>
 
+      <div className="ios-group space-y-3 p-5">
+        <Label htmlFor="selection_candidate_count">最终候选数量</Label>
+        <Input
+          id="selection_candidate_count"
+          type="number"
+          min="1"
+          max="30"
+          value={config.selection_candidate_count}
+          onChange={(event) => {
+            const value = Number.parseInt(event.target.value, 10)
+            if (Number.isFinite(value)) {
+              onChange({
+                ...config,
+                selection_candidate_count: Math.max(1, Math.min(30, value)),
+              })
+            }
+          }}
+        />
+      </div>
+
       <div className="ios-group">
         <div className="ios-row">
           <div className="space-y-1">
@@ -517,6 +538,84 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
             onCheckedChange={(checked) => onChange({ ...config, content_filtration: checked })}
           />
         </div>
+      </div>
+
+      <div className="ios-group">
+        <div className="ios-row">
+          <Label htmlFor="usage_scene_enabled">学习真人使用场景</Label>
+          <Switch
+            id="usage_scene_enabled"
+            checked={config.usage_scene_enabled}
+            onCheckedChange={(checked) => onChange({ ...config, usage_scene_enabled: checked })}
+          />
+        </div>
+
+        {config.usage_scene_enabled && (
+          <div className="space-y-4 border-t p-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="usage_scene_context_messages">学习上下文消息数</Label>
+                <Input
+                  id="usage_scene_context_messages"
+                  type="number"
+                  min="1"
+                  max="32"
+                  value={config.usage_scene_context_messages}
+                  onChange={(event) => {
+                    const value = Number.parseInt(event.target.value, 10)
+                    if (Number.isFinite(value)) {
+                      onChange({
+                        ...config,
+                        usage_scene_context_messages: Math.max(1, Math.min(32, value)),
+                      })
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="usage_scene_max_scenes">单表情场景软上限</Label>
+                <Input
+                  id="usage_scene_max_scenes"
+                  type="number"
+                  min="1"
+                  max="32"
+                  value={config.usage_scene_max_scenes}
+                  onChange={(event) => {
+                    const value = Number.parseInt(event.target.value, 10)
+                    if (Number.isFinite(value)) {
+                      onChange({
+                        ...config,
+                        usage_scene_max_scenes: Math.max(1, Math.min(32, value)),
+                      })
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="usage_scene_weight">初筛场景权重</Label>
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {Math.round(config.usage_scene_weight * 100)}%
+                </span>
+              </div>
+              <Slider
+                id="usage_scene_weight"
+                value={[config.usage_scene_weight]}
+                min={0}
+                max={1}
+                step={0.05}
+                onValueChange={(values) => onChange({ ...config, usage_scene_weight: values[0] })}
+              />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>仅情感</span>
+                <span>仅场景</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {config.content_filtration && (

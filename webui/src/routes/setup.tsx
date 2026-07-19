@@ -72,6 +72,7 @@ import {
   completeSetup,
   setupInitialPassword,
 } from './setup/api'
+import { DEFAULT_EMOJI_CONFIG } from './setup/emoji-config'
 import { restartRiyaBot, getRiyaBotStatus } from '@/lib/system-api'
 import { getAuthStatus } from '@/lib/fetch-with-auth'
 import { validatePassword } from '@/lib/password-validator'
@@ -108,15 +109,7 @@ export function SetupPage() {
   })
 
   // 表情包配置
-  const [emoji, setEmoji] = useState<EmojiConfig>({
-    emoji_chance: 0.4,
-    max_reg_num: 40,
-    do_replace: true,
-    check_interval: 10,
-    steal_emoji: true,
-    content_filtration: false,
-    filtration_prompt: '符合公序良俗',
-  })
+  const [emoji, setEmoji] = useState<EmojiConfig>(DEFAULT_EMOJI_CONFIG)
 
   // 其他基础配置
   const [otherBasic, setOtherBasic] = useState<OtherBasicConfig>({

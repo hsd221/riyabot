@@ -62,6 +62,11 @@ export interface EmojiConfig {
   steal_emoji: boolean
   content_filtration: boolean
   filtration_prompt: string
+  usage_scene_enabled: boolean
+  usage_scene_context_messages: number
+  usage_scene_max_scenes: number
+  usage_scene_weight: number
+  selection_candidate_count: number
 }
 
 export interface MemoryConfig {

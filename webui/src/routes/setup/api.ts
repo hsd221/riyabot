@@ -8,6 +8,7 @@ import type {
   EmojiConfig,
   OtherBasicConfig,
 } from './types'
+import { normalizeEmojiConfig } from './emoji-config'
 
 export async function setupInitialPassword(password: string): Promise<void> {
   const response = await fetch('/api/webui/auth/setup', {
@@ -120,15 +121,7 @@ export async function loadEmojiConfig(): Promise<EmojiConfig> {
   const data = await response.json()
   const emojiConfig = data.config.emoji || {}
 
-  return {
-    emoji_chance: emojiConfig.emoji_chance ?? 0.4,
-    max_reg_num: emojiConfig.max_reg_num ?? 40,
-    do_replace: emojiConfig.do_replace ?? true,
-    check_interval: emojiConfig.check_interval ?? 10,
-    steal_emoji: emojiConfig.steal_emoji ?? true,
-    content_filtration: emojiConfig.content_filtration ?? false,
-    filtration_prompt: emojiConfig.filtration_prompt || '',
-  }
+  return normalizeEmojiConfig(emojiConfig)
 }
 
 // 读取其他基础配置
