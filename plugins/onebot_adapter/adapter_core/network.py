@@ -22,6 +22,9 @@ _TRUE_VALUES = {"1", "true", "yes"}
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _SAFE_CONTENT_TYPES = {"application/octet-stream", "binary/octet-stream"}
+# Clash 等代理会将公网域名映射到 RFC 2544 网段，只允许受信任媒体域通过该路径。
+_PROXY_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+_TRUSTED_FAKE_IP_HOST_SUFFIXES = ("qpic.cn", "qq.com", "qq.com.cn", "qq.ugcimg.cn")
 
 
 class MediaDownloadError(ValueError):
@@ -48,12 +51,18 @@ def _env_enabled(name: str) -> bool:
 def _is_address_allowed(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
     *,
+    scheme: str,
+    hostname: str,
     allow_private: bool,
 ) -> bool:
     if address.is_unspecified or address.is_multicast or address.is_reserved or address.is_link_local:
         return False
     if address.is_global:
         return True
+    if isinstance(address, ipaddress.IPv4Address) and address in _PROXY_FAKE_IP_NETWORK:
+        return scheme == "https" and any(
+            hostname == suffix or hostname.endswith(f".{suffix}") for suffix in _TRUSTED_FAKE_IP_HOST_SUFFIXES
+        )
     return allow_private and (address.is_private or address.is_loopback)
 
 
@@ -135,7 +144,10 @@ def resolve_media_target(url: str) -> MediaTarget:
 
     addresses = _resolve_addresses(hostname, port)
     allow_private = _env_enabled("MAIBOT_ALLOW_PRIVATE_MEDIA_URLS")
-    if any(not _is_address_allowed(address, allow_private=allow_private) for address in addresses):
+    if any(
+        not _is_address_allowed(address, scheme=scheme, hostname=hostname, allow_private=allow_private)
+        for address in addresses
+    ):
         raise MediaDownloadError("媒体 URL 指向未允许的网络地址")
 
     pinned_address = sorted(addresses, key=lambda address: (address.version, int(address)))[0]

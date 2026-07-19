@@ -68,6 +68,47 @@ class OneBotAdapterNetworkTest(unittest.TestCase):
             with self.assertRaises(network.MediaDownloadError):
                 network.resolve_media_target("https://metadata.invalid/image.png")
 
+    def test_resolve_media_target_accepts_proxy_fake_ip_for_trusted_qq_media_hosts(self) -> None:
+        fake_ip_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("198.18.0.141", 443))]
+
+        with (
+            patch.object(network.socket, "getaddrinfo", return_value=fake_ip_answer),
+            patch.dict(network.os.environ, {}, clear=True),
+        ):
+            for hostname in (
+                "multimedia.nt.qq.com.cn",
+                "gchat.qpic.cn",
+                "qq.ugcimg.cn",
+                "gxh.vip.qq.com",
+            ):
+                with self.subTest(hostname=hostname):
+                    target = network.resolve_media_target(f"https://{hostname}/image.png")
+                    self.assertEqual(target.ip_address, ipaddress.ip_address("198.18.0.141"))
+
+    def test_resolve_media_target_rejects_proxy_fake_ip_for_untrusted_or_mixed_hosts(self) -> None:
+        fake_ip_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("198.18.0.141", 443))]
+        mixed_answer = [
+            *fake_ip_answer,
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443)),
+        ]
+
+        with patch.dict(network.os.environ, {}, clear=True):
+            for hostname in ("example.com", "qpic.cn.example.com", "notqq.com"):
+                with (
+                    self.subTest(hostname=hostname),
+                    patch.object(network.socket, "getaddrinfo", return_value=fake_ip_answer),
+                ):
+                    with self.assertRaises(network.MediaDownloadError):
+                        network.resolve_media_target(f"https://{hostname}/image.png")
+
+            with patch.object(network.socket, "getaddrinfo", return_value=mixed_answer):
+                with self.assertRaises(network.MediaDownloadError):
+                    network.resolve_media_target("https://gchat.qpic.cn/image.png")
+
+            with patch.object(network.socket, "getaddrinfo", return_value=fake_ip_answer):
+                with self.assertRaises(network.MediaDownloadError):
+                    network.resolve_media_target("http://gchat.qpic.cn/image.png")
+
     def test_private_and_nonstandard_media_targets_require_explicit_opt_in(self) -> None:
         private_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 8443))]
 
