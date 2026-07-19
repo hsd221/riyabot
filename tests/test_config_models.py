@@ -10,6 +10,7 @@ from src.config.config_base import ConfigBase
 from src.config.official_configs import (
     BehaviorConfig,
     ChatConfig,
+    EmojiConfig,
     ExpressionConfig,
     KeywordReactionConfig,
     KeywordRuleConfig,
@@ -169,6 +170,31 @@ class ConfigBaseTest(unittest.TestCase):
         self.assertFalse(hasattr(config, "plan_style"))
         self.assertFalse(hasattr(config, "states"))
         self.assertFalse(hasattr(config, "state_probability"))
+
+
+class EmojiConfigTest(unittest.TestCase):
+    def test_usage_scene_defaults_and_bounds(self) -> None:
+        config = EmojiConfig()
+
+        self.assertTrue(config.usage_scene_enabled)
+        self.assertEqual(config.usage_scene_context_messages, 8)
+        self.assertEqual(config.usage_scene_max_scenes, 8)
+        self.assertEqual(config.usage_scene_weight, 0.6)
+        self.assertEqual(config.selection_candidate_count, 8)
+
+        invalid_values = (
+            {"usage_scene_context_messages": 0},
+            {"usage_scene_context_messages": 33},
+            {"usage_scene_max_scenes": 0},
+            {"usage_scene_max_scenes": 33},
+            {"usage_scene_weight": -0.1},
+            {"usage_scene_weight": 1.1},
+            {"selection_candidate_count": 0},
+            {"selection_candidate_count": 31},
+        )
+        for values in invalid_values:
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                EmojiConfig(**values)
 
 
 class ApiAdaConfigTest(unittest.TestCase):

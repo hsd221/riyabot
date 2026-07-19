@@ -197,7 +197,13 @@ variants: light, standard
 | `new_description` | 准备入库的新表情包语义描述。 |
 | `emoji_list` | 为替换决策抽样出的旧表情包编号、描述和使用信息列表。 |
 | `emoji_candidates` | 本轮允许选择的表情包候选列表；每行包含临时候选 ID 和完整语义描述。 |
+| `current_scene` | Planner 对本次准备发表情时具体聊天场景的一句话概括。 |
 | `description` | 视觉模型生成的原始表情包描述，供多维语义压缩器整理。 |
+| `emoji_description` | 真人场景学习时用于理解表情画面内容的参考描述，不作为真实用法证据。 |
+| `emoji_sender` | 本次发送表情的真人昵称或用户标识，用于判断对话中的回应关系。 |
+| `chat_context` | 真人发送表情之前、同一聊天流内的有界聊天上下文。 |
+| `existing_usage_scenes` | 同一表情已归纳的真人使用场景 JSONL，包含稳定 ID、总结和样本数。 |
+| `max_scenes` | 单张表情建议保留的真人使用场景软上限；不得据此强行合并不同用法。 |
 | `frame_count` | 动态图像的总帧数。 |
 | `frame_start` | 当前批次第一帧的全局序号。 |
 | `frame_end` | 当前批次最后一帧的全局序号。 |

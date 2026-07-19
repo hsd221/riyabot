@@ -42,6 +42,8 @@ PROMPT_IDS = {
     "media.emoji.replace_decision",
     "media.emoji.selection",
     "media.emoji.semantic_description",
+    "media.emoji.usage_scene_compaction",
+    "media.emoji.usage_scene_learning",
     "media.vision.animated",
     "media.vision.static",
     "memory.atom_extraction",

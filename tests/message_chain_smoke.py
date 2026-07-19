@@ -65,7 +65,7 @@ async def test_lightweight_inbound() -> None:
         message_module.schedule_image_description_task = lambda data, message_id=None: calls.append(
             ("image", data, message_id)
         )
-        message_module.schedule_emoji_description_task = lambda data, message_id=None: calls.append(
+        message_module.schedule_emoji_description_task = lambda data, message_id=None, **_kwargs: calls.append(
             ("emoji", data, message_id)
         )
         message_module.schedule_voice_transcription_task = lambda data, message_id=None: calls.append(

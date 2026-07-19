@@ -3,7 +3,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from src.chat.emoji_system.emoji_vector_index import EmojiVectorCandidate, EmojiVectorIndex
+from src.chat.emoji_system.emoji_vector_index import (
+    EmojiUsageSceneVectorCandidate,
+    EmojiUsageSceneVectorIndex,
+    EmojiVectorCandidate,
+    EmojiVectorIndex,
+)
 
 
 class EmojiVectorIndexTest(unittest.IsolatedAsyncioTestCase):
@@ -159,6 +164,126 @@ class EmojiVectorIndexTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNone(first_result)
             self.assertEqual([match.emoji_hash for match in second_result or []], ["emoji-target"])
+
+    async def test_incomplete_backfill_does_not_return_partial_emotion_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index = EmojiVectorIndex(Path(temp_dir) / "emoji_vector_index.json")
+            candidates = [
+                EmojiVectorCandidate(f"emoji-{index_number:02d}", (f"普通情绪{index_number:02d}",))
+                for index_number in range(30)
+            ]
+            candidates.append(EmojiVectorCandidate("emoji-target", ("目标情绪",)))
+
+            async def fake_embedding(text: str, request_type: str):
+                if request_type == "emoji.vector.query" or "目标情绪" in text:
+                    return [1.0, 0.0], "fake-embedding"
+                if "普通情绪00" in text:
+                    return [0.9, 0.435889894], "fake-embedding"
+                return [0.0, 1.0], "fake-embedding"
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(side_effect=fake_embedding),
+                ),
+            ):
+                first_result = await index.search(
+                    query_text="目标情绪",
+                    candidates=candidates,
+                    similarity_threshold=0.8,
+                )
+                second_result = await index.search(
+                    query_text="目标情绪",
+                    candidates=candidates,
+                    similarity_threshold=0.8,
+                )
+
+            self.assertIsNone(first_result)
+            self.assertEqual(
+                [match.emoji_hash for match in second_result or []],
+                ["emoji-target", "emoji-00"],
+            )
+
+
+class EmojiUsageSceneVectorIndexTest(unittest.IsolatedAsyncioTestCase):
+    async def test_each_human_usage_scene_is_indexed_and_ranked_independently(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "emoji_usage_scene_vector_index.json"
+            index = EmojiUsageSceneVectorIndex(index_path)
+
+            async def fake_embedding(text: str, request_type: str):
+                if request_type == "emoji.usage_scene.vector.query" or "自嘲失败" in text:
+                    return [1.0, 0.0], "fake-embedding"
+                return [0.0, 1.0], "fake-embedding"
+
+            candidates = [
+                EmojiUsageSceneVectorCandidate(1, "emoji-a", "对方严肃批评时表示歉意"),
+                EmojiUsageSceneVectorCandidate(2, "emoji-a", "对方自嘲失败时轻松接梗"),
+                EmojiUsageSceneVectorCandidate(3, "emoji-b", "对方难过时安慰"),
+            ]
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(side_effect=fake_embedding),
+                ),
+            ):
+                matches = await index.search(
+                    query_text="接住自嘲",
+                    candidates=candidates,
+                    limit=5,
+                    similarity_threshold=0.8,
+                )
+
+            self.assertIsNotNone(matches)
+            self.assertEqual([match.scene_id for match in matches or []], [2])
+            self.assertEqual((matches or [])[0].emoji_hash, "emoji-a")
+            self.assertEqual((matches or [])[0].scene, "对方自嘲失败时轻松接梗")
+            self.assertTrue(index_path.exists())
+
+    async def test_incomplete_scene_backfill_is_unavailable_until_all_candidates_are_indexed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index = EmojiUsageSceneVectorIndex(Path(temp_dir) / "emoji_usage_scene_vector_index.json")
+            candidates = [
+                EmojiUsageSceneVectorCandidate(
+                    index_number + 1,
+                    f"emoji-{index_number:02d}",
+                    f"普通场景{index_number:02d}",
+                )
+                for index_number in range(30)
+            ]
+            candidates.append(EmojiUsageSceneVectorCandidate(31, "emoji-target", "目标场景"))
+
+            async def fake_embedding(text: str, request_type: str):
+                if request_type == "emoji.usage_scene.vector.query" or "目标场景" in text:
+                    return [1.0, 0.0], "fake-embedding"
+                if "普通场景00" in text:
+                    return [0.8, 0.6], "fake-embedding"
+                return [0.0, 1.0], "fake-embedding"
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(side_effect=fake_embedding),
+                ),
+            ):
+                first_result = await index.search(
+                    query_text="目标场景",
+                    candidates=candidates,
+                    limit=5,
+                    similarity_threshold=0.8,
+                )
+                second_result = await index.search(
+                    query_text="目标场景",
+                    candidates=candidates,
+                    limit=5,
+                    similarity_threshold=0.8,
+                )
+
+            self.assertIsNone(first_result)
+            self.assertEqual([match.scene_id for match in second_result or []], [31, 1])
 
 
 if __name__ == "__main__":

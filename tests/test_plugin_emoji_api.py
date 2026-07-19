@@ -134,6 +134,38 @@ class EmojiApiLookupTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TypeError):
             await emoji_api.get_random(count="1")  # type: ignore[arg-type]
 
+    async def test_get_random_candidates_preserves_hash_without_recording_usage(self) -> None:
+        happy = make_emoji("happy", filename="happy.png", description="happy", emotion=["开心"])
+        manager = make_manager([happy])
+        with (
+            patch.object(emoji_api, "get_emoji_manager", return_value=manager),
+            patch.object(emoji_api.random, "sample", return_value=[happy]),
+            patch.object(emoji_api.random, "choice", return_value="开心"),
+            patch.object(emoji_api, "image_path_to_base64", return_value="base64-happy"),
+        ):
+            candidates = await emoji_api.get_random_candidates(1)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].emoji_hash, "happy")
+        self.assertEqual(candidates[0].emoji_base64, "base64-happy")
+        manager.record_usage.assert_not_called()
+
+    def test_record_usage_reports_the_manager_write_result(self) -> None:
+        manager = make_manager()
+        manager.record_usage.return_value = True
+        with patch.object(emoji_api, "get_emoji_manager", return_value=manager):
+            self.assertTrue(emoji_api.record_usage("happy"))
+
+        manager.record_usage.return_value = False
+        with patch.object(emoji_api, "get_emoji_manager", return_value=manager):
+            self.assertFalse(emoji_api.record_usage("missing"))
+
+        manager.record_usage.side_effect = RuntimeError("database down")
+        with patch.object(emoji_api, "get_emoji_manager", return_value=manager):
+            self.assertFalse(emoji_api.record_usage("broken"))
+
+        self.assertFalse(emoji_api.record_usage(""))
+
     async def test_get_random_returns_empty_for_empty_deleted_unreadable_and_manager_errors(self) -> None:
         with patch.object(emoji_api, "get_emoji_manager", return_value=make_manager()):
             self.assertEqual(await emoji_api.get_random(count=1), [])

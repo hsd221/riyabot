@@ -126,6 +126,37 @@ class Emoji(BaseModel):
         table_name = "emoji"
 
 
+class EmojiUsageScene(BaseModel):
+    """从真人发送记录中归纳出的表情包使用场景。"""
+
+    emoji_hash = TextField(index=True)
+    scene = TextField()
+    sample_count = IntegerField(default=1)
+    created_at = FloatField()
+    last_active_time = FloatField()
+
+    class Meta:
+        table_name = "emoji_usage_scene"
+
+
+class EmojiUsageEvent(BaseModel):
+    """单次真人表情出现的幂等学习记录。"""
+
+    emoji_hash = TextField(index=True)
+    message_row_id = IntegerField(index=True)
+    message_id = TextField(index=True)
+    occurrence_index = IntegerField(default=0)
+    chat_id = TextField(index=True)
+    user_id = TextField(null=True)
+    scene_id = IntegerField(null=True, index=True)
+    status = TextField(default="pending")
+    created_at = FloatField()
+
+    class Meta:
+        table_name = "emoji_usage_event"
+        indexes = ((("chat_id", "message_id", "occurrence_index", "emoji_hash"), True),)
+
+
 class Messages(BaseModel):
     """
     用于存储消息数据的模型。
@@ -385,6 +416,8 @@ MODELS = [
     ChatStreams,
     LLMUsage,
     Emoji,
+    EmojiUsageScene,
+    EmojiUsageEvent,
     Messages,
     Images,
     ImageDescriptions,

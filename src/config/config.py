@@ -61,7 +61,7 @@ CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 # 考虑到，实际上配置文件中的mai_version是不会自动更新的,所以采用硬编码
 # 对该字段的更新，请严格参照语义化版本规范：https://semver.org/lang/zh-CN/
 MMC_VERSION = "0.13.0"
-BOT_CONFIG_VERSION = "7.5.7"
+BOT_CONFIG_VERSION = "7.6.0"
 MODEL_CONFIG_VERSION = "1.12.0"
 
 

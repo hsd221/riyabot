@@ -21,7 +21,7 @@ from src.common.data_models.message_component_model import (
 from src.config.config import global_config
 from src.chat.utils.utils_image import get_image_manager
 from src.chat.utils.utils_voice import get_voice_text
-from .chat_stream import ChatStream
+from .chat_stream import ChatManager, ChatStream
 from .media_background import (
     schedule_emoji_description_task,
     schedule_image_description_task,
@@ -275,7 +275,19 @@ class MessageRecv(Message):
                 self.is_voice = False
                 if isinstance(segment.data, str):
                     if not enable_heavy_media_analysis:
-                        schedule_emoji_description_task(segment.data, self.message_info.message_id)
+                        try:
+                            chat_id = ChatManager._generate_stream_id(
+                                self.message_info.platform,
+                                self.message_info.user_info,
+                                self.message_info.group_info,
+                            )
+                        except (AttributeError, TypeError, ValueError):
+                            chat_id = None
+                        schedule_emoji_description_task(
+                            segment.data,
+                            self.message_info.message_id,
+                            chat_id=chat_id,
+                        )
                         return "[表情包]"
                     # 使用 semaphore 限制 VLM 并发
                     async with _vlm_semaphore:

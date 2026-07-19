@@ -32,6 +32,7 @@ class EmojiAction(BaseAction):
     # 动作参数定义
     action_parameters = {
         "emotion": "用1到5个简短词概括希望表情包表达的情感或语气，例如“轻松调侃”“温柔安慰”",
+        "scene": "用一句话概括当前准备发表情的具体聊天场景，例如“对方自嘲失败，准备轻松接梗”",
     }
 
     # 动作使用场景
@@ -50,34 +51,53 @@ class EmojiAction(BaseAction):
         try:
             # 1. 获取发送表情的原因
             # reason = self.action_data.get("reason", "表达当前情绪")
-            reason = self.action_reasoning
+            reason = str(self.action_reasoning or "表达当前情绪")
+            current_scene = " ".join(str(self.action_data.get("scene") or "").split()).strip()[:1000]
+            if not current_scene:
+                current_scene = " ".join(reason.split()).strip()[:1000]
 
-            # 2. 优先按 Planner 提供的简短情感词做向量检索；不可用时保持原随机回退。
+            candidate_count = max(1, min(int(getattr(global_config.emoji, "selection_candidate_count", 8)), 30))
+            scene_weight = max(0.0, min(float(getattr(global_config.emoji, "usage_scene_weight", 0.6)), 1.0))
+            usage_scene_enabled = bool(getattr(global_config.emoji, "usage_scene_enabled", True))
+
+            # 2. 对情感与真人场景分别做向量召回，再按配置加权；不可用时保持随机回退。
             emotion_query = " ".join(str(self.action_data.get("emotion") or "").split()).strip()[:64]
             sampled_emojis = None
             if emotion_query:
                 try:
-                    sampled_emojis = await emoji_api.get_by_emotion_vector(emotion_query, count=30)
+                    sampled_emojis = await emoji_api.get_ranked_candidates(
+                        emotion_query,
+                        current_scene if usage_scene_enabled else "",
+                        count=candidate_count,
+                        scene_weight=scene_weight if usage_scene_enabled else 0.0,
+                    )
                 except Exception as vector_error:
                     logger.warning(f"{self.log_prefix} 表情向量检索异常，回退随机候选: {vector_error}")
 
                 if sampled_emojis == []:
-                    logger.info(f"{self.log_prefix} 没有表情包达到情感向量相似度阈值: {emotion_query}")
-                    return False, "没有表情包达到情感相似度阈值"
+                    logger.info(f"{self.log_prefix} 没有表情包达到情感或场景向量相似度阈值")
+                    return False, "没有表情包达到情感或场景相似度阈值"
 
             if sampled_emojis is None:
-                sampled_emojis = await emoji_api.get_random(30)
+                sampled_emojis = await emoji_api.get_random_candidates(candidate_count)
             if not sampled_emojis:
                 logger.warning(f"{self.log_prefix} 无法获取随机表情包")
                 return False, "无法获取随机表情包"
 
-            candidates: dict[str, tuple[str, str]] = {}
-            candidate_records: list[dict[str, str]] = []
-            for index, (emoji_base64, description, emotion) in enumerate(sampled_emojis, start=1):
+            candidates: dict[str, emoji_api.EmojiSelectionCandidate] = {}
+            candidate_records: list[dict[str, object]] = []
+            for index, candidate in enumerate(sampled_emojis, start=1):
                 candidate_id = f"emoji_{index:03d}"
-                description = str(description).strip() if description else f"情感标签：{emotion or '未标注'}"
-                candidates[candidate_id] = (emoji_base64, description)
-                candidate_records.append({"id": candidate_id, "description": description})
+                description = (
+                    str(candidate.description).strip()
+                    if candidate.description
+                    else f"情感标签：{candidate.matched_emotion or '未标注'}"
+                )
+                candidates[candidate_id] = candidate
+                candidate_record: dict[str, object] = {"id": candidate_id, "description": description}
+                if candidate.usage_scenes:
+                    candidate_record["human_usage_scenes"] = list(candidate.usage_scenes)
+                candidate_records.append(candidate_record)
 
             emoji_candidates = "\n".join(json.dumps(candidate, ensure_ascii=False) for candidate in candidate_records)
 
@@ -95,6 +115,7 @@ class EmojiAction(BaseAction):
             prompt = prompt_manager.format_prompt(
                 "media.emoji.selection",
                 reason=reason,
+                current_scene=current_scene,
                 messages_text=messages_text,
                 emoji_candidates=emoji_candidates,
             )
@@ -129,15 +150,16 @@ class EmojiAction(BaseAction):
                 logger.warning(f"{self.log_prefix} LLM返回的表情包候选 ID 无效: {selected_id!r}")
                 return False, f"表情包候选 ID 无效: {selected_id}"
 
-            emoji_base64, emoji_description = selected_emoji
+            emoji_description = selected_emoji.description
             logger.info(
                 f"{self.log_prefix} 发送表情包候选[{selected_id}]，原因: {reason}，描述: {emoji_description[:80]}"
             )
 
             # 5. 发送表情包
-            success = await self.send_emoji(emoji_base64)
+            success = await self.send_emoji(selected_emoji.emoji_base64)
 
             if success:
+                emoji_api.record_usage(selected_emoji.emoji_hash)
                 # 存储动作信息
                 await self.store_action_info(
                     action_build_into_prompt=True,

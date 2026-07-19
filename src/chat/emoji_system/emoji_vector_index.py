@@ -14,6 +14,7 @@ logger = get_logger("emoji_vector_index")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_INDEX_PATH = PROJECT_ROOT / "data" / "emoji_selection" / "emoji_vector_index.json"
+DEFAULT_USAGE_SCENE_INDEX_PATH = PROJECT_ROOT / "data" / "emoji_selection" / "emoji_usage_scene_vector_index.json"
 INDEX_VERSION = 1
 DEFAULT_SIMILARITY_THRESHOLD = 0.4
 DEFAULT_CANDIDATE_LIMIT = 30
@@ -23,6 +24,8 @@ MAX_EMBEDDING_DIMENSION = 32768
 MAX_EMOTION_COUNT = 8
 MAX_EMOTION_LENGTH = 64
 MAX_QUERY_LENGTH = 64
+MAX_USAGE_SCENE_LENGTH = 240
+MAX_USAGE_SCENE_QUERY_LENGTH = 1000
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,31 @@ class IndexedEmoji:
     embedding: list[float]
 
 
+@dataclass(frozen=True)
+class EmojiUsageSceneVectorCandidate:
+    scene_id: int
+    emoji_hash: str
+    scene: str
+
+
+@dataclass(frozen=True)
+class EmojiUsageSceneVectorMatch:
+    scene_id: int
+    emoji_hash: str
+    scene: str
+    similarity: float
+
+
+@dataclass(frozen=True)
+class IndexedEmojiUsageScene:
+    scene_id: int
+    emoji_hash: str
+    scene: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding: list[float]
+
+
 def normalize_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
@@ -64,6 +92,10 @@ def normalize_emotions(values: Sequence[Any]) -> tuple[str, ...]:
 
 def emoji_embedding_text(emotions: Sequence[str]) -> str:
     return f"表情情感：{'、'.join(normalize_emotions(emotions))}"
+
+
+def usage_scene_embedding_text(scene: str) -> str:
+    return f"表情使用场景：{normalize_text(scene)[:MAX_USAGE_SCENE_LENGTH]}"
 
 
 def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -344,7 +376,7 @@ class EmojiVectorIndex:
         if usable_entries == 0:
             logger.info("表情向量检索不可用：没有可用的索引条目")
             return None
-        if not scored_matches and unresolved_candidates:
+        if unresolved_candidates:
             logger.info("表情向量索引仍在补齐，本轮回退随机候选")
             return None
         scored_matches.sort(key=lambda match: match.similarity, reverse=True)
@@ -352,3 +384,231 @@ class EmojiVectorIndex:
 
 
 emoji_vector_index = EmojiVectorIndex()
+
+
+class EmojiUsageSceneVectorIndex:
+    """发送阶段使用的真人场景向量索引；每个场景保持独立条目。"""
+
+    def __init__(self, index_path: Path = DEFAULT_USAGE_SCENE_INDEX_PATH) -> None:
+        self.index_path = index_path
+        self._lock = asyncio.Lock()
+
+    def _load_entries(self) -> dict[int, IndexedEmojiUsageScene]:
+        if not self.index_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"真人表情场景向量索引读取失败，已忽略旧索引: {exc}")
+            return {}
+        if not isinstance(payload, dict) or payload.get("version") != INDEX_VERSION:
+            return {}
+
+        entries: dict[int, IndexedEmojiUsageScene] = {}
+        raw_entries = payload.get("scenes")
+        if not isinstance(raw_entries, list):
+            return {}
+        for raw_entry in raw_entries:
+            if not isinstance(raw_entry, dict):
+                continue
+            try:
+                scene_id = int(raw_entry.get("scene_id"))
+                embedding_dimension = int(raw_entry.get("embedding_dimension"))
+            except (TypeError, ValueError):
+                continue
+            emoji_hash = normalize_text(raw_entry.get("emoji_hash"))[:128]
+            scene = normalize_text(raw_entry.get("scene"))[:MAX_USAGE_SCENE_LENGTH]
+            embedding = normalize_embedding(raw_entry.get("embedding"))
+            if scene_id <= 0 or not emoji_hash or not scene or embedding is None:
+                continue
+            entry = IndexedEmojiUsageScene(
+                scene_id=scene_id,
+                emoji_hash=emoji_hash,
+                scene=scene,
+                embedding_model=normalize_text(raw_entry.get("embedding_model"))[:256],
+                embedding_dimension=embedding_dimension,
+                embedding=embedding,
+            )
+            if entry.embedding_dimension == len(entry.embedding):
+                entries[entry.scene_id] = entry
+        return entries
+
+    def _write_entries(self, entries: dict[int, IndexedEmojiUsageScene]) -> None:
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": INDEX_VERSION,
+            "scenes": [
+                {
+                    "scene_id": entry.scene_id,
+                    "emoji_hash": entry.emoji_hash,
+                    "scene": entry.scene,
+                    "embedding_model": entry.embedding_model,
+                    "embedding_dimension": entry.embedding_dimension,
+                    "embedding": [round(float(value), 7) for value in entry.embedding],
+                }
+                for entry in entries.values()
+            ],
+        }
+        temporary_path = self.index_path.with_name(f"{self.index_path.stem}.tmp{self.index_path.suffix}")
+        temporary_path.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        temporary_path.replace(self.index_path)
+
+    @staticmethod
+    def _entry_matches(
+        entry: IndexedEmojiUsageScene,
+        candidate: EmojiUsageSceneVectorCandidate,
+        query_model: str,
+        query_dimension: int,
+    ) -> bool:
+        return (
+            entry.emoji_hash == candidate.emoji_hash
+            and entry.scene == candidate.scene
+            and entry.embedding_model == query_model
+            and entry.embedding_dimension == query_dimension
+        )
+
+    async def _embed_candidate(
+        self,
+        candidate: EmojiUsageSceneVectorCandidate,
+    ) -> IndexedEmojiUsageScene | None:
+        try:
+            raw_embedding, model_name = await _get_embedding_with_model(
+                usage_scene_embedding_text(candidate.scene),
+                request_type="emoji.usage_scene.vector.index",
+            )
+        except Exception as exc:
+            logger.warning(f"真人表情场景向量生成失败，跳过 scene_id={candidate.scene_id}: {exc}")
+            return None
+        embedding = normalize_embedding(raw_embedding)
+        if embedding is None:
+            logger.warning(f"真人表情场景向量响应无效，跳过 scene_id={candidate.scene_id}")
+            return None
+        return IndexedEmojiUsageScene(
+            scene_id=candidate.scene_id,
+            emoji_hash=candidate.emoji_hash,
+            scene=candidate.scene,
+            embedding_model=normalize_text(model_name)[:256],
+            embedding_dimension=len(embedding),
+            embedding=embedding,
+        )
+
+    async def _embed_candidates(
+        self,
+        candidates: Sequence[EmojiUsageSceneVectorCandidate],
+    ) -> list[IndexedEmojiUsageScene]:
+        semaphore = asyncio.Semaphore(MAX_EMBEDDING_CONCURRENCY)
+
+        async def embed_with_limit(candidate: EmojiUsageSceneVectorCandidate) -> IndexedEmojiUsageScene | None:
+            async with semaphore:
+                return await self._embed_candidate(candidate)
+
+        embedded = await asyncio.gather(*(embed_with_limit(candidate) for candidate in candidates))
+        return [entry for entry in embedded if entry is not None]
+
+    async def search(
+        self,
+        *,
+        query_text: str,
+        candidates: Sequence[EmojiUsageSceneVectorCandidate],
+        limit: int = DEFAULT_CANDIDATE_LIMIT,
+        similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+    ) -> list[EmojiUsageSceneVectorMatch] | None:
+        normalized_query = normalize_text(query_text)[:MAX_USAGE_SCENE_QUERY_LENGTH]
+        normalized_candidates: list[EmojiUsageSceneVectorCandidate] = []
+        seen_scene_ids: set[int] = set()
+        for candidate in candidates:
+            scene_id = candidate.scene_id
+            emoji_hash = normalize_text(candidate.emoji_hash)[:128]
+            scene = normalize_text(candidate.scene)[:MAX_USAGE_SCENE_LENGTH]
+            if (
+                isinstance(scene_id, bool)
+                or not isinstance(scene_id, int)
+                or scene_id <= 0
+                or scene_id in seen_scene_ids
+                or not emoji_hash
+                or not scene
+            ):
+                continue
+            seen_scene_ids.add(scene_id)
+            normalized_candidates.append(EmojiUsageSceneVectorCandidate(scene_id, emoji_hash, scene))
+        if not normalized_query:
+            return None
+        if not normalized_candidates:
+            return []
+        if not _has_embedding_model_configured():
+            logger.info("真人表情场景向量检索不可用：未配置 embedding 模型")
+            return None
+
+        try:
+            raw_query_embedding, query_model = await _get_embedding_with_model(
+                usage_scene_embedding_text(normalized_query),
+                request_type="emoji.usage_scene.vector.query",
+            )
+        except Exception as exc:
+            logger.warning(f"真人表情场景向量 query 生成失败: {exc}")
+            return None
+        query_embedding = normalize_embedding(raw_query_embedding)
+        if query_embedding is None:
+            logger.warning("真人表情场景向量 query 响应无效")
+            return None
+
+        query_model = normalize_text(query_model)[:256]
+        query_dimension = len(query_embedding)
+        effective_limit = max(1, min(int(limit), len(normalized_candidates)))
+        threshold = max(-1.0, min(float(similarity_threshold), 1.0))
+
+        async with self._lock:
+            entries = self._load_entries()
+            active_scene_ids = {candidate.scene_id for candidate in normalized_candidates}
+            changed = False
+            for scene_id in list(entries):
+                if scene_id not in active_scene_ids:
+                    entries.pop(scene_id, None)
+                    changed = True
+
+            missing_candidates = [
+                candidate
+                for candidate in normalized_candidates
+                if (entry := entries.get(candidate.scene_id)) is None
+                or not self._entry_matches(entry, candidate, query_model, query_dimension)
+            ][:MAX_SYNC_EMBEDDING_UPDATES]
+            for entry in await self._embed_candidates(missing_candidates):
+                entries[entry.scene_id] = entry
+                changed = True
+
+            if changed:
+                try:
+                    self._write_entries(entries)
+                except Exception as exc:
+                    logger.warning(f"真人表情场景向量索引刷新失败，将使用内存结果: {exc}")
+
+            scored_matches: list[EmojiUsageSceneVectorMatch] = []
+            usable_entries = 0
+            unresolved_candidates = 0
+            for candidate in normalized_candidates:
+                entry = entries.get(candidate.scene_id)
+                if entry is None or not self._entry_matches(entry, candidate, query_model, query_dimension):
+                    unresolved_candidates += 1
+                    continue
+                usable_entries += 1
+                similarity = cosine_similarity(query_embedding, entry.embedding)
+                if similarity >= threshold:
+                    scored_matches.append(
+                        EmojiUsageSceneVectorMatch(
+                            scene_id=candidate.scene_id,
+                            emoji_hash=candidate.emoji_hash,
+                            scene=candidate.scene,
+                            similarity=similarity,
+                        )
+                    )
+
+        if usable_entries == 0:
+            return None
+        if unresolved_candidates:
+            logger.info("真人表情场景向量索引仍在补齐，本轮保留其他候选路径")
+            return None
+        scored_matches.sort(key=lambda match: match.similarity, reverse=True)
+        return scored_matches[:effective_limit]
+
+
+emoji_usage_scene_vector_index = EmojiUsageSceneVectorIndex()

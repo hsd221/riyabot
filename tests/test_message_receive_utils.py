@@ -13,7 +13,7 @@ from peewee import SqliteDatabase
 from PIL import Image
 
 from src.chat.message_receive import media_background
-from src.chat.message_receive.chat_stream import ChatStream
+from src.chat.message_receive.chat_stream import ChatManager, ChatStream
 from src.chat.message_receive.message import MessageRecv, MessageSending, MessageSet
 from src.chat.message_receive.storage import MessageStorage
 from src.chat.message_receive import uni_message_sender
@@ -413,7 +413,7 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
             kind="image",
             media_hash="hash-1",
             status="processing",
-            message_refs=[("msg-1", 0)],
+            message_refs=[("msg-1", 0, None)],
         )
         media_background._media_task_states["image:hash-1"] = success_state
 
@@ -567,9 +567,27 @@ class MessageRecvLightweightMediaTest(unittest.IsolatedAsyncioTestCase):
             "[音乐: Song - Singer (Radio)] 跳转链接: https://jump.test 音乐链接: https://music.test",
         )
         schedule_image.assert_called_once_with("aW1hZ2U=", "recv-1")
-        schedule_emoji.assert_called_once_with("ZW1vamk=", "recv-1")
+        expected_chat_id = ChatManager._generate_stream_id(
+            message.message_info.platform,
+            message.message_info.user_info,
+            message.message_info.group_info,
+        )
+        schedule_emoji.assert_called_once_with("ZW1vamk=", "recv-1", chat_id=expected_chat_id)
         schedule_voice.assert_called_once_with("dm9pY2U=", "recv-1")
         self.assertEqual(message.is_mentioned, 0.8)
+
+    async def test_chat_id_derivation_failure_does_not_block_emoji_processing(self) -> None:
+        message = make_recv(processed_plain_text="")
+        message.message_segment = Seg(type="emoji", data="ZW1vamk=")
+
+        with (
+            patch.object(ChatManager, "_generate_stream_id", side_effect=ValueError("missing identity")),
+            patch("src.chat.message_receive.message.schedule_emoji_description_task") as schedule_emoji,
+        ):
+            await message.process(enable_heavy_media_analysis=False)
+
+        self.assertEqual(message.processed_plain_text, "[表情包]")
+        schedule_emoji.assert_called_once_with("ZW1vamk=", "recv-1", chat_id=None)
 
 
 class MessageSetTest(unittest.TestCase):

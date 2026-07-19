@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from src.chat.emoji_system.emoji_description import is_semantic_emoji_description
+from src.chat.emoji_system.emoji_usage_scene import schedule_emoji_usage_scene_learning
 from src.chat.utils.utils_image import (
     VISION_DESCRIPTION_CACHE_TYPE,
     get_image_manager,
@@ -33,7 +34,7 @@ class _MediaTaskState:
     status: str = "pending"
     result_text: Optional[str] = None
     task: Optional[asyncio.Task] = None
-    message_refs: list[tuple[str, int]] = field(default_factory=list)
+    message_refs: list[tuple[str, int, str | None]] = field(default_factory=list)
 
 
 @dataclass
@@ -41,6 +42,7 @@ class _MessageMediaRef:
     kind: str
     task_key: str
     occurrence_index: int
+    chat_id: str | None = None
 
 
 _media_task_states: dict[str, _MediaTaskState] = {}
@@ -152,14 +154,27 @@ def _replace_placeholder_occurrence(kind: str, content: str, result_text: str, o
     return content
 
 
-def _remember_message_ref(message_id: Optional[str], task_key: str, state: _MediaTaskState) -> None:
+def _remember_message_ref(
+    message_id: Optional[str],
+    task_key: str,
+    state: _MediaTaskState,
+    chat_id: str | None = None,
+) -> None:
     if not message_id:
         return
     message_id = str(message_id)
+    normalized_chat_id = str(chat_id or "").strip() or None
     refs = _message_media_refs.setdefault(message_id, [])
-    occurrence_index = sum(1 for ref in refs if ref.kind == state.kind)
-    refs.append(_MessageMediaRef(kind=state.kind, task_key=task_key, occurrence_index=occurrence_index))
-    state.message_refs.append((message_id, occurrence_index))
+    occurrence_index = sum(1 for ref in refs if ref.kind == state.kind and ref.chat_id == normalized_chat_id)
+    refs.append(
+        _MessageMediaRef(
+            kind=state.kind,
+            task_key=task_key,
+            occurrence_index=occurrence_index,
+            chat_id=normalized_chat_id,
+        )
+    )
+    state.message_refs.append((message_id, occurrence_index, normalized_chat_id))
 
 
 def _schedule_placeholder_backfill(kind: str, message_id: str, result_text: str, occurrence_index: int) -> None:
@@ -226,8 +241,16 @@ async def _run_media_task(task_key: str, media_data: str) -> None:
 
         state.result_text = result_text
         state.status = "done"
-        for message_id, occurrence_index in list(state.message_refs):
+        for message_id, occurrence_index, chat_id in list(state.message_refs):
             _schedule_placeholder_backfill(state.kind, message_id, result_text, occurrence_index)
+            if state.kind == "emoji":
+                schedule_emoji_usage_scene_learning(
+                    state.media_hash,
+                    message_id,
+                    occurrence_index,
+                    result_text,
+                    chat_id=chat_id,
+                )
     except Exception as e:
         state.status = "failed"
         logger.warning(f"后台{state.kind}识别任务失败: {e}")
@@ -235,7 +258,13 @@ async def _run_media_task(task_key: str, media_data: str) -> None:
         state.task = None
 
 
-def _schedule_media_task(kind: str, media_data: str, message_id: Optional[str]) -> None:
+def _schedule_media_task(
+    kind: str,
+    media_data: str,
+    message_id: Optional[str],
+    *,
+    chat_id: str | None = None,
+) -> None:
     if not media_data:
         return
 
@@ -246,7 +275,7 @@ def _schedule_media_task(kind: str, media_data: str, message_id: Optional[str]) 
         state = _MediaTaskState(kind=kind, media_hash=media_hash)
         _media_task_states[task_key] = state
 
-    _remember_message_ref(message_id, task_key, state)
+    _remember_message_ref(message_id, task_key, state, chat_id)
 
     if state.status in {"pending", "failed"} and (
         cached_result := _load_cached_media_result(kind, media_hash, media_data)
@@ -256,11 +285,27 @@ def _schedule_media_task(kind: str, media_data: str, message_id: Optional[str]) 
         if message_id:
             occurrence_index = _message_media_refs[str(message_id)][-1].occurrence_index
             _schedule_placeholder_backfill(kind, str(message_id), cached_result, occurrence_index)
+            if kind == "emoji":
+                schedule_emoji_usage_scene_learning(
+                    media_hash,
+                    str(message_id),
+                    occurrence_index,
+                    cached_result,
+                    chat_id=chat_id,
+                )
         return
 
     if state.status == "done" and state.result_text and message_id:
         occurrence_index = _message_media_refs[str(message_id)][-1].occurrence_index
         _schedule_placeholder_backfill(kind, str(message_id), state.result_text, occurrence_index)
+        if kind == "emoji":
+            schedule_emoji_usage_scene_learning(
+                media_hash,
+                str(message_id),
+                occurrence_index,
+                state.result_text,
+                chat_id=chat_id,
+            )
         return
 
     if state.status == "processing" and state.task:
@@ -280,8 +325,13 @@ def schedule_image_description_task(image_base64: str, message_id: Optional[str]
     _schedule_media_task("image", image_base64, message_id)
 
 
-def schedule_emoji_description_task(emoji_base64: str, message_id: Optional[str] = None) -> None:
-    _schedule_media_task("emoji", emoji_base64, message_id)
+def schedule_emoji_description_task(
+    emoji_base64: str,
+    message_id: Optional[str] = None,
+    *,
+    chat_id: str | None = None,
+) -> None:
+    _schedule_media_task("emoji", emoji_base64, message_id, chat_id=chat_id)
 
 
 def schedule_voice_transcription_task(voice_base64: str, message_id: Optional[str] = None) -> None:

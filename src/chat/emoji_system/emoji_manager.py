@@ -13,7 +13,7 @@ from typing import Optional, Tuple, List, Any
 from PIL import Image
 from rich.traceback import install
 
-from src.common.database.database_model import Emoji, EmojiDescriptionCache
+from src.common.database.database_model import Emoji, EmojiDescriptionCache, EmojiUsageScene
 from src.common.database.database import db as peewee_db
 from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
@@ -23,7 +23,12 @@ from src.chat.emoji_system.emoji_description import (
     extract_semantic_emoji_emotions,
     is_semantic_emoji_description,
 )
-from src.chat.emoji_system.emoji_vector_index import EmojiVectorCandidate, emoji_vector_index
+from src.chat.emoji_system.emoji_vector_index import (
+    EmojiUsageSceneVectorCandidate,
+    emoji_usage_scene_vector_index,
+    EmojiVectorCandidate,
+    emoji_vector_index,
+)
 from src.chat.utils.utils_image import (
     audit_gif_frames,
     get_image_manager,
@@ -42,6 +47,7 @@ EMOJI_DIR = os.path.join(BASE_DIR, "emoji")  # 表情包存储目录
 EMOJI_REGISTERED_DIR = os.path.join(BASE_DIR, "emoji_registed")  # 已注册的表情包注册目录
 SUPPORTED_EMOJI_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 MAX_EMOJI_FOR_PROMPT = 20  # 最大允许的表情包描述数量于图片替换的 prompt 中
+MAX_USAGE_SCENES_PER_CANDIDATE = 4
 
 """
 还没经过测试，有些地方数据库和内存数据同步可能不完全
@@ -403,6 +409,7 @@ class EmojiManager:
         self.emoji_num_max_reach_deletion = global_config.emoji.do_replace
         self.emoji_objects: list[MaiEmoji] = []  # 存储MaiEmoji对象的列表，使用类型注解明确列表元素类型
         self.vector_index = emoji_vector_index
+        self.usage_scene_vector_index = emoji_usage_scene_vector_index
 
         logger.info("启动表情包管理器")
 
@@ -423,17 +430,19 @@ class EmojiManager:
         if not self._initialized:
             raise RuntimeError("EmojiManager not initialized")
 
-    def record_usage(self, emoji_hash: str) -> None:
+    def record_usage(self, emoji_hash: str) -> bool:
         """记录表情使用次数"""
         try:
             emoji_update = Emoji.get(Emoji.emoji_hash == emoji_hash)
             emoji_update.usage_count += 1
             emoji_update.last_used_time = time.time()  # Update last used time
             emoji_update.save()  # Persist changes to DB
+            return True
         except Emoji.DoesNotExist:  # type: ignore
             logger.error(f"记录表情使用失败: 未找到 hash 为 {emoji_hash} 的表情包")
         except Exception as e:
             logger.error(f"记录表情使用失败: {str(e)}")
+        return False
 
     async def get_emoji_for_text(self, text_emotion: str) -> Optional[Tuple[str, str, str]]:
         """根据文本内容获取相关表情包
@@ -541,6 +550,61 @@ class EmojiManager:
             return results
         except Exception as e:
             logger.warning(f"表情向量检索失败，将回退随机候选: {e}")
+            return None
+
+    async def get_emoji_candidates_by_scene_vector(
+        self,
+        current_scene: str,
+        *,
+        limit: int = 30,
+    ) -> Optional[List[Tuple["MaiEmoji", tuple[str, ...], float]]]:
+        """按真人使用场景向量召回表情，每张表情只保留最高场景分。"""
+        try:
+            self._ensure_db()
+            emojis_by_hash = {emoji.hash: emoji for emoji in self.emoji_objects if not emoji.is_deleted and emoji.hash}
+            if not emojis_by_hash:
+                return []
+
+            scene_records = list(
+                EmojiUsageScene.select()
+                .where(EmojiUsageScene.emoji_hash.in_(tuple(emojis_by_hash)))
+                .order_by(EmojiUsageScene.sample_count.desc(), EmojiUsageScene.last_active_time.desc())
+            )
+            if not scene_records:
+                return None
+
+            matches = await self.usage_scene_vector_index.search(
+                query_text=current_scene,
+                candidates=[
+                    EmojiUsageSceneVectorCandidate(scene.id, scene.emoji_hash, scene.scene) for scene in scene_records
+                ],
+                limit=len(scene_records),
+            )
+            if matches is None:
+                return None
+
+            scenes_by_hash: dict[str, list[str]] = {}
+            best_scores: dict[str, float] = {}
+            for match in sorted(matches, key=lambda item: item.similarity, reverse=True):
+                if match.emoji_hash not in emojis_by_hash:
+                    continue
+                best_scores[match.emoji_hash] = max(best_scores.get(match.emoji_hash, -1.0), match.similarity)
+                matched_scenes = scenes_by_hash.setdefault(match.emoji_hash, [])
+                if match.scene not in matched_scenes and len(matched_scenes) < MAX_USAGE_SCENES_PER_CANDIDATE:
+                    matched_scenes.append(match.scene)
+
+            effective_limit = max(1, min(int(limit), 30))
+            ranked_hashes = sorted(best_scores, key=lambda emoji_hash: best_scores[emoji_hash], reverse=True)
+            return [
+                (
+                    emojis_by_hash[emoji_hash],
+                    tuple(scenes_by_hash.get(emoji_hash, ())),
+                    best_scores[emoji_hash],
+                )
+                for emoji_hash in ranked_hashes[:effective_limit]
+            ]
+        except Exception as e:
+            logger.warning(f"真人表情场景向量检索失败，将保留情感候选: {e}")
             return None
 
     async def _index_emoji_vector(self, emoji: "MaiEmoji") -> None:

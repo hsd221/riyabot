@@ -655,6 +655,31 @@ class EmojiConfig(ConfigBase):
     filtration_prompt: str = "符合公序良俗"
     """表情包过滤要求"""
 
+    usage_scene_enabled: bool = True
+    """是否学习并使用真人发送表情包时的场景"""
+
+    usage_scene_context_messages: int = 8
+    """学习真人使用场景时读取的历史消息条数"""
+
+    usage_scene_max_scenes: int = 8
+    """单个表情包触发场景合并前的场景数量软上限"""
+
+    usage_scene_weight: float = 0.6
+    """候选初筛中真人场景相似度所占权重"""
+
+    selection_candidate_count: int = 8
+    """交给模型执行最终选择的候选表情包数量"""
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.usage_scene_context_messages <= 32:
+            raise ValueError("usage_scene_context_messages 必须在 1 到 32 之间")
+        if not 1 <= self.usage_scene_max_scenes <= 32:
+            raise ValueError("usage_scene_max_scenes 必须在 1 到 32 之间")
+        if not 0.0 <= self.usage_scene_weight <= 1.0:
+            raise ValueError("usage_scene_weight 必须在 0 到 1 之间")
+        if not 1 <= self.selection_candidate_count <= 30:
+            raise ValueError("selection_candidate_count 必须在 1 到 30 之间")
+
 
 @dataclass
 class KeywordRuleConfig(ConfigBase):

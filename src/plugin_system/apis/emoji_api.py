@@ -10,15 +10,44 @@
 
 import random
 import base64
+import math
 import os
 import uuid
 
+from dataclasses import dataclass
 from typing import Optional, Tuple, List, Dict, Any
 from src.common.logger import get_logger
-from src.chat.emoji_system.emoji_manager import EMOJI_DIR, get_emoji_manager, is_supported_emoji_filename
+from src.chat.emoji_system.emoji_manager import (
+    EMOJI_DIR,
+    MAX_USAGE_SCENES_PER_CANDIDATE,
+    get_emoji_manager,
+    is_supported_emoji_filename,
+)
 from src.chat.utils.utils_image import image_path_to_base64, base64_to_image
 
 logger = get_logger("emoji_api")
+
+
+@dataclass(frozen=True)
+class EmojiSelectionCandidate:
+    emoji_hash: str
+    emoji_base64: str
+    description: str
+    matched_emotion: str
+    usage_scenes: tuple[str, ...]
+    emotion_score: float | None
+    scene_score: float | None
+    combined_score: float
+
+
+def _normalize_similarity(value: Any) -> float | None:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(score):
+        return None
+    return max(0.0, min(score, 1.0))
 
 
 # =============================================================================
@@ -101,6 +130,181 @@ async def get_by_emotion_vector(emotion: str, count: int = 30) -> Optional[List[
     except Exception as e:
         logger.warning(f"[EmojiAPI] 情感向量检索不可用: {e}")
         return None
+
+
+async def get_ranked_candidates(
+    emotion: str,
+    scene: str,
+    *,
+    count: int = 8,
+    scene_weight: float = 0.6,
+) -> Optional[List[EmojiSelectionCandidate]]:
+    """合并情感和真人使用场景的向量召回，并返回加权后的具名候选。"""
+    if not isinstance(emotion, str):
+        raise TypeError("情感描述必须是字符串类型")
+    if not emotion.strip():
+        raise ValueError("情感描述不能为空")
+    if not isinstance(scene, str):
+        raise TypeError("当前场景必须是字符串类型")
+    if not isinstance(count, int) or isinstance(count, bool):
+        raise TypeError("count 必须是整数类型")
+    if count <= 0:
+        raise ValueError("count 必须大于0")
+    if isinstance(scene_weight, bool) or not isinstance(scene_weight, (int, float)):
+        raise TypeError("scene_weight 必须是数字类型")
+    if not math.isfinite(float(scene_weight)) or not 0.0 <= float(scene_weight) <= 1.0:
+        raise ValueError("scene_weight 必须在0到1之间")
+
+    manager = get_emoji_manager()
+    effective_count = min(count, 30)
+    bounded_scene_weight = float(scene_weight)
+    emotion_matches = None
+    if bounded_scene_weight < 1.0:
+        try:
+            emotion_matches = await manager.get_emoji_candidates_by_vector(emotion.strip(), limit=30)
+        except Exception as error:
+            logger.warning(f"[EmojiAPI] 情感向量候选检索失败: {error}")
+
+    normalized_scene = " ".join(scene.split()).strip()[:1000]
+    scene_matches = None
+    if normalized_scene and bounded_scene_weight > 0.0:
+        try:
+            scene_matches = await manager.get_emoji_candidates_by_scene_vector(normalized_scene, limit=30)
+        except Exception as error:
+            logger.warning(f"[EmojiAPI] 真人场景向量候选检索失败: {error}")
+
+    if emotion_matches is None and scene_matches is None:
+        return None
+
+    candidates_by_hash: dict[str, dict[str, Any]] = {}
+    for emoji, matched_emotion, raw_score in emotion_matches or []:
+        emoji_hash = str(getattr(emoji, "hash", "") or "").strip()
+        score = _normalize_similarity(raw_score)
+        if not emoji_hash or getattr(emoji, "is_deleted", False) or score is None:
+            continue
+        candidate = candidates_by_hash.setdefault(
+            emoji_hash,
+            {
+                "emoji": emoji,
+                "matched_emotion": "",
+                "usage_scenes": (),
+                "emotion_score": None,
+                "scene_score": None,
+            },
+        )
+        if candidate["emotion_score"] is None or score > candidate["emotion_score"]:
+            candidate["emotion_score"] = score
+            candidate["matched_emotion"] = str(matched_emotion or "")
+
+    for emoji, raw_usage_scenes, raw_score in scene_matches or []:
+        emoji_hash = str(getattr(emoji, "hash", "") or "").strip()
+        score = _normalize_similarity(raw_score)
+        if not emoji_hash or getattr(emoji, "is_deleted", False) or score is None:
+            continue
+        usage_scenes = tuple(
+            dict.fromkeys(
+                normalized
+                for usage_scene in raw_usage_scenes
+                if (normalized := " ".join(str(usage_scene or "").split()).strip()[:240])
+            )
+        )[:MAX_USAGE_SCENES_PER_CANDIDATE]
+        candidate = candidates_by_hash.setdefault(
+            emoji_hash,
+            {
+                "emoji": emoji,
+                "matched_emotion": "",
+                "usage_scenes": (),
+                "emotion_score": None,
+                "scene_score": None,
+            },
+        )
+        candidate["usage_scenes"] = usage_scenes
+        candidate["scene_score"] = max(candidate["scene_score"] or 0.0, score)
+
+    emotion_weight = 1.0 - bounded_scene_weight
+    ranked = []
+    for emoji_hash, candidate in candidates_by_hash.items():
+        emotion_score = candidate["emotion_score"]
+        scene_score = candidate["scene_score"]
+        combined_score = emotion_weight * (emotion_score or 0.0) + bounded_scene_weight * (scene_score or 0.0)
+        ranked.append((combined_score, scene_score or 0.0, emotion_score or 0.0, emoji_hash, candidate))
+    ranked.sort(key=lambda item: (-item[0], -item[1], -item[2], item[3]))
+
+    results: List[EmojiSelectionCandidate] = []
+    for combined_score, _scene_score, _emotion_score, emoji_hash, candidate in ranked:
+        emoji = candidate["emoji"]
+        emoji_base64 = image_path_to_base64(emoji.full_path)
+        if not emoji_base64:
+            logger.warning(f"[EmojiAPI] 加权候选无法转换为base64: {emoji.full_path}")
+            continue
+        results.append(
+            EmojiSelectionCandidate(
+                emoji_hash=emoji_hash,
+                emoji_base64=emoji_base64,
+                description=str(getattr(emoji, "description", "") or ""),
+                matched_emotion=candidate["matched_emotion"],
+                usage_scenes=candidate["usage_scenes"],
+                emotion_score=candidate["emotion_score"],
+                scene_score=candidate["scene_score"],
+                combined_score=combined_score,
+            )
+        )
+        if len(results) == effective_count:
+            break
+    return results
+
+
+async def get_random_candidates(count: int = 1) -> List[EmojiSelectionCandidate]:
+    """返回不提前写入使用次数的随机具名候选。"""
+    if not isinstance(count, int) or isinstance(count, bool):
+        raise TypeError("count 必须是整数类型")
+    if count < 0:
+        raise ValueError("count 不能为负数")
+    if count == 0:
+        return []
+
+    try:
+        manager = get_emoji_manager()
+        valid_emojis = [emoji for emoji in manager.emoji_objects if not emoji.is_deleted and emoji.hash]
+        if not valid_emojis:
+            return []
+
+        selected_emojis = random.sample(valid_emojis, min(count, len(valid_emojis)))
+        results: List[EmojiSelectionCandidate] = []
+        for emoji in selected_emojis:
+            emoji_base64 = image_path_to_base64(emoji.full_path)
+            if not emoji_base64:
+                logger.warning(f"[EmojiAPI] 随机候选无法转换为base64: {emoji.full_path}")
+                continue
+            matched_emotion = random.choice(emoji.emotion) if emoji.emotion else "随机表情"
+            results.append(
+                EmojiSelectionCandidate(
+                    emoji_hash=emoji.hash,
+                    emoji_base64=emoji_base64,
+                    description=str(emoji.description or ""),
+                    matched_emotion=matched_emotion,
+                    usage_scenes=(),
+                    emotion_score=None,
+                    scene_score=None,
+                    combined_score=0.0,
+                )
+            )
+        return results
+    except Exception as error:
+        logger.error(f"[EmojiAPI] 获取随机具名候选失败: {error}")
+        return []
+
+
+def record_usage(emoji_hash: str) -> bool:
+    """在表情实际发送成功后记录一次使用。"""
+    normalized_hash = str(emoji_hash or "").strip()
+    if not normalized_hash:
+        return False
+    try:
+        return bool(get_emoji_manager().record_usage(normalized_hash))
+    except Exception as error:
+        logger.warning(f"[EmojiAPI] 记录表情使用失败: {error}")
+        return False
 
 
 async def get_random(count: Optional[int] = 1) -> List[Tuple[str, str, str]]:
