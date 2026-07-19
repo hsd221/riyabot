@@ -385,7 +385,9 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
             content="reference answer",
         )
         prompt = (
-            f"稳定规划规则\n{DYNAMIC_CONTEXT_BOUNDARY}\n【待分析输入】\n聊天记录\n\n【本轮决策焦点】\n只决定本轮动作。"
+            f"<instructions>稳定规划规则</instructions>\n{DYNAMIC_CONTEXT_BOUNDARY}\n"
+            "<input_data>\n<chat_history>聊天记录</chat_history>\n"
+            "<decision_focus>只决定本轮动作。</decision_focus>\n</input_data>"
         )
 
         round_prompt = group_planner.ActionPlanner._inject_tool_results(prompt, [tool_result])
@@ -394,7 +396,7 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("reference answer", structured.system_prompt or "")
         self.assertIn("reference answer", structured.user_prompt)
         self.assertLess(
-            structured.user_prompt.index("reference answer"), structured.user_prompt.index("【本轮决策焦点】")
+            structured.user_prompt.index("reference answer"), structured.user_prompt.index("<decision_focus>")
         )
 
     def test_group_tool_results_never_follow_a_focus_heading_in_the_system_context(self) -> None:
@@ -786,12 +788,14 @@ class ActionPlannerTest(unittest.IsolatedAsyncioTestCase):
                 group_planner,
                 "build_readable_messages_with_id",
                 return_value=("chat", [("m101", make_db_message())]),
-            ),
+            ) as build_messages,
             patch.object(group_planner.events_manager, "handle_mai_events", new=AsyncMock(return_value=(False, None))),
         ):
             cancelled = await planner.plan({"plugin": action_info}, loop_start_time=1.0)
 
         self.assertEqual(cancelled, [])
+        self.assertEqual(build_messages.call_args_list[0].kwargs["output_format"], "jsonl")
+        self.assertNotIn("output_format", build_messages.call_args_list[1].kwargs)
 
         modified_message = SimpleNamespace(
             _modify_flags=SimpleNamespace(modify_llm_prompt=True),

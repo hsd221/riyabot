@@ -688,6 +688,7 @@ class PrivateReplyer:
             read_mark=0.0,
             show_actions=True,
             long_time_notice=True,
+            output_format="jsonl",
         )
 
         message_list_before_short = get_raw_msg_before_timestamp_with_chat(

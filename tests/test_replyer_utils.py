@@ -84,6 +84,89 @@ class ReplyerManagerTest(unittest.TestCase):
 
 
 class ReplyerSharedHelpersTest(unittest.IsolatedAsyncioTestCase):
+    async def test_main_reply_prompts_use_jsonl_for_the_full_chat_history(self) -> None:
+        group_replyer = make_group_replyer()
+        group_replyer.build_expression_habits = AsyncMock(return_value=("", []))
+        group_replyer.build_behavior_reference = AsyncMock(return_value="")
+        group_replyer.build_tool_info = AsyncMock(return_value="")
+        group_replyer.get_prompt_info = AsyncMock(return_value="")
+        group_replyer.build_actions_prompt = AsyncMock(return_value="")
+        group_replyer.build_personality_prompt = AsyncMock(return_value="identity")
+        group_replyer._build_jargon_explanation = AsyncMock(return_value="")
+        group_replyer.build_keywords_reaction_prompt = AsyncMock(return_value="")
+        group_replyer.get_chat_prompt_for_chat = Mock(return_value="")
+
+        with (
+            patch.object(group_generator.global_config, "chat", SimpleNamespace(max_context_size=10)),
+            patch.object(group_generator.global_config, "personality", SimpleNamespace(reply_style="自然")),
+            patch.object(group_generator.global_config, "bot", SimpleNamespace(nickname="Riya")),
+            patch.object(
+                group_generator,
+                "get_raw_msg_before_timestamp_with_chat",
+                side_effect=[[object()], []],
+            ),
+            patch.object(
+                group_generator,
+                "build_readable_messages",
+                side_effect=["short-history", "structured-group-history"],
+            ) as group_build_messages,
+            patch.object(
+                group_generator,
+                "build_memory_retrieval_prompt",
+                new=AsyncMock(return_value=("", [])),
+            ),
+        ):
+            group_prompt, *_ = await group_replyer.build_prompt_reply_context(reply_time_point=10.0)
+
+        self.assertIn("structured-group-history", group_prompt)
+        self.assertNotIn("output_format", group_build_messages.call_args_list[0].kwargs)
+        self.assertEqual(group_build_messages.call_args_list[1].kwargs["output_format"], "jsonl")
+
+        private_replyer = make_private_replyer()
+        private_replyer.build_expression_habits = AsyncMock(return_value=("", []))
+        private_replyer.build_behavior_reference = AsyncMock(return_value="")
+        private_replyer.build_tool_info = AsyncMock(return_value="")
+        private_replyer.get_prompt_info = AsyncMock(return_value="")
+        private_replyer.build_actions_prompt = AsyncMock(return_value="")
+        private_replyer.build_personality_prompt = AsyncMock(return_value="identity")
+        private_replyer.build_keywords_reaction_prompt = AsyncMock(return_value="")
+        private_replyer.get_chat_prompt_for_chat = Mock(return_value="")
+
+        with (
+            patch.object(private_generator.global_config, "chat", SimpleNamespace(max_context_size=10)),
+            patch.object(private_generator.global_config, "personality", SimpleNamespace(reply_style="自然")),
+            patch.object(
+                private_generator.global_config,
+                "bot",
+                SimpleNamespace(qq_account="bot", platforms=[], nickname="Riya"),
+            ),
+            patch.object(
+                private_generator.global_config,
+                "expression",
+                SimpleNamespace(enable_jargon_explanation=False),
+            ),
+            patch.object(
+                private_generator,
+                "get_raw_msg_before_timestamp_with_chat",
+                side_effect=[[object()], []],
+            ),
+            patch.object(
+                private_generator,
+                "build_readable_messages",
+                side_effect=["structured-private-history", "short-history"],
+            ) as private_build_messages,
+            patch.object(
+                private_generator,
+                "build_memory_retrieval_prompt",
+                new=AsyncMock(return_value=("", [])),
+            ),
+        ):
+            private_prompt, _ = await private_replyer.build_prompt_reply_context()
+
+        self.assertIn("structured-private-history", private_prompt)
+        self.assertEqual(private_build_messages.call_args_list[0].kwargs["output_format"], "jsonl")
+        self.assertNotIn("output_format", private_build_messages.call_args_list[1].kwargs)
+
     async def test_replyers_send_stable_rules_and_dynamic_context_as_distinct_roles(self) -> None:
         prompt = f"稳定回复规则\n{DYNAMIC_CONTEXT_BOUNDARY}\n本轮回复输入"
 

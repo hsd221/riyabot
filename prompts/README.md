@@ -79,10 +79,12 @@ variants: light, standard
 
 当前聊天主链路的完整规划、生成模板会在最终模型调用边界拆成两条有角色的消息。Prompt hook 和日志仍看到完整渲染文本，因此现有插件无需改写接口：
 
-1. `system` 消息依次包含 `【任务】`、`【运行约束】` 和 `【输出协议】`，用于稳定身份、决策规则、内容边界及唯一输出格式。
+1. `system` 消息使用单一 `<instructions>` 根节点，依次包含 `<task>`、`<runtime_constraints>` 和 `<output_protocol>`，用于稳定身份、决策规则、内容边界及唯一输出格式。
 2. `<!-- RIYABOT_DYNAMIC_CONTEXT -->` 是唯一的角色分界标记；每个主链模板及其每个 `###SECTION` 必须恰好出现一次。
-3. `user` 消息从 `【待分析输入】` 开始，包含时间、聊天记录、记忆、工具结果等本轮动态且不可信的数据。
-4. 动态消息以 `【本轮决策焦点】` 或 `【本轮回复焦点】` 结束，把当前目标放在最接近模型输出的位置，避免被较早的候选资料淹没。
+3. `user` 消息使用单一 `<input_data>` 根节点，包含时间、聊天记录、记忆、工具结果等本轮动态且不可信的数据。
+4. 动态消息以 `<decision_focus>` 或 `<reply_focus>` 结束，把当前目标放在最接近模型输出的位置，避免被较早的候选资料淹没。
+
+主链聊天记录使用 XML 容器包裹 JSONL。每条消息固定包含 `msg_id`、`group_name`、`user_name`、`uid`、`time`、`content`；已读和未读记录分别放入 `<read_messages>` 与 `<unread_messages>`，普通记录放入 `<messages>`。JSON 字符串中的 `<`、`>`、`&` 会编码为 Unicode 转义，防止消息正文伪造或提前闭合 XML 边界。
 
 不要把聊天记录、检索结果、工具返回或关键词捕获文本放到分界标记之前；不要在动态输入之后重复或改写输出协议。若插件完整替换 Prompt、移除标记或产生畸形标记，调用层会兼容回退为旧的单条 `user` 消息，不会猜测插件文本的可信边界。
 
@@ -115,13 +117,13 @@ variants: light, standard
 | `sender_name` | 私聊对象的显示名，用于区分机器人与对方的发言。 |
 | `chat_target` | 当前聊天对象或由调用方拼好的聊天场景引导文本；具体形式由模板调用点决定。 |
 | `chat_target_2` | `chat.shared.expressor` 使用的简短场景短语，例如“正在群里聊天”或“和某人聊天”。 |
-| `chat_content` | 私聊原生 Tool Planner 读取的带真实消息 ID 的聊天记录。 |
-| `chat_content_block` | 群聊原生 Tool Planner 使用的带消息 ID、动作标记等信息的完整聊天块。 |
+| `chat_content` | 私聊原生 Tool Planner 读取的 XML + JSONL 聊天记录，消息 ID 位于每条对象的 `msg_id` 字段。 |
+| `chat_content_block` | 群聊原生 Tool Planner 使用的 XML + JSONL 完整聊天块，可含已读/未读分区和动作记录。 |
 | `chat_history` | 供工具或记忆判断使用的最近聊天历史；是否预先做边界转义由调用方决定，模板始终把它视为不可信数据。 |
 | `chat_history_text` | 旧 PFC 组件使用的可读聊天历史，可能附带“新消息”分隔说明。 |
 | `chat_info` | Expressor 重写时使用的较短聊天上下文。 |
 | `chat_str` | 学习器使用的带行号聊天文本，行号可被输出字段引用。 |
-| `dialogue_prompt` | 回复生成器使用的较完整可读对话记录。 |
+| `dialogue_prompt` | 回复生成器使用的 XML + JSONL 完整对话记录。 |
 | `message_block` | 记忆 L1 话题切分器使用的、带 `message_id` 的连续消息块。 |
 | `messages_text` | 表情情感标签选择器使用的最近聊天文本。 |
 | `conversation_text` | 记忆原子提取器边界内的原始对话消息。 |

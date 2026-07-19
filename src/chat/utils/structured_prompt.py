@@ -1,9 +1,19 @@
 """将聊天主链的完整可读 Prompt 映射为有角色的 LLM 消息。"""
 
+import json
 from dataclasses import dataclass
+from typing import Any
 
 
 DYNAMIC_CONTEXT_BOUNDARY = "<!-- RIYABOT_DYNAMIC_CONTEXT -->"
+
+
+def dump_prompt_json(value: Any, *, indent: int | None = None) -> str:
+    """序列化将进入 XML Prompt 容器的不可信数据。"""
+
+    separators = (",", ":") if indent is None else None
+    rendered = json.dumps(value, ensure_ascii=False, indent=indent, separators=separators)
+    return rendered.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,6 +2,7 @@ import time
 import random
 import re
 
+from dataclasses import dataclass, replace
 from typing import List, Dict, Any, Tuple, Optional, Callable
 from rich.traceback import install
 
@@ -14,10 +15,28 @@ from src.common.database.database_model import ActionRecords
 from src.common.database.database_model import Images
 from src.common.person_stub import Person, get_person_id
 from src.chat.utils.utils import translate_timestamp_to_human_readable, assign_message_ids, is_bot_self
+from src.chat.utils.structured_prompt import dump_prompt_json
 from src.chat.message_receive.media_background import enhance_media_placeholders
 
 install(extra_lines=3)
 logger = get_logger("chat_message_builder")
+
+
+@dataclass(slots=True)
+class _DetailedMessage:
+    timestamp: float
+    msg_id: str
+    group_name: str
+    user_name: str
+    uid: str
+    content: str
+    is_action: bool
+
+
+def _wrap_jsonl(tag: str, content: str) -> str:
+    if content:
+        return f'<{tag} format="jsonl">\n{content}\n</{tag}>'
+    return f'<{tag} format="jsonl"></{tag}>'
 
 
 def replace_user_references(
@@ -369,6 +388,7 @@ def _build_readable_messages_internal(
     message_id_list: Optional[List[Tuple[str, DatabaseMessages]]] = None,
     pic_single: bool = False,
     long_time_notice: bool = False,
+    output_format: str = "readable",
 ) -> Tuple[str, List[Tuple[float, str, str]], Dict[str, str], int]:
     # sourcery skip: use-getitem-for-re-match-groups
     """
@@ -389,7 +409,10 @@ def _build_readable_messages_internal(
     if not messages:
         return "", [], pic_id_mapping or {}, pic_counter
 
-    detailed_messages_raw: List[Tuple[float, str, str, bool]] = []
+    if output_format not in {"readable", "jsonl"}:
+        raise ValueError(f"Unsupported output format: {output_format}")
+
+    detailed_messages_raw: List[_DetailedMessage] = []
 
     # 使用传入的映射字典，如果没有则创建新的
     if pic_id_mapping is None:
@@ -398,9 +421,12 @@ def _build_readable_messages_internal(
     pic_description_cache: Dict[str, str] = {}
 
     # 创建时间戳到消息ID的映射，用于在消息前添加[id]标识符
+    message_to_id_mapping: Dict[str, str] = {}
     timestamp_to_id_mapping: Dict[float, str] = {}
     if message_id_list:
         for msg_id, msg in message_id_list:
+            if msg.message_id:
+                message_to_id_mapping[msg.message_id] = msg_id
             timestamp = msg.time
             if timestamp is not None:
                 timestamp_to_id_mapping[timestamp] = msg_id
@@ -442,7 +468,17 @@ def _build_readable_messages_internal(
         if message.is_action_record:
             # 对于动作记录，也处理图片ID
             content = process_pic_ids(message.display_message)
-            detailed_messages_raw.append((message.time, message.user_nickname, content, True))
+            detailed_messages_raw.append(
+                _DetailedMessage(
+                    timestamp=message.time,
+                    msg_id="",
+                    group_name=message.group_name,
+                    user_name=message.user_nickname,
+                    uid=message.user_id,
+                    content=content,
+                    is_action=True,
+                )
+            )
             continue
 
         platform = message.user_platform
@@ -471,29 +507,48 @@ def _build_readable_messages_internal(
         if replace_bot_name and is_bot_self(platform, user_id):
             person_name = f"{global_config.bot.nickname}(你)"
 
+        structured_name = person.person_name
+        if not structured_name or structured_name in {user_id, "unknown"}:
+            structured_name = user_cardname or user_nickname or user_id
+        if replace_bot_name and is_bot_self(platform, user_id):
+            structured_name = f"{global_config.bot.nickname}(你)"
+
         # 使用独立函数处理用户引用格式
         if content := replace_user_references(content, platform, replace_bot_name=replace_bot_name):
             if getattr(message, "is_command", False):
                 content = f"[is_command=True] {content}"
-            detailed_messages_raw.append((timestamp, person_name, content, False))
+            detailed_messages_raw.append(
+                _DetailedMessage(
+                    timestamp=timestamp,
+                    msg_id=message_to_id_mapping.get(
+                        message.message_id,
+                        timestamp_to_id_mapping.get(timestamp, ""),
+                    ),
+                    group_name=message.group_name,
+                    user_name=structured_name if output_format == "jsonl" else person_name,
+                    uid=user_id,
+                    content=content,
+                    is_action=False,
+                )
+            )
 
     if not detailed_messages_raw:
         return "", [], pic_id_mapping, current_pic_counter
 
-    detailed_messages_raw.sort(key=lambda x: x[0])  # 按时间戳(第一个元素)升序排序，越早的消息排在前面
-    detailed_message: List[Tuple[float, str, str, bool]] = []
+    detailed_messages_raw.sort(key=lambda item: item.timestamp)
+    detailed_message: List[_DetailedMessage] = []
 
     # 2. 应用消息截断逻辑
     messages_count = len(detailed_messages_raw)
     if truncate and messages_count > 0:
-        for i, (timestamp, name, content, is_action) in enumerate(detailed_messages_raw):
+        for i, item in enumerate(detailed_messages_raw):
             # 对于动作记录，不进行截断
-            if is_action:
-                detailed_message.append((timestamp, name, content, is_action))
+            if item.is_action:
+                detailed_message.append(item)
                 continue
 
             percentile = i / messages_count  # 计算消息在列表中的位置百分比 (0 <= percentile < 1)
-            original_len = len(content)
+            original_len = len(item.content)
             limit = -1  # 默认不截断
 
             if percentile < 0.2:  # 60% 之前的消息 (即最旧的 60%)
@@ -509,11 +564,11 @@ def _build_readable_messages_internal(
                 limit = 400
                 replace_content = "......（内容太长了）"
 
-            truncated_content = content
+            truncated_content = item.content
             if 0 < limit < original_len:
-                truncated_content = f"{content[:limit]}{replace_content}"  # pyright: ignore[reportPossiblyUnboundVariable]
+                truncated_content = f"{item.content[:limit]}{replace_content}"  # pyright: ignore[reportPossiblyUnboundVariable]
 
-            detailed_message.append((timestamp, name, truncated_content, is_action))
+            detailed_message.append(replace(item, content=truncated_content))
     else:
         # 如果不截断，直接使用原始列表
         detailed_message = detailed_messages_raw
@@ -522,9 +577,10 @@ def _build_readable_messages_internal(
     output_lines: List[str] = []
 
     prev_timestamp: Optional[float] = None
-    for timestamp, name, content, is_action in detailed_message:
+    for item in detailed_message:
+        timestamp = item.timestamp
         # 检查是否需要插入长时间间隔提示
-        if long_time_notice and prev_timestamp is not None:
+        if output_format == "readable" and long_time_notice and prev_timestamp is not None:
             time_diff = timestamp - prev_timestamp
             time_diff_hours = time_diff / 3600
 
@@ -548,14 +604,29 @@ def _build_readable_messages_internal(
         readable_time = translate_timestamp_to_human_readable(timestamp, mode=timestamp_mode)
 
         # 查找消息id（如果有）并构建id_prefix
-        message_id = timestamp_to_id_mapping.get(timestamp, "")
+        message_id = "" if output_format == "jsonl" and item.is_action else item.msg_id
+        if not message_id and not item.is_action:
+            message_id = timestamp_to_id_mapping.get(timestamp, "")
         id_prefix = f"[{message_id}]" if message_id else ""
 
-        if is_action:
+        if output_format == "jsonl":
+            output_lines.append(
+                dump_prompt_json(
+                    {
+                        "msg_id": message_id,
+                        "group_name": item.group_name,
+                        "user_name": item.user_name,
+                        "uid": item.uid,
+                        "time": readable_time,
+                        "content": item.content,
+                    }
+                )
+            )
+        elif item.is_action:
             # 对于动作记录，使用特殊格式
-            output_lines.append(f"{id_prefix}{readable_time}, {content}")
+            output_lines.append(f"{id_prefix}{readable_time}, {item.content}")
         else:
-            output_lines.append(f"{id_prefix}{readable_time}, {name}: {content}")
+            output_lines.append(f"{id_prefix}{readable_time}, {item.user_name}: {item.content}")
         output_lines.append("\n")  # 在每个消息块后添加换行，保持可读性
 
         prev_timestamp = timestamp
@@ -565,7 +636,7 @@ def _build_readable_messages_internal(
     # 返回格式化后的字符串、消息详情列表、图片映射字典和更新后的计数器
     return (
         formatted_string,
-        [(t, n, c) for t, n, c, is_action in detailed_message if not is_action],
+        [(item.timestamp, item.user_name, item.content) for item in detailed_message if not item.is_action],
         pic_id_mapping,
         current_pic_counter,
     )
@@ -604,6 +675,26 @@ def build_pic_mapping_info(pic_id_mapping: Dict[str, str]) -> str:
         mapping_lines.append(f"[{display_name}] 的内容：{description}")
 
     return "\n".join(mapping_lines)
+
+
+def _build_prompt_pic_mapping(pic_id_mapping: Dict[str, str]) -> str:
+    """构建适合 XML Prompt 容器的图片说明 JSONL。"""
+
+    if not pic_id_mapping:
+        return ""
+
+    lines = []
+    sorted_items = sorted(pic_id_mapping.items(), key=lambda item: int(item[1].replace("图片", "")))
+    for pic_id, display_name in sorted_items:
+        description = "内容正在阅读，请稍等"
+        try:
+            image = Images.get_or_none(Images.image_id == pic_id)
+            if image and image.description:
+                description = image.description
+        except Exception:
+            pass
+        lines.append(dump_prompt_json({"image_name": display_name, "description": description}))
+    return _wrap_jsonl("image_descriptions", "\n".join(lines))
 
 
 def build_readable_actions(actions: List[DatabaseActionRecords], mode: str = "relative") -> str:
@@ -659,11 +750,13 @@ async def build_readable_messages_with_list(
     timestamp_mode: str = "relative",
     truncate: bool = False,
     pic_single: bool = False,
+    output_format: str = "readable",
 ) -> Tuple[str, List[Tuple[float, str, str]]]:
     """
     将消息列表转换为可读的文本格式，并返回原始(时间戳, 昵称, 内容)列表。
-    允许通过参数控制格式化行为。
+    output_format="jsonl" 时返回 XML 容器包裹的结构化 Prompt 消息，并自动分配 msg_id。
     """
+    message_id_list = assign_message_ids(messages) if output_format == "jsonl" else None
     formatted_string, details_list, pic_id_mapping, _ = _build_readable_messages_internal(
         [MessageAndActionModel.from_DatabaseMessages(msg) for msg in messages],
         replace_bot_name,
@@ -672,12 +765,19 @@ async def build_readable_messages_with_list(
         pic_id_mapping=None,
         pic_counter=1,
         show_pic=True,
-        message_id_list=None,
+        message_id_list=message_id_list,
         pic_single=pic_single,
         long_time_notice=False,
+        output_format=output_format,
     )
 
-    if not pic_single:
+    if output_format == "jsonl":
+        parts = []
+        if not pic_single and (pic_mapping := _build_prompt_pic_mapping(pic_id_mapping)):
+            parts.append(pic_mapping)
+        parts.append(_wrap_jsonl("messages", formatted_string))
+        formatted_string = "\n".join(parts)
+    elif not pic_single:
         if pic_mapping_info := build_pic_mapping_info(pic_id_mapping):
             formatted_string = f"{pic_mapping_info}\n\n{formatted_string}"
 
@@ -694,10 +794,11 @@ def build_readable_messages_with_id(
     show_pic: bool = True,
     remove_emoji_stickers: bool = False,
     pic_single: bool = False,
+    output_format: str = "readable",
 ) -> Tuple[str, List[Tuple[str, DatabaseMessages]]]:
     """
     将消息列表转换为可读的文本格式，并返回原始(时间戳, 昵称, 内容)列表。
-    允许通过参数控制格式化行为。
+    output_format="jsonl" 时返回 XML 容器包裹的结构化 Prompt 消息。
     """
     message_id_list = assign_message_ids(messages)
 
@@ -712,6 +813,7 @@ def build_readable_messages_with_id(
         message_id_list=message_id_list,
         remove_emoji_stickers=remove_emoji_stickers,
         pic_single=pic_single,
+        output_format=output_format,
     )
 
     return formatted_string, message_id_list
@@ -729,11 +831,12 @@ def build_readable_messages(
     remove_emoji_stickers: bool = False,
     pic_single: bool = False,
     long_time_notice: bool = False,
+    output_format: str = "readable",
 ) -> str:  # sourcery skip: extract-method
     """
     将消息列表转换为可读的文本格式。
     如果提供了 read_mark，则在相应位置插入已读标记。
-    允许通过参数控制格式化行为。
+    output_format="jsonl" 时改用 XML 容器和 JSONL 消息，并在未提供映射时自动分配 msg_id。
 
     Args:
         messages: 消息列表
@@ -751,6 +854,9 @@ def build_readable_messages(
     if not messages:
         return ""
 
+    if output_format not in {"readable", "jsonl"}:
+        raise ValueError(f"Unsupported output format: {output_format}")
+
     # 如果启用移除表情包，先过滤消息
     if remove_emoji_stickers:
         filtered_messages = []
@@ -766,6 +872,9 @@ def build_readable_messages(
                 filtered_messages.append(msg)
 
         messages = filtered_messages
+
+    if output_format == "jsonl" and message_id_list is None:
+        message_id_list = assign_message_ids(messages)
 
     copy_messages: List[MessageAndActionModel] = []
     for msg in messages:
@@ -821,6 +930,7 @@ def build_readable_messages(
                     processed_plain_text=f"{action.action_prompt_display}",
                     display_message=f"{action.action_prompt_display}",
                     chat_info_platform=str(action.chat_info_platform),
+                    group_name=messages[0].group_info.group_name if messages[0].group_info else "",
                     is_action_record=True,  # 添加标识字段
                     action_name=str(action.action_name),  # 保存动作名称
                 )
@@ -840,8 +950,15 @@ def build_readable_messages(
             message_id_list=message_id_list,
             pic_single=pic_single,
             long_time_notice=long_time_notice,
+            output_format=output_format,
         )
 
+        if output_format == "jsonl":
+            parts = []
+            if not pic_single and (pic_mapping := _build_prompt_pic_mapping(pic_id_mapping)):
+                parts.append(pic_mapping)
+            parts.append(_wrap_jsonl("messages", formatted_string))
+            return "\n".join(parts)
         if not pic_single:
             pic_mapping_info = build_pic_mapping_info(pic_id_mapping)
             if pic_mapping_info:
@@ -868,6 +985,7 @@ def build_readable_messages(
             message_id_list=message_id_list,
             pic_single=pic_single,
             long_time_notice=long_time_notice,
+            output_format=output_format,
         )
         formatted_after, _, pic_id_mapping, _ = _build_readable_messages_internal(
             messages_after_mark,
@@ -880,7 +998,16 @@ def build_readable_messages(
             message_id_list=message_id_list,
             pic_single=pic_single,
             long_time_notice=long_time_notice,
+            output_format=output_format,
         )
+
+        if output_format == "jsonl":
+            parts = []
+            if not pic_single and (pic_mapping := _build_prompt_pic_mapping(pic_id_mapping)):
+                parts.append(pic_mapping)
+            parts.append(_wrap_jsonl("read_messages", formatted_before))
+            parts.append(_wrap_jsonl("unread_messages", formatted_after))
+            return "\n".join(parts)
 
         read_mark_line = "\n--- 以上消息是你已经看过，请关注以下未读的新消息---\n"
 

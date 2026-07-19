@@ -77,7 +77,7 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
                 private_tool_pipeline,
                 "build_readable_messages_with_id",
                 return_value=("[m1] Alice: hello", [("m1", message)]),
-            ),
+            ) as build_messages,
             patch.object(
                 private_tool_pipeline,
                 "get_chat_type_and_target_info",
@@ -88,6 +88,7 @@ class PrivateToolPlannerTest(unittest.IsolatedAsyncioTestCase):
             _, messages_by_id, _, started_at = planner._load_context(context_end_time=10.0)
 
         self.assertEqual(get_messages.call_args.kwargs["timestamp"], 10.0)
+        self.assertEqual(build_messages.call_args.kwargs["output_format"], "jsonl")
         self.assertEqual(started_at, 10.0)
         self.assertIs(messages_by_id["m1"], message)
 

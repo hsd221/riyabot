@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,7 +17,7 @@ from src.chat.chat_tool_registry import (
 from src.chat.logger.plan_reply_logger import PlanReplyLogger
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.utils.chat_message_builder import build_readable_messages_with_id, get_raw_msg_before_timestamp_with_chat
-from src.chat.utils.structured_prompt import split_chat_prompt
+from src.chat.utils.structured_prompt import dump_prompt_json, split_chat_prompt
 from src.chat.utils.utils import get_chat_type_and_target_info
 from src.common.logger import get_logger
 from src.common.prompt_manager import prompt_manager
@@ -92,6 +91,7 @@ class PrivateToolPlanner:
             read_mark=self.last_obs_time_mark,
             truncate=True,
             show_actions=True,
+            output_format="jsonl",
         )
         _, chat_target_info = get_chat_type_and_target_info(self.chat_id)
         chat_target = "对方"
@@ -106,11 +106,10 @@ class PrivateToolPlanner:
         chat_target: str,
         tool_results: list[ToolExecutionResult],
     ) -> str:
-        tool_results_block = "无，本轮尚未执行工具。"
+        tool_results_block = "[]"
         if tool_results:
-            tool_results_block = json.dumps(
+            tool_results_block = dump_prompt_json(
                 [result.to_prompt_data() for result in tool_results],
-                ensure_ascii=False,
                 indent=2,
             )
 

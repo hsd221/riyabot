@@ -1,9 +1,10 @@
 import re
 import string
 import unittest
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
-from src.chat.utils.structured_prompt import DYNAMIC_CONTEXT_BOUNDARY
+from src.chat.utils.structured_prompt import DYNAMIC_CONTEXT_BOUNDARY, split_chat_prompt
 from src.common.prompt_loader import (
     list_prompt_templates,
     load_prompt,
@@ -185,11 +186,11 @@ class PromptTemplateContractTest(unittest.TestCase):
 
     def test_message_mainline_separates_stable_instructions_from_dynamic_input(self) -> None:
         expected_layers = (
-            "【任务】",
-            "【运行约束】",
-            "【输出协议】",
+            "<task>",
+            "<runtime_constraints>",
+            "<output_protocol>",
             DYNAMIC_CONTEXT_BOUNDARY,
-            "【待分析输入】",
+            "<input_data>",
         )
 
         for name, section in LAYERED_MAINLINE_PROMPTS:
@@ -200,6 +201,20 @@ class PromptTemplateContractTest(unittest.TestCase):
                 self.assertEqual(template.count(DYNAMIC_CONTEXT_BOUNDARY), 1)
                 positions = [template.index(layer) for layer in expected_layers]
                 self.assertEqual(positions, sorted(positions))
+
+    def test_message_mainline_uses_well_formed_xml_for_each_llm_role(self) -> None:
+        for name, section in LAYERED_MAINLINE_PROMPTS:
+            with self.subTest(prompt=name, section=section):
+                template = load_prompt_template(name)
+                if section is not None:
+                    template = parse_prompt_sections(template)[section]
+                formatted = template.format(**_format_kwargs(template))
+                parts = split_chat_prompt(formatted)
+
+                self.assertIsNotNone(parts.system_prompt)
+                ElementTree.fromstring(parts.system_prompt or "")
+                ElementTree.fromstring(parts.user_prompt)
+                self.assertNotRegex(template, r"【[^】]+】")
 
     def test_explicit_chat_api_templates_keep_instruction_layers_in_order(self) -> None:
         expected_layers = ("【任务】", "【运行约束】", "【待分析输入】", "【输出协议】")
@@ -266,23 +281,21 @@ class PromptTemplateContractTest(unittest.TestCase):
         for name in ("chat.group.planner", "chat.private.planner"):
             with self.subTest(prompt=name):
                 template = load_prompt_template(name)
-                focus_position = template.index("【本轮决策焦点】")
+                focus_position = template.index("<decision_focus>")
                 self.assertGreater(focus_position, template.index(DYNAMIC_CONTEXT_BOUNDARY))
-                self.assertNotRegex(template[focus_position + len("【本轮决策焦点】") :], r"【[^】]+】")
 
         group_sections = parse_prompt_sections(load_prompt_template("chat.group.reply"))
         for section, template in group_sections.items():
             with self.subTest(prompt="chat.group.reply", section=section):
-                focus_position = template.index("【本轮回复焦点】")
+                focus_position = template.index("<reply_focus>")
                 self.assertGreater(template.index("{reply_target_block}"), focus_position)
                 self.assertGreater(template.index("{planner_reasoning}"), focus_position)
                 self.assertGreater(focus_position, template.index("{memory_retrieval}"))
-                self.assertNotRegex(template[focus_position + len("【本轮回复焦点】") :], r"【[^】]+】")
 
         private_sections = parse_prompt_sections(load_prompt_template("chat.private.reply"))
         for section, template in private_sections.items():
             with self.subTest(prompt="chat.private.reply", section=section):
-                focus_position = template.index("【本轮回复焦点】")
+                focus_position = template.index("<reply_focus>")
                 focus_fields = (
                     ("{reply_target_block}", "{planner_reasoning}")
                     if section == "default"
@@ -291,7 +304,6 @@ class PromptTemplateContractTest(unittest.TestCase):
                 for field in focus_fields:
                     self.assertGreater(template.index(field), focus_position, field)
                 self.assertGreater(focus_position, template.index("{memory_retrieval}"))
-                self.assertNotRegex(template[focus_position + len("【本轮回复焦点】") :], r"【[^】]+】")
 
     def test_user_derived_identity_and_target_fields_stay_in_input_layer(self) -> None:
         untrusted_fields = {
@@ -314,7 +326,8 @@ class PromptTemplateContractTest(unittest.TestCase):
         for name, fields in untrusted_fields.items():
             with self.subTest(prompt=name):
                 template = load_prompt_template(name)
-                input_layer_position = template.index("【待分析输入】")
+                input_marker = "<input_data>" if name in MESSAGE_MAINLINE_PROMPT_IDS else "【待分析输入】"
+                input_layer_position = template.index(input_marker)
                 for field in fields:
                     self.assertGreater(template.index(field), input_layer_position, field)
 
@@ -338,14 +351,14 @@ class PromptTemplateContractTest(unittest.TestCase):
         for section, fields in private_reply_fields.items():
             with self.subTest(prompt="chat.private.reply", section=section):
                 template = private_reply_sections[section]
-                input_layer_position = template.index("【待分析输入】")
+                input_layer_position = template.index("<input_data>")
                 for field in fields:
                     self.assertGreater(template.index(field), input_layer_position, field)
 
         group_reply_sections = parse_prompt_sections(load_prompt_template("chat.group.reply"))
         for section, template in group_reply_sections.items():
             with self.subTest(prompt="chat.group.reply", section=section):
-                input_layer_position = template.index("【待分析输入】")
+                input_layer_position = template.index("<input_data>")
                 for field in (
                     "{dialogue_prompt}",
                     "{reply_target_block}",

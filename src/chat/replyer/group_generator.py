@@ -1008,6 +1008,7 @@ class DefaultReplyer:
                 timestamp_mode="normal_no_YMD",
                 truncate=True,
                 long_time_notice=True,
+                output_format="jsonl",
             )
 
         # 获取匹配的额外prompt
