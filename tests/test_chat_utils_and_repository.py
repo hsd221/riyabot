@@ -12,6 +12,7 @@ from src.chat.utils import utils as chat_utils
 from src.common import message_repository
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.database.database_model import Messages
+from src.services.adapter_identity import get_adapter_identity_registry
 
 
 def make_message_record(message_id: str, time_value: float, **overrides):
@@ -118,6 +119,12 @@ class MessageRepositoryTest(unittest.TestCase):
 
 
 class ChatUtilsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        get_adapter_identity_registry().clear()
+
+    def tearDown(self) -> None:
+        get_adapter_identity_registry().clear()
+
     def test_platform_account_parsing_and_bot_identity_support_multiple_platforms(self) -> None:
         accounts = chat_utils.parse_platform_accounts(["tg: 12345", "telegram: fallback", "wx: wxid", "bad"])
 
@@ -136,6 +143,16 @@ class ChatUtilsTest(unittest.TestCase):
             self.assertTrue(chat_utils.is_bot_self("wx", "wxid"))
             self.assertFalse(chat_utils.is_bot_self("telegram", "other"))
             self.assertFalse(chat_utils.is_bot_self("", "10000"))
+
+    def test_runtime_adapter_identity_takes_precedence_over_manual_account_config(self) -> None:
+        get_adapter_identity_registry().register("onebot_default", "qq", "20000", "Connected Bot")
+        fake_config = SimpleNamespace(
+            bot=SimpleNamespace(qq_account="10000", platforms=[]),
+        )
+
+        with patch.object(chat_utils, "global_config", fake_config):
+            self.assertTrue(chat_utils.is_bot_self("qq", "20000"))
+            self.assertFalse(chat_utils.is_bot_self("qq", "10000"))
 
     def test_mention_detection_uses_explicit_flags_segments_account_patterns_and_aliases(self) -> None:
         fake_config = SimpleNamespace(

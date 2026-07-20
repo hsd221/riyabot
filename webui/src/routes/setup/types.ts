@@ -23,14 +23,7 @@ export interface AgreementStatus {
   privacy: AgreementDocument
 }
 
-// 步骤1：Bot基础信息
-export interface BotBasicConfig {
-  qq_account: number
-  nickname: string
-  alias_names: string[]
-}
-
-// 步骤2：人格配置
+// 人格配置
 export interface PersonalityConfig {
   personality: string
   reply_style: string

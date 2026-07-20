@@ -268,6 +268,7 @@ class EmojiManagerPeriodicRegistrationTest(unittest.IsolatedAsyncioTestCase):
             with (
                 patch.object(emoji_manager, "EMOJI_DIR", str(pending_dir)),
                 patch.object(emoji_manager.os, "listdir", return_value=filenames),
+                patch.object(emoji_manager.global_config.emoji, "steal_emoji", True),
                 patch.object(emoji_manager, "clear_temp_emoji", new=AsyncMock()),
                 patch.object(emoji_manager.asyncio, "sleep", new=AsyncMock(side_effect=StopPeriodicLoop)),
                 self.assertRaises(StopPeriodicLoop),

@@ -5,33 +5,16 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Markdown } from '@/components/ui/markdown'
 import { useState } from 'react'
-import {
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  FileText,
-  KeyRound,
-  ShieldCheck,
-  X,
-  XCircle,
-} from 'lucide-react'
+import { CheckCircle2, Eye, EyeOff, FileText, KeyRound, ShieldCheck, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { validatePassword } from '@/lib/password-validator'
-import type {
-  AgreementStatus,
-  BotBasicConfig,
-  PersonalityConfig,
-  EmojiConfig,
-  OtherBasicConfig,
-} from './types'
+import type { AgreementStatus, PersonalityConfig, EmojiConfig, OtherBasicConfig } from './types'
 
 interface PasswordSetupFormProps {
   password: string
@@ -287,102 +270,7 @@ export function AgreementForm({
   )
 }
 
-// ====== 步骤1：Bot基础配置 ======
-interface BotBasicFormProps {
-  config: BotBasicConfig
-  onChange: (config: BotBasicConfig) => void
-}
-
-export function BotBasicForm({ config, onChange }: BotBasicFormProps) {
-  const handleAddAlias = (alias: string) => {
-    if (alias.trim() && !config.alias_names.includes(alias.trim())) {
-      onChange({
-        ...config,
-        alias_names: [...config.alias_names, alias.trim()],
-      })
-    }
-  }
-
-  const handleRemoveAlias = (index: number) => {
-    onChange({
-      ...config,
-      alias_names: config.alias_names.filter((_, i) => i !== index),
-    })
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="ios-group space-y-3 p-5">
-        <Label htmlFor="qq_account">QQ账号 *</Label>
-        <Input
-          id="qq_account"
-          type="number"
-          placeholder="请输入机器人的QQ账号"
-          value={config.qq_account || ''}
-          onChange={(e) => onChange({ ...config, qq_account: Number(e.target.value) })}
-        />
-        <p className="text-xs text-muted-foreground">机器人登录使用的QQ账号</p>
-      </div>
-
-      <div className="ios-group space-y-3 p-5">
-        <Label htmlFor="nickname">昵称 *</Label>
-        <Input
-          id="nickname"
-          placeholder="请输入机器人的昵称"
-          value={config.nickname}
-          onChange={(e) => onChange({ ...config, nickname: e.target.value })}
-        />
-        <p className="text-xs text-muted-foreground">机器人的主要称呼名称</p>
-      </div>
-
-      <div className="ios-group space-y-3 p-5">
-        <Label>别名</Label>
-        <div className="mb-2 flex flex-wrap gap-2">
-          {config.alias_names.map((alias, index) => (
-            <Badge key={index} variant="secondary" className="gap-1">
-              {alias}
-              <button
-                type="button"
-                onClick={() => handleRemoveAlias(index)}
-                className="hover:text-destructive ml-1"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Input
-            id="alias_input"
-            placeholder="输入别名后按回车添加"
-            onKeyPress={(e) => {
-              if (e.key === 'Enter') {
-                handleAddAlias((e.target as HTMLInputElement).value)
-                ;(e.target as HTMLInputElement).value = ''
-              }
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              const input = document.getElementById('alias_input') as HTMLInputElement
-              if (input) {
-                handleAddAlias(input.value)
-                input.value = ''
-              }
-            }}
-          >
-            添加
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">机器人的其他称呼，可以添加多个</p>
-      </div>
-    </div>
-  )
-}
-
-// ====== 步骤2：人格配置 ======
+// ====== 人格配置 ======
 interface PersonalityFormProps {
   config: PersonalityConfig
   onChange: (config: PersonalityConfig) => void

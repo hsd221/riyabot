@@ -1,13 +1,7 @@
 // 设置向导API调用函数
 
 import { fetchWithAuth, getAuthHeaders } from '@/lib/fetch-with-auth'
-import type {
-  AgreementStatus,
-  BotBasicConfig,
-  PersonalityConfig,
-  EmojiConfig,
-  OtherBasicConfig,
-} from './types'
+import type { AgreementStatus, PersonalityConfig, EmojiConfig, OtherBasicConfig } from './types'
 import { normalizeEmojiConfig } from './emoji-config'
 
 export async function setupInitialPassword(password: string): Promise<void> {
@@ -65,27 +59,6 @@ export async function confirmAgreement(
 }
 
 // ===== 读取配置 =====
-
-// 读取Bot基础配置
-export async function loadBotBasicConfig(): Promise<BotBasicConfig> {
-  const response = await fetchWithAuth('/api/webui/config/bot', {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  })
-
-  if (!response.ok) {
-    throw new Error('读取Bot配置失败')
-  }
-
-  const data = await response.json()
-  const botConfig = data.config.bot || {}
-
-  return {
-    qq_account: botConfig.qq_account || 0,
-    nickname: botConfig.nickname || '',
-    alias_names: botConfig.alias_names || [],
-  }
-}
 
 // 读取人格配置
 export async function loadPersonalityConfig(): Promise<PersonalityConfig> {
@@ -148,22 +121,6 @@ export async function loadOtherBasicConfig(): Promise<OtherBasicConfig> {
 }
 
 // ===== 保存配置 =====
-
-// 保存Bot基础配置
-export async function saveBotBasicConfig(config: BotBasicConfig) {
-  const response = await fetchWithAuth('/api/webui/config/bot/section/bot', {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(config),
-  })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || '保存Bot基础配置失败')
-  }
-
-  return await response.json()
-}
 
 // 保存人格配置
 export async function savePersonalityConfig(config: PersonalityConfig) {

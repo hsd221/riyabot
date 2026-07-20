@@ -2,7 +2,6 @@
  * Bot 配置页面各个 Section 组件
  */
 
-export { BotInfoSection } from './BotInfoSection'
 export { PersonalitySection } from './PersonalitySection'
 export { ChatSection } from './ChatSection'
 export { VoiceSection } from './VoiceSection'

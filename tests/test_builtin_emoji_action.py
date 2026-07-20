@@ -48,6 +48,16 @@ def make_candidate(
 
 
 class EmojiActionSelectionTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.emoji_config_patch = patch.multiple(
+            emoji_action_module.global_config.emoji,
+            selection_candidate_count=8,
+            usage_scene_weight=0.6,
+            usage_scene_enabled=True,
+        )
+        self.emoji_config_patch.start()
+        self.addCleanup(self.emoji_config_patch.stop)
+
     def test_tool_schema_requires_short_emotion_and_current_scene(self) -> None:
         tool_definition = action_info_to_tool_definition(EmojiAction.get_action_info())
         parameters = {parameter[0]: parameter for parameter in tool_definition["parameters"]}

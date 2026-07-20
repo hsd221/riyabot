@@ -7,7 +7,6 @@ import {
   ChevronRight,
   CheckCircle2,
   SkipForward,
-  Bot,
   User,
   Smile,
   Settings,
@@ -45,14 +44,12 @@ import { useToast } from '@/hooks/use-toast'
 import type {
   AgreementStatus,
   SetupStep,
-  BotBasicConfig,
   PersonalityConfig,
   EmojiConfig,
   OtherBasicConfig,
 } from './setup/types'
 import {
   AgreementForm,
-  BotBasicForm,
   PersonalityForm,
   EmojiForm,
   OtherBasicForm,
@@ -60,11 +57,9 @@ import {
 } from './setup/StepForms'
 import {
   loadAgreementStatus,
-  loadBotBasicConfig,
   loadPersonalityConfig,
   loadEmojiConfig,
   loadOtherBasicConfig,
-  saveBotBasicConfig,
   savePersonalityConfig,
   saveEmojiConfig,
   saveOtherBasicConfig,
@@ -93,13 +88,6 @@ export function SetupPage() {
   const [agreementStatus, setAgreementStatus] = useState<AgreementStatus | null>(null)
   const [acceptedEula, setAcceptedEula] = useState(false)
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false)
-
-  // Bot基础信息
-  const [botBasic, setBotBasic] = useState<BotBasicConfig>({
-    qq_account: 0,
-    nickname: '',
-    alias_names: [],
-  })
 
   // 人格配置
   const [personality, setPersonality] = useState<PersonalityConfig>({
@@ -139,12 +127,6 @@ export function SetupPage() {
       icon: ShieldCheck,
     },
     {
-      id: 'bot-basic',
-      title: 'Bot基础',
-      description: '配置机器人的基本信息',
-      icon: Bot,
-    },
-    {
       id: 'personality',
       title: '人格配置',
       description: '定义机器人的性格和说话风格',
@@ -174,9 +156,8 @@ export function SetupPage() {
   const currentStepInfo = steps[currentStep]
 
   const loadProtectedConfigs = useCallback(async () => {
-    const [agreement, bot, personality, emojiConfig, other] = await Promise.all([
+    const [agreement, personality, emojiConfig, other] = await Promise.all([
       loadAgreementStatus(),
-      loadBotBasicConfig(),
       loadPersonalityConfig(),
       loadEmojiConfig(),
       loadOtherBasicConfig(),
@@ -185,7 +166,6 @@ export function SetupPage() {
     setAgreementStatus(agreement)
     setAcceptedEula(false)
     setAcceptedPrivacy(false)
-    setBotBasic(bot)
     setPersonality(personality)
     setEmoji(emojiConfig)
     setOtherBasic(other)
@@ -275,9 +255,6 @@ export function SetupPage() {
               await confirmAgreement(agreementStatus.eula.hash, agreementStatus.privacy.hash)
             )
           }
-          break
-        case 'bot-basic':
-          await saveBotBasicConfig(botBasic)
           break
         case 'personality':
           await savePersonalityConfig(personality)
@@ -454,8 +431,6 @@ export function SetupPage() {
             onAcceptedPrivacyChange={setAcceptedPrivacy}
           />
         )
-      case 'bot-basic':
-        return <BotBasicForm config={botBasic} onChange={setBotBasic} />
       case 'personality':
         return <PersonalityForm config={personality} onChange={setPersonality} />
       case 'emoji':

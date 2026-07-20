@@ -168,7 +168,10 @@ export function Layout({ children }: LayoutProps) {
       if (event.shiftKey && (activeElement === firstElement || !menu.contains(activeElement))) {
         event.preventDefault()
         lastElement.focus()
-      } else if (!event.shiftKey && (activeElement === lastElement || !menu.contains(activeElement))) {
+      } else if (
+        !event.shiftKey &&
+        (activeElement === lastElement || !menu.contains(activeElement))
+      ) {
         event.preventDefault()
         firstElement.focus()
       }
@@ -244,7 +247,7 @@ export function Layout({ children }: LayoutProps) {
           path: '/config/model',
           tourId: 'sidebar-model-management',
         },
-        { icon: Sliders, label: '适配器配置', path: '/config/adapter' },
+        { icon: Sliders, label: '平台接入', path: '/config/adapter' },
       ],
     },
     {

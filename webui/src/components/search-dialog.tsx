@@ -147,8 +147,8 @@ const searchItems: SearchItem[] = [
   },
   {
     icon: Sliders,
-    title: '适配器配置',
-    description: '配置适配器连接参数',
+    title: '平台接入',
+    description: '管理消息平台实例与连接',
     path: '/config/adapter',
     category: '配置',
   },

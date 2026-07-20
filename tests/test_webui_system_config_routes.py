@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -549,6 +549,7 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
 
         loaded = await config_routes.get_adapter_config_path(_auth=True)
         self.assertEqual(loaded["path"], "adapters/napcat.toml")
+
         self.assertIsNotNone(loaded["lastModified"])
 
         (self.root / "data" / "webui.json").write_text(
@@ -565,6 +566,166 @@ class AdapterConfigRoutesTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as invalid_extension:
             await config_routes.save_adapter_config_path({"path": "adapter.txt"}, _auth=True)
         self.assertEqual(invalid_extension.exception.status_code, 400)
+
+    async def test_adapter_instances_expose_runtime_identity_without_connection_secrets(self) -> None:
+        runtime_status = {
+            "status": "connected",
+            "started": True,
+            "connected": True,
+            "identity": {"account_id": "10001", "nickname": "Riya"},
+            "connection": {"host": "127.0.0.1", "port": 8095},
+        }
+
+        with patch.object(config_routes, "_get_onebot_runtime_status", return_value=runtime_status):
+            response = await config_routes.get_adapter_instances(_auth=True)
+
+        self.assertTrue(response["success"])
+        self.assertEqual(len(response["adapters"]), 1)
+        adapter = response["adapters"][0]
+        self.assertEqual(adapter["id"], "onebot_default")
+        self.assertEqual(adapter["type"], "onebot_v11")
+        self.assertEqual(adapter["platform"], "qq")
+        self.assertEqual(adapter["identity"], runtime_status["identity"])
+        self.assertNotIn("token", repr(adapter).lower())
+
+    async def test_managed_onebot_config_is_structured_and_preserves_hidden_sections(self) -> None:
+        config_path = self.root / "plugins" / "onebot_adapter" / "config.toml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            """# keep this comment
+[inner]
+version = "0.1.3"
+
+[nickname]
+nickname = "legacy-name"
+
+[napcat_server]
+host = "127.0.0.1"
+port = 8095
+token = "secret-token"
+heartbeat_interval = 30
+
+[maibot_server]
+host = "legacy-host"
+port = 8000
+enable_api_server = false
+base_url = "ws://127.0.0.1:18095/ws"
+api_key = "legacy-key"
+
+[chat]
+group_list_type = "blacklist"
+group_list = [10001]
+private_list_type = "whitelist"
+private_list = [20001]
+ban_user_id = []
+ban_qq_bot = true
+enable_poke = true
+
+[voice]
+use_tts = false
+
+[forward]
+image_threshold = 3
+
+[debug]
+level = "INFO"
+""",
+            encoding="utf-8",
+        )
+
+        loaded = await config_routes.get_managed_adapter_config("onebot_default", _auth=True)
+        self.assertEqual(loaded["config"]["napcat_server"]["host"], "127.0.0.1")
+        self.assertEqual(loaded["config"]["napcat_server"]["token"], "secret-token")
+        self.assertEqual(loaded["config"]["chat"]["group_list"], [10001])
+        self.assertNotIn("nickname", loaded["config"])
+        self.assertNotIn("maibot_server", loaded["config"])
+
+        with patch.object(
+            config_routes,
+            "_reload_onebot_adapter_config",
+            AsyncMock(return_value=True),
+        ) as reload_config:
+            saved = await config_routes.save_managed_adapter_config(
+                "onebot_default",
+                {
+                    "napcat_server": {
+                        "host": "localhost",
+                        "port": 9000,
+                        "token": "new-token",
+                        "heartbeat_interval": 20,
+                    },
+                    "chat": {
+                        "group_list_type": "whitelist",
+                        "group_list": [30001, 30002],
+                        "private_list_type": "blacklist",
+                        "private_list": [],
+                        "ban_user_id": [40001],
+                        "ban_qq_bot": False,
+                        "enable_poke": False,
+                    },
+                    "voice": {"use_tts": True},
+                    "forward": {"image_threshold": 5},
+                    "debug": {"level": "WARNING"},
+                },
+                _auth=True,
+            )
+
+        self.assertEqual(saved, {"success": True, "message": "适配器配置已保存"})
+        reload_config.assert_awaited_once_with()
+        saved_content = config_path.read_text(encoding="utf-8")
+        self.assertIn("# keep this comment", saved_content)
+        self.assertIn('nickname = "legacy-name"', saved_content)
+        self.assertIn('host = "legacy-host"', saved_content)
+        self.assertIn('api_key = "legacy-key"', saved_content)
+        self.assertIn("port = 9000", saved_content)
+        self.assertIn("group_list = [30001, 30002]", saved_content)
+        self.assertIn('level = "WARNING"', saved_content)
+
+        with self.assertRaises(HTTPException) as unknown_field:
+            await config_routes.save_managed_adapter_config(
+                "onebot_default",
+                {"napcat_server": {"host": "localhost", "account": "manual-account"}},
+                _auth=True,
+            )
+        self.assertEqual(unknown_field.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as missing_remote_token:
+            await config_routes.save_managed_adapter_config(
+                "onebot_default",
+                {"napcat_server": {"host": "0.0.0.0", "token": ""}},
+                _auth=True,
+            )
+        self.assertEqual(missing_remote_token.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as invalid_host:
+            await config_routes.save_managed_adapter_config(
+                "onebot_default",
+                {"napcat_server": {"host": "localhost\x00"}},
+                _auth=True,
+            )
+        self.assertEqual(invalid_host.exception.status_code, 400)
+
+        with self.assertRaises(HTTPException) as unknown_adapter:
+            await config_routes.get_managed_adapter_config("unknown", _auth=True)
+        self.assertEqual(unknown_adapter.exception.status_code, 404)
+
+    async def test_managed_onebot_config_reports_runtime_reload_failure(self) -> None:
+        config_path = self.root / "plugins" / "onebot_adapter" / "config.toml"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text('[napcat_server]\nhost = "localhost"\nport = 8095\n', encoding="utf-8")
+
+        with (
+            patch.object(config_routes, "_reload_onebot_adapter_config", AsyncMock(return_value=False)),
+            self.assertRaises(HTTPException) as error,
+        ):
+            await config_routes.save_managed_adapter_config(
+                "onebot_default",
+                {"napcat_server": {"port": 9000}},
+                _auth=True,
+            )
+
+        self.assertEqual(error.exception.status_code, 500)
+        self.assertEqual(error.exception.detail, "适配器配置已保存，但运行时重载失败")
 
     async def test_adapter_config_path_revalidates_unsafe_legacy_preference(self) -> None:
         with tempfile.TemporaryDirectory() as outside_dir:

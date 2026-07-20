@@ -79,6 +79,7 @@ webui/src/lib/*
 !webui/src/lib/statistics-api.ts
 !webui/src/lib/motion.ts
 !webui/src/lib/password-validator.ts
+!webui/src/lib/adapter-config-api.ts
 lib64/
 parts/
 sdist/

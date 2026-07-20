@@ -1,6 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  BotInfoSection,
   PersonalitySection,
   ChatSection,
   VoiceSection,
@@ -37,7 +36,6 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  Bot,
   BrainCircuit,
   Check,
   ChevronRight,
@@ -102,7 +100,6 @@ type LegacyExpressionConfig = Partial<ExpressionConfig> & {
 }
 
 type BotConfigTab =
-  | 'bot'
   | 'personality'
   | 'chat'
   | 'expression'
@@ -124,13 +121,6 @@ type ConfigTabItem = {
 }
 
 const CONFIG_TABS: ConfigTabItem[] = [
-  {
-    value: 'bot',
-    label: '基本信息',
-    description: '平台账号与昵称',
-    Icon: Bot,
-    color: 'ios-symbol-blue',
-  },
   {
     value: 'personality',
     label: '人格',
@@ -217,7 +207,7 @@ export function BotConfigPage() {
   const [visualUnsavedChanges, setVisualUnsavedChanges] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [showRestartOverlay, setShowRestartOverlay] = useState(false)
-  const [activeTab, setActiveTab] = useState<BotConfigTab>('bot')
+  const [activeTab, setActiveTab] = useState<BotConfigTab>('personality')
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
   const { toast } = useToast()
   const activeTabItem = CONFIG_TABS.find((item) => item.value === activeTab) ?? CONFIG_TABS[0]
@@ -814,222 +804,211 @@ export function BotConfigPage() {
         </div>
 
         <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
-              <DialogTrigger asChild>
-                <button
-                  type="button"
-                  className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.color)}>
-                      <activeTabItem.Icon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[15px] font-medium leading-5 text-foreground">
-                        当前分类
-                      </span>
-                      <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                        {activeTabItem.label} · {activeTabItem.description}
-                      </span>
-                    </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              </DialogTrigger>
-              <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-                <DialogHeader className="px-5 pb-1 pt-5">
-                  <DialogTitle>配置分类</DialogTitle>
-                  <DialogDescription>选择要编辑的主程序配置</DialogDescription>
-                </DialogHeader>
-                <div className="ios-scrollbar-none max-h-[min(64vh,560px)] overflow-y-auto px-5 pb-5">
-                  <div className="ios-group overflow-hidden">
-                    {CONFIG_TABS.map((item) => {
-                      const selected = item.value === activeTab
-                      return (
-                        <button
-                          key={item.value}
-                          type="button"
-                          className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
-                          aria-current={selected ? 'page' : undefined}
-                          onClick={() => {
-                            setActiveTab(item.value)
-                            setCategoryDialogOpen(false)
-                          }}
-                        >
-                          <span className="flex min-w-0 items-center gap-3">
-                            <span className={cn('ios-symbol ios-symbol-sm', item.color)}>
-                              <item.Icon className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[15px] font-medium leading-5 text-foreground">
-                                {item.label}
-                              </span>
-                              <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                                {item.description}
-                              </span>
-                            </span>
-                          </span>
-                          {selected ? (
-                            <Check className="h-4 w-4 shrink-0 text-primary" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            {/* 标签页 */}
-            <Tabs
-              value={activeTab}
-              onValueChange={(value) => setActiveTab(value as BotConfigTab)}
-              className="w-full space-y-1"
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="ios-group ios-touch flex w-full items-center justify-between gap-4 px-4 py-3 text-left sm:hidden"
             >
-              <TabsList className="hidden h-auto w-fit max-w-full flex-wrap justify-start gap-1 rounded-[16px] p-1 sm:inline-flex">
-                <TabsTrigger value="bot" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  基本信息
-                </TabsTrigger>
-                <TabsTrigger value="personality" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  人格
-                </TabsTrigger>
-                <TabsTrigger value="chat" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  聊天
-                </TabsTrigger>
-                <TabsTrigger value="expression" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  表达
-                </TabsTrigger>
-                <TabsTrigger value="behavior" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  行为
-                </TabsTrigger>
-                <TabsTrigger value="features" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  功能
-                </TabsTrigger>
-                <TabsTrigger value="processing" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  处理
-                </TabsTrigger>
-                <TabsTrigger value="message_receive" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  过滤
-                </TabsTrigger>
-                <TabsTrigger value="voice" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  语音
-                </TabsTrigger>
-                <TabsTrigger value="service" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  服务
-                </TabsTrigger>
-                <TabsTrigger value="experimental" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  实验
-                </TabsTrigger>
-                <TabsTrigger value="other" className="min-w-[4.5rem] px-3 py-2 text-xs">
-                  其他
-                </TabsTrigger>
-              </TabsList>
-              {/* 基本信息 */}
-              <TabsContent value="bot" className="mt-5 space-y-5 sm:mt-6">
-                {botConfig && <BotInfoSection config={botConfig} onChange={setBotConfig} />}
-              </TabsContent>
+              <span className="flex min-w-0 items-center gap-3">
+                <span className={cn('ios-symbol ios-symbol-sm', activeTabItem.color)}>
+                  <activeTabItem.Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium leading-5 text-foreground">
+                    当前分类
+                  </span>
+                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                    {activeTabItem.label} · {activeTabItem.description}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </DialogTrigger>
+          <DialogContent className="bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+            <DialogHeader className="px-5 pb-1 pt-5">
+              <DialogTitle>配置分类</DialogTitle>
+              <DialogDescription>选择要编辑的主程序配置</DialogDescription>
+            </DialogHeader>
+            <div className="ios-scrollbar-none max-h-[min(64vh,560px)] overflow-y-auto px-5 pb-5">
+              <div className="ios-group overflow-hidden">
+                {CONFIG_TABS.map((item) => {
+                  const selected = item.value === activeTab
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
+                      aria-current={selected ? 'page' : undefined}
+                      onClick={() => {
+                        setActiveTab(item.value)
+                        setCategoryDialogOpen(false)
+                      }}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className={cn('ios-symbol ios-symbol-sm', item.color)}>
+                          <item.Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[15px] font-medium leading-5 text-foreground">
+                            {item.label}
+                          </span>
+                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                            {item.description}
+                          </span>
+                        </span>
+                      </span>
+                      {selected ? (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
-              {/* 人格配置 */}
-              <TabsContent value="personality" className="mt-5 space-y-5 sm:mt-6">
-                {personalityConfig && (
-                  <PersonalitySection config={personalityConfig} onChange={setPersonalityConfig} />
-                )}
-              </TabsContent>
+        {/* 标签页 */}
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as BotConfigTab)}
+          className="w-full space-y-1"
+        >
+          <TabsList className="hidden h-auto w-fit max-w-full flex-wrap justify-start gap-1 rounded-[16px] p-1 sm:inline-flex">
+            <TabsTrigger value="personality" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              人格
+            </TabsTrigger>
+            <TabsTrigger value="chat" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              聊天
+            </TabsTrigger>
+            <TabsTrigger value="expression" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              表达
+            </TabsTrigger>
+            <TabsTrigger value="behavior" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              行为
+            </TabsTrigger>
+            <TabsTrigger value="features" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              功能
+            </TabsTrigger>
+            <TabsTrigger value="processing" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              处理
+            </TabsTrigger>
+            <TabsTrigger value="message_receive" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              过滤
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              语音
+            </TabsTrigger>
+            <TabsTrigger value="service" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              服务
+            </TabsTrigger>
+            <TabsTrigger value="experimental" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              实验
+            </TabsTrigger>
+            <TabsTrigger value="other" className="min-w-[4.5rem] px-3 py-2 text-xs">
+              其他
+            </TabsTrigger>
+          </TabsList>
+          {/* 人格配置 */}
+          <TabsContent value="personality" className="mt-5 space-y-5 sm:mt-6">
+            {personalityConfig && (
+              <PersonalitySection config={personalityConfig} onChange={setPersonalityConfig} />
+            )}
+          </TabsContent>
 
-              {/* 聊天配置 */}
-              <TabsContent value="chat" className="mt-5 space-y-5 sm:mt-6">
-                {chatConfig && <ChatSection config={chatConfig} onChange={setChatConfig} />}
-              </TabsContent>
+          {/* 聊天配置 */}
+          <TabsContent value="chat" className="mt-5 space-y-5 sm:mt-6">
+            {chatConfig && <ChatSection config={chatConfig} onChange={setChatConfig} />}
+          </TabsContent>
 
-              {/* 表达配置 */}
-              <TabsContent value="expression" className="mt-5 space-y-5 sm:mt-6">
-                {expressionConfig && (
-                  <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
-                )}
-              </TabsContent>
+          {/* 表达配置 */}
+          <TabsContent value="expression" className="mt-5 space-y-5 sm:mt-6">
+            {expressionConfig && (
+              <ExpressionSection config={expressionConfig} onChange={setExpressionConfig} />
+            )}
+          </TabsContent>
 
-              {/* 行为学习配置 */}
-              <TabsContent value="behavior" className="mt-5 space-y-5 sm:mt-6">
-                {behaviorConfig && (
-                  <BehaviorSection config={behaviorConfig} onChange={setBehaviorConfig} />
-                )}
-              </TabsContent>
+          {/* 行为学习配置 */}
+          <TabsContent value="behavior" className="mt-5 space-y-5 sm:mt-6">
+            {behaviorConfig && (
+              <BehaviorSection config={behaviorConfig} onChange={setBehaviorConfig} />
+            )}
+          </TabsContent>
 
-              {/* 功能配置（合并表情、记忆、工具） */}
-              <TabsContent value="features" className="mt-5 space-y-5 sm:mt-6">
-                {emojiConfig && memoryConfig && toolConfig && (
-                  <FeaturesSection
-                    emojiConfig={emojiConfig}
-                    memoryConfig={memoryConfig}
-                    toolConfig={toolConfig}
-                    onEmojiChange={setEmojiConfig}
-                    onMemoryChange={setMemoryConfig}
-                    onToolChange={setToolConfig}
-                  />
-                )}
-              </TabsContent>
+          {/* 功能配置（合并表情、记忆、工具） */}
+          <TabsContent value="features" className="mt-5 space-y-5 sm:mt-6">
+            {emojiConfig && memoryConfig && toolConfig && (
+              <FeaturesSection
+                emojiConfig={emojiConfig}
+                memoryConfig={memoryConfig}
+                toolConfig={toolConfig}
+                onEmojiChange={setEmojiConfig}
+                onMemoryChange={setMemoryConfig}
+                onToolChange={setToolConfig}
+              />
+            )}
+          </TabsContent>
 
-              {/* 处理配置（关键词反应和回复后处理） */}
-              <TabsContent value="processing" className="mt-5 space-y-5 sm:mt-6">
-                {keywordReactionConfig &&
-                  responsePostProcessConfig &&
-                  chineseTypoConfig &&
-                  responseSplitterConfig && (
-                    <ProcessingSection
-                      keywordReactionConfig={keywordReactionConfig}
-                      responsePostProcessConfig={responsePostProcessConfig}
-                      chineseTypoConfig={chineseTypoConfig}
-                      responseSplitterConfig={responseSplitterConfig}
-                      onKeywordReactionChange={setKeywordReactionConfig}
-                      onResponsePostProcessChange={setResponsePostProcessConfig}
-                      onChineseTypoChange={setChineseTypoConfig}
-                      onResponseSplitterChange={setResponseSplitterConfig}
-                    />
-                  )}
-              </TabsContent>
+          {/* 处理配置（关键词反应和回复后处理） */}
+          <TabsContent value="processing" className="mt-5 space-y-5 sm:mt-6">
+            {keywordReactionConfig &&
+              responsePostProcessConfig &&
+              chineseTypoConfig &&
+              responseSplitterConfig && (
+                <ProcessingSection
+                  keywordReactionConfig={keywordReactionConfig}
+                  responsePostProcessConfig={responsePostProcessConfig}
+                  chineseTypoConfig={chineseTypoConfig}
+                  responseSplitterConfig={responseSplitterConfig}
+                  onKeywordReactionChange={setKeywordReactionConfig}
+                  onResponsePostProcessChange={setResponsePostProcessConfig}
+                  onChineseTypoChange={setChineseTypoConfig}
+                  onResponseSplitterChange={setResponseSplitterConfig}
+                />
+              )}
+          </TabsContent>
 
-              {/* 语音配置 */}
-              <TabsContent value="voice" className="mt-5 space-y-5 sm:mt-6">
-                {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
-              </TabsContent>
+          {/* 语音配置 */}
+          <TabsContent value="voice" className="mt-5 space-y-5 sm:mt-6">
+            {voiceConfig && <VoiceSection config={voiceConfig} onChange={setVoiceConfig} />}
+          </TabsContent>
 
-              {/* 消息过滤配置 */}
-              <TabsContent value="message_receive" className="mt-5 space-y-5 sm:mt-6">
-                {messageReceiveConfig && (
-                  <MessageReceiveSection
-                    config={messageReceiveConfig}
-                    onChange={setMessageReceiveConfig}
-                  />
-                )}
-              </TabsContent>
+          {/* 消息过滤配置 */}
+          <TabsContent value="message_receive" className="mt-5 space-y-5 sm:mt-6">
+            {messageReceiveConfig && (
+              <MessageReceiveSection
+                config={messageReceiveConfig}
+                onChange={setMessageReceiveConfig}
+              />
+            )}
+          </TabsContent>
 
-              {/* 服务配置 */}
-              <TabsContent value="service" className="mt-5 space-y-5 sm:mt-6">
-                {webuiConfig && <WebUISection config={webuiConfig} onChange={setWebuiConfig} />}
-                {maimMessageConfig && (
-                  <MaimMessageSection config={maimMessageConfig} onChange={setMaimMessageConfig} />
-                )}
-                {telemetryConfig && (
-                  <TelemetrySection config={telemetryConfig} onChange={setTelemetryConfig} />
-                )}
-              </TabsContent>
+          {/* 服务配置 */}
+          <TabsContent value="service" className="mt-5 space-y-5 sm:mt-6">
+            {webuiConfig && <WebUISection config={webuiConfig} onChange={setWebuiConfig} />}
+            {maimMessageConfig && (
+              <MaimMessageSection config={maimMessageConfig} onChange={setMaimMessageConfig} />
+            )}
+            {telemetryConfig && (
+              <TelemetrySection config={telemetryConfig} onChange={setTelemetryConfig} />
+            )}
+          </TabsContent>
 
-              {/* 实验配置 */}
-              <TabsContent value="experimental" className="mt-5 space-y-5 sm:mt-6">
-                {experimentalConfig && (
-                  <ExperimentalSection
-                    config={experimentalConfig}
-                    onChange={setExperimentalConfig}
-                  />
-                )}
-              </TabsContent>
+          {/* 实验配置 */}
+          <TabsContent value="experimental" className="mt-5 space-y-5 sm:mt-6">
+            {experimentalConfig && (
+              <ExperimentalSection config={experimentalConfig} onChange={setExperimentalConfig} />
+            )}
+          </TabsContent>
 
-              {/* 其他配置 */}
-              <TabsContent value="other" className="mt-5 space-y-5 sm:mt-6">
-                {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
-                {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
-              </TabsContent>
+          {/* 其他配置 */}
+          <TabsContent value="other" className="mt-5 space-y-5 sm:mt-6">
+            {logConfig && <LogSection config={logConfig} onChange={setLogConfig} />}
+            {debugConfig && <DebugSection config={debugConfig} onChange={setDebugConfig} />}
+          </TabsContent>
         </Tabs>
 
         {/* 重启遮罩层 */}

@@ -16,6 +16,7 @@ from src.chat.message_receive.message import MessageRecv
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.llm_models.utils_model import LLMRequest
 from src.common.person_stub import Person
+from src.services.adapter_identity import get_adapter_identity_registry
 from .typo_generator import ChineseTypoGenerator
 
 if TYPE_CHECKING:
@@ -85,6 +86,11 @@ def is_bot_self(platform: str, user_id: str) -> bool:
     # 将 user_id 转为字符串进行比较
     user_id_str = str(user_id)
 
+    identity_platform = "qq" if platform == "webui" else platform
+    identity_registry = get_adapter_identity_registry()
+    if identity_registry.get_for_platform(identity_platform):
+        return identity_registry.is_bot_account(identity_platform, user_id_str)
+
     # 获取机器人的 QQ 账号（主账号）
     qq_account = str(global_config.bot.qq_account or "")
 
@@ -127,9 +133,14 @@ def is_mentioned_bot_in_message(message: MessageRecv) -> tuple[bool, bool, float
     # 获取当前平台对应的账号
     current_account = get_current_platform_account(platform, platform_accounts, qq_account)
 
+    identity_platform = "qq" if platform == "webui" else platform
+    runtime_identity = get_adapter_identity_registry().get_for_platform(identity_platform)
+    if runtime_identity:
+        current_account = runtime_identity.account_id
+
     nickname = str(global_config.bot.nickname or "")
     alias_names = list(getattr(global_config.bot, "alias_names", []) or [])
-    keywords = [nickname] + alias_names
+    keywords = [runtime_identity.nickname if runtime_identity else "", nickname, *alias_names]
 
     reply_probability = 0.0
     is_at = False

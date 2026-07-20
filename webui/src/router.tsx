@@ -113,7 +113,7 @@ const modelConfigRoute = createRoute({
   component: ModelConfigPage,
 })
 
-// 配置路由 - 适配器配置
+// 配置路由 - 平台接入
 const adapterConfigRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/config/adapter',

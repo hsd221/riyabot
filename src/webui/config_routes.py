@@ -5,6 +5,7 @@
 import copy
 from dataclasses import fields
 import errno
+import ipaddress
 import os
 from pathlib import Path
 import stat
@@ -94,6 +95,27 @@ _CONFIG_VALIDATION_DETAIL = "配置数据验证失败，请检查字段和值"
 _CONFIG_FILENAMES = {"bot_config.toml", "model_config.toml"}
 _MISSING_CONFIG_FILE = object()
 _MISSING_ADAPTER_CONFIG = object()
+_MANAGED_ADAPTER_PATHS = {"onebot_default": "plugins/onebot_adapter/config.toml"}
+_ONEBOT_MANAGED_DEFAULTS: dict[str, dict[str, Any]] = {
+    "napcat_server": {
+        "host": "localhost",
+        "port": 8095,
+        "token": "",
+        "heartbeat_interval": 30,
+    },
+    "chat": {
+        "group_list_type": "blacklist",
+        "group_list": [],
+        "private_list_type": "blacklist",
+        "private_list": [],
+        "ban_user_id": [],
+        "ban_qq_bot": True,
+        "enable_poke": True,
+    },
+    "voice": {"use_tts": False},
+    "forward": {"image_threshold": 3},
+    "debug": {"level": "INFO"},
+}
 
 
 def _log_config_failure(action: str, exc: Exception) -> None:
@@ -710,6 +732,200 @@ async def update_model_config_section(
 
 
 # ===== 适配器配置管理接口 =====
+
+
+def _get_onebot_runtime_status() -> dict[str, Any]:
+    from plugins.onebot_adapter.adapter_core.runtime import adapter_runtime
+
+    return adapter_runtime.get_status()
+
+
+async def _reload_onebot_adapter_config() -> bool:
+    from plugins.onebot_adapter.adapter_core.config import config_manager
+
+    return await config_manager.reload()
+
+
+@router.get("/adapters")
+async def get_adapter_instances(_auth: bool = Depends(require_auth)):
+    """Return public runtime state for managed platform adapter instances."""
+    try:
+        status = _get_onebot_runtime_status()
+        return {
+            "success": True,
+            "adapters": [
+                {
+                    "id": "onebot_default",
+                    "type": "onebot_v11",
+                    "name": "OneBot v11 / NapCat",
+                    "platform": "qq",
+                    **status,
+                }
+            ],
+        }
+    except Exception as e:
+        _log_config_failure("获取适配器实例状态失败", e)
+        raise HTTPException(status_code=500, detail="获取适配器状态失败") from e
+
+
+def _get_managed_adapter_path(adapter_id: str) -> str:
+    try:
+        return _MANAGED_ADAPTER_PATHS[adapter_id]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="适配器实例不存在") from None
+
+
+@router.get("/adapters/{adapter_id}/config")
+async def get_managed_adapter_config(adapter_id: str, _auth: bool = Depends(require_auth)):
+    path = Path(_validate_adapter_config_path(_get_managed_adapter_path(adapter_id)))
+    document = _read_adapter_toml_document(path)
+    return {"success": True, "config": _get_onebot_managed_config(document)}
+
+
+@router.put("/adapters/{adapter_id}/config")
+async def save_managed_adapter_config(
+    adapter_id: str,
+    data: ConfigBody,
+    _auth: bool = Depends(require_auth),
+):
+    path = Path(_validate_adapter_config_path(_get_managed_adapter_path(adapter_id)))
+    document = _read_adapter_toml_document(path)
+    current_config = _get_onebot_managed_config(document)
+    updated_config = _validate_onebot_managed_update(data, current_config)
+
+    for section_name, section_data in updated_config.items():
+        if section_name not in document or not isinstance(document[section_name], dict):
+            document[section_name] = tomlkit.table()
+        for field_name, value in section_data.items():
+            document[section_name][field_name] = value
+
+    content = tomlkit.dumps(document).encode("utf-8")
+    if len(content) > MAX_ADAPTER_CONFIG_BYTES:
+        raise HTTPException(status_code=413, detail="适配器配置内容过大")
+    _atomic_write_adapter_config(path, content)
+    try:
+        reloaded = await _reload_onebot_adapter_config()
+    except Exception as exc:
+        _log_config_failure("重载适配器配置失败", exc)
+        raise HTTPException(status_code=500, detail="适配器配置已保存，但运行时重载失败") from exc
+    if not reloaded:
+        logger.error("重载适配器配置失败")
+        raise HTTPException(status_code=500, detail="适配器配置已保存，但运行时重载失败")
+    logger.info("适配器配置已保存")
+    return {"success": True, "message": "适配器配置已保存"}
+
+
+def _read_adapter_toml_document(path: Path):
+    raw_content = _read_adapter_config_bytes(path)
+    try:
+        content = raw_content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="适配器配置文件必须使用 UTF-8 编码") from exc
+    try:
+        return tomlkit.loads(content)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="TOML 格式错误，请检查配置语法") from exc
+
+
+def _get_onebot_managed_config(document) -> dict[str, dict[str, Any]]:
+    unwrapped = document.unwrap()
+    managed_config = copy.deepcopy(_ONEBOT_MANAGED_DEFAULTS)
+    for section_name, defaults in managed_config.items():
+        section = unwrapped.get(section_name, {})
+        if not isinstance(section, dict):
+            continue
+        for field_name in defaults:
+            if field_name in section:
+                managed_config[section_name][field_name] = section[field_name]
+    return managed_config
+
+
+def _validate_onebot_managed_update(
+    update: dict[str, Any],
+    current_config: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if not update:
+        raise HTTPException(status_code=400, detail="配置内容不能为空")
+
+    unknown_sections = set(update) - set(_ONEBOT_MANAGED_DEFAULTS)
+    if unknown_sections:
+        raise HTTPException(status_code=400, detail="包含不支持的适配器配置项")
+
+    merged = copy.deepcopy(current_config)
+    for section_name, section_update in update.items():
+        if not isinstance(section_update, dict):
+            raise HTTPException(status_code=400, detail="适配器配置节格式无效")
+        unknown_fields = set(section_update) - set(_ONEBOT_MANAGED_DEFAULTS[section_name])
+        if unknown_fields:
+            raise HTTPException(status_code=400, detail="包含不支持的适配器配置项")
+        merged[section_name].update(section_update)
+
+    _validate_onebot_managed_config(merged)
+    return merged
+
+
+def _validate_onebot_managed_config(config: dict[str, dict[str, Any]]) -> None:
+    napcat = config["napcat_server"]
+    host = napcat["host"]
+    if (
+        not isinstance(host, str)
+        or not host
+        or host != host.strip()
+        or len(host) > 255
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in host)
+    ):
+        raise HTTPException(status_code=400, detail="NapCat 监听地址无效")
+    if not _is_plain_int(napcat["port"]) or not 1 <= napcat["port"] <= 65535:
+        raise HTTPException(status_code=400, detail="NapCat 监听端口无效")
+    token = napcat["token"]
+    if not isinstance(token, str) or len(token) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in token):
+        raise HTTPException(status_code=400, detail="NapCat 访问令牌无效")
+    if not token.strip() and not _is_loopback_bind_host(host):
+        raise HTTPException(status_code=400, detail="非本机监听地址必须配置访问令牌")
+    heartbeat_interval = napcat["heartbeat_interval"]
+    if not _is_plain_int(heartbeat_interval) or not 1 <= heartbeat_interval <= 3600:
+        raise HTTPException(status_code=400, detail="NapCat 心跳间隔无效")
+
+    chat = config["chat"]
+    for list_type_name in ("group_list_type", "private_list_type"):
+        if chat[list_type_name] not in {"whitelist", "blacklist"}:
+            raise HTTPException(status_code=400, detail="名单模式无效")
+    for list_name in ("group_list", "private_list", "ban_user_id"):
+        values = chat[list_name]
+        if (
+            not isinstance(values, list)
+            or len(values) > 4096
+            or any(not _is_plain_int(value) or value < 0 for value in values)
+        ):
+            raise HTTPException(status_code=400, detail="账号或群组名单无效")
+    for option_name in ("ban_qq_bot", "enable_poke"):
+        if not isinstance(chat[option_name], bool):
+            raise HTTPException(status_code=400, detail="聊天开关配置无效")
+
+    if not isinstance(config["voice"]["use_tts"], bool):
+        raise HTTPException(status_code=400, detail="语音配置无效")
+    image_threshold = config["forward"]["image_threshold"]
+    if not _is_plain_int(image_threshold) or not 0 <= image_threshold <= 1000:
+        raise HTTPException(status_code=400, detail="转发图片阈值无效")
+    if config["debug"]["level"] not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise HTTPException(status_code=400, detail="日志等级无效")
+
+
+def _is_plain_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_loopback_bind_host(host: str) -> bool:
+    normalized = host.strip().lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    normalized = normalized.split("%", maxsplit=1)[0]
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _normalize_adapter_path(path: str) -> str:
