@@ -292,7 +292,7 @@ export function PersonManagementPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
+    <div className="flex h-[calc(100vh-4rem)] min-w-0 flex-col overflow-x-hidden px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -303,8 +303,9 @@ export function PersonManagementPage() {
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="space-y-4 sm:space-y-6 sm:pr-4">
+      {/* Radix's table wrapper otherwise adopts the list rows' intrinsic width. */}
+      <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+        <div className="w-full min-w-0 max-w-full space-y-4 sm:space-y-6 sm:pr-4">
           {/* 统计 */}
           <div className="ios-group overflow-hidden">
             <div className="ios-row">
