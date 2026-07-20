@@ -27,6 +27,7 @@ import {
   MoreHorizontal,
   X,
   ChevronRight,
+  ScanSearch,
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { Link, useMatchRoute, useRouterState } from '@tanstack/react-router'
@@ -106,6 +107,7 @@ const menuIconTileClasses: Record<string, string> = {
   '/resource/memory': 'ios-symbol-green',
   '/plugins': 'ios-symbol-purple',
   '/plugin-config': 'ios-symbol-teal',
+  '/model-traces': 'ios-symbol-teal',
   '/logs': 'ios-symbol-gray',
   '/chat': 'ios-symbol-green',
   '/settings': 'ios-symbol-gray',
@@ -266,6 +268,7 @@ export function Layout({ children }: LayoutProps) {
       items: [
         { icon: Package, label: '插件市场', path: '/plugins' },
         { icon: Sliders, label: '插件配置', path: '/plugin-config' },
+        { icon: ScanSearch, label: '模型请求追踪', path: '/model-traces' },
         { icon: FileSearch, label: '日志查看器', path: '/logs' },
         { icon: MessageSquare, label: '本地聊天室', path: '/chat' },
       ],

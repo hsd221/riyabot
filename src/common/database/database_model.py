@@ -104,6 +104,50 @@ class LLMUsage(BaseModel):
         table_name = "llm_usage"
 
 
+class LLMRequestTrace(BaseModel):
+    """模型请求与响应的结构化追踪记录。"""
+
+    request_type = TextField(index=True)
+    operation = TextField(index=True)
+    model_name = TextField(index=True)
+    model_identifier = TextField()
+    provider_name = TextField(index=True)
+    attempt = IntegerField(default=1)
+    status = TextField(index=True)
+    started_at = DateTimeField(default=datetime.datetime.now, index=True)
+    completed_at = DateTimeField(null=True)
+    duration_ms = IntegerField(null=True)
+    request_preview = TextField(default="")
+    response_preview = TextField(default="")
+    request_payload = TextField()
+    response_payload = TextField(null=True)
+    error_type = TextField(null=True)
+    error_message = TextField(null=True)
+    status_code = IntegerField(null=True)
+    prompt_tokens = IntegerField(default=0)
+    completion_tokens = IntegerField(default=0)
+    total_tokens = IntegerField(default=0)
+
+    class Meta:
+        table_name = "llm_request_trace"
+
+
+class LLMRequestTraceMedia(BaseModel):
+    """模型请求追踪关联的本地媒体快照元数据。"""
+
+    trace_id = IntegerField(index=True)
+    media_id = TextField()
+    kind = TextField()
+    format = TextField()
+    mime_type = TextField()
+    size_bytes = IntegerField()
+    file_name = TextField()
+
+    class Meta:
+        table_name = "llm_request_trace_media"
+        indexes = ((("trace_id", "media_id"), True),)
+
+
 class Emoji(BaseModel):
     """表情包"""
 
@@ -415,6 +459,8 @@ class ChatHistory(BaseModel):
 MODELS = [
     ChatStreams,
     LLMUsage,
+    LLMRequestTrace,
+    LLMRequestTraceMedia,
     Emoji,
     EmojiUsageScene,
     EmojiUsageEvent,

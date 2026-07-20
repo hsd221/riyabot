@@ -23,6 +23,7 @@ from .ws_auth import router as ws_auth_router
 from .annual_report_routes import router as annual_report_router
 from .memory_routes import router as memory_router
 from .behavior_routes import router as behavior_router
+from .model_trace_routes import router as model_trace_router
 
 logger = get_logger("webui.api")
 
@@ -57,6 +58,8 @@ router.include_router(annual_report_router)
 router.include_router(memory_router)
 # 注册行为学习路由
 router.include_router(behavior_router)
+# 注册模型请求追踪路由
+router.include_router(model_trace_router)
 
 
 class PasswordLoginRequest(BaseModel):

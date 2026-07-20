@@ -23,6 +23,7 @@ import { JargonManagementPage } from './routes/resource/jargon'
 import { PersonManagementPage } from './routes/person'
 import { MemoryPage } from './routes/resource/memory'
 import { LogViewerPage } from './routes/logs'
+import { ModelTracesPage } from './routes/model-traces'
 import { PluginsPage } from './routes/plugins'
 import { PluginConfigPage } from './routes/plugin-config'
 import { PluginMirrorsPage } from './routes/plugin-mirrors'
@@ -169,6 +170,12 @@ const logsRoute = createRoute({
   component: LogViewerPage,
 })
 
+const modelTracesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/model-traces',
+  component: ModelTracesPage,
+})
+
 // 本地聊天室路由
 const chatRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -245,6 +252,7 @@ const routeTree = rootRoute.addChildren([
     pluginsRoute,
     pluginConfigRoute,
     pluginMirrorsRoute,
+    modelTracesRoute,
     logsRoute,
     chatRoute,
     settingsRoute,

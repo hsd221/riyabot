@@ -19,6 +19,7 @@ import {
   MessageCircle,
   Globe,
   ChevronRight,
+  ScanSearch,
 } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -63,6 +64,7 @@ const searchIconTileClasses: Record<string, string> = {
   '/plugin-config': 'ios-symbol-teal',
   '/plugin-mirrors': 'ios-symbol-purple',
   '/chat': 'ios-symbol-green',
+  '/model-traces': 'ios-symbol-teal',
   '/logs': 'ios-symbol-gray',
   '/settings': 'ios-symbol-gray',
 }
@@ -178,6 +180,13 @@ const searchItems: SearchItem[] = [
     title: '本地聊天室',
     description: '在 WebUI 中与当前 Bot 对话',
     path: '/chat',
+    category: '监控',
+  },
+  {
+    icon: ScanSearch,
+    title: '模型请求追踪',
+    description: '查看模型请求与返回内容',
+    path: '/model-traces',
     category: '监控',
   },
   {

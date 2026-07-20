@@ -14,12 +14,14 @@ from .payload_content.message import MessageBuilder, Message, RoleType
 from .payload_content.resp_format import RespFormat
 from .payload_content.tool_option import ToolOption, ToolCall, ToolOptionBuilder, ToolParamType
 from .model_client.base_client import BaseClient, APIResponse, client_registry
+from .request_trace import build_request_payload, collect_request_media, model_request_trace_recorder
 from .utils import compress_messages, llm_usage_recorder
 from .exceptions import (
     NetworkConnectionError,
     RespNotOkException,
     EmptyResponseException,
     ModelAttemptFailed,
+    ReqAbortException,
 )
 
 install(extra_lines=3)
@@ -375,6 +377,29 @@ class LLMRequest:
         self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty + 1)
         return model_info, api_provider, client
 
+    def _resolve_generation_options(
+        self,
+        model_info: ModelInfo,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> tuple[float | None, int | None]:
+        effective_temperature = temperature
+        if effective_temperature is None:
+            effective_temperature = model_info.temperature
+        if effective_temperature is None:
+            effective_temperature = (model_info.extra_params or {}).get("temperature")
+        if effective_temperature is None:
+            effective_temperature = self.model_for_task.temperature
+
+        effective_max_tokens = max_tokens
+        if effective_max_tokens is None:
+            effective_max_tokens = model_info.max_tokens
+        if effective_max_tokens is None:
+            effective_max_tokens = (model_info.extra_params or {}).get("max_tokens")
+        if effective_max_tokens is None:
+            effective_max_tokens = self.model_for_task.max_tokens
+        return effective_temperature, effective_max_tokens
+
     async def _attempt_request_on_model(
         self,
         model_info: ModelInfo,
@@ -398,28 +423,15 @@ class LLMRequest:
         """
         retry_remain = api_provider.max_retry
         compressed_messages: Optional[List[Message]] = None
+        effective_temperature, effective_max_tokens = self._resolve_generation_options(
+            model_info,
+            temperature,
+            max_tokens,
+        )
 
         while retry_remain > 0:
             try:
                 if request_type == RequestType.RESPONSE:
-                    # 温度优先级：参数传入 > 模型级别配置 > extra_params > 任务配置
-                    effective_temperature = temperature
-                    if effective_temperature is None:
-                        effective_temperature = model_info.temperature
-                    if effective_temperature is None:
-                        effective_temperature = (model_info.extra_params or {}).get("temperature")
-                    if effective_temperature is None:
-                        effective_temperature = self.model_for_task.temperature
-
-                    # max_tokens 优先级：参数传入 > 模型级别配置 > extra_params > 任务配置
-                    effective_max_tokens = max_tokens
-                    if effective_max_tokens is None:
-                        effective_max_tokens = model_info.max_tokens
-                    if effective_max_tokens is None:
-                        effective_max_tokens = (model_info.extra_params or {}).get("max_tokens")
-                    if effective_max_tokens is None:
-                        effective_max_tokens = self.model_for_task.max_tokens
-
                     return await client.get_response(
                         model_info=model_info,
                         message_list=(compressed_messages or message_list),
@@ -590,12 +602,51 @@ class LLMRequest:
         max_attempts = len(self.model_for_task.model_list)
         last_exception: Optional[Exception] = None
 
-        for _ in range(max_attempts):
+        for attempt in range(1, max_attempts + 1):
             model_info, api_provider, client = self._select_model(exclude_models=failed_models_this_request)
 
             message_list = []
             if message_factory:
                 message_list = message_factory(client)
+
+            effective_temperature, effective_max_tokens = self._resolve_generation_options(
+                model_info,
+                temperature,
+                max_tokens,
+            )
+            trace_id: int | None = None
+            trace_started_at = time.perf_counter()
+            try:
+                request_payload = build_request_payload(
+                    operation=request_type.value,
+                    model_info=model_info,
+                    messages=message_list,
+                    tool_options=tool_options,
+                    temperature=effective_temperature if request_type == RequestType.RESPONSE else None,
+                    max_tokens=effective_max_tokens if request_type == RequestType.RESPONSE else None,
+                    response_format=response_format,
+                    embedding_input=embedding_input,
+                    audio_base64=audio_base64,
+                    extra_params=model_info.extra_params,
+                )
+                trace_id = model_request_trace_recorder.start_trace(
+                    request_type=self.request_type or request_type.value,
+                    operation=request_type.value,
+                    model_name=model_info.name,
+                    model_identifier=model_info.model_identifier,
+                    provider_name=api_provider.name,
+                    attempt=attempt,
+                    request_payload=request_payload,
+                    request_media=collect_request_media(messages=message_list, audio_base64=audio_base64),
+                )
+            except Exception:
+                logger.warning(
+                    "模型请求追踪准备失败",
+                    event_code="llm.trace.prepare_failed",
+                    request_type=self.request_type or request_type.value,
+                    model_name=model_info.name,
+                    exc_info=True,
+                )
 
             try:
                 response = await self._attempt_request_on_model(
@@ -618,10 +669,28 @@ class LLMRequest:
                 if response_usage := response.usage:
                     total_tokens += response_usage.total_tokens
                 self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
+                model_request_trace_recorder.finish_success(
+                    trace_id,
+                    response,
+                    duration_seconds=time.perf_counter() - trace_started_at,
+                )
                 return response, model_info
+
+            except asyncio.CancelledError:
+                model_request_trace_recorder.finish_error(
+                    trace_id,
+                    ReqAbortException("模型请求任务已取消"),
+                    duration_seconds=time.perf_counter() - trace_started_at,
+                )
+                raise
 
             except ModelAttemptFailed as e:
                 last_exception = e.original_exception or e
+                model_request_trace_recorder.finish_error(
+                    trace_id,
+                    last_exception,
+                    duration_seconds=time.perf_counter() - trace_started_at,
+                )
                 logger.warning(
                     "LLM 模型尝试失败，切换到下一个模型",
                     event_code="llm.model.attempt_failed",

@@ -80,6 +80,10 @@ webui/src/lib/*
 !webui/src/lib/motion.ts
 !webui/src/lib/password-validator.ts
 !webui/src/lib/adapter-config-api.ts
+!webui/src/lib/api/
+webui/src/lib/api/*
+!webui/src/lib/api/memory-api.ts
+!webui/src/lib/api/model-trace-api.ts
 lib64/
 parts/
 sdist/

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import unittest
@@ -13,7 +14,7 @@ from src.llm_models.payload_content.message import MessageBuilder, RoleType
 from src.llm_models.payload_content.tool_option import ToolParamType
 from src.llm_models.utils import LLMUsageRecorder, compress_messages
 from src.llm_models import utils as llm_utils
-from src.llm_models.exceptions import EmptyResponseException, ModelAttemptFailed, RespNotOkException
+from src.llm_models.exceptions import EmptyResponseException, ModelAttemptFailed, ReqAbortException, RespNotOkException
 from src.llm_models.utils_model import LLMRequest, RequestType
 
 
@@ -403,6 +404,134 @@ class LLMRequestHelpersTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIsInstance(raised.exception.original_exception, EmptyResponseException)
+
+    async def test_execute_request_records_effective_request_and_successful_response(self) -> None:
+        task = TaskConfig(
+            model_list=["model-a"],
+            max_tokens=64,
+            temperature=0.2,
+            selection_strategy="balance",
+        )
+        request = LLMRequest(task, request_type="reply.main")
+        provider = APIProvider(
+            name="provider-a",
+            base_url="https://api.example.test",
+            api_key="secret",
+            max_retry=1,
+            retry_interval=0,
+        )
+        model = ModelInfo(
+            model_identifier="provider-model",
+            name="model-a",
+            api_provider="provider-a",
+            temperature=0.35,
+            max_tokens=96,
+        )
+        response = APIResponse(
+            content="ok",
+            usage=UsageRecord("model-a", "provider-a", 8, 3, 11),
+        )
+        client = CapturingClient(response)
+
+        with (
+            patch.object(request, "_select_model", return_value=(model, provider, client)),
+            patch("src.llm_models.utils_model.model_request_trace_recorder") as recorder,
+        ):
+            recorder.start_trace.return_value = 42
+            actual, actual_model = await request._execute_request(
+                request_type=RequestType.RESPONSE,
+                message_factory=lambda _client: [
+                    MessageBuilder().add_text_content("hello").add_image_content("png", "aGVsbG8=").build()
+                ],
+            )
+
+        self.assertIs(actual, response)
+        self.assertIs(actual_model, model)
+        trace_kwargs = recorder.start_trace.call_args.kwargs
+        self.assertEqual(trace_kwargs["request_type"], "reply.main")
+        self.assertEqual(trace_kwargs["operation"], "response")
+        self.assertEqual(trace_kwargs["request_payload"]["parameters"]["temperature"], 0.35)
+        self.assertEqual(trace_kwargs["request_payload"]["parameters"]["max_tokens"], 96)
+        self.assertEqual(trace_kwargs["request_payload"]["messages"][0]["content"][0]["text"], "hello")
+        self.assertEqual(trace_kwargs["request_payload"]["messages"][0]["content"][1]["media_id"], "image-1")
+        self.assertEqual(trace_kwargs["request_media"][0].media_id, "image-1")
+        self.assertEqual(trace_kwargs["request_media"][0].base64_data, "aGVsbG8=")
+        recorder.finish_success.assert_called_once()
+        self.assertEqual(recorder.finish_success.call_args.args[:2], (42, response))
+
+    async def test_execute_request_finishes_error_trace_without_changing_failure_semantics(self) -> None:
+        class HardFailClient(CapturingClient):
+            async def get_response(self, **kwargs):
+                self.calls.append(("response", kwargs))
+                raise RespNotOkException(400)
+
+        task = TaskConfig(
+            model_list=["model-a"],
+            max_tokens=64,
+            temperature=0.2,
+            selection_strategy="balance",
+        )
+        request = LLMRequest(task, request_type="planner.main")
+        provider = APIProvider(
+            name="provider-a",
+            base_url="https://api.example.test",
+            api_key="secret",
+            max_retry=1,
+            retry_interval=0,
+        )
+        model = ModelInfo(model_identifier="provider-model", name="model-a", api_provider="provider-a")
+
+        with (
+            patch.object(request, "_select_model", return_value=(model, provider, HardFailClient())),
+            patch("src.llm_models.utils_model.model_request_trace_recorder") as recorder,
+        ):
+            recorder.start_trace.return_value = 73
+            with self.assertRaises(RespNotOkException):
+                await request._execute_request(
+                    request_type=RequestType.RESPONSE,
+                    message_factory=lambda _client: [MessageBuilder().add_text_content("hello").build()],
+                )
+
+        recorder.finish_error.assert_called_once()
+        self.assertEqual(recorder.finish_error.call_args.args[0], 73)
+        self.assertIsInstance(recorder.finish_error.call_args.args[1], RespNotOkException)
+
+    async def test_execute_request_finishes_trace_when_task_is_cancelled(self) -> None:
+        class CancelledClient(CapturingClient):
+            async def get_response(self, **kwargs):
+                self.calls.append(("response", kwargs))
+                raise asyncio.CancelledError
+
+        task = TaskConfig(
+            model_list=["model-a"],
+            max_tokens=64,
+            temperature=0.2,
+            selection_strategy="balance",
+        )
+        request = LLMRequest(task, request_type="reply.main")
+        provider = APIProvider(
+            name="provider-a",
+            base_url="https://api.example.test",
+            api_key="secret",
+            max_retry=1,
+            retry_interval=0,
+        )
+        model = ModelInfo(model_identifier="provider-model", name="model-a", api_provider="provider-a")
+
+        with (
+            patch.object(request, "_select_model", return_value=(model, provider, CancelledClient())),
+            patch("src.llm_models.utils_model.model_request_trace_recorder") as recorder,
+        ):
+            recorder.start_trace.return_value = 91
+            with self.assertRaises(asyncio.CancelledError):
+                await request._execute_request(
+                    request_type=RequestType.RESPONSE,
+                    message_factory=lambda _client: [MessageBuilder().add_text_content("hello").build()],
+                )
+
+        recorder.finish_error.assert_called_once()
+        self.assertEqual(recorder.finish_error.call_args.args[0], 91)
+        self.assertIsInstance(recorder.finish_error.call_args.args[1], ReqAbortException)
 
     async def test_generate_response_allows_empty_result_when_requested(self) -> None:
         class EmptyClient(CapturingClient):
