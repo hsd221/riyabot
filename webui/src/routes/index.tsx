@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import axios from 'axios'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ModelPieLegend } from '@/components/statistics/model-pie-legend'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
@@ -1072,41 +1073,44 @@ export function IndexPage() {
                   </CardHeader>
                   <CardContent>
                     {modelPieData.length > 0 ? (
-                      <ChartContainer
-                        config={
-                          Object.fromEntries(
-                            model_stats.map((stat, i) => [
-                              stat.model_name,
-                              {
-                                label: stat.model_name,
-                                color: pieColors[i],
-                              },
-                            ])
-                          ) as ChartConfig
-                        }
-                        className="aspect-auto h-[300px] w-full sm:h-[400px]"
-                      >
-                        <PieChart>
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                          <Pie
-                            data={modelPieData}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={({ name, percent }) => {
-                              // 只显示占比大于5%的标签，避免小块标签重叠
-                              if (percent && percent < 0.05) return ''
-                              return `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`
-                            }}
-                            outerRadius={100}
-                            dataKey="value"
-                          >
-                            {modelPieData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.fill} />
-                            ))}
-                          </Pie>
-                        </PieChart>
-                      </ChartContainer>
+                      <div>
+                        <ChartContainer
+                          config={
+                            Object.fromEntries(
+                              model_stats.map((stat, i) => [
+                                stat.model_name,
+                                {
+                                  label: stat.model_name,
+                                  color: pieColors[i],
+                                },
+                              ])
+                            ) as ChartConfig
+                          }
+                          className="aspect-auto h-[240px] w-full sm:h-[400px] [&_.recharts-pie-label-text]:hidden sm:[&_.recharts-pie-label-text]:block"
+                        >
+                          <PieChart>
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Pie
+                              data={modelPieData}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={({ name, percent }) => {
+                                // 只显示占比大于5%的标签，避免小块标签重叠
+                                if (percent && percent < 0.05) return ''
+                                return `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`
+                              }}
+                              outerRadius={100}
+                              dataKey="value"
+                            >
+                              {modelPieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.fill} />
+                              ))}
+                            </Pie>
+                          </PieChart>
+                        </ChartContainer>
+                        <ModelPieLegend data={modelPieData} />
+                      </div>
                     ) : (
                       <ChartEmptyState
                         title="暂无模型统计"
