@@ -43,6 +43,23 @@ logger = get_logger("memory.profile")
 
 PROFILE_VERSION = 2
 LEGACY_PLATFORM = "legacy"
+_LEGACY_EXPRESSION_ANALYSIS_KEYS = {
+    "avg_message_length",
+    "emoji_ratio",
+    "question_ratio",
+}
+
+
+def _is_legacy_expression_analysis(patterns: dict[str, Any]) -> bool:
+    """识别旧桥接算法写入的、没有版本标记的不可信表达统计。"""
+    if not patterns or "analysis_version" in patterns:
+        return False
+    keys = set(patterns)
+    return bool(keys & _LEGACY_EXPRESSION_ANALYSIS_KEYS) or {
+        "favorite_expressions",
+        "analyzed_message_count",
+        "updated_at",
+    }.issubset(keys)
 
 
 def make_profile_id(platform: str, user_id: str) -> str:
@@ -111,6 +128,9 @@ _PREFERENCE_KEYWORDS = {"preference", "偏好", "兴趣", "like", "dislike", "ho
 _FACT_KEYWORDS = {
     "fact",
     "profile",
+    "general",
+    "basic",
+    "基本信息",
     "属性",
     "factual",
     "attribute",
@@ -310,6 +330,9 @@ class ProfileStore:
             expression_style = stats.pop("_expression_style", "") if isinstance(stats, dict) else ""
             expression_patterns = stats.pop("_expression_patterns", {}) if isinstance(stats, dict) else {}
             if not isinstance(expression_patterns, dict):
+                expression_patterns = {}
+            if _is_legacy_expression_analysis(expression_patterns):
+                expression_style = ""
                 expression_patterns = {}
 
             return UserProfile(
@@ -737,16 +760,16 @@ class ProfileBuilder:
         # 1. 处理 PREFERENCE / FACTUAL 语义数据
         if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and atom.semantic_detail is not None:
             sd = atom.semantic_detail
-            category = _semantic_category(sd.attr_category)
+            category = _semantic_category(sd.attr_category, atom.atom_type)
             evidence = _effective_evidence_count(sd.evidence_counter, sd.evidence_list)
             subject_matches = not sd.subject_key or sd.subject_key == profile.profile_id
             name = sd.attr_name.strip()
             value = sd.attr_value.strip()
             if category and name and value and evidence >= 1 and subject_matches:
-                section = "preferences" if category in {"preference", "interest"} else "facts"
+                section = _profile_section(category, name)
                 field_sources = profile.stats.setdefault(
                     "_profile_field_sources",
-                    {"preferences": {}, "facts": {}, "traits": {}},
+                    {"preferences": {}, "interests": {}, "facts": {}, "traits": {}},
                 )
                 section_sources = field_sources.setdefault(section, {})
                 previous_source = section_sources.get(name)
@@ -766,22 +789,41 @@ class ProfileBuilder:
                 if not isinstance(previous_source, dict) or _semantic_rank(candidate) >= _semantic_rank(
                     previous_source
                 ):
-                    if section == "preferences":
-                        profile.preferences[name] = value
-                        profile.interests = []
-                        for pref_name, pref_value in profile.preferences.items():
-                            interest = _preference_interest(pref_name, pref_value)
-                            if interest and interest not in profile.interests:
-                                profile.interests.append(interest)
-                    else:
-                        previous_value = profile.facts.get(name, "")
-                        profile.facts[name] = value
-                        if category == "personality" or name.casefold() in _PERSONALITY_CATEGORIES:
-                            if previous_value and previous_value != value:
-                                profile.traits.pop(previous_value, None)
-                            profile.traits[value] = max(profile.traits.get(value, 0.0), atom.confidence)
-                            field_sources.setdefault("traits", {})[value] = candidate
                     section_sources[name] = candidate
+                    if section == "preferences":
+                        previous_value = str(previous_source.get("value", "")) if previous_source else ""
+                        previous_interest = _preference_interest(name, previous_value) if previous_value else ""
+                        profile.preferences[name] = value
+                        interest = _preference_interest(name, value)
+                        supported_interests = _supported_profile_interests(profile.preferences, field_sources)
+                        if previous_interest not in supported_interests and previous_interest in profile.interests:
+                            profile.interests.remove(previous_interest)
+                        if interest and interest not in profile.interests:
+                            profile.interests.append(interest)
+                    elif section == "interests":
+                        previous_value = str(previous_source.get("value", "")) if previous_source else ""
+                        previous_interest = _preference_interest(name, previous_value) if previous_value else ""
+                        interest = _preference_interest(name, value)
+                        supported_interests = _supported_profile_interests(profile.preferences, field_sources)
+                        if previous_interest not in supported_interests and previous_interest in profile.interests:
+                            profile.interests.remove(previous_interest)
+                        if interest and interest not in profile.interests:
+                            profile.interests.append(interest)
+                    elif section == "traits":
+                        previous_value = str(previous_source.get("value", "")) if previous_source else ""
+                        if previous_value and previous_value != value:
+                            previous_confidence = _trait_confidence_from_sources(field_sources, previous_value)
+                            if previous_confidence is None:
+                                profile.traits.pop(previous_value, None)
+                            else:
+                                profile.traits[previous_value] = previous_confidence
+                        if profile.facts.get(name) in {previous_value, value}:
+                            profile.facts.pop(name, None)
+                        trait_confidence = _trait_confidence_from_sources(field_sources, value)
+                        if trait_confidence is not None:
+                            profile.traits[value] = trait_confidence
+                    else:
+                        profile.facts[name] = value
                     updated = True
 
         # 2. 处理感官/情绪数据 → mood_history（任意原子类型）
@@ -829,8 +871,8 @@ class ProfileBuilder:
         try:
             candidates = []
             for item in self._load_semantic_data(profile):
-                category = _semantic_category(item.get("attr_category", ""))
-                item_section = "preferences" if category in {"preference", "interest"} else "facts"
+                category = _semantic_category(item.get("attr_category", ""), item.get("atom_type"))
+                item_section = _profile_section(category, str(item.get("attr_name", "") or "").strip())
                 if item_section != section or str(item.get("attr_name", "")).strip() != name:
                     continue
                 if int(item.get("evidence_counter", 0) or 0) < 1:
@@ -865,21 +907,26 @@ class ProfileBuilder:
         """
         winners: dict[tuple[str, str], dict[str, Any]] = {}
         for item in semantic_data:
-            category = _semantic_category(item.get("attr_category", ""))
+            category = _semantic_category(item.get("attr_category", ""), item.get("atom_type"))
             name = str(item.get("attr_name", "") or "").strip()
             value = str(item.get("attr_value", "") or "").strip()
             evidence = int(item.get("evidence_counter", 0) or 0)
             if not category or not name or not value or evidence < 1:
                 continue
 
-            section = "preferences" if category in {"preference", "interest"} else "facts"
+            section = _profile_section(category, name)
             key = (section, name)
             rank = _semantic_rank(item)
             previous = winners.get(key)
             if previous is None or rank > previous["_rank"]:
                 winners[key] = {**item, "_category": category, "_rank": rank}
 
-        field_sources: dict[str, dict[str, Any]] = {"preferences": {}, "facts": {}, "traits": {}}
+        field_sources: dict[str, dict[str, Any]] = {
+            "preferences": {},
+            "interests": {},
+            "facts": {},
+            "traits": {},
+        }
         for (section, name), item in sorted(winners.items(), key=lambda entry: entry[1]["_rank"], reverse=True):
             value = str(item["attr_value"]).strip()
             category = item["_category"]
@@ -902,11 +949,20 @@ class ProfileBuilder:
                     profile.interests.append(interest)
                 continue
 
+            if section == "interests":
+                field_sources["interests"][name] = source
+                interest = _preference_interest(name, value)
+                if interest and interest not in profile.interests:
+                    profile.interests.append(interest)
+                continue
+
+            if section == "traits":
+                profile.traits[value] = max(profile.traits.get(value, 0.0), confidence)
+                field_sources["traits"][name] = source
+                continue
+
             profile.facts[name] = value
             field_sources["facts"][name] = source
-            if category == "personality" or name.casefold() in _PERSONALITY_CATEGORIES:
-                profile.traits[value] = max(profile.traits.get(value, 0.0), confidence)
-                field_sources["traits"][value] = source
 
         profile.stats["_profile_field_sources"] = field_sources
 
@@ -1141,24 +1197,39 @@ def _effective_evidence_count(counter: Any, evidence_raw: Any) -> int:
     return count
 
 
-def _semantic_category(category: Any) -> str:
+def _semantic_category(category: Any, atom_type: Any = None) -> str:
     """将提示词协议和历史别名收敛为画像聚合类别。"""
     normalized = str(category or "").strip().casefold()
-    if not normalized:
-        return ""
-    if normalized in _PERSONALITY_CATEGORIES or _matches_keywords(normalized, _PERSONALITY_CATEGORIES):
+    if normalized and (normalized in _PERSONALITY_CATEGORIES or _matches_keywords(normalized, _PERSONALITY_CATEGORIES)):
         return "personality"
-    if normalized in _HABIT_CATEGORIES or _matches_keywords(normalized, _HABIT_CATEGORIES):
+    if normalized and (normalized in _HABIT_CATEGORIES or _matches_keywords(normalized, _HABIT_CATEGORIES)):
         return "habit"
-    if normalized in _SKILL_CATEGORIES or _matches_keywords(normalized, _SKILL_CATEGORIES):
+    if normalized and (normalized in _SKILL_CATEGORIES or _matches_keywords(normalized, _SKILL_CATEGORIES)):
         return "skill"
-    if normalized in _INTEREST_CATEGORIES or _matches_keywords(normalized, _INTEREST_CATEGORIES):
+    if normalized and (normalized in _INTEREST_CATEGORIES or _matches_keywords(normalized, _INTEREST_CATEGORIES)):
         return "interest"
-    if _matches_keywords(normalized, _PREFERENCE_KEYWORDS):
+    if normalized and _matches_keywords(normalized, _PREFERENCE_KEYWORDS):
         return "preference"
-    if _matches_keywords(normalized, _FACT_KEYWORDS):
+    if normalized and _matches_keywords(normalized, _FACT_KEYWORDS):
+        return "fact"
+
+    normalized_atom_type = atom_type.value if isinstance(atom_type, AtomType) else str(atom_type or "").casefold()
+    if normalized_atom_type == AtomType.PREFERENCE.value:
+        return "preference"
+    if normalized_atom_type == AtomType.FACTUAL.value:
         return "fact"
     return ""
+
+
+def _profile_section(category: str, name: str) -> str:
+    """将语义类别映射到互斥的公开画像维度。"""
+    if category == "preference":
+        return "preferences"
+    if category == "interest":
+        return "interests"
+    if category == "personality" or name.casefold() in _PERSONALITY_CATEGORIES:
+        return "traits"
+    return "facts"
 
 
 def _preference_interest(name: str, value: str) -> str:
@@ -1172,6 +1243,42 @@ def _preference_interest(name: str, value: str) -> str:
         if value.strip().startswith(prefix) and value.strip()[len(prefix) :].strip():
             return value.strip()[len(prefix) :].strip()
     return value.strip()
+
+
+def _supported_profile_interests(
+    preferences: dict[str, str],
+    field_sources: dict[str, dict[str, Any]],
+) -> set[str]:
+    """返回仍由偏好或显式兴趣证据支持的兴趣值。"""
+    supported = {
+        interest for name, value in preferences.items() if (interest := _preference_interest(str(name), str(value)))
+    }
+    interest_sources = field_sources.get("interests", {})
+    if isinstance(interest_sources, dict):
+        for name, source in interest_sources.items():
+            if not isinstance(source, dict):
+                continue
+            interest = _preference_interest(str(name), str(source.get("value", "")))
+            if interest:
+                supported.add(interest)
+    return supported
+
+
+def _trait_confidence_from_sources(field_sources: dict[str, dict[str, Any]], value: str) -> Optional[float]:
+    """汇总仍指向同一特征值的来源置信度。"""
+    trait_sources = field_sources.get("traits", {})
+    if not isinstance(trait_sources, dict):
+        return None
+
+    confidences = []
+    for source in trait_sources.values():
+        if not isinstance(source, dict) or str(source.get("value", "")) != value:
+            continue
+        try:
+            confidences.append(float(source.get("confidence", 0.5) or 0.5))
+        except (TypeError, ValueError):
+            confidences.append(0.5)
+    return max(confidences) if confidences else None
 
 
 def _semantic_rank(item: dict[str, Any]) -> tuple[float, float, int, float, str]:

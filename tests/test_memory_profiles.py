@@ -7,6 +7,7 @@ from src.memory.atom import AtomType, EpisodicDetail, MemoryAtom, SemanticDetail
 from src.memory.expression_bridge import ExpressionBridge
 from src.memory.schema import (
     MemoryAtom as MemoryAtomModel,
+    RawMessageArchive,
     SemanticDetail as SemanticDetailModel,
     configure_memory_database,
     initialize_database,
@@ -289,15 +290,85 @@ class ProfileStoreTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
         store.get_or_create_profile(identity)
         bridge = ExpressionBridge(store)
 
-        bridge.update_expression_profile(identity, ["好耶😀", "冲鸭😀"])
+        bridge.update_expression_profile(identity, ["好耶😀", "好耶😀", "好耶✨", "收到", "真的吗？"])
 
         loaded = store.get_profile("expression-user", platform="qq")
         self.assertIsNotNone(loaded)
         assert loaded is not None
         self.assertTrue(loaded.expression_style)
-        self.assertTrue(loaded.expression_patterns.get("favorite_expressions"))
+        self.assertEqual(loaded.expression_patterns.get("favorite_expressions"), ["好耶"])
         context = ProfileRetriever(store).get_profile_context("expression-user", platform="qq")
         self.assertIn("表达风格:", context)
+
+    def test_expression_bridge_uses_recent_messages_from_the_same_platform(self) -> None:
+        store = ProfileStore()
+        identity = PersonIdentity(platform="qq", user_id="shared-id", nickname="表达用户")
+        store.get_or_create_profile(identity)
+        now = datetime.datetime.now().timestamp()
+        for index in range(3):
+            RawMessageArchive.create(
+                stream_id="qq-stream",
+                message_id=f"qq-{index}",
+                user_id=identity.user_id,
+                platform="qq",
+                content="好耶😀",
+                timestamp=now + index,
+                chat_type="group",
+            )
+        for index in range(6):
+            RawMessageArchive.create(
+                stream_id="discord-stream",
+                message_id=f"discord-{index}",
+                user_id=identity.user_id,
+                platform="discord",
+                content="不应混入？？？",
+                timestamp=now + 10 + index,
+                chat_type="group",
+            )
+
+        ExpressionBridge(store).update_expression_profile(identity, ["好耶😀"])
+
+        loaded = store.get_profile(identity.profile_id)
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.expression_patterns["analyzed_message_count"], 3)
+        self.assertEqual(loaded.expression_patterns["favorite_expressions"], ["好耶"])
+        self.assertEqual(loaded.expression_patterns["question_message_ratio"], 0.0)
+
+    def test_profile_store_hides_only_legacy_generated_expression_analysis(self) -> None:
+        store = ProfileStore()
+        store.save_profile(
+            UserProfile(
+                user_id="legacy-expression",
+                expression_style="阴阳怪气",
+                expression_patterns={
+                    "favorite_expressions": ["跨消"],
+                    "avg_message_length": 3.0,
+                    "emoji_ratio": 0.0,
+                    "question_ratio": 0.5,
+                    "analyzed_message_count": 2,
+                    "updated_at": 1.0,
+                },
+            )
+        )
+        store.save_profile(
+            UserProfile(
+                user_id="custom-expression",
+                expression_style="短句",
+                expression_patterns={"ending": ["呢"]},
+            )
+        )
+
+        legacy = store.get_profile("legacy-expression")
+        custom = store.get_profile("custom-expression")
+
+        self.assertIsNotNone(legacy)
+        self.assertIsNotNone(custom)
+        assert legacy is not None and custom is not None
+        self.assertEqual(legacy.expression_style, "")
+        self.assertEqual(legacy.expression_patterns, {})
+        self.assertEqual(custom.expression_style, "短句")
+        self.assertEqual(custom.expression_patterns, {"ending": ["呢"]})
 
     def test_safe_json_entity_keyword_helpers_and_profile_store_roundtrip(self) -> None:
         self.assertEqual(_safe_json_loads(None, dict), {})
@@ -386,7 +457,7 @@ class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
 
         self.assertEqual(profile.preferences, {"梦幻游戏": "喜欢"})
         self.assertEqual(profile.interests, ["梦幻游戏"])
-        self.assertEqual(profile.facts, {"性格": "耐心", "作息": "早睡", "技能": "Python"})
+        self.assertEqual(profile.facts, {"作息": "早睡", "技能": "Python"})
         self.assertEqual(profile.traits, {"耐心": 0.8})
         self.assertEqual(SemanticDetail(atom_id="new-detail").evidence_counter, 1)
 
@@ -440,9 +511,32 @@ class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
         discord_profile = builder.build_profile(discord_identity)
 
         self.assertEqual(qq_profile.interests, ["梦幻游戏"])
-        self.assertEqual(qq_profile.preferences, {"游戏": "梦幻游戏"})
+        self.assertEqual(qq_profile.preferences, {})
         self.assertEqual(discord_profile.interests, ["爵士乐"])
-        self.assertEqual(discord_profile.preferences, {"音乐": "爵士乐"})
+        self.assertEqual(discord_profile.preferences, {})
+
+    def test_build_profile_keeps_interest_personality_and_general_fact_dimensions_distinct(self) -> None:
+        identity = PersonIdentity(platform="qq", user_id="dimension-user", nickname="维度用户")
+        for atom_id, category, name, value, confidence in (
+            ("interest", "interest", "音乐", "爵士乐", 0.8),
+            ("personality", "personality", "性格", "耐心", 0.7),
+            ("general", "general", "城市", "上海", 0.9),
+        ):
+            create_atom_model(atom_id, user_id=identity.user_id, atom_type="factual", confidence=confidence)
+            create_semantic_detail(
+                atom_id,
+                category=category,
+                name=name,
+                value=value,
+                subject_key=identity.profile_id,
+            )
+
+        profile = ProfileBuilder(ProfileStore()).build_profile(identity)
+
+        self.assertEqual(profile.interests, ["爵士乐"])
+        self.assertEqual(profile.traits, {"耐心": 0.7})
+        self.assertEqual(profile.preferences, {})
+        self.assertEqual(profile.facts, {"城市": "上海"})
 
     def test_incremental_update_does_not_let_low_weight_value_replace_legacy_high_weight_value(self) -> None:
         identity = PersonIdentity(platform="qq", user_id="u1", nickname="小明")
@@ -486,6 +580,53 @@ class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
         assert persisted is not None
         self.assertEqual(persisted.preferences["music"], "jazz")
 
+    def test_incremental_update_preserves_dimensions_supported_by_other_sources(self) -> None:
+        for atom_id, category, name, value, confidence in (
+            ("music", "preference", "music", "jazz", 0.7),
+            ("playlist", "preference", "playlist", "jazz", 0.8),
+            ("temperament", "personality", "性格", "耐心", 0.9),
+            ("character", "personality", "个性", "耐心", 0.6),
+        ):
+            create_atom_model(atom_id, weight=0.2, confidence=confidence)
+            create_semantic_detail(atom_id, category=category, name=name, value=value)
+
+        store = ProfileStore()
+        builder = ProfileBuilder(store)
+        profile = builder.build_profile("u1")
+        self.assertEqual(profile.interests, ["jazz"])
+        self.assertEqual(profile.traits, {"耐心": 0.9})
+
+        builder.update_profile_from_atom(
+            "u1",
+            make_memory_atom(
+                "music-new",
+                semantic_detail=SemanticDetail(
+                    atom_id="music-new",
+                    attr_category="preference",
+                    attr_name="music",
+                    attr_value="rock",
+                ),
+            ),
+        )
+        updated = builder.update_profile_from_atom(
+            "u1",
+            make_memory_atom(
+                "temperament-new",
+                atom_type=AtomType.FACTUAL,
+                semantic_detail=SemanticDetail(
+                    atom_id="temperament-new",
+                    attr_category="personality",
+                    attr_name="性格",
+                    attr_value="果断",
+                ),
+            ),
+        )
+
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.interests, ["jazz", "rock"])
+        self.assertEqual(updated.traits, {"耐心": 0.6, "果断": 0.75})
+
     def test_build_profile_filters_user_entities_and_aggregates_preference_fact_and_traits(self) -> None:
         create_atom_model("pref-u1", user_id="u1", atom_type="preference", confidence=0.8)
         create_semantic_detail("pref-u1", category="preference", name="music", value="jazz", evidence_counter=2)
@@ -509,7 +650,7 @@ class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
 
         self.assertEqual(profile.preferences, {"music": "jazz"})
         self.assertEqual(profile.interests, ["jazz"])
-        self.assertEqual(profile.facts, {"personality": "耐心"})
+        self.assertEqual(profile.facts, {})
         self.assertEqual(profile.traits, {"耐心": 0.7})
         self.assertIn("偏好：music=jazz", profile.impression)
         self.assertIsNotNone(profile.last_extracted_at)
@@ -560,12 +701,12 @@ class ProfileBuilderTest(MemoryProfileDatabaseFixtureMixin, unittest.TestCase):
 
         self.assertIsNotNone(updated)
         assert updated is not None
-        self.assertEqual(updated.preferences, {"music": "lofi"})
+        self.assertEqual(updated.preferences, {})
         self.assertEqual(updated.interests, ["lofi"])
         self.assertEqual(updated.mood_history[0]["sensory_tags"], ["auditory"])
         self.assertIsNotNone(fact_updated)
         assert fact_updated is not None
-        self.assertEqual(fact_updated.facts["personality"], "温和")
+        self.assertNotIn("personality", fact_updated.facts)
         self.assertEqual(fact_updated.traits["温和"], 0.75)
         self.assertIsNone(unchanged)
 
