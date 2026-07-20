@@ -477,9 +477,9 @@ export function IndexPage() {
   ]
 
   return (
-    <ScrollArea className="h-full">
-      <div className="ios-page">
-        <div className="mx-auto w-full max-w-6xl space-y-8 sm:space-y-9 lg:space-y-10">
+    <ScrollArea className="h-full min-w-0 overflow-x-hidden [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+      <div className="ios-page min-w-0">
+        <div className="mx-auto w-full min-w-0 max-w-6xl space-y-8 sm:space-y-9 lg:space-y-10">
           {/* 标题和控制栏 */}
           <div className="flex flex-col justify-between gap-5 sm:gap-6 lg:flex-row lg:items-center">
             <div className="min-w-0">
@@ -905,7 +905,7 @@ export function IndexPage() {
           </div>
 
           {/* 图表区域 */}
-          <Tabs defaultValue="trends" className="space-y-5 sm:space-y-6">
+          <Tabs defaultValue="trends" className="min-w-0 space-y-5 sm:space-y-6">
             <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
               <TabsTrigger value="trends">趋势</TabsTrigger>
               <TabsTrigger value="models">模型</TabsTrigger>
@@ -967,7 +967,7 @@ export function IndexPage() {
               </Card>
 
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
-                <Card>
+                <Card className="min-w-0">
                   <CardHeader>
                     <CardTitle>花费趋势</CardTitle>
                     <CardDescription>API调用成本变化</CardDescription>
@@ -1013,7 +1013,7 @@ export function IndexPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="min-w-0">
                   <CardHeader>
                     <CardTitle>Token消耗</CardTitle>
                     <CardDescription>Token使用量变化</CardDescription>
@@ -1064,7 +1064,7 @@ export function IndexPage() {
             {/* 模型统计 */}
             <TabsContent value="models" className="space-y-4">
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
-                <Card>
+                <Card className="min-w-0">
                   <CardHeader>
                     <CardTitle>模型请求分布</CardTitle>
                     <CardDescription>
@@ -1120,35 +1120,39 @@ export function IndexPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="min-w-0">
                   <CardHeader>
                     <CardTitle>模型详细统计</CardTitle>
                     <CardDescription>请求数、花费和性能</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {model_stats.length > 0 ? (
-                      <ScrollArea className="h-[300px] sm:h-[400px]">
-                        <div className="ios-group overflow-hidden">
+                      <ScrollArea className="ios-group h-[300px] min-w-0 overflow-hidden sm:h-[400px] [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+                        <div className="w-full min-w-0 max-w-full">
                           {model_stats.map((stat, index) => (
-                            <div key={index} className="ios-row min-h-[86px]">
-                              <span className="flex min-w-0 flex-1 items-center gap-3">
+                            <div
+                              key={index}
+                              className="ios-row min-h-[86px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                            >
+                              <span className="flex w-full min-w-0 items-start gap-3 sm:flex-1 sm:items-center">
                                 <span
-                                  className="h-3 w-3 shrink-0 rounded-full"
+                                  className="mt-1 h-3 w-3 shrink-0 rounded-full sm:mt-0"
                                   style={{ backgroundColor: pieColors[index] }}
                                 />
-                                <span className="min-w-0">
-                                  <span className="block truncate text-[15px] font-semibold leading-5">
+                                <span className="min-w-0 flex-1">
+                                  <span className="ios-break-anywhere block text-[15px] font-semibold leading-5 sm:truncate">
                                     {stat.model_name}
                                   </span>
-                                  <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">
+                                  <span className="ios-break-anywhere mt-1 block text-[13px] leading-5 text-muted-foreground sm:truncate">
                                     {stat.request_count.toLocaleString()} 次 · ¥
                                     {stat.total_cost.toFixed(2)} ·{' '}
                                     {(stat.total_tokens / 1000).toFixed(1)}K Tokens
                                   </span>
                                 </span>
                               </span>
-                              <span className="shrink-0 text-right text-[13px] leading-5 text-muted-foreground">
-                                {stat.avg_response_time.toFixed(2)}s
+                              <span className="flex w-full shrink-0 items-center justify-between gap-3 pl-6 text-[13px] leading-5 text-muted-foreground sm:block sm:w-auto sm:pl-0 sm:text-right">
+                                <span className="sm:hidden">平均响应</span>
+                                <span>{stat.avg_response_time.toFixed(2)}s</span>
                               </span>
                             </div>
                           ))}
@@ -1165,18 +1169,21 @@ export function IndexPage() {
               </div>
             </TabsContent>
             <TabsContent value="activity">
-              <Card>
+              <Card className="min-w-0">
                 <CardHeader>
                   <CardTitle>最近活动</CardTitle>
                   <CardDescription>最新的API调用记录</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {recent_activity.length > 0 ? (
-                    <ScrollArea className="h-[400px] sm:h-[500px]">
-                      <div className="ios-group overflow-hidden">
+                    <ScrollArea className="ios-group h-[400px] min-w-0 overflow-hidden sm:h-[500px] [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+                      <div className="w-full min-w-0 max-w-full">
                         {recent_activity.map((activity, index) => (
-                          <div key={index} className="ios-row min-h-[92px]">
-                            <span className="flex min-w-0 flex-1 items-center gap-3">
+                          <div
+                            key={index}
+                            className="ios-row min-h-[92px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                          >
+                            <span className="flex w-full min-w-0 items-start gap-3 sm:flex-1 sm:items-center">
                               <span
                                 className={`ios-symbol ios-symbol-md ${
                                   activity.status === 'success'
@@ -1186,17 +1193,17 @@ export function IndexPage() {
                               >
                                 <Activity className="h-4 w-4" />
                               </span>
-                              <span className="min-w-0">
-                                <span className="block truncate text-[15px] font-semibold leading-5">
+                              <span className="min-w-0 flex-1">
+                                <span className="block break-words text-[15px] font-semibold leading-5">
                                   {activity.model}
                                 </span>
-                                <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">
+                                <span className="mt-1 block break-words text-[13px] leading-5 text-muted-foreground">
                                   {activity.request_type} · {activity.tokens} Tokens · ¥
                                   {activity.cost.toFixed(4)}
                                 </span>
                               </span>
                             </span>
-                            <span className="shrink-0 text-right text-[13px] leading-5 text-muted-foreground">
+                            <span className="flex w-full shrink-0 items-center justify-between gap-3 text-left text-[13px] leading-5 text-muted-foreground sm:w-auto sm:flex-col sm:items-end sm:text-right">
                               <span className="block">{formatDateTime(activity.timestamp)}</span>
                               <span className="block">{activity.time_cost.toFixed(2)}s</span>
                             </span>

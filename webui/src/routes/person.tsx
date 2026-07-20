@@ -512,9 +512,9 @@ export function PersonManagementPage() {
                 persons.map((person) => (
                   <div
                     key={person.id}
-                    className="ios-row min-h-[96px] flex-col !items-stretch !justify-start gap-3 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                    className="ios-row min-h-[96px] flex-row !items-start !justify-between gap-3 py-3 sm:!items-center"
                   >
-                    <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
                       <Checkbox
                         checked={selectedPersons.has(person.person_id)}
                         onCheckedChange={() => togglePersonSelection(person.person_id)}
@@ -566,7 +566,7 @@ export function PersonManagementPage() {
                       </button>
                     </div>
 
-                    <div className="flex shrink-0 justify-end pl-14 sm:pl-0">
+                    <div className="flex shrink-0 justify-end">
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
