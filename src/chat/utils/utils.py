@@ -11,10 +11,10 @@ from typing import Optional, Tuple, List, TYPE_CHECKING
 
 from src.common.logger import get_logger
 from src.common.data_models.database_data_model import DatabaseMessages
-from src.config.config import global_config, model_config
+from src.config.config import global_config
 from src.chat.message_receive.message import MessageRecv
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.llm_models.utils_model import LLMRequest
+from src.llm_models.embedding import embed_text
 from src.common.person_stub import Person
 from src.services.adapter_identity import get_adapter_identity_registry
 from .typo_generator import ChineseTypoGenerator
@@ -234,10 +234,9 @@ def is_mentioned_bot_in_message(message: MessageRecv) -> tuple[bool, bool, float
 
 async def get_embedding(text, request_type="embedding") -> Optional[List[float]]:
     """获取文本的embedding向量"""
-    # 每次都创建新的LLMRequest实例以避免事件循环冲突
-    llm = LLMRequest(model_set=model_config.model_task_config.embedding, request_type=request_type)
     try:
-        embedding, _ = await llm.get_embedding(text)
+        result = await embed_text(text, request_type=request_type)
+        embedding = result.vector
     except Exception as e:
         logger.error(f"获取embedding失败: {str(e)}")
         embedding = None

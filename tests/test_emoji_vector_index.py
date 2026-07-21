@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -205,6 +206,44 @@ class EmojiVectorIndexTest(unittest.IsolatedAsyncioTestCase):
                 ["emoji-target", "emoji-00"],
             )
 
+    async def test_rebuilds_emotion_cache_after_profile_and_dimension_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "emoji_vector_index.json"
+            index = EmojiVectorIndex(index_path)
+            candidate = EmojiVectorCandidate("emoji-happy", ("开心",))
+            current_profile = {"signature": "profile-v1", "dimension": 2}
+            request_types: list[str] = []
+
+            async def fake_embedding(_text: str, request_type: str):
+                request_types.append(request_type)
+                dimension = current_profile["dimension"]
+                return [1.0, *([0.0] * (dimension - 1))], current_profile["signature"]
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(side_effect=fake_embedding),
+                ),
+            ):
+                self.assertTrue(await index.upsert(candidate.emoji_hash, candidate.emotions))
+
+                request_types.clear()
+                current_profile["signature"] = "profile-v2"
+                await index.search(query_text="开心", candidates=[candidate], similarity_threshold=0.8)
+                self.assertEqual(request_types.count("emoji.vector.index"), 1)
+                same_dimension_payload = json.loads(index_path.read_text(encoding="utf-8"))
+                self.assertEqual(same_dimension_payload["emojis"][0]["embedding_model"], "profile-v2")
+                self.assertEqual(same_dimension_payload["emojis"][0]["embedding_dimension"], 2)
+
+                request_types.clear()
+                current_profile.update(signature="profile-v3", dimension=3)
+                await index.search(query_text="开心", candidates=[candidate], similarity_threshold=0.8)
+                self.assertEqual(request_types.count("emoji.vector.index"), 1)
+                changed_dimension_payload = json.loads(index_path.read_text(encoding="utf-8"))
+                self.assertEqual(changed_dimension_payload["emojis"][0]["embedding_model"], "profile-v3")
+                self.assertEqual(changed_dimension_payload["emojis"][0]["embedding_dimension"], 3)
+
 
 class EmojiUsageSceneVectorIndexTest(unittest.IsolatedAsyncioTestCase):
     async def test_each_human_usage_scene_is_indexed_and_ranked_independently(self) -> None:
@@ -284,6 +323,44 @@ class EmojiUsageSceneVectorIndexTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNone(first_result)
             self.assertEqual([match.scene_id for match in second_result or []], [31, 1])
+
+    async def test_rebuilds_scene_cache_after_profile_and_dimension_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "emoji_usage_scene_vector_index.json"
+            index = EmojiUsageSceneVectorIndex(index_path)
+            candidate = EmojiUsageSceneVectorCandidate(1, "emoji-happy", "对方开心时一起庆祝")
+            current_profile = {"signature": "profile-v1", "dimension": 2}
+            request_types: list[str] = []
+
+            async def fake_embedding(_text: str, request_type: str):
+                request_types.append(request_type)
+                dimension = current_profile["dimension"]
+                return [1.0, *([0.0] * (dimension - 1))], current_profile["signature"]
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(side_effect=fake_embedding),
+                ),
+            ):
+                await index.search(query_text="一起庆祝", candidates=[candidate], similarity_threshold=0.8)
+
+                request_types.clear()
+                current_profile["signature"] = "profile-v2"
+                await index.search(query_text="一起庆祝", candidates=[candidate], similarity_threshold=0.8)
+                self.assertEqual(request_types.count("emoji.usage_scene.vector.index"), 1)
+                same_dimension_payload = json.loads(index_path.read_text(encoding="utf-8"))
+                self.assertEqual(same_dimension_payload["scenes"][0]["embedding_model"], "profile-v2")
+                self.assertEqual(same_dimension_payload["scenes"][0]["embedding_dimension"], 2)
+
+                request_types.clear()
+                current_profile.update(signature="profile-v3", dimension=3)
+                await index.search(query_text="一起庆祝", candidates=[candidate], similarity_threshold=0.8)
+                self.assertEqual(request_types.count("emoji.usage_scene.vector.index"), 1)
+                changed_dimension_payload = json.loads(index_path.read_text(encoding="utf-8"))
+                self.assertEqual(changed_dimension_payload["scenes"][0]["embedding_model"], "profile-v3")
+                self.assertEqual(changed_dimension_payload["scenes"][0]["embedding_dimension"], 3)
 
 
 if __name__ == "__main__":

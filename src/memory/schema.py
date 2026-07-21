@@ -353,6 +353,32 @@ class DreamRun(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 14. 向量索引迁移状态
+# ---------------------------------------------------------------------------
+
+
+class VectorIndexState(BaseModel):
+    """Persisted state for versioned embedding collection migrations."""
+
+    index_name = TextField(primary_key=True)
+    active_signature = TextField(null=True)
+    active_dimension = IntegerField(null=True)
+    active_collection = TextField(null=True)
+    target_signature = TextField(null=True)
+    target_dimension = IntegerField(null=True)
+    target_collection = TextField(null=True)
+    status = TextField(default="ready")  # ready/migrating/failed
+    last_processed_id = TextField(null=True)
+    migrated_count = IntegerField(default=0)
+    total_count = IntegerField(default=0)
+    last_error = TextField(null=True)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        table_name = "vector_index_state"
+
+
+# ---------------------------------------------------------------------------
 # 模型注册表 & 自动建表
 # ---------------------------------------------------------------------------
 
@@ -370,6 +396,7 @@ MODELS = [
     GraphEntry,
     AtomAssociationModel,
     DreamRun,
+    VectorIndexState,
 ]
 
 

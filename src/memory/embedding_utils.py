@@ -1,7 +1,7 @@
 """嵌入向量生成工具
 
-提供 generate_embedding / generate_query_embedding 两个核心函数，
-通过延迟导入调用 bot 已配置的 LLM embedding 模型接口，避免循环依赖。
+提供 generate_embedding / generate_query_embedding 两个记忆层兼容函数，
+底层统一调用 ``src.llm_models.embedding.embed_text``。
 
 Usage:
     from src.memory.embedding_utils import generate_embedding
@@ -14,14 +14,14 @@ Usage:
 from typing import Optional
 
 from src.common.logger import get_logger
+from src.config.config import global_config
+from src.llm_models.embedding import embed_text
 
 logger = get_logger("memory.embedding")
 
 
 async def generate_embedding(text: str) -> Optional[list[float]]:
     """为记忆内容生成嵌入向量
-
-    延迟导入 src.chat.utils.utils.get_embedding 以避免模块加载时的循环依赖。
 
     Args:
         text: 要编码的文本内容
@@ -33,10 +33,12 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
         return None
 
     try:
-        from src.chat.utils.utils import get_embedding
-
-        embedding = await get_embedding(text)
-        return embedding
+        result = await embed_text(
+            text,
+            request_type="memory.embedding",
+            expected_dimension=global_config.memory.embedding_dimension,
+        )
+        return result.vector
     except Exception as e:
         logger.error(f"生成 embedding 失败: {e}")
         return None
@@ -54,4 +56,15 @@ async def generate_query_embedding(query: str) -> Optional[list[float]]:
     Returns:
         嵌入向量列表，失败时返回 None
     """
-    return await generate_embedding(query)
+    if not query or not query.strip():
+        return None
+    try:
+        result = await embed_text(
+            query,
+            request_type="memory.embedding.query",
+            expected_dimension=global_config.memory.embedding_dimension,
+        )
+        return result.vector
+    except Exception as e:
+        logger.error(f"生成 query embedding 失败: {e}")
+        return None

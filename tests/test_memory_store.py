@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from src.llm_models.embedding import embedding_source_hash
 from src.memory import store as store_module
 from src.memory.schema import (
     AtomAssociationModel,
@@ -589,6 +590,10 @@ class MemoryStoreCrudTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
 
         self.assertEqual(await store.list_atom_ids(status="active"), {"active-atom"})
         self.assertEqual(await store.list_atom_ids(), {"active-atom", "archived-atom"})
+        self.assertEqual(
+            await store.list_atom_source_hashes(status="active"),
+            {"active-atom": embedding_source_hash("active-atom 内容")},
+        )
 
     async def test_singleton_initialize_close_and_statistics(self) -> None:
         with self.assertRaises(RuntimeError):

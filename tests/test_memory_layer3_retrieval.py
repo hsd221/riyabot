@@ -238,6 +238,32 @@ class Layer3SQLiteRetrievalTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsy
 
 
 class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_retrieve_by_vector_skips_embedding_while_vector_search_is_disabled(self) -> None:
+        store = SimpleNamespace(
+            qdrant=SimpleNamespace(vector_search_enabled=False),
+            search_similar=AsyncMock(return_value=[]),
+        )
+        retriever = MemoryRetriever(store)
+
+        with (
+            patch.object(layer3_retrieval, "generate_query_embedding", new=AsyncMock()) as generate_embedding,
+            patch.object(retriever, "keyword_search", new=AsyncMock(return_value=[{"atom_id": "kw"}])) as keyword,
+        ):
+            result = await retriever.retrieve_by_vector(
+                query_text="爵士乐",
+                filters={"keyword": "爵士乐", "status": "active"},
+                top_k=3,
+            )
+
+        self.assertEqual(result, [{"atom_id": "kw"}])
+        generate_embedding.assert_not_awaited()
+        store.search_similar.assert_not_awaited()
+        keyword.assert_awaited_once_with(
+            query="爵士乐",
+            filters={"keyword": "爵士乐", "status": "active"},
+            limit=3,
+        )
+
     async def test_retrieve_by_vector_uses_embedding_fallback_fetches_full_atoms_and_sorts(self) -> None:
         store = SimpleNamespace(search_similar=AsyncMock(return_value=[]))
         retriever = MemoryRetriever(store)

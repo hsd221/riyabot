@@ -33,6 +33,48 @@ install(extra_lines=3)
 logger = get_logger("main")
 
 
+async def _register_vector_migration_tasks(store, embedding_profile) -> None:
+    """Register one background rebuild task for every pending vector index."""
+    from src.memory.vector_migration import GraphVectorIndexMigrationTask, VectorIndexMigrationTask
+
+    migration_specs = (
+        (
+            "memory_atoms",
+            store.qdrant.atom_migration_pending,
+            store.qdrant.atom_migration_target,
+            VectorIndexMigrationTask,
+        ),
+        (
+            "graph_entries",
+            store.qdrant.graph_migration_pending,
+            store.qdrant.graph_migration_target,
+            GraphVectorIndexMigrationTask,
+        ),
+    )
+    for index_name, migration_pending, target_collection, task_type in migration_specs:
+        if not migration_pending:
+            continue
+        try:
+            migration_task = task_type(store)
+            await async_task_manager.add_task(migration_task)
+            logger.warning(
+                "检测到 embedding 配置变化，向量索引后台迁移任务已注册",
+                event_code="memory.vector_migration.task_registered",
+                index_name=index_name,
+                embedding_model=embedding_profile.model_name,
+                embedding_dimension=embedding_profile.dimension,
+                target_collection=target_collection,
+                interval_seconds=migration_task.run_interval,
+            )
+        except Exception:
+            logger.warning(
+                "向量索引后台迁移任务注册失败，对应旧索引保持停用",
+                event_code="memory.vector_migration.task_register_failed",
+                index_name=index_name,
+                exc_info=True,
+            )
+
+
 class MainSystem:
     def __init__(self):
         # 使用消息API替代直接的FastAPI实例
@@ -148,14 +190,18 @@ class MainSystem:
         # 初始化记忆存储
         try:
             from src.memory import MemoryStore, MemoryStoreConfig
+            from src.llm_models.embedding_profile import get_embedding_profile
 
             mc = global_config.memory
+            embedding_profile = get_embedding_profile(mc.embedding_dimension)
             memory_config = MemoryStoreConfig(
                 sqlite_path=mc.sqlite_path,
                 qdrant_url=mc.qdrant_url,
                 qdrant_api_key=mc.qdrant_api_key or None,
                 qdrant_local_path=mc.qdrant_local_path,
                 embedding_dimension=mc.embedding_dimension,
+                embedding_signature=embedding_profile.signature,
+                embedding_model_name=embedding_profile.model_name,
                 collection_name_atoms=mc.collection_name_atoms,
                 collection_name_graph=mc.collection_name_graph,
                 vector_batch_size=mc.vector_batch_size,
@@ -164,6 +210,8 @@ class MainSystem:
             await store.initialize()
             logger.info("记忆存储初始化完成", event_code="memory.store.initialized")
             forgetting_manager = None
+
+            await _register_vector_migration_tasks(store, embedding_profile)
 
             # 启动记忆遗忘定期扫描
             try:

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.common.logger import get_logger
+from src.llm_models.embedding import embedding_source_hash
 from src.memory.embedding_utils import generate_embedding
 from src.memory.schema import ConflictObservation, MemoryTraceChain, RawMessageArchive, SemanticDetail, memory_db
 from src.memory.store import MemoryStore
@@ -613,6 +614,7 @@ class ConflictArbiter:
                                     "source_scene": atom_a.get("source_scene", "chat"),
                                     "source_id": atom_a.get("source_id"),
                                     "privacy_level": atom_a.get("privacy_level", "context_sensitive"),
+                                    "embedding_source_hash": embedding_source_hash(resolution.merged_content),
                                 },
                             )
                 except Exception as e:

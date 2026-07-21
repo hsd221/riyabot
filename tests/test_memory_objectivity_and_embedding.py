@@ -1,4 +1,3 @@
-import sys
 import tempfile
 import types
 import unittest
@@ -81,18 +80,17 @@ class MemoryObjectivityDatabaseFixtureMixin:
 
 
 class EmbeddingUtilsTest(unittest.IsolatedAsyncioTestCase):
-    async def test_generate_embedding_skips_blank_delegates_to_lazy_import_and_handles_errors(self) -> None:
-        fake_module = types.ModuleType("src.chat.utils.utils")
-        fake_module.get_embedding = AsyncMock(return_value=[0.1, 0.2])
-
-        with patch.dict(sys.modules, {"src.chat.utils.utils": fake_module}):
+    async def test_generate_embedding_skips_blank_delegates_to_shared_service_and_handles_errors(self) -> None:
+        result = types.SimpleNamespace(vector=[0.1, 0.2])
+        with patch("src.memory.embedding_utils.embed_text", new=AsyncMock(return_value=result)):
             self.assertIsNone(await generate_embedding("   "))
             self.assertEqual(await generate_embedding("hello"), [0.1, 0.2])
             self.assertEqual(await generate_query_embedding("query"), [0.1, 0.2])
 
-        fake_error_module = types.ModuleType("src.chat.utils.utils")
-        fake_error_module.get_embedding = AsyncMock(side_effect=RuntimeError("embedding unavailable"))
-        with patch.dict(sys.modules, {"src.chat.utils.utils": fake_error_module}):
+        with patch(
+            "src.memory.embedding_utils.embed_text",
+            new=AsyncMock(side_effect=RuntimeError("embedding unavailable")),
+        ):
             self.assertIsNone(await generate_embedding("hello"))
 
 

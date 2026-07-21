@@ -19,6 +19,7 @@ import time
 from typing import Any, Optional
 
 from src.common.logger import get_logger
+from src.llm_models.embedding import embedding_source_hash
 from src.manager.async_task_manager import AsyncTask
 from src.memory.embedding_utils import generate_embedding
 from src.memory.store import MemoryStore
@@ -132,6 +133,10 @@ class ReconciliationTask(AsyncTask):
             qdrant_points = await self._list_qdrant_points()
             sqlite_all_ids = await self._store.list_atom_ids()
             sqlite_active_ids = await self._store.list_atom_ids(status="active")
+            list_source_hashes = getattr(self._store, "list_atom_source_hashes", None)
+            sqlite_active_source_hashes = (
+                await list_source_hashes(status="active") if callable(list_source_hashes) else None
+            )
         except Exception as e:
             logger.error("读取存储一致性状态失败", error=str(e), exc_info=True)
             return 0, 0
@@ -146,6 +151,18 @@ class ReconciliationTask(AsyncTask):
             if isinstance(point.get("business_id"), str) and point["business_id"]
         }
         missing_ids = sqlite_active_ids - qdrant_business_ids
+        stale_ids: set[str] = set()
+        if sqlite_active_source_hashes is not None:
+            for point in qdrant_points:
+                business_id = point.get("business_id")
+                stored_source_hash = point.get("embedding_source_hash")
+                if not isinstance(business_id, str) or stored_source_hash is None:
+                    continue
+                expected_source_hash = sqlite_active_source_hashes.get(business_id)
+                if expected_source_hash is not None and str(stored_source_hash) != expected_source_hash:
+                    stale_ids.add(business_id)
+
+        self._forced_resync_ids.update(stale_ids)
 
         reactivated_ids = self._forced_cleanup_ids & sqlite_active_ids
         self._forced_cleanup_ids.difference_update(reactivated_ids)
@@ -185,6 +202,7 @@ class ReconciliationTask(AsyncTask):
             "发现存储真实差异",
             extra={
                 "missing_vectors": len(missing_ids),
+                "stale_vectors": len(stale_ids),
                 "orphan_vectors": len(current_orphans),
                 "confirmed_orphans": len(confirmed_orphans),
                 "forced_resync": len(self._forced_resync_ids),
@@ -432,6 +450,7 @@ class ReconciliationTask(AsyncTask):
             "source_scene": atom_data.get("source_scene", "chat"),
             "source_id": atom_data.get("source_id"),
             "privacy_level": atom_data.get("privacy_level", "context_sensitive"),
+            "embedding_source_hash": embedding_source_hash(str(atom_data.get("content") or "")),
         }
 
     @classmethod

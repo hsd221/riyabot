@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.common.logger import get_logger
 from src.config.config import model_config
-from src.llm_models.utils_model import LLMRequest
+from src.llm_models.embedding import embed_text
 
 logger = get_logger("expression_vector_index")
 
@@ -125,8 +125,8 @@ def _has_embedding_model_configured() -> bool:
 
 
 async def _get_embedding_with_model(text: str, request_type: str) -> Tuple[List[float], str]:
-    llm = LLMRequest(model_set=model_config.model_task_config.embedding, request_type=request_type)
-    return await llm.get_embedding(text)
+    result = await embed_text(text, request_type=request_type)
+    return result.vector, result.profile.signature
 
 
 class ExpressionVectorIndex:

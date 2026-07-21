@@ -18,6 +18,7 @@ from src.memory.schema import (
     MemoryTraceChain,
     RawMessageArchive,
     SemanticDetail,
+    VectorIndexState,
     configure_memory_database,
     initialize_database,
     memory_db,
@@ -28,6 +29,7 @@ logger = get_logger("memory.store")
 
 _QDRANT_POINT_NAMESPACE = uuid.UUID("8e9e1f74-2b30-4f33-8e9b-9b2c972a1a67")
 _DATETIME_FIELDS = ("created_at", "last_accessed_at", "last_reinforced_at")
+_LEGACY_EMBEDDING_SIGNATURE = "legacy-unknown"
 
 
 def _coerce_datetime(value: Any) -> datetime.datetime:
@@ -100,6 +102,12 @@ class MemoryStoreConfig:
     embedding_dimension: int = 1024
     """嵌入向量维度"""
 
+    embedding_signature: str = ""
+    """稳定的 embedding 配置签名，由启动层计算。"""
+
+    embedding_model_name: str = ""
+    """当前 embedding 模型的可读名称，仅用于日志。"""
+
     collection_name_atoms: str = "memory_atoms"
     """记忆原子 Qdrant 集合名称"""
 
@@ -118,6 +126,7 @@ class MemoryStoreConfig:
             f"qdrant_api_key={masked_key}, "
             f"qdrant_local_path={self.qdrant_local_path!r}, "
             f"embedding_dimension={self.embedding_dimension}, "
+            f"embedding_signature={self.embedding_signature!r}, "
             f"collection_name_atoms={self.collection_name_atoms!r}, "
             f"vector_batch_size={self.vector_batch_size})"
         )
@@ -139,9 +148,173 @@ class QdrantManager:
         self.config = config
         self._client: Optional[Any] = None
         self._available = QDRANT_AVAILABLE
+        self._atom_alias_name = f"{config.collection_name_atoms}__active"
+        self._graph_alias_name = f"{config.collection_name_graph}__active"
+        self._active_atoms_collection = config.collection_name_atoms
+        self._active_graph_collection = config.collection_name_graph
+        self._atom_migration_target: Optional[str] = None
+        self._graph_migration_target: Optional[str] = None
+        self._vector_search_enabled = True
+        self._graph_search_enabled = True
+        self._embedding_signature = config.embedding_signature or f"dimension-{config.embedding_dimension}"
 
         if not self._available:
             logger.warning("qdrant-client 未安装，向量索引功能不可用。pip install qdrant-client")
+
+    @property
+    def atom_migration_pending(self) -> bool:
+        return self._atom_migration_target is not None
+
+    @property
+    def atom_migration_target(self) -> Optional[str]:
+        return self._atom_migration_target
+
+    @property
+    def graph_migration_pending(self) -> bool:
+        return self._graph_migration_target is not None
+
+    @property
+    def graph_migration_target(self) -> Optional[str]:
+        return self._graph_migration_target
+
+    @property
+    def vector_search_enabled(self) -> bool:
+        return self._vector_search_enabled and self._client is not None
+
+    @property
+    def graph_search_enabled(self) -> bool:
+        return self._graph_search_enabled and self._client is not None
+
+    @property
+    def active_atoms_collection(self) -> str:
+        if self._client and hasattr(self._client, "get_aliases"):
+            return self._atom_alias_name
+        return self._active_atoms_collection
+
+    @property
+    def active_graph_collection(self) -> str:
+        if self._client and hasattr(self._client, "get_aliases"):
+            return self._graph_alias_name
+        return self._active_graph_collection
+
+    def _atom_write_collection(self) -> str:
+        """Return the collection that accepts vectors in the current embedding space."""
+        return self._atom_migration_target or self.active_atoms_collection
+
+    def _atom_mutation_collections(self) -> list[str]:
+        """Return all atom collections that must receive deletes/payload updates."""
+        collections = [self.active_atoms_collection]
+        if self._atom_migration_target and self._atom_migration_target not in collections:
+            collections.append(self._atom_migration_target)
+        return collections
+
+    def _graph_write_collection(self) -> str:
+        """Return the graph collection that accepts vectors in the current embedding space."""
+        return self._graph_migration_target or self.active_graph_collection
+
+    def _graph_mutation_collections(self) -> list[str]:
+        """Return all graph collections that must receive destructive mutations."""
+        collections = [self.active_graph_collection]
+        if self._graph_migration_target and self._graph_migration_target not in collections:
+            collections.append(self._graph_migration_target)
+        return collections
+
+    def _with_atom_embedding_metadata(self, point_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized_payload = {**payload, "atom_id": str(point_id)}
+        if self.config.embedding_signature:
+            normalized_payload["embedding_signature"] = self._embedding_signature
+            normalized_payload["embedding_dimension"] = self.config.embedding_dimension
+        return normalized_payload
+
+    def _with_graph_embedding_metadata(self, point_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized_payload = {**payload, "entry_id": str(point_id)}
+        if self.config.embedding_signature:
+            normalized_payload["embedding_signature"] = self._embedding_signature
+            normalized_payload["embedding_dimension"] = self.config.embedding_dimension
+        return normalized_payload
+
+    @staticmethod
+    def _versioned_collection_name(base_name: str, signature: str, dimension: int) -> str:
+        suffix = f"__emb_{signature[:12]}_{int(dimension)}"
+        return f"{base_name[: max(1, 180 - len(suffix))]}{suffix}"
+
+    def _get_collection_names(self) -> set[str]:
+        if self._client is None:
+            return set()
+        return {str(collection.name) for collection in self._client.get_collections().collections}
+
+    def _get_aliases(self) -> dict[str, str]:
+        if self._client is None or not hasattr(self._client, "get_aliases"):
+            return {}
+        response = self._client.get_aliases()
+        return {
+            str(alias.alias_name): str(alias.collection_name)
+            for alias in getattr(response, "aliases", []) or []
+            if getattr(alias, "alias_name", None) and getattr(alias, "collection_name", None)
+        }
+
+    def _switch_alias(self, alias_name: str, collection_name: str) -> None:
+        # Qdrant applies all alias changes in this request atomically, which
+        # makes a delete+create pair safe for blue/green collection cutover.
+        # Source: https://qdrant.tech/documentation/concepts/collections/#collection-aliases
+        if self._client is None or qdrant_models is None or not hasattr(self._client, "update_collection_aliases"):
+            raise RuntimeError("当前 Qdrant 客户端不支持 collection alias")
+
+        aliases = self._get_aliases()
+        operations: list[Any] = []
+        if alias_name in aliases:
+            if aliases[alias_name] == collection_name:
+                return
+            operations.append(
+                qdrant_models.DeleteAliasOperation(
+                    delete_alias=qdrant_models.DeleteAlias(alias_name=alias_name),
+                )
+            )
+        operations.append(
+            qdrant_models.CreateAliasOperation(
+                create_alias=qdrant_models.CreateAlias(
+                    collection_name=collection_name,
+                    alias_name=alias_name,
+                )
+            )
+        )
+        if not self._client.update_collection_aliases(change_aliases_operations=operations):
+            raise RuntimeError(f"Qdrant alias '{alias_name}' 切换失败")
+
+    def _load_vector_state(self, index_name: Optional[str] = None) -> Optional[VectorIndexState]:
+        resolved_index_name = index_name or self.config.collection_name_atoms
+        try:
+            with memory_db:
+                return VectorIndexState.get_or_none(VectorIndexState.index_name == resolved_index_name)
+        except Exception:
+            logger.exception(
+                "读取向量索引迁移状态失败",
+                event_code="memory.qdrant.migration_state_read_failed",
+                index_name=resolved_index_name,
+            )
+            return None
+
+    def get_atom_migration_state(self) -> Optional[VectorIndexState]:
+        """Return the persisted atom-index migration state."""
+        return self._load_vector_state()
+
+    def get_graph_migration_state(self) -> Optional[VectorIndexState]:
+        """Return the persisted graph-index migration state."""
+        return self._load_vector_state(self.config.collection_name_graph)
+
+    def _save_vector_state(self, index_name: Optional[str] = None, **updates: Any) -> VectorIndexState:
+        resolved_index_name = index_name or self.config.collection_name_atoms
+        now = datetime.datetime.now()
+        with memory_db:
+            state, _ = VectorIndexState.get_or_create(
+                index_name=resolved_index_name,
+                defaults={"updated_at": now},
+            )
+            for field_name, value in updates.items():
+                setattr(state, field_name, value)
+            state.updated_at = now
+            state.save()
+            return state
 
     @staticmethod
     def _normalize_point_id(point_id: str | int) -> str | int:
@@ -254,6 +427,227 @@ class QdrantManager:
         points = getattr(response, "points", response)
         return list(points or [])
 
+    async def _ensure_collection_for_dimension(
+        self,
+        collection_name: str,
+        payload_schema: list[PayloadSchemaField],
+        dimension: int,
+    ) -> None:
+        """Ensure a physical collection has exactly the requested dimension."""
+        if not self._available or not self._client:
+            return
+
+        exists = collection_name in self._get_collection_names()
+        if exists:
+            collection_info = self._client.get_collection(collection_name=collection_name)
+            vector_size = self._collection_vector_size(collection_info)
+            if vector_size is None:
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' vector configuration is incompatible with unnamed vectors"
+                )
+            if vector_size != int(dimension):
+                raise RuntimeError(
+                    f"Qdrant collection '{collection_name}' vector size {vector_size} != requested dimension {dimension}"
+                )
+            return
+
+        self._client.create_collection(
+            collection_name=collection_name,
+            vectors_config=qdrant_models.VectorParams(
+                size=int(dimension),
+                distance=qdrant_models.Distance.COSINE,
+            ),
+        )
+        for field_schema in payload_schema:
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_schema["name"],
+                field_type=field_schema["type"],
+            )
+        logger.info(
+            "Qdrant 版本化集合已创建",
+            event_code="memory.qdrant.versioned_collection_created",
+            collection=collection_name,
+            dimension=dimension,
+        )
+
+    async def _initialize_versioned_index(
+        self,
+        *,
+        index_name: str,
+        alias_name: str,
+        payload_schema: list[PayloadSchemaField],
+    ) -> tuple[str, Optional[str], bool]:
+        """Adopt one legacy collection and prepare a versioned migration target."""
+        if self._client is None:
+            return index_name, None, False
+
+        collection_names = self._get_collection_names()
+        aliases = self._get_aliases()
+        state = self._load_vector_state(index_name)
+        active_collection = aliases.get(alias_name)
+        if active_collection and active_collection not in collection_names:
+            raise RuntimeError(f"Qdrant alias '{alias_name}' 指向不存在的 collection")
+
+        expected_collection = self._versioned_collection_name(
+            index_name,
+            self._embedding_signature,
+            self.config.embedding_dimension,
+        )
+        if not active_collection:
+            if state is not None and state.active_collection in collection_names:
+                active_collection = str(state.active_collection)
+            elif index_name in collection_names:
+                active_collection = index_name
+            else:
+                active_collection = expected_collection
+                await self._ensure_collection_for_dimension(
+                    active_collection,
+                    payload_schema,
+                    self.config.embedding_dimension,
+                )
+            self._switch_alias(alias_name, active_collection)
+
+        active_info = self._client.get_collection(collection_name=active_collection)
+        active_dimension = self._collection_vector_size(active_info)
+        if active_dimension is None:
+            raise RuntimeError(f"Qdrant collection '{active_collection}' 缺少未命名向量配置")
+
+        if state is None:
+            points_count = int(getattr(active_info, "points_count", 0) or 0)
+            active_signature = self._embedding_signature
+            if points_count > 0 and active_collection != expected_collection:
+                # Legacy collections predate persisted model metadata.  A
+                # matching dimension cannot prove that their vectors came
+                # from the configured model, so rebuild them once.
+                active_signature = _LEGACY_EMBEDDING_SIGNATURE
+            state = self._save_vector_state(
+                index_name=index_name,
+                active_signature=active_signature,
+                active_dimension=active_dimension,
+                active_collection=active_collection,
+                status="ready",
+                target_signature=None,
+                target_dimension=None,
+                target_collection=None,
+                last_processed_id=None,
+                migrated_count=0,
+                total_count=0,
+                last_error=None,
+            )
+        elif (
+            state.target_collection == active_collection
+            and state.target_signature == self._embedding_signature
+            and state.target_dimension == self.config.embedding_dimension
+            and active_dimension == self.config.embedding_dimension
+        ):
+            # Alias switching is the authoritative activation step.  If the
+            # process stopped before SQLite state was updated, recover the
+            # completed activation instead of rebuilding a valid target.
+            state = self._save_vector_state(
+                index_name=index_name,
+                active_signature=self._embedding_signature,
+                active_dimension=self.config.embedding_dimension,
+                active_collection=active_collection,
+                target_signature=None,
+                target_dimension=None,
+                target_collection=None,
+                status="ready",
+                last_processed_id=None,
+                last_error=None,
+            )
+        elif state.active_collection != active_collection or state.active_dimension != active_dimension:
+            # The alias is authoritative.  If it unexpectedly points at a
+            # collection other than the persisted active one, its model space
+            # is unknown and must be rebuilt before reads resume.
+            state = self._save_vector_state(
+                index_name=index_name,
+                active_signature=_LEGACY_EMBEDDING_SIGNATURE,
+                active_dimension=active_dimension,
+                active_collection=active_collection,
+            )
+
+        target = None
+        if (
+            state.status in {"migrating", "failed"}
+            and state.target_signature == self._embedding_signature
+            and state.target_dimension == self.config.embedding_dimension
+            and state.target_collection
+        ):
+            target = state.target_collection
+
+        needs_migration = (
+            state.active_signature != self._embedding_signature
+            or state.active_dimension != self.config.embedding_dimension
+        )
+        if needs_migration or target:
+            target = target or self._versioned_collection_name(
+                index_name,
+                self._embedding_signature,
+                self.config.embedding_dimension,
+            )
+            await self._ensure_collection_for_dimension(
+                target,
+                payload_schema,
+                self.config.embedding_dimension,
+            )
+            target_changed = (
+                state.target_signature != self._embedding_signature
+                or state.target_dimension != self.config.embedding_dimension
+                or state.target_collection != target
+            )
+            state_updates: dict[str, Any] = {
+                "status": "migrating",
+                "target_signature": self._embedding_signature,
+                "target_dimension": self.config.embedding_dimension,
+                "target_collection": target,
+                "last_error": None,
+            }
+            if target_changed:
+                state_updates.update(
+                    last_processed_id=None,
+                    migrated_count=0,
+                    total_count=0,
+                )
+            self._save_vector_state(
+                index_name=index_name,
+                **state_updates,
+            )
+            logger.warning(
+                "检测到 embedding 配置变化，已准备后台重建",
+                event_code="memory.qdrant.migration_required",
+                old_signature=state.active_signature,
+                new_signature=self._embedding_signature,
+                old_dimension=state.active_dimension,
+                new_dimension=self.config.embedding_dimension,
+                target_collection=target,
+                index_name=index_name,
+            )
+            return active_collection, target, False
+        return active_collection, None, True
+
+    async def _initialize_versioned_atoms(self) -> None:
+        """Adopt the legacy atom collection and prepare a versioned target when needed."""
+        active, target, search_enabled = await self._initialize_versioned_index(
+            index_name=self.config.collection_name_atoms,
+            alias_name=self._atom_alias_name,
+            payload_schema=self._atoms_payload_schema(),
+        )
+        self._active_atoms_collection = active
+        self._atom_migration_target = target
+        self._vector_search_enabled = search_enabled
+
+    async def _initialize_graph_collection(self) -> None:
+        """Adopt the graph collection and detect embedding-space changes."""
+        active, target, search_enabled = await self._initialize_versioned_index(
+            index_name=self.config.collection_name_graph,
+            alias_name=self._graph_alias_name,
+            payload_schema=self._graph_payload_schema(),
+        )
+        self._active_graph_collection = active
+        self._graph_migration_target = target
+        self._graph_search_enabled = search_enabled
+
     async def initialize(self) -> None:
         """初始化 Qdrant 连接并确保集合存在
 
@@ -279,22 +673,24 @@ class QdrantManager:
                 mode = "local"
                 source = self.config.qdrant_local_path
 
-            # 确保集合存在
-            await self._ensure_collection(
-                self.config.collection_name_atoms,
-                self._atoms_payload_schema(),
-            )
-            await self._ensure_collection(
-                self.config.collection_name_graph,
-                self._graph_payload_schema(),
-            )
+            if hasattr(self._client, "update_collection_aliases") and hasattr(self._client, "get_aliases"):
+                await self._initialize_versioned_atoms()
+                await self._initialize_graph_collection()
+            else:
+                # Compatibility path for older adapters and small test fakes.
+                await self._ensure_collection(self.config.collection_name_atoms, self._atoms_payload_schema())
+                await self._ensure_collection(self.config.collection_name_graph, self._graph_payload_schema())
             logger.info(
                 "Qdrant 已就绪",
                 event_code="memory.qdrant.ready",
                 mode=mode,
                 source=source,
-                atom_collection=self.config.collection_name_atoms,
-                graph_collection=self.config.collection_name_graph,
+                atom_collection=self.active_atoms_collection,
+                graph_collection=self.active_graph_collection,
+                vector_search_enabled=self.vector_search_enabled,
+                migration_pending=self.atom_migration_pending,
+                graph_search_enabled=self.graph_search_enabled,
+                graph_migration_pending=self.graph_migration_pending,
             )
         except Exception:
             logger.exception("Qdrant 初始化失败", event_code="memory.qdrant.init_failed")
@@ -321,6 +717,9 @@ class QdrantManager:
             {"name": "privacy_level", "type": "keyword"},
             {"name": "source_scene", "type": "keyword"},
             {"name": "source_id", "type": "keyword"},
+            {"name": "embedding_signature", "type": "keyword"},
+            {"name": "embedding_dimension", "type": "integer"},
+            {"name": "embedding_source_hash", "type": "keyword"},
         ]
 
     @staticmethod
@@ -332,6 +731,9 @@ class QdrantManager:
             {"name": "predicate", "type": "keyword"},
             {"name": "object", "type": "keyword"},
             {"name": "confidence", "type": "float"},
+            {"name": "embedding_signature", "type": "keyword"},
+            {"name": "embedding_dimension", "type": "integer"},
+            {"name": "embedding_source_hash", "type": "keyword"},
         ]
 
     async def _ensure_collection(self, collection_name: str, payload_schema: list[PayloadSchemaField]) -> None:
@@ -394,20 +796,33 @@ class QdrantManager:
         payload: dict[str, Any],
     ) -> bool:
         """写入/更新记忆原子向量"""
+        return await self.upsert_atom_vector_to_collection(
+            collection_name=self._atom_write_collection(),
+            point_id=point_id,
+            vector=vector,
+            payload=payload,
+        )
+
+    async def upsert_atom_vector_to_collection(
+        self,
+        collection_name: str,
+        point_id: str,
+        vector: list[float],
+        payload: dict[str, Any],
+    ) -> bool:
+        """Write an atom vector to one explicit physical collection or alias."""
         if not self._available:
             return True
         if not self._client:
             return False
         try:
-            normalized_payload = dict(payload)
-            normalized_payload["atom_id"] = str(point_id)
             self._client.upsert(
-                collection_name=self.config.collection_name_atoms,
+                collection_name=collection_name,
                 points=[
                     qdrant_models.PointStruct(
                         id=self._normalize_point_id(point_id),
                         vector=vector,
-                        payload=normalized_payload,
+                        payload=self._with_atom_embedding_metadata(point_id, payload),
                     )
                 ],
             )
@@ -418,6 +833,7 @@ class QdrantManager:
                 event_code="memory.qdrant.atom_vector_upsert_failed",
                 point_id=point_id,
                 vector_dimension=len(vector),
+                collection=collection_name,
             )
             return False
 
@@ -428,18 +844,33 @@ class QdrantManager:
         payload: dict[str, Any],
     ) -> bool:
         """写入/更新图条目向量"""
+        return await self.upsert_graph_vector_to_collection(
+            collection_name=self._graph_write_collection(),
+            point_id=point_id,
+            vector=vector,
+            payload=payload,
+        )
+
+    async def upsert_graph_vector_to_collection(
+        self,
+        collection_name: str,
+        point_id: str,
+        vector: list[float],
+        payload: dict[str, Any],
+    ) -> bool:
+        """Write a graph vector to one explicit physical collection or alias."""
         if not self._available:
             return True
         if not self._client:
             return False
         try:
             self._client.upsert(
-                collection_name=self.config.collection_name_graph,
+                collection_name=collection_name,
                 points=[
                     qdrant_models.PointStruct(
                         id=self._normalize_point_id(point_id),
                         vector=vector,
-                        payload=payload,
+                        payload=self._with_graph_embedding_metadata(point_id, payload),
                     )
                 ],
             )
@@ -450,6 +881,7 @@ class QdrantManager:
                 event_code="memory.qdrant.graph_vector_upsert_failed",
                 point_id=point_id,
                 vector_dimension=len(vector),
+                collection=collection_name,
             )
             return False
 
@@ -471,12 +903,12 @@ class QdrantManager:
                 qdrant_models.PointStruct(
                     id=self._normalize_point_id(pid),
                     vector=vec,
-                    payload={**pl, "atom_id": str(pid)},
+                    payload=self._with_atom_embedding_metadata(pid, pl),
                 )
                 for pid, vec, pl in points
             ]
             self._client.upsert(
-                collection_name=self.config.collection_name_atoms,
+                collection_name=self._atom_write_collection(),
                 points=point_structs,
             )
             return len(point_structs)
@@ -485,6 +917,7 @@ class QdrantManager:
                 "Qdrant 原子向量批量写入失败",
                 event_code="memory.qdrant.atom_vectors_batch_upsert_failed",
                 count=len(points),
+                collection=self._atom_write_collection(),
             )
             return 0
 
@@ -506,13 +939,13 @@ class QdrantManager:
         Returns:
             list[dict]: 每个元素包含 payload 和 score
         """
-        if not self._available or not self._client:
+        if not self._available or not self.vector_search_enabled:
             return []
 
         try:
             qdrant_filter = self._build_filter(filters, self._atoms_payload_schema())
             results = self._query_points(
-                collection_name=self.config.collection_name_atoms,
+                collection_name=self.active_atoms_collection,
                 query_vector=query_vector,
                 qdrant_filter=qdrant_filter,
                 limit=limit,
@@ -540,12 +973,12 @@ class QdrantManager:
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """向量检索相似图条目"""
-        if not self._available or not self._client:
+        if not self._available or not self.graph_search_enabled:
             return []
 
         try:
             results = self._query_points(
-                collection_name=self.config.collection_name_graph,
+                collection_name=self.active_graph_collection,
                 query_vector=query_vector,
                 limit=limit,
             )
@@ -565,34 +998,55 @@ class QdrantManager:
             )
             return []
 
-    async def list_atom_points(self, page_size: int = 256) -> Optional[list[dict[str, Any]]]:
-        """分页读取 Qdrant 原子的物理 ID 与可信业务 ID。"""
+    async def _list_index_points(
+        self,
+        *,
+        collection_name: str,
+        business_id_key: str,
+        index_label: str,
+        page_size: int = 256,
+    ) -> Optional[list[dict[str, Any]]]:
+        """Read physical IDs and verified business IDs from one Qdrant collection."""
         if not self._available or not self._client:
             return None
 
-        atom_points: list[dict[str, Any]] = []
+        point_summaries: list[dict[str, Any]] = []
         offset: Any = None
         untrusted = 0
         try:
             while True:
                 points, next_offset = self._client.scroll(
-                    collection_name=self.config.collection_name_atoms,
+                    collection_name=collection_name,
                     limit=page_size,
                     offset=offset,
-                    with_payload=["atom_id"],
+                    with_payload=[
+                        business_id_key,
+                        "embedding_signature",
+                        "embedding_dimension",
+                        "embedding_source_hash",
+                    ],
                     with_vectors=False,
                 )
                 for point in points:
                     physical_id = point.id
-                    payload_atom_id = (getattr(point, "payload", None) or {}).get("atom_id")
+                    point_payload = getattr(point, "payload", None) or {}
+                    payload_business_id = point_payload.get(business_id_key)
                     business_id: Optional[str] = None
-                    if payload_atom_id is not None:
-                        candidate = str(payload_atom_id)
+                    if payload_business_id is not None:
+                        candidate = str(payload_business_id)
                         if self._normalize_point_id(candidate) == self._normalize_point_id(physical_id):
                             business_id = candidate
                     if business_id is None:
                         untrusted += 1
-                    atom_points.append({"physical_id": physical_id, "business_id": business_id})
+                    point_summary = {"physical_id": physical_id, "business_id": business_id}
+                    for metadata_key in (
+                        "embedding_signature",
+                        "embedding_dimension",
+                        "embedding_source_hash",
+                    ):
+                        if point_payload.get(metadata_key) is not None:
+                            point_summary[metadata_key] = point_payload[metadata_key]
+                    point_summaries.append(point_summary)
 
                 if next_offset is None:
                     break
@@ -602,18 +1056,54 @@ class QdrantManager:
 
             if untrusted:
                 logger.warning(
-                    "Qdrant 原子业务 atom_id 缺失或与物理 ID 不匹配",
-                    event_code="memory.qdrant.atom_ids_untrusted_payload",
+                    "Qdrant 业务 ID 缺失或与物理 ID 不匹配",
+                    event_code="memory.qdrant.index_ids_untrusted_payload",
+                    index_name=index_label,
                     count=untrusted,
                 )
-            return atom_points
+            return point_summaries
         except Exception:
-            logger.exception("Qdrant 原子 point 列表获取失败", event_code="memory.qdrant.atom_points_list_failed")
+            logger.exception(
+                "Qdrant point 列表获取失败",
+                event_code="memory.qdrant.index_points_list_failed",
+                index_name=index_label,
+                collection=collection_name,
+            )
             return None
 
-    async def list_atom_ids(self, page_size: int = 256) -> Optional[set[str]]:
+    async def list_atom_points(
+        self,
+        page_size: int = 256,
+        collection_name: Optional[str] = None,
+    ) -> Optional[list[dict[str, Any]]]:
+        """分页读取 Qdrant 原子的物理 ID 与可信业务 ID。"""
+        return await self._list_index_points(
+            collection_name=collection_name or self.active_atoms_collection,
+            business_id_key="atom_id",
+            index_label=self.config.collection_name_atoms,
+            page_size=page_size,
+        )
+
+    async def list_graph_points(
+        self,
+        page_size: int = 256,
+        collection_name: Optional[str] = None,
+    ) -> Optional[list[dict[str, Any]]]:
+        """分页读取 Qdrant 图条目的物理 ID 与可信业务 ID。"""
+        return await self._list_index_points(
+            collection_name=collection_name or self.active_graph_collection,
+            business_id_key="entry_id",
+            index_label=self.config.collection_name_graph,
+            page_size=page_size,
+        )
+
+    async def list_atom_ids(
+        self,
+        page_size: int = 256,
+        collection_name: Optional[str] = None,
+    ) -> Optional[set[str]]:
         """分页读取 Qdrant 中已验证可映射回业务主键的原子 ID。"""
-        atom_points = await self.list_atom_points(page_size=page_size)
+        atom_points = await self.list_atom_points(page_size=page_size, collection_name=collection_name)
         if atom_points is None:
             return None
         return {
@@ -630,9 +1120,24 @@ class QdrantManager:
             return True
         if not self._client:
             return False
+        for collection_name in self._atom_mutation_collections():
+            if not await self.delete_atom_vector_from_collection(collection_name, point_id):
+                return False
+        return True
+
+    async def delete_atom_vector_from_collection(
+        self,
+        collection_name: str,
+        point_id: str | int,
+    ) -> bool:
+        """Delete one atom point from an explicit physical collection or alias."""
+        if not self._available:
+            return True
+        if not self._client:
+            return False
         try:
             self._client.delete(
-                collection_name=self.config.collection_name_atoms,
+                collection_name=collection_name,
                 points_selector=qdrant_models.PointIdsList(points=[self._normalize_point_id(point_id)]),
             )
             return True
@@ -641,6 +1146,7 @@ class QdrantManager:
                 "Qdrant 原子向量删除失败",
                 event_code="memory.qdrant.atom_vector_delete_failed",
                 point_id=point_id,
+                collection=collection_name,
             )
             return False
 
@@ -661,28 +1167,32 @@ class QdrantManager:
             return True
         if not self._client:
             return False
-        try:
-            self._client.set_payload(
-                collection_name=self.config.collection_name_atoms,
-                payload=payload,
-                points=[self._normalize_point_id(point_id)],
-            )
-            return True
-        except KeyError:
-            logger.debug(
-                "Qdrant 原子不存在，等待一致性协调",
-                event_code="memory.qdrant.atom_payload_missing",
-                point_id=point_id,
-            )
-            return False
-        except Exception:
-            logger.exception(
-                "Qdrant 原子 payload 设置失败",
-                event_code="memory.qdrant.atom_payload_set_failed",
-                point_id=point_id,
-                payload_keys=list(payload.keys()),
-            )
-            return False
+        updated = False
+        for collection_name in self._atom_mutation_collections():
+            try:
+                self._client.set_payload(
+                    collection_name=collection_name,
+                    payload=payload,
+                    points=[self._normalize_point_id(point_id)],
+                )
+                updated = True
+            except KeyError:
+                logger.debug(
+                    "Qdrant 原子不存在，等待一致性协调",
+                    event_code="memory.qdrant.atom_payload_missing",
+                    point_id=point_id,
+                    collection=collection_name,
+                )
+            except Exception:
+                logger.exception(
+                    "Qdrant 原子 payload 设置失败",
+                    event_code="memory.qdrant.atom_payload_set_failed",
+                    point_id=point_id,
+                    payload_keys=list(payload.keys()),
+                    collection=collection_name,
+                )
+                return False
+        return updated
 
     async def delete_graph_vector(self, entry_id: str) -> bool:
         """删除指定图条目的向量"""
@@ -690,9 +1200,20 @@ class QdrantManager:
             return True
         if not self._client:
             return False
+        for collection_name in self._graph_mutation_collections():
+            if not await self.delete_graph_vector_from_collection(collection_name, entry_id):
+                return False
+        return True
+
+    async def delete_graph_vector_from_collection(self, collection_name: str, entry_id: str | int) -> bool:
+        """Delete one graph point from an explicit physical collection or alias."""
+        if not self._available:
+            return True
+        if not self._client:
+            return False
         try:
             self._client.delete(
-                collection_name=self.config.collection_name_graph,
+                collection_name=collection_name,
                 points_selector=qdrant_models.PointIdsList(points=[self._normalize_point_id(entry_id)]),
             )
             return True
@@ -701,8 +1222,179 @@ class QdrantManager:
                 "Qdrant 图向量删除失败",
                 event_code="memory.qdrant.graph_vector_delete_failed",
                 entry_id=entry_id,
+                collection=collection_name,
             )
             return False
+
+    def _mark_index_migration_progress(
+        self,
+        *,
+        index_name: str,
+        target_collection: Optional[str],
+        last_processed_id: Optional[str],
+        migrated_count: int,
+        total_count: int,
+    ) -> None:
+        if not target_collection:
+            return
+        self._save_vector_state(
+            index_name=index_name,
+            status="migrating",
+            target_signature=self._embedding_signature,
+            target_dimension=self.config.embedding_dimension,
+            target_collection=target_collection,
+            last_processed_id=last_processed_id,
+            migrated_count=max(0, int(migrated_count)),
+            total_count=max(0, int(total_count)),
+            last_error=None,
+        )
+
+    def _mark_index_migration_failure(
+        self,
+        *,
+        index_name: str,
+        target_collection: Optional[str],
+        error: str,
+    ) -> None:
+        if not target_collection:
+            return
+        self._save_vector_state(
+            index_name=index_name,
+            status="failed",
+            target_signature=self._embedding_signature,
+            target_dimension=self.config.embedding_dimension,
+            target_collection=target_collection,
+            last_error=str(error)[:4000],
+        )
+
+    async def _activate_index_migration(
+        self,
+        *,
+        index_name: str,
+        alias_name: str,
+        target: Optional[str],
+    ) -> bool:
+        if not target or not self._client:
+            return False
+
+        try:
+            self._switch_alias(alias_name, target)
+        except Exception:
+            logger.exception(
+                "Qdrant 向量迁移 alias 切换失败",
+                event_code="memory.qdrant.migration_activation_failed",
+                index_name=index_name,
+                target_collection=target,
+            )
+            return False
+
+        try:
+            self._save_vector_state(
+                index_name=index_name,
+                active_signature=self._embedding_signature,
+                active_dimension=self.config.embedding_dimension,
+                active_collection=target,
+                target_signature=None,
+                target_dimension=None,
+                target_collection=None,
+                status="ready",
+                last_processed_id=None,
+                last_error=None,
+            )
+        except Exception:
+            logger.exception(
+                "Qdrant alias 已切换，但迁移状态保存失败",
+                event_code="memory.qdrant.migration_state_activation_failed",
+                index_name=index_name,
+                target_collection=target,
+            )
+            return False
+
+        logger.info(
+            "Qdrant 向量索引迁移已激活",
+            event_code="memory.qdrant.migration_activated",
+            index_name=index_name,
+            active_collection=target,
+            embedding_signature=self._embedding_signature,
+            embedding_dimension=self.config.embedding_dimension,
+        )
+        return True
+
+    async def mark_atom_migration_progress(
+        self,
+        *,
+        last_processed_id: Optional[str],
+        migrated_count: int,
+        total_count: int,
+    ) -> None:
+        """Persist a resumable atom migration cursor after a completed batch."""
+        self._mark_index_migration_progress(
+            index_name=self.config.collection_name_atoms,
+            target_collection=self._atom_migration_target,
+            last_processed_id=last_processed_id,
+            migrated_count=migrated_count,
+            total_count=total_count,
+        )
+
+    async def mark_atom_migration_failure(self, error: str) -> None:
+        """Record an atom migration failure without changing the active alias."""
+        self._mark_index_migration_failure(
+            index_name=self.config.collection_name_atoms,
+            target_collection=self._atom_migration_target,
+            error=error,
+        )
+
+    async def activate_atom_migration(self) -> bool:
+        """Atomically point the stable atom alias at a fully rebuilt collection."""
+        target = self._atom_migration_target
+        if not await self._activate_index_migration(
+            index_name=self.config.collection_name_atoms,
+            alias_name=self._atom_alias_name,
+            target=target,
+        ):
+            return False
+        self._active_atoms_collection = str(target)
+        self._atom_migration_target = None
+        self._vector_search_enabled = True
+        return True
+
+    async def mark_graph_migration_progress(
+        self,
+        *,
+        last_processed_id: Optional[str],
+        migrated_count: int,
+        total_count: int,
+    ) -> None:
+        """Persist a resumable graph migration cursor after a completed batch."""
+        self._mark_index_migration_progress(
+            index_name=self.config.collection_name_graph,
+            target_collection=self._graph_migration_target,
+            last_processed_id=last_processed_id,
+            migrated_count=migrated_count,
+            total_count=total_count,
+        )
+
+    async def mark_graph_migration_failure(self, error: str) -> None:
+        """Record a graph migration failure without changing the active alias."""
+        self._mark_index_migration_failure(
+            index_name=self.config.collection_name_graph,
+            target_collection=self._graph_migration_target,
+            error=error,
+        )
+
+    async def activate_graph_migration(self) -> bool:
+        """Atomically point the stable graph alias at a fully rebuilt collection."""
+        target = self._graph_migration_target
+        if not await self._activate_index_migration(
+            index_name=self.config.collection_name_graph,
+            alias_name=self._graph_alias_name,
+            target=target,
+        ):
+            return False
+        self._active_graph_collection = str(target)
+        self._graph_migration_target = None
+        self._graph_search_enabled = True
+        return True
 
     # -- 集合管理工具 -------------------------------------------------------
 
@@ -1058,6 +1750,24 @@ class MemoryStore:
             )
             return None
 
+    async def list_atom_source_hashes(self, status: Optional[str] = None) -> Optional[dict[str, str]]:
+        """读取 SQLite 原子当前内容的稳定哈希，用于识别陈旧向量。"""
+        from src.llm_models.embedding import embedding_source_hash
+
+        try:
+            with memory_db:
+                query = MemoryAtom.select(MemoryAtom.atom_id, MemoryAtom.content)
+                if status:
+                    query = query.where(MemoryAtom.status == status)
+                return {str(atom.atom_id): embedding_source_hash(str(atom.content or "")) for atom in query}
+        except Exception:
+            logger.exception(
+                "记忆原子内容哈希列表获取失败",
+                event_code="memory.atom.source_hashes_list_failed",
+                status=status,
+            )
+            return None
+
     async def list_atoms(
         self,
         atom_type: Optional[str] = None,
@@ -1140,16 +1850,21 @@ class MemoryStore:
     # -- Qdrant 重建 --------------------------------------------------------
 
     async def rebuild_qdrant_index(self) -> int:
-        """从 SQLite 全量重建 Qdrant 索引
+        """执行一个可恢复的 Qdrant 重建批次。
 
         Returns:
-            int: 重建的向量数量
+            int: 本批次重建的向量数量
         """
-        logger.warning(
-            "Qdrant 索引重建暂不可用：SQLite 未保存原始向量，不能仅凭 embedding_id 重建",
-            event_code="memory.qdrant.index_rebuild_unavailable",
+        if not getattr(self.qdrant, "atom_migration_pending", False):
+            return 0
+
+        from src.memory.vector_migration import VectorIndexMigrationTask
+
+        task = VectorIndexMigrationTask(
+            self,
+            batch_size=self.config.vector_batch_size,
         )
-        return 0
+        return await task.run()
 
     # -- 统计信息 -----------------------------------------------------------
 
@@ -1165,7 +1880,12 @@ class MemoryStore:
                     if count > 0:
                         type_distribution[atom_type] = count
 
-            qdrant_info = await self.qdrant.collection_info(self.config.collection_name_atoms)
+            active_collection = getattr(
+                self.qdrant,
+                "active_atoms_collection",
+                self.config.collection_name_atoms,
+            )
+            qdrant_info = await self.qdrant.collection_info(active_collection)
 
             return {
                 "total_atoms": total_atoms,

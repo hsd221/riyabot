@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Any, Callable, Optional
 
 from src.common.logger import get_logger
+from src.llm_models.embedding import embedding_source_hash
 from src.memory.embedding_utils import generate_embedding
 from src.memory.types import RollbackAction
 
@@ -559,7 +560,7 @@ class WriteOpLogger:
 
     @staticmethod
     def _atom_vector_payload(atom_id: str, atom: dict[str, Any]) -> dict[str, Any]:
-        return {
+        payload = {
             "atom_id": atom_id,
             "atom_type": atom.get("atom_type", "factual"),
             "user_id": atom.get("user_id"),
@@ -572,6 +573,10 @@ class WriteOpLogger:
             "source_id": atom.get("source_id"),
             "privacy_level": atom.get("privacy_level", "context_sensitive"),
         }
+        content = atom.get("content")
+        if isinstance(content, str) and content:
+            payload["embedding_source_hash"] = embedding_source_hash(content)
+        return payload
 
     async def _ensure_sqlite_atom(self, store, atom: dict[str, Any]) -> str:
         atom_id = atom.get("atom_id")
@@ -588,9 +593,10 @@ class WriteOpLogger:
         if not content:
             raise ValueError(f"Qdrant replay 缺少 content，无法生成 embedding: {atom_id}")
 
-        embedding = atom.get("embedding")
-        if not embedding:
-            embedding = await generate_embedding(content)
+        # Operation logs can outlive an embedding-model change.  Never trust
+        # a persisted vector here: regenerate it through the canonical service
+        # so replay cannot label an old vector as belonging to the new space.
+        embedding = await generate_embedding(content)
         if not embedding:
             raise RuntimeError(f"Qdrant replay 生成 embedding 失败: {atom_id}")
 
@@ -628,22 +634,28 @@ class WriteOpLogger:
             if "sqlite" in targets:
                 await store.update_atom(atom_id, updates)
             if "qdrant" in targets:
-                qdrant_updates = {}
-                for key in (
-                    "weight",
-                    "importance",
-                    "confidence",
-                    "status",
-                    "privacy_level",
-                    "source_scene",
-                    "source_id",
-                ):
-                    if key in updates:
-                        qdrant_updates[key] = updates[key]
-                if qdrant_updates:
-                    ok = await store.qdrant.set_atom_payload(atom_id, qdrant_updates)
-                    if not ok:
-                        raise RuntimeError(f"Qdrant replay payload 更新失败: {atom_id}")
+                if "content" in updates:
+                    current_atom = await store.get_atom(atom_id)
+                    if current_atom is None:
+                        raise ValueError(f"UPDATE_ATOM replay 找不到原子: {atom_id}")
+                    await self._upsert_qdrant_atom(store, atom_id, current_atom)
+                else:
+                    qdrant_updates = {}
+                    for key in (
+                        "weight",
+                        "importance",
+                        "confidence",
+                        "status",
+                        "privacy_level",
+                        "source_scene",
+                        "source_id",
+                    ):
+                        if key in updates:
+                            qdrant_updates[key] = updates[key]
+                    if qdrant_updates:
+                        ok = await store.qdrant.set_atom_payload(atom_id, qdrant_updates)
+                        if not ok:
+                            raise RuntimeError(f"Qdrant replay payload 更新失败: {atom_id}")
 
         elif op.op_type == OpType.DELETE_ATOM:
             if not op.atom_ids:

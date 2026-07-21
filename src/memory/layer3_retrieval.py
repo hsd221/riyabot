@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from src.common.logger import get_logger
+from src.llm_models.embedding import embedding_source_hash
 from src.memory.atom import (
     MemoryAtom as MemoryAtomDC,
     EpisodicDetail,
@@ -739,6 +740,9 @@ class MemoryWriter:
                         "source_scene": merged.get("source_scene", "chat"),
                         "source_id": merged.get("source_id"),
                         "privacy_level": merged.get("privacy_level", "context_sensitive"),
+                        "embedding_source_hash": embedding_source_hash(
+                            str(store_updates.get("content") or merged.get("content") or "")
+                        ),
                     }
                     async with WriteOperation(
                         self.op_logger,
@@ -916,6 +920,7 @@ class MemoryWriter:
             "source_scene": atom.source_scene,
             "source_id": atom.source_id,
             "privacy_level": atom.privacy_level,
+            "embedding_source_hash": embedding_source_hash(atom.content),
         }
         return await self.store.qdrant.upsert_atom_vector(
             point_id=atom.atom_id,
@@ -1024,6 +1029,16 @@ class MemoryRetriever:
         Returns:
             检索结果字典列表，每项含原子全部字段 + final_score + similarity_score
         """
+        qdrant = getattr(self.store, "qdrant", None)
+        if qdrant is not None and not getattr(qdrant, "vector_search_enabled", True):
+            logger.debug("向量索引迁移中，直接回退到关键词检索")
+            kw_query = (filters or {}).get("keyword", query_text)
+            return await self.keyword_search(
+                query=kw_query,
+                filters=filters,
+                limit=top_k,
+            )
+
         # 0. 自动生成 query embedding
         if query_embedding is None:
             if query_text:

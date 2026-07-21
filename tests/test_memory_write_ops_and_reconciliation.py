@@ -387,6 +387,13 @@ class FakeStore:
     async def list_atom_ids(self, status: str | None = None) -> set[str]:
         return {atom_id for atom_id, atom in self.atoms.items() if status is None or atom.get("status") == status}
 
+    async def list_atom_source_hashes(self, status: str | None = None) -> dict[str, str]:
+        return {
+            atom_id: reconciliation.embedding_source_hash(str(atom.get("content") or ""))
+            for atom_id, atom in self.atoms.items()
+            if status is None or atom.get("status") == status
+        }
+
     async def insert_atom(self, atom: dict) -> str:
         self.insert_calls += 1
         atom_id = atom["atom_id"]
@@ -451,7 +458,12 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
         store = FakeStore()
 
         try:
-            recovered = await logger.replay_failed_ops(store)
+            with patch.object(
+                write_ops_module,
+                "generate_embedding",
+                new=AsyncMock(return_value=[0.7, 0.3]),
+            ):
+                recovered = await logger.replay_failed_ops(store)
             completed = logger.get_op("op-insert")
         finally:
             tmpdir.cleanup()
@@ -502,7 +514,6 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
             atom_ids=["atom-1"],
             payload={
                 "updates": {
-                    "content": "ignored by qdrant payload",
                     "weight": 0.4,
                     "confidence": 0.6,
                     "source_scene": "group_chat",
@@ -518,6 +529,35 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
             store.qdrant.payload_updates,
             [("atom-1", {"weight": 0.4, "confidence": 0.6, "source_scene": "group_chat"})],
         )
+
+    async def test_replay_content_update_regenerates_the_full_vector(self) -> None:
+        atom = {
+            "atom_id": "atom-content-update",
+            "content": "old content",
+            "weight": 0.5,
+            "status": "active",
+        }
+        store = FakeStore(atoms={atom["atom_id"]: atom})
+        logger = WriteOpLogger(":memory:")
+        op = make_op(
+            "op-content-update",
+            op_type=OpType.UPDATE_ATOM,
+            target="both",
+            atom_ids=[atom["atom_id"]],
+            payload={"updates": {"content": "new content", "weight": 0.7}},
+        )
+
+        with patch.object(
+            write_ops_module,
+            "generate_embedding",
+            new=AsyncMock(return_value=[0.3, 0.7]),
+        ) as generate_embedding:
+            await logger._dispatch_replay(op, store)
+
+        generate_embedding.assert_awaited_once_with("new content")
+        self.assertEqual(store.qdrant.upserts[0]["vector"], [0.3, 0.7])
+        self.assertEqual(store.qdrant.upserts[0]["payload"]["weight"], 0.7)
+        self.assertEqual(store.qdrant.payload_updates, [])
 
     async def test_replay_update_atom_requires_ids_and_surfaces_qdrant_payload_failure(self) -> None:
         logger = WriteOpLogger(":memory:")
@@ -560,14 +600,19 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
         multi_atom = {"atom_id": "atom-multi", "content": "multi", "embedding": [0.2]}
         store = FakeStore()
 
-        await logger._dispatch_replay(
-            make_op("op-single", op_type=OpType.BATCH_INSERT, target="both", payload={"atom": single_atom}),
-            store,
-        )
-        await logger._dispatch_replay(
-            make_op("op-multi", op_type=OpType.BATCH_INSERT, target="both", payload={"atoms": [multi_atom]}),
-            store,
-        )
+        with patch.object(
+            write_ops_module,
+            "generate_embedding",
+            new=AsyncMock(side_effect=[[0.6], [0.4]]),
+        ):
+            await logger._dispatch_replay(
+                make_op("op-single", op_type=OpType.BATCH_INSERT, target="both", payload={"atom": single_atom}),
+                store,
+            )
+            await logger._dispatch_replay(
+                make_op("op-multi", op_type=OpType.BATCH_INSERT, target="both", payload={"atoms": [multi_atom]}),
+                store,
+            )
 
         self.assertEqual(store.insert_calls, 2)
         self.assertEqual([upsert["point_id"] for upsert in store.qdrant.upserts], ["atom-single", "atom-multi"])
@@ -589,16 +634,21 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
         atom = {"atom_id": "atom-existing", "content": "from sqlite", "embedding": [0.3]}
         store = FakeStore(atoms={"atom-existing": atom})
 
-        await logger._dispatch_replay(
-            make_op(
-                "op-qdrant-fallback",
-                op_type=OpType.BATCH_INSERT,
-                target="qdrant",
-                atom_ids=["atom-existing"],
-                payload={},
-            ),
-            store,
-        )
+        with patch.object(
+            write_ops_module,
+            "generate_embedding",
+            new=AsyncMock(return_value=[0.9]),
+        ):
+            await logger._dispatch_replay(
+                make_op(
+                    "op-qdrant-fallback",
+                    op_type=OpType.BATCH_INSERT,
+                    target="qdrant",
+                    atom_ids=["atom-existing"],
+                    payload={},
+                ),
+                store,
+            )
 
         self.assertEqual(store.qdrant.upserts[0]["point_id"], "atom-existing")
 
@@ -708,8 +758,55 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
                     {"atom_id": "atom-upsert-fails", "content": "hello"},
                 )
 
+    async def test_replay_reembeds_instead_of_reusing_a_persisted_vector(self) -> None:
+        logger = WriteOpLogger(":memory:")
+        store = FakeStore()
+        generate_embedding = AsyncMock(return_value=[0.8, 0.2])
+
+        with patch.object(write_ops_module, "generate_embedding", new=generate_embedding):
+            await logger._upsert_qdrant_atom(
+                store,
+                "atom-stale-vector",
+                {
+                    "atom_id": "atom-stale-vector",
+                    "content": "current content",
+                    "embedding": [0.1, 0.9],
+                },
+            )
+
+        generate_embedding.assert_awaited_once_with("current content")
+        self.assertEqual(store.qdrant.upserts[0]["vector"], [0.8, 0.2])
+
 
 class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
+    async def test_storage_drift_reembeds_vector_when_source_hash_is_stale(self) -> None:
+        atom_id = "stale-source-hash"
+        atom = {"atom_id": atom_id, "content": "new content", "status": "active"}
+
+        class MetadataQdrant(FakeQdrant):
+            async def list_atom_points(self) -> list[dict]:
+                return [
+                    {
+                        "physical_id": atom_id,
+                        "business_id": atom_id,
+                        "embedding_source_hash": reconciliation.embedding_source_hash("old content"),
+                    }
+                ]
+
+        qdrant = MetadataQdrant(atom_ids={atom_id})
+        task = ReconciliationTask(FakeStore(atoms={atom_id: atom}, qdrant=qdrant))  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.7, 0.3])) as embed:
+            repaired, removed = await task._reconcile_storage_drift()
+
+        self.assertEqual((repaired, removed), (1, 0))
+        embed.assert_awaited_once_with("new content")
+        self.assertEqual(qdrant.upserts[0]["point_id"], atom_id)
+        self.assertEqual(
+            qdrant.upserts[0]["payload"]["embedding_source_hash"],
+            reconciliation.embedding_source_hash("new content"),
+        )
+
     async def test_run_repairs_actual_store_drift_without_inconsistent_write_ops(self) -> None:
         missing_atom = {
             "atom_id": "missing-active",
