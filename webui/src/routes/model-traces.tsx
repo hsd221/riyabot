@@ -3,13 +3,14 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  RefreshCw,
   ScanSearch,
   Search,
   X,
 } from 'lucide-react'
 import { ModelTraceDetailPanel } from '@/components/model-traces/model-trace-detail'
+import { resolveModelTraceDetailView } from '@/components/model-traces/model-trace-detail-state'
 import { ModelTraceList } from '@/components/model-traces/model-trace-list'
+import { ModelTraceRefreshControls } from '@/components/model-traces/model-trace-refresh-controls'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -21,8 +22,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { fetchModelTraceDetail, fetchModelTraces } from '@/lib/api/model-trace-api'
+import {
+  fetchModelTraceDetail,
+  fetchModelTraces,
+  mergeModelTraceUpdates,
+} from '@/lib/api/model-trace-api'
 import type {
   ModelTraceDetail,
   ModelTraceListResponse,
@@ -30,6 +34,7 @@ import type {
 } from '@/types/model-trace'
 
 const PAGE_SIZE = 30
+const STATUS_REFRESH_INTERVAL_MS = 2000
 
 function DetailSkeleton() {
   return (
@@ -67,6 +72,7 @@ export function ModelTracesPage() {
   const [listError, setListError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [refreshVersion, setRefreshVersion] = useState(0)
+  const [autoRefresh, setAutoRefresh] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -130,6 +136,72 @@ export function ModelTracesPage() {
   const resetPage = () => setPage(1)
   const totalItems = list?.pagination.total_items ?? 0
   const totalPages = list?.pagination.total_pages ?? 0
+  const detailView = resolveModelTraceDetailView({
+    selectedId,
+    detail,
+    loading: loadingDetail,
+    error: detailError,
+  })
+  const runningTraceIds =
+    list?.data
+      .filter((trace) => trace.status === 'running')
+      .map((trace) => trace.id)
+      .join(',') ?? ''
+
+  useEffect(() => {
+    if (!runningTraceIds) return undefined
+
+    const traceIds = runningTraceIds.split(',').map(Number)
+    const controller = new AbortController()
+    let syncing = false
+
+    const syncRunningTraces = async () => {
+      if (document.visibilityState !== 'visible' || syncing) return
+      syncing = true
+
+      try {
+        const updates = (
+          await Promise.all(
+            traceIds.map((traceId) =>
+              fetchModelTraceDetail(traceId, controller.signal).catch(() => null)
+            )
+          )
+        ).filter((trace): trace is ModelTraceDetail => trace !== null)
+
+        if (controller.signal.aborted || updates.length === 0) return
+        setList((current) => (current ? mergeModelTraceUpdates(current, updates) : current))
+        setDetail((current) => {
+          const update = updates.find((trace) => trace.id === current?.id)
+          return update && update.status !== current?.status ? update : current
+        })
+      } finally {
+        syncing = false
+      }
+    }
+
+    const intervalId = window.setInterval(() => {
+      void syncRunningTraces()
+    }, STATUS_REFRESH_INTERVAL_MS)
+
+    return () => {
+      controller.abort()
+      window.clearInterval(intervalId)
+    }
+  }, [runningTraceIds])
+
+  useEffect(() => {
+    if (!autoRefresh) return undefined
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && !loadingList) refresh()
+    }, 8000)
+
+    return () => window.clearInterval(intervalId)
+  }, [autoRefresh, loadingList, refresh])
+
+  useEffect(() => {
+    if (autoRefresh) refresh()
+  }, [autoRefresh, refresh])
 
   return (
     <div className="ios-page h-full overflow-y-auto">
@@ -144,22 +216,12 @@ export function ModelTracesPage() {
             </div>
             <p className="ios-subtitle">{totalItems.toLocaleString()} 条记录</p>
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-11 w-11 shrink-0 rounded-[14px]"
-                onClick={refresh}
-                disabled={loadingList}
-                aria-label="刷新模型请求追踪"
-              >
-                <RefreshCw className={loadingList ? 'animate-spin' : ''} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>刷新模型请求追踪</TooltipContent>
-          </Tooltip>
+          <ModelTraceRefreshControls
+            autoRefresh={autoRefresh}
+            loading={loadingList}
+            onAutoRefreshChange={setAutoRefresh}
+            onRefresh={refresh}
+          />
         </header>
 
         <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1.4fr)_repeat(3,minmax(10rem,0.75fr))]">
@@ -303,9 +365,11 @@ export function ModelTracesPage() {
           </section>
 
           <div className="min-w-0 lg:overflow-y-auto">
-            {loadingDetail ? (
+            {detailView.kind === 'detail' ? (
+              <ModelTraceDetailPanel detail={detailView.detail} />
+            ) : detailView.kind === 'loading' ? (
               <DetailSkeleton />
-            ) : detailError ? (
+            ) : detailView.kind === 'error' ? (
               <div className="flex min-h-[36rem] flex-col items-center justify-center gap-3 px-6 text-center">
                 <span className="ios-symbol ios-symbol-md ios-symbol-red" aria-hidden="true">
                   <AlertCircle className="h-5 w-5" />
@@ -313,12 +377,10 @@ export function ModelTracesPage() {
                 <div>
                   <p className="text-[16px] font-semibold">详情加载失败</p>
                   <p className="mt-1 max-w-md text-[13px] leading-5 text-muted-foreground">
-                    {detailError}
+                    {detailView.message}
                   </p>
                 </div>
               </div>
-            ) : detail ? (
-              <ModelTraceDetailPanel detail={detail} />
             ) : (
               <div className="flex min-h-[36rem] flex-col items-center justify-center gap-3 px-6 text-center">
                 <span className="ios-symbol ios-symbol-md ios-symbol-gray" aria-hidden="true">

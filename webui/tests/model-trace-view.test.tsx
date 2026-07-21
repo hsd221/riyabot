@@ -2,13 +2,22 @@ import { describe, expect, it, mock } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { cn } from '../src/lib/utils'
-import { buildModelTraceSearchParams } from '../src/lib/api/model-trace-api'
+import {
+  buildModelTraceSearchParams,
+  mergeModelTraceUpdates,
+} from '../src/lib/api/model-trace-api'
 import type { ModelTraceDetail } from '../src/types/model-trace'
 
 mock.module('@/lib/utils', () => ({ cn }))
 
 const { ModelTraceDetailPanel } = await import('../src/components/model-traces/model-trace-detail')
+const { resolveModelTraceDetailView } = await import(
+  '../src/components/model-traces/model-trace-detail-state'
+)
 const { ModelTraceList } = await import('../src/components/model-traces/model-trace-list')
+const { ModelTraceRefreshControls } = await import(
+  '../src/components/model-traces/model-trace-refresh-controls'
+)
 const { TooltipProvider } = await import('../src/components/ui/tooltip')
 
 const detail: ModelTraceDetail = {
@@ -71,6 +80,58 @@ describe('model trace view', () => {
     expect(params.toString()).toBe(
       'page=2&page_size=30&status=error&request_type=planner.main&model=model-b&search=timeout'
     )
+  })
+
+  it('updates existing request states without adding newly discovered requests', () => {
+    const current = {
+      data: [{ ...detail, status: 'running' as const, completed_at: null, duration_ms: null }],
+      pagination: { page: 1, page_size: 30, total_items: 1, total_pages: 1 },
+      filter_options: { request_types: ['reply.main'], models: ['model-a'] },
+    }
+    const completed = { ...detail, status: 'success' as const }
+    const newRequest = {
+      ...detail,
+      id: 18,
+      status: 'running' as const,
+      completed_at: null,
+      duration_ms: null,
+    }
+
+    const updated = mergeModelTraceUpdates(current, [completed, newRequest])
+
+    expect(updated.data).toHaveLength(1)
+    expect(updated.data[0]?.id).toBe(detail.id)
+    expect(updated.data[0]?.status).toBe('success')
+    expect(updated.data[0]?.completed_at).toBe(detail.completed_at)
+    expect(updated.pagination).toBe(current.pagination)
+  })
+
+  it('uses native switch semantics for automatic list refresh', () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <ModelTraceRefreshControls
+          autoRefresh={false}
+          loading={false}
+          onAutoRefreshChange={() => {}}
+          onRefresh={() => {}}
+        />
+      </TooltipProvider>
+    )
+
+    expect(html).toContain('role="switch"')
+    expect(html).toContain('aria-checked="false"')
+    expect(html).toContain('for="model-traces-auto-refresh"')
+  })
+
+  it('keeps the selected detail mounted while it refreshes in the background', () => {
+    const view = resolveModelTraceDetailView({
+      selectedId: detail.id,
+      detail,
+      loading: true,
+      error: '后台刷新暂时失败',
+    })
+
+    expect(view).toEqual({ kind: 'detail', detail })
   })
 
   it('renders concrete request, response, and trace metadata without interpreting markup', () => {

@@ -3,6 +3,7 @@ import type {
   ModelTraceDetail,
   ModelTraceListResponse,
   ModelTraceQuery,
+  ModelTraceSummary,
 } from '../../types/model-trace'
 
 const API_BASE = '/api/webui/model-traces'
@@ -30,6 +31,49 @@ export function buildModelTraceSearchParams(query: ModelTraceQuery): URLSearchPa
   if (query.model) params.set('model', query.model)
   if (query.search?.trim()) params.set('search', query.search.trim())
   return params
+}
+
+export function mergeModelTraceUpdates(
+  current: ModelTraceListResponse,
+  updates: ModelTraceSummary[]
+): ModelTraceListResponse {
+  const updatesById = new Map(updates.map((trace) => [trace.id, trace]))
+  let changed = false
+  const data = current.data.map((trace) => {
+    const update = updatesById.get(trace.id)
+    if (
+      !update ||
+      (trace.status === update.status &&
+        trace.completed_at === update.completed_at &&
+        trace.duration_ms === update.duration_ms &&
+        trace.response_preview === update.response_preview &&
+        trace.error_type === update.error_type &&
+        trace.error_message === update.error_message &&
+        trace.status_code === update.status_code &&
+        trace.prompt_tokens === update.prompt_tokens &&
+        trace.completion_tokens === update.completion_tokens &&
+        trace.total_tokens === update.total_tokens)
+    ) {
+      return trace
+    }
+
+    changed = true
+    return {
+      ...trace,
+      status: update.status,
+      completed_at: update.completed_at,
+      duration_ms: update.duration_ms,
+      response_preview: update.response_preview,
+      error_type: update.error_type,
+      error_message: update.error_message,
+      status_code: update.status_code,
+      prompt_tokens: update.prompt_tokens,
+      completion_tokens: update.completion_tokens,
+      total_tokens: update.total_tokens,
+    }
+  })
+
+  return changed ? { ...current, data } : current
 }
 
 export async function fetchModelTraces(
