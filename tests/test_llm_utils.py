@@ -293,6 +293,30 @@ class LLMRequestHelpersTest(unittest.IsolatedAsyncioTestCase):
         get_client.assert_called_once_with(provider, force_new=True)
         self.assertEqual(request.model_usage["model-b"], (10, 0, 1))
 
+    def test_select_model_uses_runtime_config_override_for_custom_embedding_request(self) -> None:
+        task = TaskConfig(model_list=["model-a"], selection_strategy="balance")
+        request = LLMRequest(task, request_type="emoji.vector.index", model_config_override=SimpleNamespace())
+        provider = APIProvider(name="provider-runtime", base_url="https://api.example.test", api_key="secret")
+        model = ModelInfo(
+            model_identifier="runtime-id",
+            name="model-a",
+            api_provider="provider-runtime",
+        )
+        override = SimpleNamespace(
+            get_model_info=lambda name: model,
+            get_provider=lambda name: provider,
+        )
+        request.model_config_override = override
+
+        with patch(
+            "src.llm_models.utils_model.client_registry.get_client_class_instance", return_value=object()
+        ) as get_client:
+            selected_model, selected_provider, _ = request._select_model(request_type=RequestType.EMBEDDING)
+
+        self.assertIs(selected_model, model)
+        self.assertIs(selected_provider, provider)
+        get_client.assert_called_once_with(provider, force_new=True)
+
     async def test_attempt_response_uses_request_then_model_then_task_generation_defaults(self) -> None:
         request = LLMRequest(self.task, request_type="reply")
         provider = APIProvider(

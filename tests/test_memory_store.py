@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.llm_models.embedding import embedding_source_hash
+from src.llm_models.embedding_profile import EmbeddingProfile, ProfiledEmbedding
 from src.memory import store as store_module
 from src.memory.schema import (
     AtomAssociationModel,
@@ -272,6 +273,37 @@ class QdrantManagerUtilityTest(unittest.TestCase):
 
 
 class QdrantManagerOperationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_rejects_an_in_flight_vector_from_the_previous_embedding_profile(self) -> None:
+        manager = QdrantManager(
+            MemoryStoreConfig(
+                collection_name_atoms="atoms",
+                embedding_dimension=2,
+                embedding_signature="profile-new",
+            )
+        )
+        client = FakeQdrantClient(collections=["atoms"])
+        manager._available = True
+        manager._client = client
+        old_profile = EmbeddingProfile("profile-old", "old", "old", "provider", 2, ("old",))
+        new_profile = EmbeddingProfile("profile-new", "new", "new", "provider", 2, ("new",))
+
+        self.assertFalse(
+            await manager.upsert_atom_vector(
+                "atom-old",
+                ProfiledEmbedding([0.1, 0.2], old_profile),
+                {},
+            )
+        )
+        self.assertTrue(
+            await manager.upsert_atom_vector(
+                "atom-new",
+                ProfiledEmbedding([0.1, 0.2], new_profile),
+                {},
+            )
+        )
+        self.assertEqual(len(client.upserts), 1)
+        self.assertEqual(client.upserts[0][1][0].payload["embedding_signature"], "profile-new")
+
     async def test_upsert_atom_vector_overrides_missing_or_incorrect_payload_atom_id(self) -> None:
         manager = QdrantManager(MemoryStoreConfig(collection_name_atoms="atoms"))
         client = FakeQdrantClient(collections=["atoms"])

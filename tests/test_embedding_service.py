@@ -38,6 +38,19 @@ class EmbeddingServiceTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "finite"):
                 await embedding.embed_text("hello")
 
+    async def test_embed_text_passes_runtime_snapshot_to_request_and_marks_vector(self) -> None:
+        llm = SimpleNamespace(get_embedding=AsyncMock(return_value=([0.1, 0.2], "runtime-model")))
+        profile = SimpleNamespace(signature="profile-signature", dimension=2)
+        runtime = SimpleNamespace(model_config=object(), task_config=object(), profile=profile)
+
+        with patch.object(embedding, "LLMRequest", Mock(return_value=llm)) as request_cls:
+            result = await embedding.embed_text("hello", runtime=runtime)
+
+        self.assertEqual(result.vector, [0.1, 0.2])
+        self.assertEqual(result.vector.embedding_signature, "profile-signature")
+        self.assertEqual(result.vector.embedding_dimension, 2)
+        self.assertIs(request_cls.call_args.kwargs["model_config_override"], runtime.model_config)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,9 @@ from hashlib import sha256
 
 from src.llm_models.embedding_profile import (
     EmbeddingProfile,
+    EmbeddingRuntime,
+    ProfiledEmbedding,
+    get_active_embedding_runtime,
     get_embedding_profile,
     get_stable_embedding_task_config,
 )
@@ -34,6 +37,7 @@ async def embed_text(
     *,
     request_type: str = "embedding",
     expected_dimension: int | None = None,
+    runtime: EmbeddingRuntime | None = None,
 ) -> EmbeddingResult:
     """Generate a validated vector using the project's pinned embedding model.
 
@@ -44,10 +48,13 @@ async def embed_text(
     if not isinstance(text, str) or not text.strip():
         raise ValueError("embedding input must be a non-empty string")
 
-    llm = LLMRequest(
-        model_set=get_stable_embedding_task_config(),
-        request_type=request_type,
-    )
+    runtime = runtime or get_active_embedding_runtime()
+    runtime_config = runtime.model_config if runtime is not None else None
+    task_config = runtime.task_config if runtime is not None else get_stable_embedding_task_config()
+    request_kwargs = {"model_set": task_config, "request_type": request_type}
+    if runtime_config is not None:
+        request_kwargs["model_config_override"] = runtime_config
+    llm = LLMRequest(**request_kwargs)
     raw_vector, _runtime_model_name = await llm.get_embedding(text)
     try:
         vector = [float(value) for value in raw_vector]
@@ -61,7 +68,16 @@ async def embed_text(
     if expected_dimension is not None and len(vector) != int(expected_dimension):
         raise ValueError(f"embedding dimension {len(vector)} != expected dimension {int(expected_dimension)}")
 
+    if runtime is not None and len(vector) == runtime.profile.dimension:
+        profile = runtime.profile
+    elif runtime_config is not None:
+        profile = get_embedding_profile(len(vector), config=runtime_config)
+    else:
+        profile = get_embedding_profile(len(vector))
+    if runtime is not None and profile.signature != runtime.profile.signature:
+        raise ValueError("embedding profile changed while request was running")
+
     return EmbeddingResult(
-        vector=vector,
-        profile=get_embedding_profile(len(vector)),
+        vector=ProfiledEmbedding(vector, profile),
+        profile=profile,
     )

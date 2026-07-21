@@ -34,6 +34,32 @@ class EmbeddingProfile:
     model_names: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class EmbeddingRuntime:
+    """Immutable configuration snapshot used by one embedding generation."""
+
+    model_config: Any
+    task_config: Any
+    profile: EmbeddingProfile
+
+
+class ProfiledEmbedding(list[float]):
+    """A list-compatible vector carrying the profile that generated it.
+
+    Existing callers can keep treating vectors as ordinary lists, while storage
+    layers can reject a result that was generated before a runtime profile
+    switch.
+    """
+
+    def __init__(self, values: list[float], profile: EmbeddingProfile) -> None:
+        super().__init__(values)
+        self.embedding_signature = profile.signature
+        self.embedding_dimension = profile.dimension
+
+
+_active_embedding_runtime: EmbeddingRuntime | None = None
+
+
 def _json_safe(value: Any) -> Any:
     """Convert TOML/config values into deterministic JSON-compatible data."""
     if isinstance(value, dict):
@@ -45,10 +71,11 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _model_descriptor(model_name: str) -> dict[str, Any]:
+def _model_descriptor(model_name: str, config: Any | None = None) -> dict[str, Any]:
     """Return the non-secret parts of a configured model contract."""
-    model_info = model_config.get_model_info(model_name)
-    provider = model_config.get_provider(model_info.api_provider)
+    config = config or model_config
+    model_info = config.get_model_info(model_name)
+    provider = config.get_provider(model_info.api_provider)
     return {
         "name": model_info.name,
         "model_identifier": model_info.model_identifier,
@@ -70,7 +97,7 @@ def _warn_multiple_models(model_names: tuple[str, ...]) -> None:
     )
 
 
-def get_embedding_profile(dimension: int) -> EmbeddingProfile:
+def get_embedding_profile(dimension: int, *, config: Any | None = None) -> EmbeddingProfile:
     """Build a deterministic profile for the model used by vector writes.
 
     The embedding task historically allowed multiple models with a random
@@ -79,7 +106,8 @@ def get_embedding_profile(dimension: int) -> EmbeddingProfile:
     first configured model.  The selected model is therefore the only model
     included in the signature.
     """
-    task_config = model_config.model_task_config.embedding
+    config = config or model_config
+    task_config = config.model_task_config.embedding
     model_names = tuple(str(name).strip() for name in task_config.model_list if str(name).strip())
     primary_name = model_names[0] if model_names else ""
 
@@ -87,7 +115,7 @@ def get_embedding_profile(dimension: int) -> EmbeddingProfile:
         _warn_multiple_models(model_names)
 
     if primary_name:
-        descriptor = _model_descriptor(primary_name)
+        descriptor = _model_descriptor(primary_name, config)
     else:
         descriptor = {
             "name": "",
@@ -117,9 +145,10 @@ def get_embedding_profile(dimension: int) -> EmbeddingProfile:
     )
 
 
-def get_stable_embedding_task_config():
+def get_stable_embedding_task_config(config: Any | None = None):
     """Return a task config pinned to the model used by vector indexes."""
-    task_config = model_config.model_task_config.embedding
+    config = config or model_config
+    task_config = config.model_task_config.embedding
     model_names = [str(name).strip() for name in task_config.model_list if str(name).strip()]
     if not model_names or len(model_names) == 1:
         return task_config
@@ -129,3 +158,50 @@ def get_stable_embedding_task_config():
     pinned.model_list = [model_names[0]]
     pinned.selection_strategy = "balance"
     return pinned
+
+
+def build_embedding_runtime(config: Any, dimension: int) -> EmbeddingRuntime:
+    """Build a candidate runtime without changing the active process state."""
+    profile = get_embedding_profile(int(dimension), config=config)
+    task_config = get_stable_embedding_task_config(config)
+    return EmbeddingRuntime(model_config=config, task_config=task_config, profile=profile)
+
+
+def activate_embedding_runtime(config: Any, dimension: int) -> EmbeddingRuntime:
+    """Atomically make a validated embedding configuration the active one."""
+    global _active_embedding_runtime
+    runtime = build_embedding_runtime(config, dimension)
+    _active_embedding_runtime = runtime
+    return runtime
+
+
+def get_active_embedding_runtime() -> EmbeddingRuntime | None:
+    """Return the current runtime snapshot, if startup has activated one."""
+    return _active_embedding_runtime
+
+
+def is_active_embedding_profile(profile: EmbeddingProfile) -> bool:
+    """Return whether a profile still matches the process-wide embedding runtime."""
+    return is_active_embedding_signature(profile.signature, profile.dimension)
+
+
+def is_active_embedding_signature(signature: str | None, dimension: int | None = None) -> bool:
+    """Return whether a stored signature and optional dimension are still current."""
+    runtime = get_active_embedding_runtime()
+    if runtime is None:
+        return True
+    if not signature or str(signature) != runtime.profile.signature:
+        return False
+    if dimension is not None:
+        try:
+            if int(dimension) != runtime.profile.dimension:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def reset_embedding_runtime() -> None:
+    """Reset the process-local runtime override for tests and controlled shutdown."""
+    global _active_embedding_runtime
+    _active_embedding_runtime = None

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from src.chat.emoji_system.emoji_vector_index import (
@@ -13,6 +14,52 @@ from src.chat.emoji_system.emoji_vector_index import (
 
 
 class EmojiVectorIndexTest(unittest.IsolatedAsyncioTestCase):
+    async def test_upsert_discards_an_embedding_from_the_previous_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "emoji_vector_index.json"
+            index = EmojiVectorIndex(index_path)
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(return_value=([1.0, 0.0], "profile-old")),
+                ),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index.is_active_embedding_signature",
+                    return_value=False,
+                ),
+            ):
+                indexed = await index.upsert("emoji-a", ("开心",))
+
+            self.assertFalse(indexed)
+            self.assertFalse(index_path.exists())
+
+    async def test_rebuild_replaces_the_complete_emotion_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "emoji_vector_index.json"
+            index = EmojiVectorIndex(index_path)
+            candidates = [
+                EmojiVectorCandidate("emoji-a", ("开心",)),
+                EmojiVectorCandidate("emoji-b", ("难过",)),
+            ]
+            profile = SimpleNamespace(signature="profile-current", dimension=2)
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(return_value=([1.0, 0.0], "profile-current")),
+                ),
+            ):
+                rebuilt = await index.rebuild(candidates, expected_profile=profile)
+
+            self.assertTrue(rebuilt)
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["embedding_signature"], "profile-current")
+            self.assertEqual(payload["embedding_dimension"], 2)
+            self.assertEqual({entry["emoji_hash"] for entry in payload["emojis"]}, {"emoji-a", "emoji-b"})
+
     async def test_upserted_emotion_vectors_are_ranked_and_filtered_by_similarity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             index_path = Path(temp_dir) / "emoji_vector_index.json"
@@ -246,6 +293,31 @@ class EmojiVectorIndexTest(unittest.IsolatedAsyncioTestCase):
 
 
 class EmojiUsageSceneVectorIndexTest(unittest.IsolatedAsyncioTestCase):
+    async def test_rebuild_replaces_the_complete_scene_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "emoji_usage_scene_vector_index.json"
+            index = EmojiUsageSceneVectorIndex(index_path)
+            candidates = [
+                EmojiUsageSceneVectorCandidate(1, "emoji-a", "开心时庆祝"),
+                EmojiUsageSceneVectorCandidate(2, "emoji-b", "难过时安慰"),
+            ]
+            profile = SimpleNamespace(signature="profile-current", dimension=2)
+
+            with (
+                patch("src.chat.emoji_system.emoji_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.chat.emoji_system.emoji_vector_index._get_embedding_with_model",
+                    new=AsyncMock(return_value=([1.0, 0.0], "profile-current")),
+                ),
+            ):
+                rebuilt = await index.rebuild(candidates, expected_profile=profile)
+
+            self.assertTrue(rebuilt)
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["embedding_signature"], "profile-current")
+            self.assertEqual(payload["embedding_dimension"], 2)
+            self.assertEqual({entry["scene_id"] for entry in payload["scenes"]}, {1, 2})
+
     async def test_each_human_usage_scene_is_indexed_and_ranked_independently(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             index_path = Path(temp_dir) / "emoji_usage_scene_vector_index.json"

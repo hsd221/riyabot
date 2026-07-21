@@ -1,9 +1,9 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
-import src.main as main_module
 from src.memory.vector_migration import GraphVectorIndexMigrationTask, VectorIndexMigrationTask
+from src.services.embedding_profile_monitor import register_pending_vector_migrations
 
 
 class VectorMigrationStartupTest(unittest.IsolatedAsyncioTestCase):
@@ -18,11 +18,11 @@ class VectorMigrationStartupTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
         embedding_profile = SimpleNamespace(model_name="embedding-v2", dimension=1536)
+        task_manager = SimpleNamespace(tasks={}, add_task=AsyncMock())
 
-        with patch.object(main_module.async_task_manager, "add_task", new=AsyncMock()) as add_task:
-            await main_module._register_vector_migration_tasks(store, embedding_profile)
+        await register_pending_vector_migrations(store, embedding_profile, task_manager=task_manager)
 
-        registered_tasks = [call.args[0] for call in add_task.await_args_list]
+        registered_tasks = [call.args[0] for call in task_manager.add_task.await_args_list]
         self.assertEqual(len(registered_tasks), 2)
         self.assertIsInstance(registered_tasks[0], VectorIndexMigrationTask)
         self.assertIsInstance(registered_tasks[1], GraphVectorIndexMigrationTask)
@@ -38,17 +38,16 @@ class VectorMigrationStartupTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
         embedding_profile = SimpleNamespace(model_name="embedding-v2", dimension=1536)
+        task_manager = SimpleNamespace(
+            tasks={},
+            add_task=AsyncMock(side_effect=[RuntimeError("atom task failed"), None]),
+        )
 
-        with patch.object(
-            main_module.async_task_manager,
-            "add_task",
-            new=AsyncMock(side_effect=[RuntimeError("atom task failed"), None]),
-        ) as add_task:
-            await main_module._register_vector_migration_tasks(store, embedding_profile)
+        await register_pending_vector_migrations(store, embedding_profile, task_manager=task_manager)
 
-        self.assertEqual(add_task.await_count, 2)
-        self.assertIsInstance(add_task.await_args_list[0].args[0], VectorIndexMigrationTask)
-        self.assertIsInstance(add_task.await_args_list[1].args[0], GraphVectorIndexMigrationTask)
+        self.assertEqual(task_manager.add_task.await_count, 2)
+        self.assertIsInstance(task_manager.add_task.await_args_list[0].args[0], VectorIndexMigrationTask)
+        self.assertIsInstance(task_manager.add_task.await_args_list[1].args[0], GraphVectorIndexMigrationTask)
 
 
 if __name__ == "__main__":

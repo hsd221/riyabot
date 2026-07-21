@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from src.memory import store as store_module
 from src.memory.schema import VectorIndexState, configure_memory_database, initialize_database, memory_db
@@ -115,6 +115,83 @@ class VectorMigrationManagerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await manager.search_similar_atoms([0.1, 0.2]), [])
         self.assertEqual(client.search_calls, [])
+
+    async def test_runtime_reconfigure_prepares_new_targets_without_aliasing_old_vectors(self) -> None:
+        client = AliasQdrantClient(
+            {"memory_atoms": 1024, "graph_entries": 1024},
+            {"memory_atoms__active": "memory_atoms", "graph_entries__active": "graph_entries"},
+        )
+        manager = QdrantManager(
+            MemoryStoreConfig(
+                embedding_dimension=1024,
+                embedding_signature="old-signature",
+                qdrant_local_path=str(Path(self.temp_dir.name) / "qdrant"),
+            )
+        )
+        manager._available = True
+        with patch.object(store_module, "_QdrantClient", Mock(return_value=client)):
+            await manager.initialize()
+
+        profile = SimpleNamespace(signature="new-signature", model_name="new-model", dimension=1536)
+        self.assertTrue(await manager.reconfigure_embedding(profile))
+
+        self.assertEqual(manager.config.embedding_signature, "new-signature")
+        self.assertEqual(manager.config.embedding_dimension, 1536)
+        self.assertTrue(manager.atom_migration_pending)
+        self.assertTrue(manager.graph_migration_pending)
+        self.assertFalse(manager.vector_search_enabled)
+        self.assertFalse(manager.graph_search_enabled)
+        self.assertEqual(
+            client.collections[manager.atom_migration_target],
+            1536,
+        )
+        self.assertEqual(
+            client.collections[manager.graph_migration_target],
+            1536,
+        )
+
+    async def test_runtime_reconfigure_failure_restores_the_previous_in_memory_state(self) -> None:
+        manager = QdrantManager(
+            MemoryStoreConfig(
+                embedding_dimension=1024,
+                embedding_signature=None,
+                embedding_model_name="old-model",
+            )
+        )
+        manager._available = True
+        manager._client = SimpleNamespace(update_collection_aliases=object(), get_aliases=object())
+        manager._active_atoms_collection = "atoms-old"
+        manager._active_graph_collection = "graph-old"
+
+        async def mutate_atoms_then_succeed() -> None:
+            manager._active_atoms_collection = "atoms-new"
+            manager._atom_migration_target = "atoms-target-new"
+
+        async def mutate_graph_then_fail() -> None:
+            manager._active_graph_collection = "graph-new"
+            manager._graph_migration_target = "graph-target-new"
+            raise RuntimeError("graph setup failed")
+
+        profile = SimpleNamespace(signature="new-signature", model_name="new-model", dimension=1536)
+        with (
+            patch.object(manager, "_initialize_versioned_atoms", new=AsyncMock(side_effect=mutate_atoms_then_succeed)),
+            patch.object(
+                manager,
+                "_initialize_graph_collection",
+                new=AsyncMock(side_effect=mutate_graph_then_fail),
+            ),
+        ):
+            reconfigured = await manager.reconfigure_embedding(profile)
+
+        self.assertFalse(reconfigured)
+        self.assertIsNone(manager.config.embedding_signature)
+        self.assertEqual(manager.config.embedding_dimension, 1024)
+        self.assertEqual(manager.config.embedding_model_name, "old-model")
+        self.assertEqual(manager._active_atoms_collection, "atoms-old")
+        self.assertEqual(manager._active_graph_collection, "graph-old")
+        self.assertIsNone(manager.atom_migration_target)
+        self.assertIsNone(manager.graph_migration_target)
+        self.assertTrue(manager._embedding_operations_enabled)
 
     async def test_graph_signature_change_creates_target_and_disables_graph_reads(self) -> None:
         VectorIndexState.create(

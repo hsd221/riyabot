@@ -40,10 +40,16 @@ class RequestType(Enum):
 class LLMRequest:
     """LLM请求类"""
 
-    def __init__(self, model_set: TaskConfig, request_type: str = "") -> None:
+    def __init__(
+        self,
+        model_set: TaskConfig,
+        request_type: str = "",
+        model_config_override: Any | None = None,
+    ) -> None:
         self.task_name = request_type
         self.model_for_task = model_set
         self.request_type = request_type
+        self.model_config_override = model_config_override
         self.model_usage: Dict[str, Tuple[int, int, int]] = {
             model: (0, 0, 0) for model in self.model_for_task.model_list
         }
@@ -325,7 +331,12 @@ class LLMRequest:
             raise RuntimeError("获取embedding失败")
         return embedding, model_info.name
 
-    def _select_model(self, exclude_models: Optional[Set[str]] = None) -> Tuple[ModelInfo, APIProvider, BaseClient]:
+    def _select_model(
+        self,
+        exclude_models: Optional[Set[str]] = None,
+        *,
+        request_type: RequestType | None = None,
+    ) -> Tuple[ModelInfo, APIProvider, BaseClient]:
         """
         根据配置的策略选择模型：balance（负载均衡）或 random（随机选择）
         """
@@ -361,9 +372,12 @@ class LLMRequest:
                 key=lambda k: available_models[k][0] + available_models[k][1] * 300 + available_models[k][2] * 1000,
             )
 
-        model_info = model_config.get_model_info(selected_model_name)
-        api_provider = model_config.get_provider(model_info.api_provider)
-        force_new_client = self.request_type == "embedding"
+        active_model_config = self.model_config_override or model_config
+        model_info = active_model_config.get_model_info(selected_model_name)
+        api_provider = active_model_config.get_provider(model_info.api_provider)
+        force_new_client = request_type == RequestType.EMBEDDING or (
+            request_type is None and self.request_type == "embedding"
+        )
         client = client_registry.get_client_class_instance(api_provider, force_new=force_new_client)
         logger.debug(
             "LLM 请求模型已选择",
@@ -603,7 +617,10 @@ class LLMRequest:
         last_exception: Optional[Exception] = None
 
         for attempt in range(1, max_attempts + 1):
-            model_info, api_provider, client = self._select_model(exclude_models=failed_models_this_request)
+            model_info, api_provider, client = self._select_model(
+                exclude_models=failed_models_this_request,
+                request_type=request_type,
+            )
 
             message_list = []
             if message_factory:

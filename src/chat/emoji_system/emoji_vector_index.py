@@ -8,6 +8,12 @@ from typing import Any, Sequence
 from src.common.logger import get_logger
 from src.config.config import model_config
 from src.llm_models.embedding import embed_text
+from src.llm_models.embedding_profile import (
+    EmbeddingProfile,
+    get_active_embedding_runtime,
+    is_active_embedding_profile,
+    is_active_embedding_signature,
+)
 
 
 logger = get_logger("emoji_vector_index")
@@ -130,7 +136,9 @@ def normalize_embedding(values: Any) -> list[float] | None:
 
 
 def _has_embedding_model_configured() -> bool:
-    model_list = getattr(model_config.model_task_config.embedding, "model_list", []) or []
+    runtime = get_active_embedding_runtime()
+    config = runtime.model_config if runtime is not None else model_config
+    model_list = getattr(config.model_task_config.embedding, "model_list", []) or []
     return any(normalize_text(model_name) for model_name in model_list)
 
 
@@ -190,10 +198,46 @@ class EmojiVectorIndex:
                 entries[entry.emoji_hash] = entry
         return entries
 
-    def _write_entries(self, entries: dict[str, IndexedEmoji]) -> None:
+    @staticmethod
+    def _profile_metadata(
+        entries: dict[str, IndexedEmoji],
+        profile: EmbeddingProfile | None,
+    ) -> tuple[str | None, int | None]:
+        if profile is not None:
+            return profile.signature, profile.dimension
+        entry_profiles = {(entry.embedding_model, entry.embedding_dimension) for entry in entries.values()}
+        if len(entry_profiles) == 1:
+            return next(iter(entry_profiles))
+        if not entries and (runtime := get_active_embedding_runtime()) is not None:
+            return runtime.profile.signature, runtime.profile.dimension
+        return None, None
+
+    def profile_matches(self, profile: EmbeddingProfile) -> bool:
+        """Return whether the file was completely written for this profile."""
+        if not self.index_path.exists():
+            return False
+        try:
+            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+            return (
+                isinstance(payload, dict)
+                and int(payload.get("version") or 0) == INDEX_VERSION
+                and payload.get("embedding_signature") == profile.signature
+                and int(payload.get("embedding_dimension") or 0) == profile.dimension
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
+    def _write_entries(
+        self,
+        entries: dict[str, IndexedEmoji],
+        profile: EmbeddingProfile | None = None,
+    ) -> None:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        embedding_signature, embedding_dimension = self._profile_metadata(entries, profile)
         payload = {
             "version": INDEX_VERSION,
+            "embedding_signature": embedding_signature,
+            "embedding_dimension": embedding_dimension,
             "emojis": [
                 {
                     "emoji_hash": entry.emoji_hash,
@@ -253,6 +297,53 @@ class EmojiVectorIndex:
         embedded = await asyncio.gather(*(embed_with_limit(candidate) for candidate in candidates))
         return [entry for entry in embedded if entry is not None]
 
+    async def rebuild(
+        self,
+        candidates: Sequence[EmojiVectorCandidate],
+        *,
+        expected_profile: EmbeddingProfile | None = None,
+    ) -> bool:
+        """Rebuild the complete emotion cache atomically."""
+        normalized_candidates = [
+            EmojiVectorCandidate(
+                normalize_text(candidate.emoji_hash)[:128],
+                normalize_emotions(candidate.emotions),
+            )
+            for candidate in candidates
+            if normalize_text(candidate.emoji_hash)[:128] and normalize_emotions(candidate.emotions)
+        ]
+        async with self._lock:
+            if normalized_candidates and not _has_embedding_model_configured():
+                return False
+            embedded_entries = await self._embed_candidates(normalized_candidates)
+            if len(embedded_entries) != len(normalized_candidates):
+                logger.warning("表情情感向量全量重建未完成，保留旧缓存")
+                return False
+            if expected_profile is not None and (
+                not is_active_embedding_profile(expected_profile)
+                or any(
+                    entry.embedding_model != expected_profile.signature
+                    or entry.embedding_dimension != expected_profile.dimension
+                    for entry in embedded_entries
+                )
+            ):
+                logger.warning("表情情感向量全量重建期间 profile 发生变化，丢弃本轮结果")
+                return False
+            try:
+                self._write_entries(
+                    {entry.emoji_hash: entry for entry in embedded_entries},
+                    expected_profile,
+                )
+            except Exception:
+                logger.exception("表情情感向量全量重建写入失败")
+                return False
+            logger.info(
+                "表情情感向量索引全量重建完成",
+                event_code="embedding.index.emoji.rebuilt",
+                count=len(embedded_entries),
+            )
+            return True
+
     async def upsert(self, emoji_hash: str, emotions: Sequence[str]) -> bool:
         normalized_hash = normalize_text(emoji_hash)[:128]
         normalized_emotions = normalize_emotions(emotions)
@@ -265,6 +356,9 @@ class EmojiVectorIndex:
 
         try:
             async with self._lock:
+                if not is_active_embedding_signature(entry.embedding_model, entry.embedding_dimension):
+                    logger.info("表情向量 upsert profile 已切换，丢弃旧结果")
+                    return False
                 entries = self._load_entries()
                 entries[normalized_hash] = entry
                 self._write_entries(entries)
@@ -325,10 +419,16 @@ class EmojiVectorIndex:
 
         query_model = normalize_text(query_model)[:256]
         query_dimension = len(query_embedding)
+        if not is_active_embedding_signature(query_model, query_dimension):
+            logger.info("表情向量 query profile 已切换，本轮放弃旧结果")
+            return None
         effective_limit = max(1, min(int(limit), DEFAULT_CANDIDATE_LIMIT))
         threshold = max(-1.0, min(float(similarity_threshold), 1.0))
 
         async with self._lock:
+            if not is_active_embedding_signature(query_model, query_dimension):
+                logger.info("表情向量 query profile 在索引锁等待期间发生变化")
+                return None
             entries = self._load_entries()
             active_hashes = {candidate.emoji_hash for candidate in normalized_candidates}
             changed = False
@@ -344,7 +444,11 @@ class EmojiVectorIndex:
                 or not self._entry_matches(entry, candidate, query_model, query_dimension)
             ][:MAX_SYNC_EMBEDDING_UPDATES]
             if missing_candidates:
-                for entry in await self._embed_candidates(missing_candidates):
+                refreshed_entries = await self._embed_candidates(missing_candidates)
+                if not is_active_embedding_signature(query_model, query_dimension):
+                    logger.info("表情向量刷新期间 profile 发生变化，丢弃旧结果")
+                    return None
+                for entry in refreshed_entries:
                     entries[entry.emoji_hash] = entry
                     changed = True
 
@@ -433,10 +537,46 @@ class EmojiUsageSceneVectorIndex:
                 entries[entry.scene_id] = entry
         return entries
 
-    def _write_entries(self, entries: dict[int, IndexedEmojiUsageScene]) -> None:
+    @staticmethod
+    def _profile_metadata(
+        entries: dict[int, IndexedEmojiUsageScene],
+        profile: EmbeddingProfile | None,
+    ) -> tuple[str | None, int | None]:
+        if profile is not None:
+            return profile.signature, profile.dimension
+        entry_profiles = {(entry.embedding_model, entry.embedding_dimension) for entry in entries.values()}
+        if len(entry_profiles) == 1:
+            return next(iter(entry_profiles))
+        if not entries and (runtime := get_active_embedding_runtime()) is not None:
+            return runtime.profile.signature, runtime.profile.dimension
+        return None, None
+
+    def profile_matches(self, profile: EmbeddingProfile) -> bool:
+        """Return whether the file was completely written for this profile."""
+        if not self.index_path.exists():
+            return False
+        try:
+            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+            return (
+                isinstance(payload, dict)
+                and int(payload.get("version") or 0) == INDEX_VERSION
+                and payload.get("embedding_signature") == profile.signature
+                and int(payload.get("embedding_dimension") or 0) == profile.dimension
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
+    def _write_entries(
+        self,
+        entries: dict[int, IndexedEmojiUsageScene],
+        profile: EmbeddingProfile | None = None,
+    ) -> None:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        embedding_signature, embedding_dimension = self._profile_metadata(entries, profile)
         payload = {
             "version": INDEX_VERSION,
+            "embedding_signature": embedding_signature,
+            "embedding_dimension": embedding_dimension,
             "scenes": [
                 {
                     "scene_id": entry.scene_id,
@@ -505,6 +645,62 @@ class EmojiUsageSceneVectorIndex:
         embedded = await asyncio.gather(*(embed_with_limit(candidate) for candidate in candidates))
         return [entry for entry in embedded if entry is not None]
 
+    async def rebuild(
+        self,
+        candidates: Sequence[EmojiUsageSceneVectorCandidate],
+        *,
+        expected_profile: EmbeddingProfile | None = None,
+    ) -> bool:
+        """Rebuild the complete usage-scene cache atomically."""
+        normalized_candidates: list[EmojiUsageSceneVectorCandidate] = []
+        seen_scene_ids: set[int] = set()
+        for candidate in candidates:
+            if (
+                isinstance(candidate.scene_id, bool)
+                or not isinstance(candidate.scene_id, int)
+                or candidate.scene_id <= 0
+                or candidate.scene_id in seen_scene_ids
+            ):
+                continue
+            emoji_hash = normalize_text(candidate.emoji_hash)[:128]
+            scene = normalize_text(candidate.scene)[:MAX_USAGE_SCENE_LENGTH]
+            if not emoji_hash or not scene:
+                continue
+            seen_scene_ids.add(candidate.scene_id)
+            normalized_candidates.append(EmojiUsageSceneVectorCandidate(candidate.scene_id, emoji_hash, scene))
+
+        async with self._lock:
+            if normalized_candidates and not _has_embedding_model_configured():
+                return False
+            embedded_entries = await self._embed_candidates(normalized_candidates)
+            if len(embedded_entries) != len(normalized_candidates):
+                logger.warning("真人表情场景向量全量重建未完成，保留旧缓存")
+                return False
+            if expected_profile is not None and (
+                not is_active_embedding_profile(expected_profile)
+                or any(
+                    entry.embedding_model != expected_profile.signature
+                    or entry.embedding_dimension != expected_profile.dimension
+                    for entry in embedded_entries
+                )
+            ):
+                logger.warning("真人表情场景向量全量重建期间 profile 发生变化，丢弃本轮结果")
+                return False
+            try:
+                self._write_entries(
+                    {entry.scene_id: entry for entry in embedded_entries},
+                    expected_profile,
+                )
+            except Exception:
+                logger.exception("真人表情场景向量全量重建写入失败")
+                return False
+            logger.info(
+                "真人表情场景向量索引全量重建完成",
+                event_code="embedding.index.emoji_scene.rebuilt",
+                count=len(embedded_entries),
+            )
+            return True
+
     async def search(
         self,
         *,
@@ -554,10 +750,16 @@ class EmojiUsageSceneVectorIndex:
 
         query_model = normalize_text(query_model)[:256]
         query_dimension = len(query_embedding)
+        if not is_active_embedding_signature(query_model, query_dimension):
+            logger.info("真人表情场景 query profile 已切换，本轮放弃旧结果")
+            return None
         effective_limit = max(1, min(int(limit), len(normalized_candidates)))
         threshold = max(-1.0, min(float(similarity_threshold), 1.0))
 
         async with self._lock:
+            if not is_active_embedding_signature(query_model, query_dimension):
+                logger.info("真人表情场景 query profile 在索引锁等待期间发生变化")
+                return None
             entries = self._load_entries()
             active_scene_ids = {candidate.scene_id for candidate in normalized_candidates}
             changed = False
@@ -572,7 +774,11 @@ class EmojiUsageSceneVectorIndex:
                 if (entry := entries.get(candidate.scene_id)) is None
                 or not self._entry_matches(entry, candidate, query_model, query_dimension)
             ][:MAX_SYNC_EMBEDDING_UPDATES]
-            for entry in await self._embed_candidates(missing_candidates):
+            refreshed_entries = await self._embed_candidates(missing_candidates)
+            if not is_active_embedding_signature(query_model, query_dimension):
+                logger.info("真人表情场景刷新期间 profile 发生变化，丢弃旧结果")
+                return None
+            for entry in refreshed_entries:
                 entries[entry.scene_id] = entry
                 changed = True
 

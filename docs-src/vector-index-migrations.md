@@ -11,8 +11,10 @@ embedding profile；profile 签名由模型标识、provider、client 类型、A
   同一索引不能通过随机或负载均衡混入不同模型生成的向量。
 - `bot_config.toml` 中的 `memory.embedding_dimension` 必须与该模型实际返回的维度一致。返回维度不一致时，
   新向量写入和迁移会失败，不会把错误维度的向量写入当前索引。
-- 修改模型、provider、endpoint、相关额外参数或维度后，需要按正常配置流程重启进程。启动时会重新计算
-  profile 并检查现有索引。
+- 修改模型、provider、endpoint、相关额外参数或维度后，运行中的进程会每 15 秒检查一次配置文件；启动时也会
+  立即执行同一套检查。候选配置会先发起一次小型 embedding 探测，只有返回维度和 profile 都匹配时才会切换。
+  探测失败或配置不完整时继续使用旧 profile；探测失败会在后续检查周期重试，配置解析或完整性校验失败会在
+  配置文件再次变化后重试。
 
 ## Qdrant 自动重建
 
@@ -32,12 +34,16 @@ https://qdrant.tech/documentation/concepts/collections/#collection-aliases
 
 ## JSON 向量缓存
 
-表达选择、表情情感和表情使用场景的 JSON 索引会保存 profile 签名与向量维度。查询发现缓存签名或维度与
-当前结果不一致时，会按各索引原有的并发和数量限制懒刷新，不需要手动删除缓存文件。
+表达选择、表情情感和表情使用场景的 JSON 索引会保存 profile 签名与向量维度。profile 切换时，或者启动检查发现
+缓存元数据不匹配时，这三个索引会从 SQLite 当前源数据按原有并发上限顺序全量重建，并以临时文件替换旧缓存；
+任一条目生成失败时保留旧文件，后续检查只重试尚未完成的索引。普通新增/修改数据仍可在查询时按原有逻辑懒刷新，
+不需要手动删除缓存文件。
 
 ## 运维说明
 
 - 迁移失败时旧 collection 不会被覆盖或删除，但对应向量查询保持停用，后台任务会继续重试。
+- 运行时切换期间，已经开始的旧 profile 请求如果晚于切换完成，会被写入层拒绝，不会污染新 collection；对应源数据由
+  后台迁移任务补写。
 - 日志事件 `memory.qdrant.migration_required`、`memory.vector_migration.*` 和
   `memory.qdrant.migration_activated` 可用于观察准备、批次、失败和切换过程。
 - `GraphStore` 的实时增删目前仍以 SQLite 为准；图向量迁移会从 SQLite 完整重建，但实时图向量写入链路是

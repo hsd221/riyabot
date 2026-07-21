@@ -16,6 +16,7 @@ from typing import Optional
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.llm_models.embedding import embed_text
+from src.llm_models.embedding_profile import get_active_embedding_runtime
 
 logger = get_logger("memory.embedding")
 
@@ -33,10 +34,14 @@ async def generate_embedding(text: str) -> Optional[list[float]]:
         return None
 
     try:
+        runtime = get_active_embedding_runtime()
         result = await embed_text(
             text,
             request_type="memory.embedding",
-            expected_dimension=global_config.memory.embedding_dimension,
+            expected_dimension=(
+                runtime.profile.dimension if runtime is not None else global_config.memory.embedding_dimension
+            ),
+            runtime=runtime,
         )
         return result.vector
     except Exception as e:
@@ -59,10 +64,14 @@ async def generate_query_embedding(query: str) -> Optional[list[float]]:
     if not query or not query.strip():
         return None
     try:
+        runtime = get_active_embedding_runtime()
         result = await embed_text(
             query,
             request_type="memory.embedding.query",
-            expected_dimension=global_config.memory.embedding_dimension,
+            expected_dimension=(
+                runtime.profile.dimension if runtime is not None else global_config.memory.embedding_dimension
+            ),
+            runtime=runtime,
         )
         return result.vector
     except Exception as e:

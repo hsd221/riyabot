@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.common.logger import get_logger
 from src.config.config import model_config
 from src.llm_models.embedding import embed_text
+from src.llm_models.embedding_profile import (
+    EmbeddingProfile,
+    get_active_embedding_runtime,
+    is_active_embedding_profile,
+    is_active_embedding_signature,
+)
 
 logger = get_logger("expression_vector_index")
 
@@ -120,7 +126,9 @@ def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
 
 
 def _has_embedding_model_configured() -> bool:
-    model_list = getattr(model_config.model_task_config.embedding, "model_list", []) or []
+    runtime = get_active_embedding_runtime()
+    config = runtime.model_config if runtime is not None else model_config
+    model_list = getattr(config.model_task_config.embedding, "model_list", []) or []
     return any(str(model_name or "").strip() for model_name in model_list)
 
 
@@ -183,11 +191,47 @@ class ExpressionVectorIndex:
                 entries[fingerprint] = entry
         return entries
 
-    def _write_entries(self, entries: Dict[str, IndexedExpression]) -> None:
+    @staticmethod
+    def _profile_metadata(
+        entries: Dict[str, IndexedExpression],
+        profile: EmbeddingProfile | None,
+    ) -> tuple[str | None, int | None]:
+        if profile is not None:
+            return profile.signature, profile.dimension
+        entry_profiles = {(entry.embedding_model, entry.embedding_dimension) for entry in entries.values()}
+        if len(entry_profiles) == 1:
+            return next(iter(entry_profiles))
+        if not entries and (runtime := get_active_embedding_runtime()) is not None:
+            return runtime.profile.signature, runtime.profile.dimension
+        return None, None
+
+    def profile_matches(self, profile: EmbeddingProfile) -> bool:
+        """Return whether the file was completely written for this profile."""
+        if not self.index_path.exists():
+            return False
+        try:
+            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+            return (
+                isinstance(payload, dict)
+                and int(payload.get("version") or 0) == INDEX_VERSION
+                and payload.get("embedding_signature") == profile.signature
+                and int(payload.get("embedding_dimension") or 0) == profile.dimension
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
+    def _write_entries(
+        self,
+        entries: Dict[str, IndexedExpression],
+        profile: EmbeddingProfile | None = None,
+    ) -> None:
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        embedding_signature, embedding_dimension = self._profile_metadata(entries, profile)
         payload = {
             "version": INDEX_VERSION,
             "generated_at": time.time(),
+            "embedding_signature": embedding_signature,
+            "embedding_dimension": embedding_dimension,
             "expressions": [
                 {
                     "id": entry.id,
@@ -239,6 +283,56 @@ class ExpressionVectorIndex:
 
         embedded = await asyncio.gather(*(embed_with_limit(candidate) for candidate in candidates))
         return [entry for entry in embedded if entry is not None]
+
+    async def rebuild(
+        self,
+        candidates: Sequence[Dict[str, Any]],
+        *,
+        expected_profile: EmbeddingProfile | None = None,
+    ) -> bool:
+        """Rebuild the complete cache atomically for one embedding profile."""
+        normalized_candidates = [
+            candidate.copy()
+            for candidate in candidates
+            if candidate.get("id") is not None
+            and normalize_text(candidate.get("situation"))
+            and normalize_text(candidate.get("style"))
+        ]
+        async with self._lock:
+            if normalized_candidates and not _has_embedding_model_configured():
+                return False
+            embedded_entries = await self._embed_missing_candidates(normalized_candidates)
+            if len(embedded_entries) != len(normalized_candidates):
+                logger.warning(
+                    "表达向量全量重建未完成，保留旧缓存",
+                    event_code="embedding.index.expression.rebuild_incomplete",
+                    expected=len(normalized_candidates),
+                    actual=len(embedded_entries),
+                )
+                return False
+            if expected_profile is not None and (
+                not is_active_embedding_profile(expected_profile)
+                or any(
+                    entry.embedding_model != expected_profile.signature
+                    or entry.embedding_dimension != expected_profile.dimension
+                    for entry in embedded_entries
+                )
+            ):
+                logger.warning("表达向量全量重建期间 profile 发生变化，丢弃本轮结果")
+                return False
+            entries = {entry.fingerprint: entry for entry in embedded_entries}
+            try:
+                self._write_entries(entries, expected_profile)
+            except Exception:
+                logger.exception("表达向量全量重建写入失败", event_code="embedding.index.expression.rebuild_failed")
+                return False
+            logger.info(
+                "表达向量索引全量重建完成",
+                event_code="embedding.index.expression.rebuilt",
+                count=len(entries),
+                embedding_signature=expected_profile.signature if expected_profile else None,
+            )
+            return True
 
     @staticmethod
     def _entry_matches_query(entry: IndexedExpression, query_model: str, query_dimension: int) -> bool:
@@ -304,6 +398,9 @@ class ExpressionVectorIndex:
 
         query_model = normalize_text(query_model)
         query_dimension = len(query_embedding)
+        if not is_active_embedding_signature(query_model, query_dimension):
+            logger.info("表达向量 query profile 已切换，本轮放弃旧结果")
+            return None
         effective_limit = max(1, min(int(limit), VECTOR_CANDIDATE_LIMIT))
         normalized_candidates = [
             candidate.copy()
@@ -316,6 +413,9 @@ class ExpressionVectorIndex:
             candidate["_query_text"] = normalized_query
 
         async with self._lock:
+            if not is_active_embedding_signature(query_model, query_dimension):
+                logger.info("表达向量 query profile 在索引锁等待期间发生变化")
+                return None
             entries = self._load_entries()
             missing_candidates: List[Dict[str, Any]] = []
             usable_count = 0
@@ -330,6 +430,9 @@ class ExpressionVectorIndex:
 
             if missing_candidates:
                 embedded_entries = await self._embed_missing_candidates(missing_candidates)
+                if not is_active_embedding_signature(query_model, query_dimension):
+                    logger.info("表达向量刷新期间 profile 发生变化，丢弃旧结果")
+                    return None
                 for entry in embedded_entries:
                     entries[entry.fingerprint] = entry
                     if self._entry_matches_query(entry, query_model, query_dimension):

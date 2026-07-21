@@ -3,6 +3,7 @@
 提供 SQLite (源数据) + Qdrant (向量索引) 双层存储的统一入口。
 """
 
+import asyncio
 import datetime
 import json
 import uuid
@@ -156,7 +157,9 @@ class QdrantManager:
         self._graph_migration_target: Optional[str] = None
         self._vector_search_enabled = True
         self._graph_search_enabled = True
+        self._embedding_operations_enabled = True
         self._embedding_signature = config.embedding_signature or f"dimension-{config.embedding_dimension}"
+        self._embedding_reconfigure_lock = asyncio.Lock()
 
         if not self._available:
             logger.warning("qdrant-client 未安装，向量索引功能不可用。pip install qdrant-client")
@@ -219,18 +222,55 @@ class QdrantManager:
             collections.append(self._graph_migration_target)
         return collections
 
-    def _with_atom_embedding_metadata(self, point_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _vector_profile(vector: list[float], payload: dict[str, Any]) -> tuple[Optional[str], Optional[int]]:
+        signature = getattr(vector, "embedding_signature", None)
+        dimension = getattr(vector, "embedding_dimension", None)
+        if signature is None:
+            signature = payload.get("embedding_signature")
+        if dimension is None:
+            dimension = payload.get("embedding_dimension")
+        try:
+            normalized_dimension = int(dimension) if dimension is not None else None
+        except (TypeError, ValueError):
+            normalized_dimension = None
+        return (str(signature) if signature else None), normalized_dimension
+
+    def _embedding_vector_is_current(self, vector: list[float], payload: dict[str, Any]) -> bool:
+        """Reject profiled vectors generated before the current runtime switch."""
+        if not self._embedding_operations_enabled:
+            return False
+        signature, dimension = self._vector_profile(vector, payload)
+        if signature is not None and signature != self._embedding_signature:
+            return False
+        if dimension is not None and dimension != int(self.config.embedding_dimension):
+            return False
+        return True
+
+    def _with_atom_embedding_metadata(
+        self,
+        point_id: str | int,
+        payload: dict[str, Any],
+        vector: Optional[list[float]] = None,
+    ) -> dict[str, Any]:
         normalized_payload = {**payload, "atom_id": str(point_id)}
         if self.config.embedding_signature:
-            normalized_payload["embedding_signature"] = self._embedding_signature
-            normalized_payload["embedding_dimension"] = self.config.embedding_dimension
+            signature, dimension = self._vector_profile(vector or [], payload)
+            normalized_payload["embedding_signature"] = signature or self._embedding_signature
+            normalized_payload["embedding_dimension"] = dimension or self.config.embedding_dimension
         return normalized_payload
 
-    def _with_graph_embedding_metadata(self, point_id: str | int, payload: dict[str, Any]) -> dict[str, Any]:
+    def _with_graph_embedding_metadata(
+        self,
+        point_id: str | int,
+        payload: dict[str, Any],
+        vector: Optional[list[float]] = None,
+    ) -> dict[str, Any]:
         normalized_payload = {**payload, "entry_id": str(point_id)}
         if self.config.embedding_signature:
-            normalized_payload["embedding_signature"] = self._embedding_signature
-            normalized_payload["embedding_dimension"] = self.config.embedding_dimension
+            signature, dimension = self._vector_profile(vector or [], payload)
+            normalized_payload["embedding_signature"] = signature or self._embedding_signature
+            normalized_payload["embedding_dimension"] = dimension or self.config.embedding_dimension
         return normalized_payload
 
     @staticmethod
@@ -696,6 +736,89 @@ class QdrantManager:
             logger.exception("Qdrant 初始化失败", event_code="memory.qdrant.init_failed")
             self._client = None
 
+    async def reconfigure_embedding(self, profile: Any) -> bool:
+        """Prepare versioned indexes for a validated runtime embedding profile.
+
+        Reads and writes are paused while the new physical collections are
+        prepared.  The caller activates the matching embedding runtime only
+        after this method succeeds, so an in-flight vector from the previous
+        profile can never be labelled as belonging to the new collection.
+        """
+        signature = str(getattr(profile, "signature", "") or "")
+        model_name = str(getattr(profile, "model_name", "") or "")
+        try:
+            dimension = int(profile.dimension)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("embedding profile dimension is invalid") from exc
+        if not signature or dimension <= 0:
+            raise ValueError("embedding profile signature and dimension are required")
+
+        async with self._embedding_reconfigure_lock:
+            if signature == self._embedding_signature and dimension == int(self.config.embedding_dimension):
+                return True
+
+            previous = {
+                "signature": self._embedding_signature,
+                "config_signature": self.config.embedding_signature,
+                "dimension": self.config.embedding_dimension,
+                "model_name": self.config.embedding_model_name,
+                "atom_target": self._atom_migration_target,
+                "graph_target": self._graph_migration_target,
+                "active_atoms": self._active_atoms_collection,
+                "active_graph": self._active_graph_collection,
+                "atom_search": self._vector_search_enabled,
+                "graph_search": self._graph_search_enabled,
+            }
+            self._embedding_operations_enabled = False
+            self._vector_search_enabled = False
+            self._graph_search_enabled = False
+            try:
+                self._embedding_signature = signature
+                self.config.embedding_signature = signature
+                self.config.embedding_dimension = dimension
+                self.config.embedding_model_name = model_name
+
+                if self._client is not None:
+                    if not (
+                        hasattr(self._client, "update_collection_aliases") and hasattr(self._client, "get_aliases")
+                    ):
+                        raise RuntimeError("当前 Qdrant 客户端不支持运行时 collection alias 迁移")
+                    await self._initialize_versioned_atoms()
+                    await self._initialize_graph_collection()
+                else:
+                    self._atom_migration_target = None
+                    self._graph_migration_target = None
+
+                logger.warning(
+                    "运行时 embedding 配置已切换，向量索引进入重建阶段",
+                    event_code="memory.qdrant.embedding_reconfigured",
+                    old_signature=previous["signature"],
+                    new_signature=signature,
+                    old_dimension=previous["dimension"],
+                    new_dimension=dimension,
+                )
+                return True
+            except Exception:
+                self._embedding_signature = str(previous["signature"])
+                self.config.embedding_signature = previous["config_signature"]
+                self.config.embedding_dimension = int(previous["dimension"])
+                self.config.embedding_model_name = previous["model_name"]
+                self._atom_migration_target = previous["atom_target"]
+                self._graph_migration_target = previous["graph_target"]
+                self._active_atoms_collection = str(previous["active_atoms"])
+                self._active_graph_collection = str(previous["active_graph"])
+                self._vector_search_enabled = bool(previous["atom_search"])
+                self._graph_search_enabled = bool(previous["graph_search"])
+                logger.exception(
+                    "运行时 embedding 配置切换失败，继续使用旧 profile",
+                    event_code="memory.qdrant.embedding_reconfigure_failed",
+                    requested_signature=signature,
+                    requested_dimension=dimension,
+                )
+                return False
+            finally:
+                self._embedding_operations_enabled = True
+
     async def close(self) -> None:
         """关闭 Qdrant 连接"""
         self._client = None
@@ -815,6 +938,18 @@ class QdrantManager:
             return True
         if not self._client:
             return False
+        if not self._embedding_vector_is_current(vector, payload):
+            vector_signature, vector_dimension = self._vector_profile(vector, payload)
+            logger.warning(
+                "拒绝写入非当前 profile 的原子向量",
+                event_code="memory.qdrant.atom_vector_profile_rejected",
+                point_id=point_id,
+                vector_signature=vector_signature,
+                vector_dimension=vector_dimension,
+                expected_signature=self._embedding_signature,
+                expected_dimension=self.config.embedding_dimension,
+            )
+            return False
         try:
             self._client.upsert(
                 collection_name=collection_name,
@@ -822,7 +957,7 @@ class QdrantManager:
                     qdrant_models.PointStruct(
                         id=self._normalize_point_id(point_id),
                         vector=vector,
-                        payload=self._with_atom_embedding_metadata(point_id, payload),
+                        payload=self._with_atom_embedding_metadata(point_id, payload, vector),
                     )
                 ],
             )
@@ -863,6 +998,18 @@ class QdrantManager:
             return True
         if not self._client:
             return False
+        if not self._embedding_vector_is_current(vector, payload):
+            vector_signature, vector_dimension = self._vector_profile(vector, payload)
+            logger.warning(
+                "拒绝写入非当前 profile 的图向量",
+                event_code="memory.qdrant.graph_vector_profile_rejected",
+                point_id=point_id,
+                vector_signature=vector_signature,
+                vector_dimension=vector_dimension,
+                expected_signature=self._embedding_signature,
+                expected_dimension=self.config.embedding_dimension,
+            )
+            return False
         try:
             self._client.upsert(
                 collection_name=collection_name,
@@ -870,7 +1017,7 @@ class QdrantManager:
                     qdrant_models.PointStruct(
                         id=self._normalize_point_id(point_id),
                         vector=vector,
-                        payload=self._with_graph_embedding_metadata(point_id, payload),
+                        payload=self._with_graph_embedding_metadata(point_id, payload, vector),
                     )
                 ],
             )
@@ -899,14 +1046,25 @@ class QdrantManager:
         if not self._client:
             return 0
         try:
+            accepted_points = [(pid, vec, pl) for pid, vec, pl in points if self._embedding_vector_is_current(vec, pl)]
+            if len(accepted_points) != len(points):
+                logger.warning(
+                    "批量原子向量中存在非当前 profile 的结果，已拒绝对应写入",
+                    event_code="memory.qdrant.atom_vectors_profile_rejected",
+                    rejected_count=len(points) - len(accepted_points),
+                    expected_signature=self._embedding_signature,
+                    expected_dimension=self.config.embedding_dimension,
+                )
             point_structs = [
                 qdrant_models.PointStruct(
                     id=self._normalize_point_id(pid),
                     vector=vec,
-                    payload=self._with_atom_embedding_metadata(pid, pl),
+                    payload=self._with_atom_embedding_metadata(pid, pl, vec),
                 )
-                for pid, vec, pl in points
+                for pid, vec, pl in accepted_points
             ]
+            if not point_structs:
+                return 0
             self._client.upsert(
                 collection_name=self._atom_write_collection(),
                 points=point_structs,
@@ -941,6 +1099,9 @@ class QdrantManager:
         """
         if not self._available or not self.vector_search_enabled:
             return []
+        if not self._embedding_vector_is_current(query_vector, {}):
+            logger.info("忽略非当前 profile 的原子查询向量")
+            return []
 
         try:
             qdrant_filter = self._build_filter(filters, self._atoms_payload_schema())
@@ -974,6 +1135,9 @@ class QdrantManager:
     ) -> list[dict[str, Any]]:
         """向量检索相似图条目"""
         if not self._available or not self.graph_search_enabled:
+            return []
+        if not self._embedding_vector_is_current(query_vector, {}):
+            logger.info("忽略非当前 profile 的图查询向量")
             return []
 
         try:

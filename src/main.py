@@ -9,7 +9,7 @@ from src.chat.utils.statistic import OnlineTimeRecordTask
 # from src.chat.utils.token_statistics import TokenStatisticsTask
 from src.chat.emoji_system.emoji_manager import get_emoji_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.config.config import global_config, get_created_config_files, model_config
+from src.config.config import CONFIG_DIR, global_config, get_created_config_files, model_config
 from src.chat.message_receive.bot import chat_bot
 from src.common.logger import get_logger
 from src.common.agreement import are_agreements_confirmed
@@ -31,48 +31,6 @@ from src.bw_learner.expression_auto_check_task import ExpressionAutoCheckTask
 install(extra_lines=3)
 
 logger = get_logger("main")
-
-
-async def _register_vector_migration_tasks(store, embedding_profile) -> None:
-    """Register one background rebuild task for every pending vector index."""
-    from src.memory.vector_migration import GraphVectorIndexMigrationTask, VectorIndexMigrationTask
-
-    migration_specs = (
-        (
-            "memory_atoms",
-            store.qdrant.atom_migration_pending,
-            store.qdrant.atom_migration_target,
-            VectorIndexMigrationTask,
-        ),
-        (
-            "graph_entries",
-            store.qdrant.graph_migration_pending,
-            store.qdrant.graph_migration_target,
-            GraphVectorIndexMigrationTask,
-        ),
-    )
-    for index_name, migration_pending, target_collection, task_type in migration_specs:
-        if not migration_pending:
-            continue
-        try:
-            migration_task = task_type(store)
-            await async_task_manager.add_task(migration_task)
-            logger.warning(
-                "检测到 embedding 配置变化，向量索引后台迁移任务已注册",
-                event_code="memory.vector_migration.task_registered",
-                index_name=index_name,
-                embedding_model=embedding_profile.model_name,
-                embedding_dimension=embedding_profile.dimension,
-                target_collection=target_collection,
-                interval_seconds=migration_task.run_interval,
-            )
-        except Exception:
-            logger.warning(
-                "向量索引后台迁移任务注册失败，对应旧索引保持停用",
-                event_code="memory.vector_migration.task_register_failed",
-                index_name=index_name,
-                exc_info=True,
-            )
 
 
 class MainSystem:
@@ -190,10 +148,12 @@ class MainSystem:
         # 初始化记忆存储
         try:
             from src.memory import MemoryStore, MemoryStoreConfig
-            from src.llm_models.embedding_profile import get_embedding_profile
+            from src.llm_models.embedding_profile import activate_embedding_runtime
+            from src.services.embedding_profile_monitor import EmbeddingProfileMonitorTask
 
             mc = global_config.memory
-            embedding_profile = get_embedding_profile(mc.embedding_dimension)
+            embedding_runtime = activate_embedding_runtime(model_config, mc.embedding_dimension)
+            embedding_profile = embedding_runtime.profile
             memory_config = MemoryStoreConfig(
                 sqlite_path=mc.sqlite_path,
                 qdrant_url=mc.qdrant_url,
@@ -211,7 +171,18 @@ class MainSystem:
             logger.info("记忆存储初始化完成", event_code="memory.store.initialized")
             forgetting_manager = None
 
-            await _register_vector_migration_tasks(store, embedding_profile)
+            await async_task_manager.add_task(
+                EmbeddingProfileMonitorTask(
+                    store,
+                    config_dir=CONFIG_DIR,
+                    task_manager=async_task_manager,
+                )
+            )
+            logger.info(
+                "embedding profile 运行时检测任务已注册",
+                event_code="embedding.profile.monitor_registered",
+                interval_seconds=15,
+            )
 
             # 启动记忆遗忘定期扫描
             try:
