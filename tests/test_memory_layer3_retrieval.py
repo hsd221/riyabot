@@ -17,6 +17,7 @@ from src.memory.layer3_retrieval import (
     MemoryWriter,
     PartitionManager,
     PrivacyFilter,
+    RetrievedAtom,
     _convert_atom_type,
     _convert_decay_type,
     _entities_include_user,
@@ -238,6 +239,171 @@ class Layer3SQLiteRetrievalTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsy
 
 
 class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_retrieve_hybrid_fuses_vector_and_bm25_rankings(self) -> None:
+        bm25 = SimpleNamespace(
+            search=AsyncMock(
+                return_value=[
+                    RetrievedAtom(
+                        atom_id="shared",
+                        content="Alpha-42 精确命中",
+                        atom_type="factual",
+                        weight=0.8,
+                        similarity_score=5.0,
+                    ),
+                    RetrievedAtom(
+                        atom_id="exact-only",
+                        content="Alpha-42 只被词法检索命中",
+                        atom_type="factual",
+                        weight=0.8,
+                        similarity_score=4.0,
+                    ),
+                ]
+            )
+        )
+        retriever = MemoryRetriever(store=SimpleNamespace(), bm25_retriever=bm25)
+        retriever.retrieve_by_vector = AsyncMock(
+            return_value=[
+                {
+                    "atom_id": "semantic-only",
+                    "content": "语义相关候选",
+                    "atom_type": "factual",
+                    "weight": 0.8,
+                    "similarity_score": 0.95,
+                    "final_score": 0.76,
+                },
+                {
+                    "atom_id": "shared",
+                    "content": "Alpha-42 精确命中",
+                    "atom_type": "factual",
+                    "weight": 0.8,
+                    "similarity_score": 0.8,
+                    "final_score": 0.64,
+                },
+            ]
+        )
+        atom_map = {
+            atom_id: {
+                "atom_id": atom_id,
+                "content": atom_id,
+                "atom_type": "factual",
+                "weight": 0.8,
+            }
+            for atom_id in ("shared", "semantic-only", "exact-only")
+        }
+        retriever._fetch_atoms_by_ids = AsyncMock(
+            side_effect=lambda atom_ids: [atom_map[atom_id].copy() for atom_id in atom_ids]
+        )
+
+        filters = {"source_scene": "group_chat", "source_id": "stream-1", "status": "active"}
+        query_text = "需要查证的问题: Alpha-42 是什么\n当前目标消息: Alpha-42 是啥\n近邻上下文: 这里是应该排除的旧话题"
+        results = await retriever.retrieve_hybrid(
+            query_text=query_text,
+            filters=filters,
+            top_k=3,
+        )
+
+        self.assertEqual([atom["atom_id"] for atom in results], ["shared", "semantic-only", "exact-only"])
+        self.assertEqual(results[0]["retrieval_sources"], ["vector", "bm25"])
+        self.assertEqual(results[1]["retrieval_sources"], ["vector"])
+        self.assertEqual(results[2]["retrieval_sources"], ["bm25"])
+        bm25.search.assert_awaited_once_with("Alpha-42 是什么 Alpha-42 是啥", top_k=6, filters=filters)
+
+    async def test_retrieve_hybrid_uses_like_only_after_vector_and_bm25_are_empty(self) -> None:
+        bm25_atom = RetrievedAtom(
+            atom_id="bm25-only",
+            content="Alpha-42 精确命中",
+            atom_type="factual",
+            weight=0.7,
+            similarity_score=3.0,
+        )
+        bm25 = SimpleNamespace(search=AsyncMock(return_value=[bm25_atom]))
+        retriever = MemoryRetriever(store=SimpleNamespace(), bm25_retriever=bm25)
+        retriever.retrieve_by_vector = AsyncMock(return_value=[])
+        retriever.keyword_search = AsyncMock(return_value=[{"atom_id": "like-only"}])
+        retriever._fetch_atoms_by_ids = AsyncMock(
+            return_value=[
+                {
+                    "atom_id": "bm25-only",
+                    "content": "Alpha-42 精确命中",
+                    "atom_type": "factual",
+                    "weight": 0.7,
+                }
+            ]
+        )
+
+        bm25_results = await retriever.retrieve_hybrid(query_text="Alpha-42", top_k=2)
+
+        self.assertEqual([atom["atom_id"] for atom in bm25_results], ["bm25-only"])
+        retriever.keyword_search.assert_not_awaited()
+
+        bm25.search.return_value = []
+        like_results = await retriever.retrieve_hybrid(query_text="Alpha-42", top_k=2)
+
+        self.assertEqual(like_results, [{"atom_id": "like-only"}])
+        retriever.keyword_search.assert_awaited_once_with(query="Alpha-42", filters=None, limit=2)
+
+    async def test_retrieve_hybrid_keeps_vector_results_when_bm25_query_is_empty(self) -> None:
+        bm25 = SimpleNamespace(search=AsyncMock(side_effect=AssertionError("BM25 should not receive an empty query")))
+        retriever = MemoryRetriever(store=SimpleNamespace(), bm25_retriever=bm25)
+        retriever.retrieve_by_vector = AsyncMock(
+            return_value=[
+                {
+                    "atom_id": "semantic-only",
+                    "content": "语义相关候选",
+                    "atom_type": "factual",
+                    "weight": 0.8,
+                    "similarity_score": 0.9,
+                }
+            ]
+        )
+        retriever._fetch_atoms_by_ids = AsyncMock(
+            return_value=[
+                {
+                    "atom_id": "semantic-only",
+                    "content": "语义相关候选",
+                    "atom_type": "factual",
+                    "weight": 0.8,
+                }
+            ]
+        )
+
+        results = await retriever.retrieve_hybrid(query_text="近邻上下文: 这是只供向量理解的旧话题", top_k=2)
+
+        self.assertEqual([atom["atom_id"] for atom in results], ["semantic-only"])
+        self.assertEqual(results[0]["retrieval_sources"], ["vector"])
+
+    async def test_retrieve_hybrid_keeps_bm25_results_when_vector_search_raises(self) -> None:
+        bm25 = SimpleNamespace(
+            search=AsyncMock(
+                return_value=[
+                    RetrievedAtom(
+                        atom_id="exact-only",
+                        content="Alpha-42 精确命中",
+                        atom_type="factual",
+                        weight=0.7,
+                        similarity_score=3.0,
+                    )
+                ]
+            )
+        )
+        retriever = MemoryRetriever(store=SimpleNamespace(), bm25_retriever=bm25)
+        retriever.retrieve_by_vector = AsyncMock(side_effect=RuntimeError("vector search unavailable"))
+        retriever._fetch_atoms_by_ids = AsyncMock(
+            return_value=[
+                {
+                    "atom_id": "exact-only",
+                    "content": "Alpha-42 精确命中",
+                    "atom_type": "factual",
+                    "weight": 0.7,
+                }
+            ]
+        )
+
+        results = await retriever.retrieve_hybrid(query_text="Alpha-42", top_k=2)
+
+        self.assertEqual([atom["atom_id"] for atom in results], ["exact-only"])
+        self.assertEqual(results[0]["retrieval_sources"], ["bm25"])
+
     async def test_retrieve_by_vector_skips_embedding_while_vector_search_is_disabled(self) -> None:
         store = SimpleNamespace(
             qdrant=SimpleNamespace(vector_search_enabled=False),
@@ -312,7 +478,7 @@ class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAs
             temporal_context="深夜",
         )
         retriever = MemoryRetriever(store=SimpleNamespace())
-        retriever.retrieve_by_vector = AsyncMock(
+        retriever.retrieve_hybrid = AsyncMock(
             return_value=[
                 {
                     "atom_id": "query-match",
@@ -381,7 +547,7 @@ class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAs
 
     async def test_cross_scene_context_applies_global_gate_blacklist_privacy_and_query_relevance(self) -> None:
         retriever = MemoryRetriever(store=SimpleNamespace())
-        retriever.retrieve_by_vector = AsyncMock(
+        retriever.retrieve_hybrid = AsyncMock(
             return_value=[
                 {
                     "atom_id": "public",

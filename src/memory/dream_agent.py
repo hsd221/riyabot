@@ -518,6 +518,11 @@ class DreamTask(AsyncTask):
         except Exception as e:
             logger.error(f"记忆巩固阶段异常: {e}")
 
+        notify_bm25 = getattr(self._store, "_notify_bm25_update", None)
+        if callable(notify_bm25):
+            for atom_id, updates in qdrant_updates:
+                notify_bm25(atom_id, updates)
+
         for atom_id, payload in qdrant_updates:
             try:
                 await self._store.qdrant.set_atom_payload(atom_id, payload)
@@ -960,6 +965,11 @@ class DreamTask(AsyncTask):
         except Exception as e:
             logger.error(f"梦境评分重估阶段异常: {e}")
 
+        notify_bm25 = getattr(self._store, "_notify_bm25_update", None)
+        if callable(notify_bm25):
+            for atom_id, updates in qdrant_updates:
+                notify_bm25(atom_id, updates)
+
         for atom_id, payload in qdrant_updates:
             try:
                 await self._store.qdrant.set_atom_payload(atom_id, payload)
@@ -1074,6 +1084,11 @@ class DreamTask(AsyncTask):
                         logger.error(f"隐私重评失败 ({atom_model.atom_id}): {e}")
         except Exception as e:
             logger.error(f"梦境隐私重评阶段异常: {e}")
+
+        notify_bm25 = getattr(self._store, "_notify_bm25_update", None)
+        if callable(notify_bm25):
+            for atom_id, updates in qdrant_updates:
+                notify_bm25(atom_id, updates)
 
         for atom_id, payload in qdrant_updates:
             try:
@@ -1405,6 +1420,10 @@ class DreamTask(AsyncTask):
                 confidence_decay=0.9,
             )
 
+        invalidate_bm25 = getattr(self._store, "_invalidate_bm25_index", None)
+        if callable(invalidate_bm25):
+            invalidate_bm25()
+
         try:
             await self._store.qdrant.set_atom_payload(
                 atom_id,
@@ -1432,6 +1451,9 @@ class DreamTask(AsyncTask):
             MemoryAtomModel.update(status="archived", last_accessed_at=now).where(
                 MemoryAtomModel.atom_id == atom.atom_id
             ).execute()
+            notify_bm25 = getattr(self._store, "_notify_bm25_update", None)
+            if callable(notify_bm25):
+                notify_bm25(atom.atom_id, {"status": "archived", "last_accessed_at": now})
             MemoryTraceChain.create(
                 atom_id=atom.atom_id,
                 step_number=self._next_trace_step(atom.atom_id),

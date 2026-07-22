@@ -31,6 +31,7 @@ logger = get_logger("memory.store")
 _QDRANT_POINT_NAMESPACE = uuid.UUID("8e9e1f74-2b30-4f33-8e9b-9b2c972a1a67")
 _DATETIME_FIELDS = ("created_at", "last_accessed_at", "last_reinforced_at")
 _LEGACY_EMBEDDING_SIGNATURE = "legacy-unknown"
+_BM25_REBUILD_FIELDS = {"content", "status"}
 
 
 def _coerce_datetime(value: Any) -> datetime.datetime:
@@ -1627,6 +1628,27 @@ class MemoryStore:
 
         self.config = config or MemoryStoreConfig()
         self.qdrant = QdrantManager(self.config)
+        self._bm25_retriever: Any = None
+
+    def get_bm25_retriever(self) -> Any:
+        """Return the store-owned BM25 index shared by all memory retrievers."""
+        if self._bm25_retriever is None:
+            from src.memory.bm25_retrieval import BM25Retriever
+
+            self._bm25_retriever = BM25Retriever(self)
+        return self._bm25_retriever
+
+    def _invalidate_bm25_index(self) -> None:
+        if self._bm25_retriever is not None:
+            self._bm25_retriever.invalidate_cache()
+
+    def _notify_bm25_update(self, atom_id: str, updates: dict[str, Any]) -> None:
+        if self._bm25_retriever is None:
+            return
+        if _BM25_REBUILD_FIELDS & updates.keys():
+            self._bm25_retriever.invalidate_cache()
+            return
+        self._bm25_retriever.update_cached_metadata(atom_id, updates)
 
     @classmethod
     def get_instance(cls) -> "MemoryStore":
@@ -1654,6 +1676,7 @@ class MemoryStore:
         await self.qdrant.close()
         if not memory_db.is_closed():
             memory_db.close()
+        self._bm25_retriever = None
         self._initialized = False
         type(self)._instance = None
         logger.info("MemoryStore 已关闭", event_code="memory.store.closed")
@@ -1685,6 +1708,8 @@ class MemoryStore:
             logger.exception("记忆原子写入失败", event_code="memory.atom.insert_failed", atom_id=atom_id)
             raise
 
+        self._invalidate_bm25_index()
+
         logger.debug(
             "记忆原子写入完成",
             event_code="memory.atom.inserted",
@@ -1715,6 +1740,7 @@ class MemoryStore:
                 query = MemoryAtom.update(**updates).where(MemoryAtom.atom_id == atom_id)
                 rows = query.execute()
             if rows > 0:
+                self._notify_bm25_update(atom_id, updates)
                 logger.debug("记忆原子更新完成", event_code="memory.atom.updated", atom_id=atom_id, rows=rows)
             return rows > 0
         except Exception:
@@ -1739,6 +1765,7 @@ class MemoryStore:
         if not updates_list:
             return 0
         count = 0
+        successful_updates: list[tuple[str, dict[str, Any]]] = []
         try:
             with memory_db.atomic():
                 for atom_id, updates in updates_list:
@@ -1747,7 +1774,15 @@ class MemoryStore:
                     if isinstance(normalized_updates.get("entities"), (list, dict)):
                         normalized_updates["entities"] = json.dumps(normalized_updates["entities"], ensure_ascii=False)
                     query = MemoryAtom.update(**normalized_updates).where(MemoryAtom.atom_id == atom_id)
-                    count += query.execute()
+                    rows = query.execute()
+                    count += rows
+                    if rows > 0:
+                        successful_updates.append((atom_id, normalized_updates))
+            if any(_BM25_REBUILD_FIELDS & updates.keys() for _, updates in successful_updates):
+                self._invalidate_bm25_index()
+            else:
+                for atom_id, updates in successful_updates:
+                    self._notify_bm25_update(atom_id, updates)
             return count
         except Exception:
             logger.exception(
@@ -1778,6 +1813,7 @@ class MemoryStore:
                 query = MemoryAtom.delete().where(MemoryAtom.atom_id == atom_id)
                 rows = query.execute()
             if rows > 0:
+                self._invalidate_bm25_index()
                 await self.qdrant.delete_atom_vector(atom_id)
                 logger.debug("记忆原子已删除", event_code="memory.atom.deleted", atom_id=atom_id)
             return rows > 0
@@ -1827,6 +1863,7 @@ class MemoryStore:
                 rows = MemoryAtom.update(status="archived").where(MemoryAtom.atom_id == atom_id).execute()
 
             if rows > 0:
+                self._invalidate_bm25_index()
                 await self.qdrant.delete_atom_vector(atom_id)
                 logger.debug("记忆原子已归档", event_code="memory.atom.archived", atom_id=atom_id)
             return rows > 0
@@ -1845,6 +1882,7 @@ class MemoryStore:
         try:
             rows = MemoryAtom.update(atom_type=target_type).where(MemoryAtom.atom_id == atom_id).execute()
             if rows > 0:
+                self._notify_bm25_update(atom_id, {"atom_type": target_type})
                 await self.qdrant.set_atom_payload(atom_id, {"atom_type": target_type})
                 logger.debug(
                     "记忆原子类型已迁移", event_code="memory.atom.migrated", atom_id=atom_id, target_type=target_type

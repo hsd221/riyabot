@@ -80,7 +80,7 @@ class FakeRetriever(MemoryRetriever):
     def __init__(self) -> None:
         self.graph_store = None
 
-    async def retrieve_by_vector(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    async def retrieve_hybrid(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return []
 
     async def retrieve_by_source(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
@@ -100,7 +100,7 @@ class FakeTruncatingRetriever(MemoryRetriever):
     def __init__(self) -> None:
         self.graph_store = None
 
-    async def retrieve_by_vector(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    async def retrieve_hybrid(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return []
 
     async def retrieve_by_source(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
@@ -120,7 +120,7 @@ class FakeCrossSceneRetriever(MemoryRetriever):
     def __init__(self) -> None:
         self.graph_store = None
 
-    async def retrieve_by_vector(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    async def retrieve_hybrid(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return []
 
     async def retrieve_by_source(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:

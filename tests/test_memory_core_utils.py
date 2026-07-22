@@ -11,6 +11,7 @@ from src.memory import atom as memory_atom
 from src.memory.bm25_retrieval import BM25Retriever, reciprocal_rank_fusion, tokenize
 from src.memory.forgetting import ForgettingManager, _safe_timestamp
 from src.memory.layer3_retrieval import RetrievedAtom
+from src.memory.store import MemoryStore, MemoryStoreConfig
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
 from src.memory.schema import MemoryAtom as MemoryAtomModel
 from src.memory.schema import RawMessageArchive, configure_memory_database, initialize_database, memory_db
@@ -182,6 +183,55 @@ class BM25RetrievalTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retriever._doc_count, 0)
         self.assertEqual(retriever._doc_lengths, {})
 
+    async def test_bm25_search_applies_memory_payload_filters(self) -> None:
+        create_memory_atom(
+            "target",
+            content="Alpha-42 是当前群的发布代号",
+            source_scene="group_chat",
+            source_id="stream-1",
+            atom_type="factual",
+            privacy_level="context_sensitive",
+        )
+        create_memory_atom(
+            "other-stream",
+            content="Alpha-42 是另一个群的发布代号",
+            source_scene="group_chat",
+            source_id="stream-2",
+            atom_type="factual",
+            privacy_level="context_sensitive",
+        )
+        create_memory_atom(
+            "other-type",
+            content="Alpha-42 是当前群偏好的称呼",
+            source_scene="group_chat",
+            source_id="stream-1",
+            atom_type="preference",
+            privacy_level="context_sensitive",
+        )
+        create_memory_atom(
+            "private",
+            content="Alpha-42 是私聊中的发布代号",
+            source_scene="private_chat",
+            source_id="stream-1",
+            atom_type="factual",
+            privacy_level="private",
+        )
+
+        retriever = BM25Retriever(store=SimpleNamespace())
+        results = await retriever.search(
+            "Alpha-42",
+            top_k=10,
+            filters={
+                "source_scene": "group_chat",
+                "source_id": "stream-1",
+                "atom_type": "factual",
+                "privacy_level": "context_sensitive",
+                "status": "active",
+            },
+        )
+
+        self.assertEqual([atom.atom_id for atom in results], ["target"])
+
     async def test_hybrid_search_handles_empty_query_empty_sides_and_weighted_rrf(self) -> None:
         retriever = BM25Retriever(store=SimpleNamespace())
         vector_atom = retrieved("vector")
@@ -242,6 +292,90 @@ def create_memory_atom(atom_id: str, *, weight: float = 0.5, status: str = "acti
     }
     data.update(overrides)
     MemoryAtomModel.create(**data)
+
+
+class BM25StoreLifecycleTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.original_store_instance = MemoryStore._instance
+        MemoryStore._instance = None
+        self.store = MemoryStore(MemoryStoreConfig())
+        self.store.qdrant = SimpleNamespace(
+            delete_atom_vector=AsyncMock(return_value=True),
+            set_atom_payload=AsyncMock(return_value=True),
+        )
+
+    def tearDown(self) -> None:
+        MemoryStore._instance = self.original_store_instance
+        super().tearDown()
+
+    async def test_store_mutations_keep_shared_bm25_index_current(self) -> None:
+        retriever = self.store.get_bm25_retriever()
+        self.assertIs(retriever, self.store.get_bm25_retriever())
+        self.assertEqual(await retriever.search("Alpha-42"), [])
+
+        await self.store.insert_atom(
+            {
+                "atom_id": "release-code",
+                "atom_type": "factual",
+                "content": "Alpha-42 是发布代号",
+                "source_scene": "group_chat",
+                "source_id": "stream-1",
+                "status": "active",
+            }
+        )
+        inserted = await retriever.search("Alpha-42")
+
+        self.assertEqual([atom.atom_id for atom in inserted], ["release-code"])
+
+        await self.store.update_atom("release-code", {"content": "Beta-7 是新的发布代号"})
+        self.assertEqual(await retriever.search("Alpha-42"), [])
+        updated = await retriever.search("Beta-7")
+
+        self.assertEqual([atom.atom_id for atom in updated], ["release-code"])
+
+        await self.store.update_atom("release-code", {"weight": 0.9})
+        self.assertTrue(retriever._index_built)
+        refreshed = await retriever.search("Beta-7")
+
+        self.assertEqual(refreshed[0].weight, 0.9)
+
+        self.assertTrue(await self.store.archive_atom("release-code"))
+        self.assertEqual(await retriever.search("Beta-7"), [])
+
+    async def test_forgetting_decay_refreshes_cached_bm25_weight(self) -> None:
+        old_time = datetime.fromtimestamp(1.0)
+        create_memory_atom(
+            "decaying",
+            weight=0.8,
+            content="Gamma-19 是旧发布代号",
+            created_at=old_time,
+            last_accessed_at=old_time,
+            last_reinforced_at=old_time,
+            reinforcement_count=0,
+        )
+        retriever = self.store.get_bm25_retriever()
+        self.assertEqual((await retriever.search("Gamma-19"))[0].weight, 0.8)
+
+        manager = ForgettingManager(self.store, archive_threshold=0.0)
+        decayed = await manager._decay_atoms()
+        persisted_weight = MemoryAtomModel.get_by_id("decaying").weight
+        refreshed = await retriever.search("Gamma-19")
+
+        self.assertEqual(decayed, 1)
+        self.assertNotEqual(persisted_weight, 0.8)
+        self.assertEqual(refreshed[0].weight, persisted_weight)
+
+    async def test_forgetting_archive_removes_atom_from_cached_bm25_index(self) -> None:
+        create_memory_atom("faded", weight=0.05, content="Delta-23 是废弃发布代号")
+        retriever = self.store.get_bm25_retriever()
+        self.assertEqual([atom.atom_id for atom in await retriever.search("Delta-23")], ["faded"])
+
+        manager = ForgettingManager(self.store, archive_threshold=0.1)
+        archived = await manager._archive_faded()
+
+        self.assertEqual(archived, 1)
+        self.assertEqual(await retriever.search("Delta-23"), [])
 
 
 class ForgettingManagerTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):

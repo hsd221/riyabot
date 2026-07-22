@@ -16,6 +16,7 @@ Functions:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import datetime as _dt
@@ -55,6 +56,9 @@ logger = get_logger("memory.layer3")
 _MIN_QUERY_RELEVANCE = 0.08
 _MIN_SEMANTIC_QUERY_RELEVANCE = 0.5
 _CJK_RELEVANCE_STOP_CHARS = set("的一是在了有和与及或也就都还很被把给吗呢啊吧呀哦嗯我你他她它们这那个")
+_HYBRID_VECTOR_WEIGHT = 0.7
+_HYBRID_BM25_WEIGHT = 0.3
+_RRF_K = 60
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -198,6 +202,28 @@ def _query_relevance(query_text: str, content: str, similarity_score: float = 0.
     if lexical_score >= _MIN_QUERY_RELEVANCE and semantic_score >= _MIN_SEMANTIC_QUERY_RELEVANCE:
         return max(lexical_score, semantic_score)
     return lexical_score
+
+
+def _build_bm25_query_text(query_text: str) -> str:
+    """Remove retrieval-control labels and nearby-history noise from a BM25 query."""
+    selected: list[str] = []
+    unstructured: list[str] = []
+    searchable_labels = {"需要查证的问题", "检索问题", "当前目标消息", "当前目标", "目标消息", "追问线索", "待理解词语"}
+    for raw_line in str(query_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.match(r"([^:：]{1,20})[:：]\s*(.*)", line)
+        if match:
+            label, value = match.groups()
+            if label == "近邻上下文":
+                continue
+            if label in searchable_labels:
+                if value.strip():
+                    selected.append(value.strip())
+                continue
+        unstructured.append(line)
+    return " ".join(selected or unstructured).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -994,15 +1020,70 @@ class MemoryRetriever:
     所有检索结果均按 weight × similarity 综合评分排序。
     """
 
-    def __init__(self, store: MemoryStore, graph_store: Optional[GraphStore] = None):
+    def __init__(
+        self,
+        store: MemoryStore,
+        graph_store: Optional[GraphStore] = None,
+        bm25_retriever: Optional[Any] = None,
+    ):
         """初始化检索器
 
         Args:
             store: MemoryStore 实例（承载 SQLite + Qdrant）
             graph_store: GraphStore 实例（可选，用于图谱关联扩展）
+            bm25_retriever: BM25 检索器（可选，主要用于依赖注入和测试）
         """
         self.store = store
         self.graph_store = graph_store
+        self._bm25_retriever = bm25_retriever
+
+    def _get_bm25_retriever(self) -> Any:
+        """Get the store-owned BM25 retriever, creating a local fallback for lightweight stores."""
+        if self._bm25_retriever is not None:
+            return self._bm25_retriever
+
+        factory = getattr(self.store, "get_bm25_retriever", None)
+        if callable(factory):
+            self._bm25_retriever = factory()
+        else:
+            from src.memory.bm25_retrieval import BM25Retriever
+
+            self._bm25_retriever = BM25Retriever(self.store)
+        return self._bm25_retriever
+
+    async def _search_vector(
+        self,
+        query_text: str,
+        top_k: int,
+        filters: Optional[dict[str, Any]],
+        min_weight: float,
+    ) -> list[dict[str, Any]]:
+        """Run vector retrieval without allowing a backend failure to break hybrid retrieval."""
+        try:
+            return await self.retrieve_by_vector(
+                query_text=query_text,
+                filters=filters,
+                top_k=top_k,
+                min_weight=min_weight,
+                fallback_to_keyword=False,
+            )
+        except Exception as e:
+            logger.warning("向量检索失败，继续使用其他检索路径", error=str(e))
+            return []
+
+    async def _search_bm25(
+        self,
+        query_text: str,
+        top_k: int,
+        filters: Optional[dict[str, Any]],
+    ) -> list[RetrievedAtom]:
+        """Run BM25 without allowing a lexical failure to break reply generation."""
+        try:
+            retriever = self._get_bm25_retriever()
+            return await retriever.search(query_text, top_k=top_k, filters=filters)
+        except Exception as e:
+            logger.warning("BM25 检索失败，继续使用其他检索路径", error=str(e))
+            return []
 
     # ── 向量检索 ───────────────────────────────────────────
 
@@ -1013,6 +1094,7 @@ class MemoryRetriever:
         filters: Optional[dict[str, Any]] = None,
         top_k: int = 10,
         min_weight: float = 0.0,
+        fallback_to_keyword: bool = True,
     ) -> list[dict[str, Any]]:
         """向量相似度检索 + 权重排序
 
@@ -1025,12 +1107,15 @@ class MemoryRetriever:
             filters: Qdrant 过滤条件（如 {"source_scene": "group_chat"}）
             top_k: 最终返回数量
             min_weight: 最低权重阈值
+            fallback_to_keyword: 向量不可用或无结果时是否回退 SQLite LIKE
 
         Returns:
             检索结果字典列表，每项含原子全部字段 + final_score + similarity_score
         """
         qdrant = getattr(self.store, "qdrant", None)
         if qdrant is not None and not getattr(qdrant, "vector_search_enabled", True):
+            if not fallback_to_keyword:
+                return []
             logger.debug("向量索引迁移中，直接回退到关键词检索")
             kw_query = (filters or {}).get("keyword", query_text)
             return await self.keyword_search(
@@ -1044,6 +1129,8 @@ class MemoryRetriever:
             if query_text:
                 query_embedding = await generate_query_embedding(query_text)
             if query_embedding is None:
+                if not fallback_to_keyword:
+                    return []
                 logger.debug("向量检索: 无 query_embedding，回退到关键词检索")
                 kw_query = (filters or {}).get("keyword", query_text)
                 return await self.keyword_search(
@@ -1061,6 +1148,8 @@ class MemoryRetriever:
         )
 
         if not qdrant_results:
+            if not fallback_to_keyword:
+                return []
             logger.warning("Qdrant向量检索失败或返回为空，回退到关键词检索")
             logger.debug("向量检索回退详情", filters=filters, top_k=top_k)
             kw_query = filters.get("keyword", "") if filters else ""
@@ -1105,6 +1194,103 @@ class MemoryRetriever:
             top_k=top_k,
             results_count=len(results),
             oversample_limit=oversample_limit,
+        )
+        return results[:top_k]
+
+    async def retrieve_hybrid(
+        self,
+        query_text: str,
+        filters: Optional[dict[str, Any]] = None,
+        top_k: int = 10,
+        min_weight: float = 0.0,
+    ) -> list[dict[str, Any]]:
+        """Retrieve vector and BM25 candidates, then fuse them with weighted RRF."""
+        bm25_query = _build_bm25_query_text(query_text)
+        side_limit = max(top_k * 2, top_k)
+        vector_search = self._search_vector(
+            query_text=query_text,
+            filters=filters,
+            top_k=side_limit,
+            min_weight=min_weight,
+        )
+        if bm25_query:
+            vector_results, bm25_results = await asyncio.gather(
+                vector_search,
+                self._search_bm25(bm25_query, side_limit, filters),
+            )
+        else:
+            vector_results = await vector_search
+            bm25_results = []
+
+        if not vector_results and not bm25_results:
+            return await self.keyword_search(query=bm25_query, filters=filters, limit=top_k)
+
+        vector_atoms = [
+            RetrievedAtom(
+                atom_id=str(atom.get("atom_id", "")),
+                content=str(atom.get("content", "")),
+                atom_type=str(atom.get("atom_type", "")),
+                weight=float(atom.get("weight", 0.0)),
+                similarity_score=float(atom.get("similarity_score", 0.0)),
+            )
+            for atom in vector_results
+            if atom.get("atom_id")
+        ]
+
+        from src.memory.bm25_retrieval import weighted_reciprocal_rank_fusion
+
+        fused = weighted_reciprocal_rank_fusion(
+            [vector_atoms, bm25_results],
+            [_HYBRID_VECTOR_WEIGHT, _HYBRID_BM25_WEIGHT],
+            k=_RRF_K,
+        )
+        fused_ids = [atom.atom_id for atom in fused]
+        full_atoms = await self._fetch_atoms_by_ids(fused_ids)
+        full_atom_map = {str(atom.get("atom_id", "")): atom for atom in full_atoms}
+        vector_map = {atom.atom_id: atom for atom in vector_atoms}
+        bm25_map = {atom.atom_id: atom for atom in bm25_results}
+
+        active_weight = 0.0
+        if vector_atoms:
+            active_weight += _HYBRID_VECTOR_WEIGHT
+        if bm25_results:
+            active_weight += _HYBRID_BM25_WEIGHT
+        max_rrf_score = active_weight / (_RRF_K + 1)
+
+        results: list[dict[str, Any]] = []
+        for fused_atom in fused:
+            atom_data = full_atom_map.get(fused_atom.atom_id)
+            if atom_data is None:
+                continue
+            weight = float(atom_data.get("weight", 0.0))
+            if weight < min_weight:
+                continue
+
+            sources: list[str] = []
+            if fused_atom.atom_id in vector_map:
+                sources.append("vector")
+            if fused_atom.atom_id in bm25_map:
+                sources.append("bm25")
+
+            retrieval_score = fused_atom.final_score / max_rrf_score if max_rrf_score > 0 else 0.0
+            vector_atom = vector_map.get(fused_atom.atom_id)
+            bm25_atom = bm25_map.get(fused_atom.atom_id)
+            atom_data["similarity_score"] = vector_atom.similarity_score if vector_atom else 0.0
+            atom_data["bm25_score"] = bm25_atom.similarity_score if bm25_atom else 0.0
+            atom_data["rrf_score"] = fused_atom.final_score
+            atom_data["retrieval_score"] = min(max(retrieval_score, 0.0), 1.0)
+            atom_data["final_score"] = weight * atom_data["retrieval_score"]
+            atom_data["retrieval_sources"] = sources
+            atom_data["fade_level"] = get_fade_level(weight)
+            results.append(atom_data)
+
+        results.sort(key=lambda atom: atom.get("final_score", 0.0), reverse=True)
+        logger.debug(
+            "混合记忆检索完成",
+            vector_results=len(vector_atoms),
+            bm25_results=len(bm25_results),
+            fused_results=len(results),
+            top_k=top_k,
         )
         return results[:top_k]
 
@@ -1348,7 +1534,7 @@ class MemoryRetriever:
         has_query = bool(_relevance_units(query_text))
 
         if has_query:
-            local_query_atoms = await self.retrieve_by_vector(
+            local_query_atoms = await self.retrieve_hybrid(
                 query_text=query_text,
                 filters={
                     "source_scene": scene,
@@ -1373,7 +1559,7 @@ class MemoryRetriever:
         # 2. 配置允许时补充同场景全局记忆
         if include_global:
             if has_query:
-                scene_query_atoms = await self.retrieve_by_vector(
+                scene_query_atoms = await self.retrieve_hybrid(
                     query_text=query_text,
                     filters={
                         "source_scene": scene,
@@ -1837,7 +2023,7 @@ class MemoryRetriever:
 
             # 1. 从另一场景检索记忆
             if has_query:
-                other_atoms = await self.retrieve_by_vector(
+                other_atoms = await self.retrieve_hybrid(
                     query_text=query_text,
                     filters={
                         "source_scene": other_scene,

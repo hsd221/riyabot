@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from src.memory import dream_agent
+from src.memory.bm25_retrieval import BM25Retriever
 from src.memory.dream_agent import DreamTask
 from src.memory.layer1_summarizer import UnclosedTopicBridge
 from src.memory.schema import (
@@ -56,6 +57,24 @@ class FakeStore:
     def __init__(self) -> None:
         self.qdrant = FakeQdrant()
         self.archive_atom = AsyncMock(return_value=True)
+
+
+class IndexedFakeStore(FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self._bm25_retriever = BM25Retriever(self)  # type: ignore[arg-type]
+
+    def get_bm25_retriever(self) -> BM25Retriever:
+        return self._bm25_retriever
+
+    def _invalidate_bm25_index(self) -> None:
+        self._bm25_retriever.invalidate_cache()
+
+    def _notify_bm25_update(self, atom_id: str, updates: dict[str, Any]) -> None:
+        if "content" in updates or "status" in updates:
+            self._invalidate_bm25_index()
+        else:
+            self._bm25_retriever.update_cached_metadata(atom_id, updates)
 
 
 class FakeForgettingManager:
@@ -117,7 +136,10 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             status="active",
         )
 
-        task = DreamTask(FakeStore())
+        store = IndexedFakeStore()
+        retriever = store.get_bm25_retriever()
+        self.assertEqual((await retriever.search("练习钢琴"))[0].weight, 0.2)
+        task = DreamTask(store)
 
         consolidated = await task._consolidate()
 
@@ -125,6 +147,7 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(consolidated, 1)
         self.assertGreater(atom.weight, 0.2)
         self.assertGreater(atom.last_accessed_at, old_access)
+        self.assertEqual((await retriever.search("练习钢琴"))[0].weight, atom.weight)
         self.assertTrue(
             any("last_accessed_at" in payload for _, payload in task._store.qdrant.payload_updates),
             "Qdrant payload should receive the refreshed access timestamp alongside weight",
@@ -186,7 +209,10 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             created_at=now,
         )
 
-        task = DreamTask(FakeStore())
+        store = IndexedFakeStore()
+        retriever = store.get_bm25_retriever()
+        self.assertEqual(len(await retriever.search("爵士乐")), 2)
+        task = DreamTask(store)
 
         updated = await task._reassess_memory_scores()
 
@@ -198,6 +224,9 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(supported.weight, 0.225)
         self.assertLess(contested.confidence, 0.8)
         self.assertLess(contested.weight, 0.56)
+        refreshed_weights = {atom.atom_id: atom.weight for atom in await retriever.search("爵士乐")}
+        self.assertEqual(refreshed_weights["atom-supported"], supported.weight)
+        self.assertEqual(refreshed_weights["atom-contested"], contested.weight)
         qdrant_payloads = [payload for _, payload in task._store.qdrant.payload_updates]
         self.assertTrue(any("confidence" in payload and "importance" in payload for payload in qdrant_payloads))
 
@@ -530,13 +559,28 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             status="active",
         )
 
-        task = DreamTask(FakeStore())
+        store = IndexedFakeStore()
+        retriever = store.get_bm25_retriever()
+        before = await retriever.search(
+            "身份证号码",
+            filters={"privacy_level": "context_sensitive"},
+        )
+        self.assertEqual([atom.atom_id for atom in before], ["atom-private-sensitive"])
+        task = DreamTask(store)
 
         stats = await task._adjust_privacy_levels()
 
         atom = MemoryAtom.get(MemoryAtom.atom_id == "atom-private-sensitive")
         self.assertEqual(stats, {"locked_private": 1, "unlocked_public": 0})
         self.assertEqual(atom.privacy_level, "private")
+        self.assertEqual(
+            await retriever.search("身份证号码", filters={"privacy_level": "context_sensitive"}),
+            [],
+        )
+        self.assertEqual(
+            [atom.atom_id for atom in await retriever.search("身份证号码", filters={"privacy_level": "private"})],
+            ["atom-private-sensitive"],
+        )
         self.assertTrue(
             any(
                 atom_id == "atom-private-sensitive" and payload.get("privacy_level") == "private"
@@ -628,7 +672,10 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
                 status="active",
             )
 
-        task = DreamTask(FakeStore())
+        store = IndexedFakeStore()
+        retriever = store.get_bm25_retriever()
+        self.assertEqual(len(await retriever.search("爵士钢琴", top_k=10)), 5)
+        task = DreamTask(store)
 
         stats = await task._merge_overflowing_user_memories(soft_cap=3, batch_size=10)
 
@@ -644,6 +691,7 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("小明", summary.content)
         self.assertIn("泛化", summary.content)
         self.assertEqual(summary.atom_type, "factual")
+        self.assertEqual([atom.atom_id for atom in await retriever.search("泛化")], [summary.atom_id])
         self.assertTrue(
             MemoryTraceChain.select()
             .where(

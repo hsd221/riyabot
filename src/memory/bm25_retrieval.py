@@ -109,30 +109,36 @@ def reciprocal_rank_fusion(
     Returns:
         融合后的排序结果，按 RRF 得分降序排列
     """
+    return weighted_reciprocal_rank_fusion(results_lists, [1.0] * len(results_lists), k=k)
+
+
+def weighted_reciprocal_rank_fusion(
+    results_lists: list[list[RetrievedAtom]],
+    weights: list[float],
+    k: int = 60,
+) -> list[RetrievedAtom]:
+    """Fuse ranked retrieval lists with per-retriever RRF weights."""
+    if len(results_lists) != len(weights):
+        raise ValueError("results_lists and weights must have the same length")
     if not results_lists:
         return []
 
-    # 累计每个 doc 的 RRF 得分
     doc_scores: dict[str, float] = {}
     doc_map: dict[str, RetrievedAtom] = {}
-
-    for results in results_lists:
+    for results, weight in zip(results_lists, weights, strict=True):
         for rank, atom in enumerate(results, 1):
             aid = atom.atom_id
-            doc_scores[aid] = doc_scores.get(aid, 0.0) + 1.0 / (k + rank)
+            doc_scores[aid] = doc_scores.get(aid, 0.0) + weight / (k + rank)
             if aid not in doc_map:
                 doc_map[aid] = atom
 
-    # 按 RRF 得分降序排列
-    ranked = sorted(doc_scores.keys(), key=lambda aid: doc_scores[aid], reverse=True)
-
-    result: list[RetrievedAtom] = []
+    ranked = sorted(doc_scores, key=lambda aid: doc_scores[aid], reverse=True)
+    fused: list[RetrievedAtom] = []
     for aid in ranked:
         atom = doc_map[aid]
         atom.final_score = doc_scores[aid]
-        result.append(atom)
-
-    return result
+        fused.append(atom)
+    return fused
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +233,13 @@ class BM25Retriever:
 
                     # 缓存元数据
                     self._doc_metadata[doc_id] = {
+                        "atom_id": model.atom_id,
                         "atom_type": model.atom_type,
                         "weight": model.weight,
                         "source_scene": model.source_scene,
                         "source_id": model.source_id,
+                        "privacy_level": model.privacy_level,
+                        "status": model.status,
                         "importance": model.importance,
                         "confidence": model.confidence,
                         "created_at": model.created_at,
@@ -315,11 +324,45 @@ class BM25Retriever:
 
     # ── 检索方法 ──────────────────────────────────────────────
 
+    @staticmethod
+    def _matches_filter(actual: Any, expected: Any) -> bool:
+        """Match one cached payload value using Qdrant-compatible list semantics."""
+        if isinstance(expected, (list, tuple, set)):
+            return actual in expected
+        return actual == expected
+
+    def _matches_filters(
+        self,
+        doc_id: str,
+        partition: Optional[str],
+        filters: Optional[dict[str, Any]],
+    ) -> bool:
+        """Apply supported memory payload filters to one indexed document."""
+        metadata = self._doc_metadata.get(doc_id, {})
+        if partition and metadata.get("source_scene") != partition:
+            return False
+
+        supported_fields = {
+            "atom_id",
+            "atom_type",
+            "privacy_level",
+            "source_id",
+            "source_scene",
+            "status",
+        }
+        for key, expected in (filters or {}).items():
+            if key not in supported_fields or expected is None:
+                continue
+            if not self._matches_filter(metadata.get(key), expected):
+                return False
+        return True
+
     async def search(
         self,
         query: str,
         top_k: int = 10,
         partition: Optional[str] = None,
+        filters: Optional[dict[str, Any]] = None,
     ) -> list[RetrievedAtom]:
         """BM25 关键词检索
 
@@ -330,6 +373,7 @@ class BM25Retriever:
             query: 查询文本
             top_k: 返回结果数量
             partition: 场景分区过滤（如 "group_chat"，None 表示不过滤）
+            filters: 记忆 payload 过滤条件，支持场景、来源、类型、隐私级别和状态
 
         Returns:
             检索到的记忆原子列表，按 BM25 得分降序
@@ -365,8 +409,7 @@ class BM25Retriever:
         # 计算 BM25 得分
         doc_scores: dict[str, float] = {}
         for doc_id in candidate_docs:
-            # 分区过滤
-            if partition and self._doc_source_scene.get(doc_id) != partition:
+            if not self._matches_filters(doc_id, partition, filters):
                 continue
             doc_scores[doc_id] = self._calculate_bm25_score(query_terms, doc_id)
 
@@ -451,29 +494,10 @@ class BM25Retriever:
         if not vector_results:
             return bm25_results[:top_k]
 
-        # 加权 RRF 融合
-        doc_scores: dict[str, float] = {}
-        doc_map: dict[str, RetrievedAtom] = {}
-
-        for rank, atom in enumerate(bm25_results, 1):
-            aid = atom.atom_id
-            doc_scores[aid] = doc_scores.get(aid, 0.0) + bm25_weight / (60.0 + rank)
-            doc_map[aid] = atom
-
-        for rank, atom in enumerate(vector_results, 1):
-            aid = atom.atom_id
-            doc_scores[aid] = doc_scores.get(aid, 0.0) + vector_weight / (60.0 + rank)
-            if aid not in doc_map:
-                doc_map[aid] = atom
-
-        # 按加权 RRF 得分降序排列
-        ranked = sorted(doc_scores.keys(), key=lambda aid: doc_scores[aid], reverse=True)
-
-        results: list[RetrievedAtom] = []
-        for aid in ranked[:top_k]:
-            atom = doc_map[aid]
-            atom.final_score = doc_scores[aid]
-            results.append(atom)
+        results = weighted_reciprocal_rank_fusion(
+            [bm25_results, vector_results],
+            [bm25_weight, vector_weight],
+        )[:top_k]
 
         logger.debug(
             "混合检索完成(RRF)",
@@ -486,6 +510,30 @@ class BM25Retriever:
         return results
 
     # ── 缓存管理 ──────────────────────────────────────────────
+
+    def update_cached_metadata(self, atom_id: str, updates: dict[str, Any]) -> None:
+        """Refresh non-lexical metadata without rebuilding term statistics."""
+        if not self._index_built or atom_id not in self._doc_metadata:
+            return
+
+        metadata_fields = {
+            "atom_type",
+            "confidence",
+            "created_at",
+            "importance",
+            "privacy_level",
+            "source_id",
+            "source_scene",
+            "weight",
+        }
+        metadata = self._doc_metadata[atom_id]
+        for key, value in updates.items():
+            if key in metadata_fields:
+                metadata[key] = value
+        if "source_scene" in updates:
+            self._doc_source_scene[atom_id] = str(updates["source_scene"])
+        if "source_id" in updates:
+            self._doc_source_id[atom_id] = updates["source_id"]
 
     def invalidate_cache(self) -> None:
         """使索引缓存失效，下次 search 将自动重建"""

@@ -218,6 +218,11 @@ class ForgettingManager:
                     total=total,
                 )
 
+        notify_bm25 = getattr(self._store, "_notify_bm25_update", None)
+        if callable(notify_bm25):
+            for atom_id, updates in qdrant_updates:
+                notify_bm25(atom_id, updates)
+
         for atom_id, payload in qdrant_updates:
             try:
                 await self._store.qdrant.set_atom_payload(atom_id, payload)
@@ -256,6 +261,10 @@ class ForgettingManager:
                     count += 1
                 except Exception as e:
                     logger.error(f"归档原子失败 ({atom_model.atom_id}): {e}")
+
+        invalidate_bm25 = getattr(self._store, "_invalidate_bm25_index", None)
+        if count > 0 and callable(invalidate_bm25):
+            invalidate_bm25()
 
         for atom_id in qdrant_delete_ids:
             try:
