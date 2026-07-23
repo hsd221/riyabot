@@ -19,6 +19,7 @@ import { AdapterConfigPage } from './routes/config/adapter'
 import { EmojiManagementPage } from './routes/resource/emoji'
 import { ExpressionManagementPage } from './routes/resource/expression'
 import { BehaviorManagementPage } from './routes/resource/behavior'
+import { ChatHistoryImportPage } from './routes/resource/chat-history-import'
 import { JargonManagementPage } from './routes/resource/jargon'
 import { PersonManagementPage } from './routes/person'
 import { MemoryPage } from './routes/resource/memory'
@@ -142,6 +143,13 @@ const behaviorManagementRoute = createRoute({
   component: BehaviorManagementPage,
 })
 
+// 资源管理路由 - 聊天记录导入学习
+const chatHistoryImportRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: '/resource/chat-history-import',
+  component: ChatHistoryImportPage,
+})
+
 // 资源管理路由 - 人物信息管理
 const personManagementRoute = createRoute({
   getParentRoute: () => protectedRoute,
@@ -246,6 +254,7 @@ const routeTree = rootRoute.addChildren([
     emojiManagementRoute,
     expressionManagementRoute,
     behaviorManagementRoute,
+    chatHistoryImportRoute,
     jargonManagementRoute,
     personManagementRoute,
     memoryRoute,

@@ -72,6 +72,9 @@ eggs/
 lib/
 !webui/src/lib/
 webui/src/lib/*
+!webui/src/lib/fetch-with-auth.ts
+!webui/src/lib/chat-history-import-api.ts
+!webui/src/lib/chat-history-import-view.ts
 !webui/src/lib/behavior-api.ts
 !webui/src/lib/settings-manager.ts
 !webui/src/lib/log-websocket.ts

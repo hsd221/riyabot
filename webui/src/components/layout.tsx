@@ -28,6 +28,7 @@ import {
   X,
   ChevronRight,
   ScanSearch,
+  UploadCloud,
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { Link, useMatchRoute, useRouterState } from '@tanstack/react-router'
@@ -102,6 +103,7 @@ const menuIconTileClasses: Record<string, string> = {
   '/resource/emoji': 'ios-symbol-yellow',
   '/resource/expression': 'ios-symbol-orange',
   '/resource/behavior': 'ios-symbol-purple',
+  '/resource/chat-history-import': 'ios-symbol-teal',
   '/resource/jargon': 'ios-symbol-pink',
   '/resource/person': 'ios-symbol-blue',
   '/resource/memory': 'ios-symbol-green',
@@ -258,6 +260,7 @@ export function Layout({ children }: LayoutProps) {
         { icon: Smile, label: '表情包管理', path: '/resource/emoji' },
         { icon: MessageSquare, label: '表达方式管理', path: '/resource/expression' },
         { icon: Activity, label: '行为学习管理', path: '/resource/behavior' },
+        { icon: UploadCloud, label: '聊天记录学习', path: '/resource/chat-history-import' },
         { icon: Hash, label: '黑话管理', path: '/resource/jargon' },
         { icon: UserCircle, label: '人物信息管理', path: '/resource/person' },
         { icon: BrainCircuit, label: '记忆系统概览', path: '/resource/memory' },

@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import unittest
 
-from src.webui.request_limits import RequestBodyLimitMiddleware
+from src.webui.request_limits import RequestBodyLimitMiddleware, WEBUI_PATH_BODY_LIMITS
 
 
 class RequestBodyLimitMiddlewareTest(unittest.IsolatedAsyncioTestCase):
+    def test_chat_history_upload_has_an_explicit_large_body_limit(self) -> None:
+        self.assertEqual(WEBUI_PATH_BODY_LIMITS["/api/webui/chat-history-imports"], 101 * 1024 * 1024)
+
     async def _request(
         self,
         *,

@@ -24,6 +24,7 @@ from .annual_report_routes import router as annual_report_router
 from .memory_routes import router as memory_router
 from .behavior_routes import router as behavior_router
 from .model_trace_routes import router as model_trace_router
+from .chat_history_import_routes import router as chat_history_import_router
 
 logger = get_logger("webui.api")
 
@@ -60,6 +61,8 @@ router.include_router(memory_router)
 router.include_router(behavior_router)
 # 注册模型请求追踪路由
 router.include_router(model_trace_router)
+# 注册聊天记录导入学习路由
+router.include_router(chat_history_import_router)
 
 
 class PasswordLoginRequest(BaseModel):
