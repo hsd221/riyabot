@@ -456,36 +456,6 @@ class ChatHistory(BaseModel):
         table_name = "chat_history"
 
 
-class ChatHistoryImportTask(BaseModel):
-    """可审计的聊天记录导入与学习任务。"""
-
-    import_id = TextField(unique=True, index=True)
-    source_hash = TextField(index=True)
-    source_name = TextField()
-    source_size = IntegerField(default=0)
-    status = TextField(index=True)
-    chat_id = TextField(null=True, index=True)
-    chat_name = TextField(null=True)
-    group_id = TextField(null=True)
-    source_path = TextField(default="")
-    normalized_path = TextField(default="")
-    analysis_json = TextField(default="{}")
-    options_json = TextField(default="{}")
-    result_json = TextField(null=True)
-    error_message = TextField(null=True)
-    progress_stage = TextField(default="analyzing")
-    progress_current = IntegerField(default=0)
-    progress_total = IntegerField(default=1)
-    cancel_requested = BooleanField(default=False)
-    created_at = FloatField()
-    updated_at = FloatField()
-    started_at = FloatField(null=True)
-    completed_at = FloatField(null=True)
-
-    class Meta:
-        table_name = "chat_history_import_task"
-
-
 MODELS = [
     ChatStreams,
     LLMUsage,
@@ -504,7 +474,6 @@ MODELS = [
     Jargon,
     BehaviorPattern,
     ChatHistory,
-    ChatHistoryImportTask,
 ]
 
 
