@@ -24,6 +24,7 @@ SENSITIVE_ROUTE_FILES = (
     "behavior_routes.py",
     "emoji_routes.py",
     "annual_report_routes.py",
+    "chat_history_import_routes.py",
     "api/planner.py",
     "api/replier.py",
 )

@@ -1,0 +1,96 @@
+// 带自动认证处理的 fetch 封装
+
+/**
+ * 增强的 fetch 函数，自动处理 401 错误并跳转到登录页
+ * 使用 HttpOnly Cookie 进行认证，自动携带 credentials
+ */
+export async function fetchWithAuth(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  if (!(init?.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  // 合并默认配置，确保携带 Cookie
+  const config: RequestInit = {
+    ...init,
+    credentials: 'include', // 确保携带 Cookie
+    headers,
+  }
+
+  const response = await fetch(input, config)
+
+  // 检测 401 未授权错误
+  if (response.status === 401) {
+    // 跳转到登录页
+    window.location.href = '/auth'
+
+    // 抛出错误以便调用者可以处理
+    throw new Error('认证失败，请重新登录')
+  }
+
+  return response
+}
+
+export type AuthStatus = {
+  authenticated: boolean
+  passwordConfigured: boolean
+}
+
+/**
+ * 获取带认证的请求配置
+ * 现在使用 Cookie 认证，不再需要手动设置 Authorization header
+ */
+export function getAuthHeaders(): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+  }
+}
+
+/**
+ * 调用登出接口并跳转到登录页
+ */
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/api/webui/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    })
+  } catch (error) {
+    console.error('登出请求失败:', error)
+  }
+  // 无论成功与否都跳转到登录页
+  window.location.href = '/auth'
+}
+
+/**
+ * 检查当前认证状态
+ */
+export async function getAuthStatus(): Promise<AuthStatus> {
+  try {
+    const response = await fetch('/api/webui/auth/check', {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+    })
+
+    if (!response.ok) {
+      return { authenticated: false, passwordConfigured: true }
+    }
+
+    const data = await response.json()
+    return {
+      authenticated: data.authenticated === true,
+      // 连接异常时保持关闭状态，只有后端明确声明未配置时才开放首次设置流程。
+      passwordConfigured: data.password_configured !== false,
+    }
+  } catch {
+    return { authenticated: false, passwordConfigured: true }
+  }
+}
+
+export async function checkAuthStatus(): Promise<boolean> {
+  return (await getAuthStatus()).authenticated
+}
