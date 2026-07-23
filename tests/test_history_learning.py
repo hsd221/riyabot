@@ -143,6 +143,35 @@ class HistoryCandidateValidationTest(unittest.TestCase):
 
         self.assertEqual([item.actor_type for item in candidates.behaviors], ["maibot_self"])
 
+    def test_excluded_members_can_be_context_but_never_learning_evidence(self) -> None:
+        from src.bw_learner.history_learning import parse_history_candidates
+
+        response = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "遇到意外结果时",
+                        "style": "用短句表达强烈反应",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.83,
+                    },
+                    {
+                        "situation": "解释术语时",
+                        "style": "先给词义再补充上下文",
+                        "evidence_ids": ["m2"],
+                        "confidence": 0.8,
+                    },
+                ],
+                "behaviors": [],
+                "jargons": [],
+            },
+            ensure_ascii=False,
+        )
+
+        candidates = parse_history_candidates(response, self.messages, excluded_sender_ids={"u1"})
+
+        self.assertEqual([item.evidence_ids for item in candidates.expressions], [("m2",)])
+
     def test_behavior_candidates_require_distinct_action_and_result_evidence(self) -> None:
         from src.bw_learner.history_learning import parse_history_candidates
 

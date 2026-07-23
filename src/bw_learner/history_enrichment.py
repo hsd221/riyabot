@@ -1,4 +1,4 @@
-"""Store evidence-grounded history memories and isolated imported profiles."""
+"""Store evidence-grounded history memories and user-approved profile updates."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from src.memory.user_profile import PersonIdentity, ProfileBuilder, ProfileStore
 logger = get_logger("history_enrichment")
 ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 CancellationCheck = Callable[[], bool]
-IMPORT_PROFILE_PLATFORM = "qq-import"
+PROFILE_PLATFORM = "qq"
 
 
 @dataclass(frozen=True)
@@ -51,15 +51,21 @@ class HistoryEnrichmentStoreResult:
         return asdict(self)
 
 
-def load_history_enrichment_evidence(
+def load_history_candidate_evidence(
     normalized_path: str | Path,
     candidates: HistoryCandidates,
 ) -> dict[str, ImportedMessage]:
-    """Stream only the normalized messages referenced by memory/profile candidates."""
+    """Stream only normalized messages referenced by any validated candidate."""
 
     referenced_ids = {
         evidence_id
-        for collection in (candidates.memories, candidates.profiles)
+        for collection in (
+            candidates.expressions,
+            candidates.behaviors,
+            candidates.jargons,
+            candidates.memories,
+            candidates.profiles,
+        )
         for candidate in collection
         for evidence_id in candidate.evidence_ids
     }
@@ -76,6 +82,16 @@ def load_history_enrichment_evidence(
     if referenced_ids - evidence.keys():
         raise ChatHistoryFormatError("规范化聊天记录缺少候选证据")
     return evidence
+
+
+def load_history_enrichment_evidence(
+    normalized_path: str | Path,
+    candidates: HistoryCandidates,
+) -> dict[str, ImportedMessage]:
+    """Backward-compatible evidence loader for memory/profile callers."""
+
+    enrichment_candidates = HistoryCandidates(memories=candidates.memories, profiles=candidates.profiles)
+    return load_history_candidate_evidence(normalized_path, enrichment_candidates)
 
 
 async def _notify(callback: ProgressCallback | None, current: int, total: int) -> None:
@@ -101,7 +117,7 @@ def _evidence_messages(
 
 def _import_entities(messages: list[ImportedMessage], subject_id: str = "") -> list[str]:
     sender_ids = [subject_id] if subject_id else [message.sender_id for message in messages if not message.is_bot]
-    return [make_profile_id(IMPORT_PROFILE_PLATFORM, sender_id) for sender_id in dict.fromkeys(sender_ids) if sender_id]
+    return [make_profile_id(PROFILE_PLATFORM, sender_id) for sender_id in dict.fromkeys(sender_ids) if sender_id]
 
 
 def _record_trace(atom_id: str, import_id: str, content: str) -> None:
@@ -170,7 +186,7 @@ def _profile_identity(
     messages = _evidence_messages(candidate.evidence_ids, evidence)
     sender = next((message for message in reversed(messages) if message.sender_id == candidate.subject_id), None)
     return PersonIdentity(
-        platform=IMPORT_PROFILE_PLATFORM,
+        platform=PROFILE_PLATFORM,
         user_id=candidate.subject_id,
         nickname=sender.sender_name if sender else "",
         cardname=sender.sender_card if sender else "",
@@ -179,6 +195,63 @@ def _profile_identity(
         identity_source="chat_history_import",
         verification_status="unverified",
     )
+
+
+def _profile_summary(profile: Any) -> dict[str, Any]:
+    """Return a bounded, review-safe view of the existing profile."""
+
+    return {
+        "profile_id": profile.profile_id,
+        "nickname": str(profile.nickname or "")[:120],
+        "cardname": str(profile.cardname or "")[:120],
+        "verification_status": str(profile.verification_status or "unverified"),
+        "interests": [str(item)[:120] for item in profile.interests[:20]],
+        "preferences": {str(key)[:80]: str(value)[:160] for key, value in list(profile.preferences.items())[:20]},
+        "facts": {str(key)[:80]: str(value)[:160] for key, value in list(profile.facts.items())[:20]},
+        "traits": {str(key)[:80]: round(float(value), 3) for key, value in list(profile.traits.items())[:20]},
+    }
+
+
+def find_history_profile_conflicts(
+    *,
+    candidates: HistoryCandidates,
+    evidence: Mapping[str, ImportedMessage],
+    group_id: str,
+    chat_name: str,
+    profile_store: ProfileStore | None = None,
+) -> list[dict[str, Any]]:
+    """Find existing profiles that would be changed by imported candidates.
+
+    The returned data contains summaries only; raw normalized chat text remains on disk
+    until the user resolves every conflict.
+    """
+
+    profiles = profile_store or ProfileStore()
+    grouped: dict[str, dict[str, Any]] = {}
+    for candidate in candidates.profiles:
+        identity = _profile_identity(candidate, evidence, group_id=group_id, chat_name=chat_name)
+        existing = profiles.get_profile(identity.profile_id)
+        if existing is None:
+            continue
+        conflict = grouped.setdefault(
+            identity.profile_id,
+            {
+                "profile_id": identity.profile_id,
+                "subject_id": candidate.subject_id,
+                "current": _profile_summary(existing),
+                "imported": [],
+            },
+        )
+        conflict["imported"].append(
+            {
+                "category": candidate.category,
+                "name": candidate.name,
+                "value": candidate.value,
+                "evidence_count": len(candidate.evidence_ids),
+                "confidence": candidate.confidence,
+            }
+        )
+    return list(grouped.values())
 
 
 def _profile_atom(
@@ -233,6 +306,7 @@ async def store_history_enrichment(
     update_profiles: bool,
     memory_writer: MemoryWriter | Any | None = None,
     profile_store: ProfileStore | None = None,
+    profile_decisions: Mapping[str, str] | None = None,
     progress: ProgressCallback | None = None,
     should_cancel: CancellationCheck | None = None,
 ) -> HistoryEnrichmentStoreResult:
@@ -278,11 +352,29 @@ async def store_history_enrichment(
             raise HistoryLearningCancelled("聊天记录学习已取消")
         identity = _profile_identity(candidate, evidence, group_id=group_id, chat_name=chat_name)
         existing = profiles.get_profile(identity.profile_id)
-        if existing is not None and existing.verification_status == "verified":
+        decision = (profile_decisions or {}).get(identity.profile_id)
+        if decision == "keep_existing":
             profiles_skipped += 1
             current += 1
             await _notify(progress, current, total)
             continue
+        if existing is not None and decision not in {"apply_imported", "keep_existing"}:
+            profiles_skipped += 1
+            current += 1
+            await _notify(progress, current, total)
+            continue
+        if existing is not None:
+            identity = PersonIdentity(
+                platform=identity.platform,
+                user_id=identity.user_id,
+                nickname=identity.nickname,
+                cardname=identity.cardname,
+                group_id=identity.group_id,
+                group_name=identity.group_name,
+                person_type=existing.person_type,
+                identity_source=existing.identity_source,
+                verification_status=existing.verification_status,
+            )
 
         atom, semantic_detail = _profile_atom(import_id, chat_id, candidate, evidence, identity)
         try:

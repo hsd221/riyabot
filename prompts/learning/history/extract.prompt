@@ -16,7 +16,7 @@ output: strict_json
 <rules>
 1. evidence_ids 只能引用输入中真实存在的 evidence_id；每个候选引用最少且直接相关的证据。
 2. expressions 只学习非机器人发言。situation 描述可复用的表达情境，style 描述句式、语气、节奏或修辞，不得照抄身份信息、具体事实或一次性内容。优先选择在多条消息中重复出现的稳定特征，最多 6 条。
-3. behaviors 必须有连续消息证明“行为发生”及“可观察结果”。不得推测动机。机器人行为使用 maibot_self/self_reflection；单个他人使用 other_user/observed_behavior；多人共同模式使用 group_collective/observed_behavior。除机器人自身消息外，只能使用 eligible_human_senders 中成员的证据，最多 4 条。
+3. behaviors 必须有连续消息证明“行为发生”及“可观察结果”。不得推测动机。机器人行为使用 maibot_self/self_reflection；单个他人使用 other_user/observed_behavior；多人共同模式使用 group_collective/observed_behavior。除机器人自身消息外，只能使用 eligible_human_senders 中且不在 excluded_human_senders 中的成员作为证据，最多 4 条。
 4. jargons 只提取群内具有特殊含义、缩写、代称或语义偏移的原词。content 必须逐字出现在所引证消息中；meaning 只能写上下文能支持的含义。普通词、常见网络词但无群内特殊用法、姓名和仅出现一次且无法判断的词不输出，最多 6 条。
 5. low_signal=true 的短确认只能作为上下文或行为结果，不能单独支撑表达或黑话。is_bot=true 的内容不能支撑 expressions 或 jargons。
 6. extract_memories=false 时 memories 必须为空。开启时仅提取对未来对话仍有价值的明确事件、事实、关系、偏好或计划，atom_type 只能是 episodic/factual/relational/preference/planned；subject_id 有明确主体时填写发送者 ID，无明确主体时填空字符串。不得记录联系方式、地址、证件、凭据、健康、宗教、政治、财务或性取向等敏感信息，最多 5 条。
@@ -34,6 +34,7 @@ output: strict_json
 <chat_name>{chat_name_json}</chat_name>
 <window_id>{window_id_json}</window_id>
 <eligible_human_senders>{eligible_sender_ids_json}</eligible_human_senders>
+<excluded_human_senders>{excluded_sender_ids_json}</excluded_human_senders>
 <extract_memories>{extract_memories_json}</extract_memories>
 <update_profiles>{update_profiles_json}</update_profiles>
 <messages_jsonl>

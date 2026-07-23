@@ -185,6 +185,83 @@ class HistoryCandidates:
         }
 
 
+def history_candidates_from_json(value: Mapping[str, Any] | None) -> HistoryCandidates:
+    """Rehydrate the server-produced candidate payload for a deferred commit."""
+
+    payload = value if isinstance(value, Mapping) else {}
+
+    def items(key: str) -> list[Mapping[str, Any]]:
+        raw = payload.get(key, [])
+        return [item for item in raw if isinstance(item, Mapping)] if isinstance(raw, list) else []
+
+    def evidence_ids(item: Mapping[str, Any]) -> tuple[str, ...]:
+        raw = item.get("evidence_ids", [])
+        return (
+            tuple(str(source_id) for source_id in raw if isinstance(source_id, (str, int)))
+            if isinstance(raw, list)
+            else ()
+        )
+
+    def number(item: Mapping[str, Any], key: str, default: float = 0.0) -> float:
+        try:
+            return float(item.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    expressions = tuple(
+        ExpressionCandidate(
+            str(item.get("situation", "")),
+            str(item.get("style", "")),
+            evidence_ids(item),
+            number(item, "confidence"),
+        )
+        for item in items("expressions")
+    )
+    behaviors = tuple(
+        BehaviorCandidate(
+            str(item.get("actor_type", "")),
+            str(item.get("learning_type", "")),
+            str(item.get("action", "")),
+            str(item.get("outcome", "")),
+            evidence_ids(item),
+            number(item, "confidence"),
+        )
+        for item in items("behaviors")
+    )
+    jargons = tuple(
+        JargonCandidate(
+            str(item.get("content", "")),
+            str(item.get("meaning", "")),
+            evidence_ids(item),
+            number(item, "confidence"),
+        )
+        for item in items("jargons")
+    )
+    memories = tuple(
+        MemoryCandidate(
+            str(item.get("atom_type", "")),
+            str(item.get("content", "")),
+            str(item.get("subject_id", "")),
+            evidence_ids(item),
+            number(item, "confidence"),
+            number(item, "importance"),
+        )
+        for item in items("memories")
+    )
+    profiles = tuple(
+        ProfileCandidate(
+            str(item.get("subject_id", "")),
+            str(item.get("category", "")),
+            str(item.get("name", "")),
+            str(item.get("value", "")),
+            evidence_ids(item),
+            number(item, "confidence"),
+        )
+        for item in items("profiles")
+    )
+    return HistoryCandidates(expressions, behaviors, jargons, memories, profiles)
+
+
 @dataclass(frozen=True)
 class WindowContinuation:
     """A bounded request to inspect the next chronological window."""
@@ -358,6 +435,7 @@ def parse_history_window_result(
     evidence: Mapping[str, ImportedMessage],
     *,
     eligible_sender_ids: Iterable[str] | None = None,
+    excluded_sender_ids: Iterable[str] | None = None,
     require_repeated_jargon: bool = False,
     allow_memories: bool = False,
     allow_profiles: bool = False,
@@ -366,6 +444,11 @@ def parse_history_window_result(
 
     parsed = _load_model_object(response)
     eligible = frozenset(str(sender_id) for sender_id in eligible_sender_ids) if eligible_sender_ids else None
+    excluded = frozenset(str(sender_id) for sender_id in excluded_sender_ids or ())
+
+    def sender_is_eligible(sender_id: str) -> bool:
+        return sender_id not in excluded and (eligible is None or sender_id in eligible)
+
     expressions: list[ExpressionCandidate] = []
     behaviors: list[BehaviorCandidate] = []
     jargons: list[JargonCandidate] = []
@@ -382,7 +465,7 @@ def parse_history_window_result(
             for source_id in source_ids
             if not evidence[source_id].is_bot
             and not evidence[source_id].is_low_signal
-            and (eligible is None or evidence[source_id].sender_id in eligible)
+            and sender_is_eligible(evidence[source_id].sender_id)
         )
         if situation and style and confidence is not None and source_ids:
             expressions.append(ExpressionCandidate(situation, style, source_ids, confidence))
@@ -395,16 +478,15 @@ def parse_history_window_result(
         confidence = _confidence(item.get("confidence"))
         source_ids = _evidence_ids(item.get("evidence_ids"), evidence)
         excluded_human_evidence = bool(
-            eligible
-            and any(
-                not evidence[source_id].is_bot and evidence[source_id].sender_id not in eligible
+            any(
+                not evidence[source_id].is_bot and not sender_is_eligible(evidence[source_id].sender_id)
                 for source_id in source_ids
             )
         )
         source_ids = tuple(
             source_id
             for source_id in source_ids
-            if evidence[source_id].is_bot or eligible is None or evidence[source_id].sender_id in eligible
+            if evidence[source_id].is_bot or sender_is_eligible(evidence[source_id].sender_id)
         )
         pair = (actor_type, learning_type)
         source_messages = [evidence[source_id] for source_id in source_ids]
@@ -440,7 +522,7 @@ def parse_history_window_result(
                 if content in evidence[source_id].content
                 and not evidence[source_id].is_bot
                 and not evidence[source_id].is_low_signal
-                and (eligible is None or evidence[source_id].sender_id in eligible)
+                and sender_is_eligible(evidence[source_id].sender_id)
             )
         minimum_evidence = 2 if require_repeated_jargon else 1
         if content and meaning and confidence is not None and len(source_ids) >= minimum_evidence:
@@ -459,7 +541,7 @@ def parse_history_window_result(
                 for source_id in source_ids
                 if not evidence[source_id].is_low_signal
                 and (not subject_id or evidence[source_id].sender_id == subject_id)
-                and (eligible is None or evidence[source_id].sender_id in eligible)
+                and sender_is_eligible(evidence[source_id].sender_id)
             )
             source_messages = [evidence[source_id] for source_id in source_ids]
             if (
@@ -489,7 +571,7 @@ def parse_history_window_result(
                     if evidence[source_id].sender_id == subject_id
                     and not evidence[source_id].is_bot
                     and not evidence[source_id].is_low_signal
-                    and (eligible is None or subject_id in eligible)
+                    and sender_is_eligible(subject_id)
                 )
             minimum_evidence = 2 if category in {"personality", "habit"} else 1
             if (
@@ -543,6 +625,7 @@ def parse_history_candidates(
     evidence: Mapping[str, ImportedMessage],
     *,
     eligible_sender_ids: Iterable[str] | None = None,
+    excluded_sender_ids: Iterable[str] | None = None,
     require_repeated_jargon: bool = False,
     allow_memories: bool = False,
     allow_profiles: bool = False,
@@ -553,6 +636,7 @@ def parse_history_candidates(
         response,
         evidence,
         eligible_sender_ids=eligible_sender_ids,
+        excluded_sender_ids=excluded_sender_ids,
         require_repeated_jargon=require_repeated_jargon,
         allow_memories=allow_memories,
         allow_profiles=allow_profiles,
@@ -816,7 +900,10 @@ def _build_continuation_window(current: HistoryWindow, following: HistoryWindow)
             continue
         if len(messages) >= MAX_CONTINUATION_WINDOW_MESSAGES:
             break
-        if messages and sum(len(item.content) for item in messages) + len(message.content) > MAX_CONTINUATION_WINDOW_CHARS:
+        if (
+            messages
+            and sum(len(item.content) for item in messages) + len(message.content) > MAX_CONTINUATION_WINDOW_CHARS
+        ):
             break
         messages.append(message)
         seen_ids.add(message.message_id)
@@ -866,17 +953,20 @@ class ChatHistoryLearner:
         *,
         chat_name: str,
         eligible_sender_ids: Iterable[str] | None = None,
+        excluded_sender_ids: Iterable[str] | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
     ) -> HistoryWindowResult:
         evidence = {message.message_id: message for message in window.messages}
         eligible = tuple(sorted(str(sender_id) for sender_id in eligible_sender_ids or ()))
+        excluded = tuple(sorted(str(sender_id) for sender_id in excluded_sender_ids or ()))
         response = await self._request(
             "learning.history.extract",
             max_tokens=3_500,
             chat_name_json=dump_prompt_json(chat_name),
             window_id_json=dump_prompt_json(window.window_id),
             eligible_sender_ids_json=dump_prompt_json(eligible or "all_non_bot"),
+            excluded_sender_ids_json=dump_prompt_json(excluded),
             extract_memories_json=dump_prompt_json(extract_memories),
             update_profiles_json=dump_prompt_json(update_profiles),
             messages_jsonl=history_window_to_jsonl(window),
@@ -885,6 +975,7 @@ class ChatHistoryLearner:
             response,
             evidence,
             eligible_sender_ids=eligible or None,
+            excluded_sender_ids=excluded,
             allow_memories=extract_memories,
             allow_profiles=update_profiles,
         )
@@ -895,6 +986,7 @@ class ChatHistoryLearner:
         *,
         chat_name: str,
         eligible_sender_ids: Iterable[str] | None = None,
+        excluded_sender_ids: Iterable[str] | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
     ) -> HistoryCandidates:
@@ -903,6 +995,7 @@ class ChatHistoryLearner:
                 window,
                 chat_name=chat_name,
                 eligible_sender_ids=eligible_sender_ids,
+                excluded_sender_ids=excluded_sender_ids,
                 extract_memories=extract_memories,
                 update_profiles=update_profiles,
             )
@@ -915,6 +1008,7 @@ class ChatHistoryLearner:
         *,
         chat_name: str,
         eligible_sender_ids: Iterable[str] | None = None,
+        excluded_sender_ids: Iterable[str] | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
     ) -> HistoryCandidates:
@@ -933,6 +1027,7 @@ class ChatHistoryLearner:
                 response,
                 evidence,
                 eligible_sender_ids=eligible_sender_ids,
+                excluded_sender_ids=excluded_sender_ids,
                 require_repeated_jargon=True,
                 allow_memories=extract_memories,
                 allow_profiles=update_profiles,
@@ -948,6 +1043,7 @@ class ChatHistoryLearner:
         chat_name: str,
         depth: str = "balanced",
         eligible_sender_ids: Iterable[str] | None = None,
+        excluded_sender_ids: Iterable[str] | None = None,
         store: bool = True,
         window_options: Mapping[str, Any] | None = None,
         progress: ProgressCallback | None = None,
@@ -958,12 +1054,11 @@ class ChatHistoryLearner:
         if depth not in DEPTH_WINDOW_BUDGETS:
             raise ValueError(f"unsupported learning depth: {depth}")
         eligible = tuple(dict.fromkeys(str(sender_id) for sender_id in eligible_sender_ids or ()))
+        excluded = tuple(dict.fromkeys(str(sender_id) for sender_id in excluded_sender_ids or ()))
         windows = build_history_windows(normalized_path, **dict(window_options or {}))
         budget = DEPTH_WINDOW_BUDGETS[depth]
         selected = (
-            windows
-            if budget is None
-            else select_history_windows(windows, budget=budget, priority_sender_ids=eligible)
+            windows if budget is None else select_history_windows(windows, budget=budget, priority_sender_ids=eligible)
         )
         evidence = {message.message_id: message for window in selected for message in window.messages}
         extracted: list[HistoryCandidates] = []
@@ -983,6 +1078,7 @@ class ChatHistoryLearner:
                     window,
                     chat_name=chat_name,
                     eligible_sender_ids=eligible or None,
+                    excluded_sender_ids=excluded,
                     extract_memories=extract_memories,
                     update_profiles=update_profiles,
                 )
@@ -1013,6 +1109,7 @@ class ChatHistoryLearner:
                     continuation,
                     chat_name=chat_name,
                     eligible_sender_ids=eligible or None,
+                    excluded_sender_ids=excluded,
                     extract_memories=extract_memories,
                     update_profiles=update_profiles,
                 )
@@ -1033,6 +1130,7 @@ class ChatHistoryLearner:
                 evidence,
                 chat_name=chat_name,
                 eligible_sender_ids=eligible or None,
+                excluded_sender_ids=excluded,
                 extract_memories=extract_memories,
                 update_profiles=update_profiles,
             )

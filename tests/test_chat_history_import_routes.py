@@ -149,6 +149,41 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(upload.closed)
         self.assertEqual(list(self.root.iterdir()), [])
 
+    async def test_participants_are_previewed_and_loaded_with_server_pagination(self) -> None:
+        response = await self._upload()
+        task = self.model.get()
+        analysis = json.loads(task.analysis_json)
+        analysis["participants"] = [
+            {
+                "source_id": str(index),
+                "name": f"用户 {index}",
+                "card": f"成员 {index}",
+                "message_count": 100 - index,
+                "is_bot": False,
+            }
+            for index in range(65)
+        ]
+        analysis["participant_count"] = 65
+        task.analysis_json = json.dumps(analysis, ensure_ascii=False)
+        task.save()
+
+        detail = await self.routes.get_chat_history_import(response.import_id, None, None)
+        page = await self.routes.list_chat_history_participants(
+            response.import_id,
+            query="成员 3",
+            page=1,
+            page_size=10,
+            maibot_session=None,
+            authorization=None,
+        )
+
+        self.assertEqual(detail.analysis.participant_count, 65)
+        self.assertEqual(len(detail.analysis.participants), 30)
+        self.assertEqual(page.pagination.page_size, 10)
+        self.assertGreater(page.pagination.total_items, 1)
+        self.assertLessEqual(len(page.data), 10)
+        self.assertTrue(all("3" in participant.card for participant in page.data))
+
     async def test_start_runs_in_background_persists_progress_and_cleans_normalized_text(self) -> None:
         from src.bw_learner.history_learning import HistoryCandidates
 
@@ -268,6 +303,157 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         enrichment.assert_not_awaited()
         detail = await self.routes.get_chat_history_import(response.import_id, None, None)
         self.assertIsNone(detail.result["enrichment_store_result"])
+
+    async def test_all_member_scope_submits_only_small_exclusion_list(self) -> None:
+        response = await self._upload()
+        captured_options = {}
+
+        class FakeLearner:
+            async def learn(self, _path, **kwargs):
+                captured_options.update(kwargs)
+                return SimpleNamespace(
+                    candidates=SimpleNamespace(profiles=()),
+                    to_json=lambda: {
+                        "candidates": {
+                            "expressions": [],
+                            "behaviors": [],
+                            "jargons": [],
+                            "memories": [],
+                            "profiles": [],
+                        },
+                        "model_call_count": 1,
+                    },
+                )
+
+        commit = AsyncMock()
+        with (
+            patch.object(self.routes, "ChatHistoryLearner", return_value=FakeLearner()),
+            patch.object(self.routes, "_commit_learning_result", commit),
+        ):
+            started = await self.routes.start_chat_history_import(
+                response.import_id,
+                self.routes.ChatHistoryImportStartRequest(
+                    depth="fast",
+                    participant_scope=self.routes.ChatHistoryParticipantScopeRequest(
+                        mode="all",
+                        excluded_ids=["20002"],
+                    ),
+                ),
+                None,
+                None,
+            )
+            await self.routes._running_tasks[response.import_id]
+
+        self.assertEqual(started.options["participant_scope"], {"mode": "all", "excluded_ids": ["20002"]})
+        self.assertIsNone(captured_options["eligible_sender_ids"])
+        self.assertEqual(captured_options["excluded_sender_ids"], ["20002"])
+        commit.assert_awaited_once()
+
+    async def test_existing_profile_pauses_all_writes_until_review(self) -> None:
+        from src.bw_learner.history_learning import HistoryCandidates, ProfileCandidate
+
+        response = await self._upload()
+        candidates = HistoryCandidates(
+            profiles=(ProfileCandidate("20001", "interest", "音乐", "爵士乐", ("m1",), 0.82),)
+        )
+
+        class FakeLearner:
+            async def learn(self, _path, **kwargs):
+                self.options = kwargs
+                return SimpleNamespace(
+                    candidates=candidates,
+                    to_json=lambda: {
+                        "candidates": candidates.to_json(),
+                        "model_call_count": 2,
+                        "store_result": None,
+                    },
+                )
+
+        learner = FakeLearner()
+        conflict = {
+            "profile_id": "qq:20001",
+            "subject_id": "20001",
+            "current": {"profile_id": "qq:20001", "facts": {"城市": "上海"}},
+            "imported": [{"category": "interest", "name": "音乐", "value": "爵士乐"}],
+        }
+        commit = AsyncMock()
+        with (
+            patch.object(self.routes, "ChatHistoryLearner", return_value=learner),
+            patch.object(self.routes, "load_history_enrichment_evidence", return_value={}),
+            patch.object(self.routes, "find_history_profile_conflicts", return_value=[conflict]),
+            patch.object(self.routes, "_commit_learning_result", commit),
+        ):
+            await self.routes.start_chat_history_import(
+                response.import_id,
+                self.routes.ChatHistoryImportStartRequest(depth="fast", update_profiles=True),
+                None,
+                None,
+            )
+            await self.routes._running_tasks[response.import_id]
+
+        task = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(task.status, "awaiting_profile_review")
+        self.assertEqual(task.progress.stage, "awaiting_profile_review")
+        self.assertEqual(task.result["profile_review"]["conflicts"][0]["profile_id"], "qq:20001")
+        self.assertFalse(learner.options["store"])
+        self.assertTrue((self.root / response.import_id / "normalized.jsonl").exists())
+        commit.assert_not_awaited()
+
+    async def test_profile_review_requires_one_decision_per_conflict(self) -> None:
+        response = await self._upload()
+        task = self.model.get()
+        task.status = "awaiting_profile_review"
+        task.options_json = json.dumps({"update_profiles": True})
+        task.result_json = json.dumps(
+            {
+                "candidates": {
+                    "expressions": [],
+                    "behaviors": [],
+                    "jargons": [],
+                    "memories": [],
+                    "profiles": [],
+                },
+                "profile_review": {
+                    "conflicts": [
+                        {"profile_id": "qq:20001"},
+                        {"profile_id": "qq:20002"},
+                    ],
+                    "decisions": None,
+                },
+            }
+        )
+        task.save()
+
+        with self.assertRaises(HTTPException) as incomplete:
+            await self.routes.submit_chat_history_profile_decisions(
+                response.import_id,
+                self.routes.ChatHistoryProfileDecisionRequest(decisions={"qq:20001": "keep_existing"}),
+                None,
+                None,
+            )
+        self.assertEqual(incomplete.exception.status_code, 422)
+
+        commit = AsyncMock()
+        with patch.object(self.routes, "_commit_learning_result", commit):
+            started = await self.routes.submit_chat_history_profile_decisions(
+                response.import_id,
+                self.routes.ChatHistoryProfileDecisionRequest(
+                    decisions={
+                        "qq:20001": "keep_existing",
+                        "qq:20002": "apply_imported",
+                    }
+                ),
+                None,
+                None,
+            )
+            await self.routes._running_tasks[response.import_id]
+
+        self.assertEqual(started.status, "running")
+        commit.assert_awaited_once()
+        self.assertEqual(
+            commit.await_args.kwargs["profile_decisions"],
+            {"qq:20001": "keep_existing", "qq:20002": "apply_imported"},
+        )
 
     async def test_start_rejects_unknown_participants_and_invalid_state(self) -> None:
         response = await self._upload()

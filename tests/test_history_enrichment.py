@@ -30,8 +30,8 @@ class HistoryEnrichmentStorageTest(unittest.IsolatedAsyncioTestCase):
         configure_memory_database(str(self.original_path))
         self.tmpdir.cleanup()
 
-    async def test_imported_profiles_are_unverified_and_do_not_modify_verified_runtime_identity(self) -> None:
-        from src.bw_learner.history_enrichment import store_history_enrichment
+    async def test_existing_profile_requires_a_decision_and_is_kept_by_default(self) -> None:
+        from src.bw_learner.history_enrichment import find_history_profile_conflicts, store_history_enrichment
 
         profile_store = ProfileStore()
         profile_store.save_profile(
@@ -72,6 +72,13 @@ class HistoryEnrichmentStorageTest(unittest.IsolatedAsyncioTestCase):
         )
         writer = RecordingMemoryWriter()
 
+        conflicts = find_history_profile_conflicts(
+            candidates=candidates,
+            evidence=evidence,
+            group_id="group-1",
+            chat_name="测试群",
+            profile_store=profile_store,
+        )
         result = await store_history_enrichment(
             import_id="import-1",
             chat_id="chat-1",
@@ -86,20 +93,69 @@ class HistoryEnrichmentStorageTest(unittest.IsolatedAsyncioTestCase):
         )
 
         verified = profile_store.get_profile("42", platform="qq")
-        imported = profile_store.get_profile("42", platform="qq-import")
         self.assertIsNotNone(verified)
-        self.assertIsNotNone(imported)
-        assert verified is not None and imported is not None
+        assert verified is not None
         self.assertEqual(verified.facts, {"城市": "上海"})
         self.assertEqual(verified.verification_status, "verified")
-        self.assertEqual(imported.interests, ["爵士乐"])
-        self.assertEqual(imported.identity_source, "chat_history_import")
-        self.assertEqual(imported.verification_status, "unverified")
+        self.assertEqual(conflicts[0]["profile_id"], "qq:42")
+        self.assertEqual(conflicts[0]["imported"][0]["value"], "爵士乐")
         self.assertEqual(result.memories_created, 1)
-        self.assertEqual(result.profiles_created, 1)
-        self.assertEqual(len(writer.calls), 2)
+        self.assertEqual(result.profiles_skipped, 1)
+        self.assertEqual(len(writer.calls), 1)
         self.assertTrue(all(call[0].source_id == "chat-1" for call in writer.calls))
-        self.assertEqual(writer.calls[1][2].subject_key, "qq-import:42")
+
+    async def test_approved_profile_update_uses_runtime_identity_without_downgrading_it(self) -> None:
+        from src.bw_learner.history_enrichment import store_history_enrichment
+
+        profile_store = ProfileStore()
+        profile_store.save_profile(
+            UserProfile(
+                user_id="42",
+                platform="qq",
+                nickname="运行时昵称",
+                facts={"城市": "上海"},
+                identity_source="message_sender",
+                verification_status="verified",
+            )
+        )
+        evidence = {
+            "m1": ImportedMessage(
+                message_id="m1",
+                timestamp=1_750_000_000.0,
+                sender_id="42",
+                sender_name="导出昵称",
+                sender_card="群名片",
+                content="我平时最喜欢听爵士乐",
+                reply_to_id=None,
+                is_bot=False,
+                is_low_signal=False,
+            )
+        }
+        candidates = HistoryCandidates(profiles=(ProfileCandidate("42", "interest", "音乐", "爵士乐", ("m1",), 0.82),))
+        writer = RecordingMemoryWriter()
+
+        result = await store_history_enrichment(
+            import_id="import-2",
+            chat_id="chat-1",
+            group_id="group-1",
+            chat_name="测试群",
+            candidates=candidates,
+            evidence=evidence,
+            extract_memories=False,
+            update_profiles=True,
+            memory_writer=writer,
+            profile_store=profile_store,
+            profile_decisions={"qq:42": "apply_imported"},
+        )
+
+        updated = profile_store.get_profile("42", platform="qq")
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.interests, ["爵士乐"])
+        self.assertEqual(updated.verification_status, "verified")
+        self.assertEqual(updated.identity_source, "message_sender")
+        self.assertEqual(result.profiles_updated, 1)
+        self.assertEqual(writer.calls[0][2].subject_key, "qq:42")
 
     async def test_evidence_loader_returns_only_messages_referenced_by_enrichment_candidates(self) -> None:
         from src.bw_learner.history_enrichment import load_history_enrichment_evidence
