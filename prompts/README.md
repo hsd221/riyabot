@@ -127,14 +127,6 @@ variants: light, standard
 | `message_block` | 记忆 L1 话题切分器使用的、带 `message_id` 的连续消息块。 |
 | `messages_text` | 表情情感标签选择器使用的最近聊天文本。 |
 | `conversation_text` | 记忆原子提取器边界内的原始对话消息。 |
-| `messages_jsonl` | 历史聊天单个连续窗口中经过降噪、带稳定证据 ID 的 JSONL 消息。 |
-| `chat_name_json` | 历史聊天导入任务的群名，按不可信 JSON 字符串注入动态输入层。 |
-| `window_id_json` | 历史聊天学习窗口的确定性编号，按 JSON 字符串注入动态输入层。 |
-| `eligible_sender_ids_json` | 本次允许贡献表达、行为、黑话、记忆与画像证据的人类发送者 ID 集合。 |
-| `extract_memories_json` | 历史聊天任务是否允许提取群聊记忆候选的布尔开关。 |
-| `update_profiles_json` | 历史聊天任务是否允许提取未验证人物画像候选的布尔开关。 |
-| `candidates_json` | 跨窗口合并器收到的、已通过程序证据校验的学习候选。 |
-| `evidence_json` | 跨窗口合并器复核候选时使用的最小原始证据映射。 |
 | `context_block` | 表达反馈判定器读取的后续对话片段。 |
 | `chat_context` | 黑话解释整理器使用的当前聊天上下文。 |
 | `chat_observe_info` | 表达情境选择器使用的当前聊天观察摘要。 |

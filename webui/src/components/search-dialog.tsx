@@ -20,7 +20,6 @@ import {
   Globe,
   ChevronRight,
   ScanSearch,
-  UploadCloud,
 } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -58,7 +57,6 @@ const searchIconTileClasses: Record<string, string> = {
   '/resource/emoji': 'ios-symbol-yellow',
   '/resource/expression': 'ios-symbol-orange',
   '/resource/behavior': 'ios-symbol-purple',
-  '/resource/chat-history-import': 'ios-symbol-teal',
   '/resource/jargon': 'ios-symbol-pink',
   '/resource/person': 'ios-symbol-blue',
   '/resource/memory': 'ios-symbol-green',
@@ -126,13 +124,6 @@ const searchItems: SearchItem[] = [
     title: '行为学习管理',
     description: '管理当前 Bot 学习到的行为模式',
     path: '/resource/behavior',
-    category: '资源',
-  },
-  {
-    icon: UploadCloud,
-    title: '聊天记录学习',
-    description: '导入群聊并学习表达、行为与黑话',
-    path: '/resource/chat-history-import',
     category: '资源',
   },
   {
