@@ -64,9 +64,11 @@ class ChatHistoryAnalysisResponse(BaseModel):
     filtered_messages: int
     noise_counts: dict[str, int]
     participants: list[ImportedParticipantResponse]
+    participant_count: int = 0
     start_timestamp: float | None
     end_timestamp: float | None
     total_window_count: int
+    estimated_model_call_note: str = ""
 
 
 class ChatHistoryImportProgress(BaseModel):
@@ -99,7 +101,7 @@ class ChatHistoryImportListResponse(BaseModel):
 
 
 class ChatHistoryImportStartRequest(BaseModel):
-    depth: Literal["fast", "balanced", "deep"] = "balanced"
+    depth: Literal["fast", "balanced", "deep", "full"] = "balanced"
     participant_ids: list[str] = Field(default_factory=list, max_length=200)
     extract_memories: bool = False
     update_profiles: bool = False
@@ -214,10 +216,13 @@ def _analysis_payload(analysis: Any, total_window_count: int) -> dict[str, Any]:
     payload = analysis.to_json()
     payload.pop("normalized_path", None)
     payload["participants"] = list(payload.get("participants", ()))
+    payload["participant_count"] = len(payload["participants"])
     payload["total_window_count"] = total_window_count
     payload["estimated_model_calls"] = {
-        depth: min(total_window_count, budget) + 1 for depth, budget in DEPTH_WINDOW_BUDGETS.items()
+        depth: (total_window_count if budget is None else min(total_window_count, budget)) + 1
+        for depth, budget in DEPTH_WINDOW_BUDGETS.items()
     }
+    payload["estimated_model_call_note"] = "每个自然窗口 1 次提取、最后 1 次跨窗口合并；若窗口边界未结束，可能追加 1 次续接提取。"
     return payload
 
 

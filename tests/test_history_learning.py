@@ -269,6 +269,120 @@ class HistoryCandidateValidationTest(unittest.TestCase):
 
 
 class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
+    async def test_full_depth_processes_every_window_before_consolidation(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            messages = [
+                make_message(
+                    f"m{index}",
+                    f"第 {index} 个时间窗口的表达内容",
+                    timestamp=1_750_000_000.0 + index * 3_000,
+                )
+                for index in range(10)
+            ]
+            write_normalized_messages(normalized, messages)
+            empty_response = json.dumps({"expressions": [], "behaviors": [], "jargons": []})
+            llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=(empty_response, None)))
+
+            result = await ChatHistoryLearner(llm=llm).learn(
+                normalized,
+                chat_id="chat-1",
+                chat_name="测试群",
+                depth="full",
+                store=False,
+                window_options={"max_gap_seconds": 60},
+            )
+
+        self.assertEqual(result.total_window_count, 10)
+        self.assertEqual(result.selected_window_count, 10)
+        self.assertEqual(result.model_call_count, 11)
+        self.assertEqual(llm.generate_response_async.await_count, 11)
+
+    def test_window_boundary_requires_a_contiguous_tail(self) -> None:
+        from src.bw_learner.history_learning import parse_history_window_result
+
+        evidence = {
+            "m1": make_message("m1", "前一条"),
+            "m2": make_message("m2", "对话还没有结束"),
+        }
+        response = json.dumps(
+            {
+                "expressions": [],
+                "behaviors": [],
+                "jargons": [],
+                "window_boundary": {
+                    "needs_follow_up": True,
+                    "tail_evidence_ids": ["m2"],
+                    "reason": "最后一句正在等待后续回复",
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = parse_history_window_result(response, evidence)
+
+        self.assertTrue(parsed.continuation.needs_follow_up)
+        self.assertEqual(parsed.continuation.tail_evidence_ids, ("m2",))
+
+        invalid_response = response.replace('["m2"]', '["m1"]')
+        invalid = parse_history_window_result(invalid_response, evidence)
+        self.assertFalse(invalid.continuation.needs_follow_up)
+
+    async def test_boundary_request_reprocesses_tail_with_following_window(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            messages = [
+                make_message("m1", "有人提出问题", timestamp=1_750_000_000.0),
+                make_message("m2", "问题还在等待回答", timestamp=1_750_000_001.0),
+                make_message("m3", "下一段给出了回答", timestamp=1_750_000_100.0),
+            ]
+            write_normalized_messages(normalized, messages)
+            boundary_response = json.dumps(
+                {
+                    "expressions": [],
+                    "behaviors": [],
+                    "jargons": [],
+                    "window_boundary": {
+                        "needs_follow_up": True,
+                        "tail_evidence_ids": ["m2"],
+                        "reason": "等待下一条回复",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            empty_response = json.dumps({"expressions": [], "behaviors": [], "jargons": []})
+            llm = SimpleNamespace(
+                generate_response_async=AsyncMock(
+                    side_effect=[
+                        (boundary_response, None),
+                        (empty_response, None),
+                        (empty_response, None),
+                        (empty_response, None),
+                    ]
+                )
+            )
+
+            result = await ChatHistoryLearner(llm=llm).learn(
+                normalized,
+                chat_id="chat-1",
+                chat_name="测试群",
+                depth="full",
+                store=False,
+                window_options={"max_messages": 2, "max_gap_seconds": 60, "overlap_messages": 0},
+            )
+
+        self.assertEqual(result.total_window_count, 2)
+        self.assertEqual(result.selected_window_count, 2)
+        self.assertEqual(result.model_call_count, 4)
+        self.assertEqual(result.continuation_window_ids, ("window-000001+window-000002:continuation",))
+        continuation_prompt = llm.generate_response_async.await_args_list[1].kwargs["prompt"]
+        self.assertIn('"evidence_id":"m2"', continuation_prompt)
+        self.assertIn('"evidence_id":"m3"', continuation_prompt)
+
     async def test_window_prompt_keeps_untrusted_chat_only_in_user_role(self) -> None:
         from src.bw_learner.history_learning import ChatHistoryLearner
 

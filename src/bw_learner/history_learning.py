@@ -32,7 +32,11 @@ from src.llm_models.utils_model import LLMRequest
 
 logger = get_logger("history_learning")
 
-DEPTH_WINDOW_BUDGETS = {"fast": 8, "balanced": 20, "deep": 40}
+DEPTH_WINDOW_BUDGETS: dict[str, int | None] = {"fast": 8, "balanced": 20, "deep": 40, "full": None}
+MAX_CONTINUATION_TAIL_MESSAGES = 12
+MAX_CONTINUATION_FOLLOW_UP_MESSAGES = 40
+MAX_CONTINUATION_WINDOW_MESSAGES = 80
+MAX_CONTINUATION_WINDOW_CHARS = 12_000
 MAX_MODEL_RESPONSE_CHARS = 200_000
 MAX_CONSOLIDATION_DYNAMIC_CHARS = 120_000
 MAX_CONSOLIDATION_CANDIDATE_CHARS = 64_000
@@ -181,6 +185,21 @@ class HistoryCandidates:
         }
 
 
+@dataclass(frozen=True)
+class WindowContinuation:
+    """A bounded request to inspect the next chronological window."""
+
+    needs_follow_up: bool = False
+    tail_evidence_ids: tuple[str, ...] = ()
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class HistoryWindowResult:
+    candidates: HistoryCandidates
+    continuation: WindowContinuation = field(default_factory=WindowContinuation)
+
+
 def _empty_counts() -> dict[str, int]:
     return {"expressions": 0, "behaviors": 0, "jargons": 0}
 
@@ -199,6 +218,7 @@ class HistoryLearningResult:
     selected_window_ids: tuple[str, ...]
     model_call_count: int
     store_result: HistoryStoreResult | None
+    continuation_window_ids: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         result = {
@@ -206,6 +226,7 @@ class HistoryLearningResult:
             "total_window_count": self.total_window_count,
             "selected_window_count": self.selected_window_count,
             "selected_window_ids": list(self.selected_window_ids),
+            "continuation_window_ids": list(self.continuation_window_ids),
             "model_call_count": self.model_call_count,
             "store_result": None,
         }
@@ -285,6 +306,22 @@ def _evidence_ids(value: Any, evidence: Mapping[str, ImportedMessage]) -> tuple[
     return tuple(result)
 
 
+def _parse_window_continuation(
+    parsed: Mapping[str, Any], evidence: Mapping[str, ImportedMessage]
+) -> WindowContinuation:
+    raw = parsed.get("window_boundary")
+    if not isinstance(raw, dict) or raw.get("needs_follow_up") is not True:
+        return WindowContinuation()
+
+    tail_ids = _evidence_ids(raw.get("tail_evidence_ids"), evidence)
+    ordered_ids = tuple(evidence)
+    if not tail_ids or tuple(ordered_ids[-len(tail_ids) :]) != tail_ids:
+        return WindowContinuation()
+
+    reason = _clean_model_text(raw.get("reason"), minimum=1, maximum=240) or ""
+    return WindowContinuation(needs_follow_up=True, tail_evidence_ids=tail_ids, reason=reason)
+
+
 def _load_model_object(response: str) -> dict[str, Any]:
     if not isinstance(response, str) or len(response) > MAX_MODEL_RESPONSE_CHARS:
         raise HistoryLearningOutputError("模型输出为空或超过大小限制")
@@ -316,7 +353,7 @@ def _candidate_items(parsed: Mapping[str, Any], key: str, maximum: int) -> list[
     return [item for item in value[:maximum] if isinstance(item, dict)]
 
 
-def parse_history_candidates(
+def parse_history_window_result(
     response: str,
     evidence: Mapping[str, ImportedMessage],
     *,
@@ -324,7 +361,7 @@ def parse_history_candidates(
     require_repeated_jargon: bool = False,
     allow_memories: bool = False,
     allow_profiles: bool = False,
-) -> HistoryCandidates:
+) -> HistoryWindowResult:
     """Parse model JSON and reject every candidate not grounded in supplied evidence."""
 
     parsed = _load_model_object(response)
@@ -467,28 +504,59 @@ def parse_history_candidates(
             ):
                 profiles.append(ProfileCandidate(subject_id, category, name, value, source_ids, confidence))
 
-    return HistoryCandidates(
-        expressions=tuple(_deduplicate(expressions, lambda item: (item.situation.casefold(), item.style.casefold()))),
-        behaviors=tuple(
-            _deduplicate(
-                behaviors,
-                lambda item: (item.actor_type, item.learning_type, item.action.casefold(), item.outcome.casefold()),
-            )
+    return HistoryWindowResult(
+        candidates=HistoryCandidates(
+            expressions=tuple(
+                _deduplicate(expressions, lambda item: (item.situation.casefold(), item.style.casefold()))
+            ),
+            behaviors=tuple(
+                _deduplicate(
+                    behaviors,
+                    lambda item: (
+                        item.actor_type,
+                        item.learning_type,
+                        item.action.casefold(),
+                        item.outcome.casefold(),
+                    ),
+                )
+            ),
+            jargons=tuple(_deduplicate(jargons, lambda item: item.content.casefold())),
+            memories=tuple(
+                _deduplicate(
+                    memories,
+                    lambda item: (item.atom_type, item.subject_id, item.content.casefold()),
+                )
+            ),
+            profiles=tuple(
+                _deduplicate(
+                    profiles,
+                    lambda item: (item.subject_id, item.category, item.name.casefold(), item.value.casefold()),
+                )
+            ),
         ),
-        jargons=tuple(_deduplicate(jargons, lambda item: item.content.casefold())),
-        memories=tuple(
-            _deduplicate(
-                memories,
-                lambda item: (item.atom_type, item.subject_id, item.content.casefold()),
-            )
-        ),
-        profiles=tuple(
-            _deduplicate(
-                profiles,
-                lambda item: (item.subject_id, item.category, item.name.casefold(), item.value.casefold()),
-            )
-        ),
+        continuation=_parse_window_continuation(parsed, evidence),
     )
+
+
+def parse_history_candidates(
+    response: str,
+    evidence: Mapping[str, ImportedMessage],
+    *,
+    eligible_sender_ids: Iterable[str] | None = None,
+    require_repeated_jargon: bool = False,
+    allow_memories: bool = False,
+    allow_profiles: bool = False,
+) -> HistoryCandidates:
+    """Parse model JSON and return only evidence-grounded learning candidates."""
+
+    return parse_history_window_result(
+        response,
+        evidence,
+        eligible_sender_ids=eligible_sender_ids,
+        require_repeated_jargon=require_repeated_jargon,
+        allow_memories=allow_memories,
+        allow_profiles=allow_profiles,
+    ).candidates
 
 
 def _merge_candidate_evidence(first: Any, second: Any) -> Any:
@@ -738,6 +806,41 @@ async def _notify(callback: ProgressCallback | None, stage: str, current: int, t
         await result
 
 
+def _build_continuation_window(current: HistoryWindow, following: HistoryWindow) -> HistoryWindow:
+    """Join a validated tail to the next chronological window once."""
+
+    messages: list[ImportedMessage] = []
+    seen_ids: set[str] = set()
+    for message in (*current.messages[-MAX_CONTINUATION_TAIL_MESSAGES:], *following.messages):
+        if message.message_id in seen_ids:
+            continue
+        if len(messages) >= MAX_CONTINUATION_WINDOW_MESSAGES:
+            break
+        if messages and sum(len(item.content) for item in messages) + len(message.content) > MAX_CONTINUATION_WINDOW_CHARS:
+            break
+        messages.append(message)
+        seen_ids.add(message.message_id)
+        if len(messages) >= MAX_CONTINUATION_TAIL_MESSAGES + MAX_CONTINUATION_FOLLOW_UP_MESSAGES:
+            break
+
+    if not messages:
+        return following
+    sender_ids = frozenset(message.sender_id for message in messages if not message.is_bot)
+    high_signal_messages = sum(not message.is_low_signal and not message.is_bot for message in messages)
+    replies = sum(message.reply_to_id is not None for message in messages)
+    unique_content = len({message.content.casefold() for message in messages})
+    signal_score = high_signal_messages * 2.0 + replies * 0.75 + unique_content * 0.25 + len(sender_ids) * 0.5
+    return HistoryWindow(
+        window_id=f"{current.window_id}+{following.window_id}:continuation",
+        messages=tuple(messages),
+        start_timestamp=messages[0].timestamp,
+        end_timestamp=messages[-1].timestamp,
+        sender_ids=sender_ids,
+        char_count=sum(len(message.content) for message in messages),
+        signal_score=signal_score,
+    )
+
+
 class ChatHistoryLearner:
     """Bounded model pipeline for extraction, consolidation, validation, and storage."""
 
@@ -757,7 +860,7 @@ class ChatHistoryLearner:
         )
         return response
 
-    async def extract_window(
+    async def extract_window_result(
         self,
         window: HistoryWindow,
         *,
@@ -765,7 +868,7 @@ class ChatHistoryLearner:
         eligible_sender_ids: Iterable[str] | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
-    ) -> HistoryCandidates:
+    ) -> HistoryWindowResult:
         evidence = {message.message_id: message for message in window.messages}
         eligible = tuple(sorted(str(sender_id) for sender_id in eligible_sender_ids or ()))
         response = await self._request(
@@ -778,13 +881,32 @@ class ChatHistoryLearner:
             update_profiles_json=dump_prompt_json(update_profiles),
             messages_jsonl=history_window_to_jsonl(window),
         )
-        return parse_history_candidates(
+        return parse_history_window_result(
             response,
             evidence,
             eligible_sender_ids=eligible or None,
             allow_memories=extract_memories,
             allow_profiles=update_profiles,
         )
+
+    async def extract_window(
+        self,
+        window: HistoryWindow,
+        *,
+        chat_name: str,
+        eligible_sender_ids: Iterable[str] | None = None,
+        extract_memories: bool = False,
+        update_profiles: bool = False,
+    ) -> HistoryCandidates:
+        return (
+            await self.extract_window_result(
+                window,
+                chat_name=chat_name,
+                eligible_sender_ids=eligible_sender_ids,
+                extract_memories=extract_memories,
+                update_profiles=update_profiles,
+            )
+        ).candidates
 
     async def consolidate(
         self,
@@ -837,32 +959,69 @@ class ChatHistoryLearner:
             raise ValueError(f"unsupported learning depth: {depth}")
         eligible = tuple(dict.fromkeys(str(sender_id) for sender_id in eligible_sender_ids or ()))
         windows = build_history_windows(normalized_path, **dict(window_options or {}))
-        selected = select_history_windows(
-            windows,
-            budget=DEPTH_WINDOW_BUDGETS[depth],
-            priority_sender_ids=eligible,
+        budget = DEPTH_WINDOW_BUDGETS[depth]
+        selected = (
+            windows
+            if budget is None
+            else select_history_windows(windows, budget=budget, priority_sender_ids=eligible)
         )
         evidence = {message.message_id: message for window in selected for message in window.messages}
         extracted: list[HistoryCandidates] = []
+        continuation_window_ids: list[str] = []
+        window_positions = {window.window_id: index for index, window in enumerate(windows)}
+        continuation_keys: set[tuple[str, str]] = set()
         model_call_count = 0
-        await _notify(progress, "extracting", 0, len(selected))
-        for index, window in enumerate(selected, start=1):
+        extraction_total = len(selected)
+        extraction_completed = 0
+        await _notify(progress, "extracting", extraction_completed, extraction_total)
+        for window in selected:
             if should_cancel and should_cancel():
                 raise HistoryLearningCancelled("聊天记录学习已取消")
+            window_result: HistoryWindowResult | None = None
             try:
-                extracted.append(
-                    await self.extract_window(
-                        window,
-                        chat_name=chat_name,
-                        eligible_sender_ids=eligible or None,
-                        extract_memories=extract_memories,
-                        update_profiles=update_profiles,
-                    )
+                window_result = await self.extract_window_result(
+                    window,
+                    chat_name=chat_name,
+                    eligible_sender_ids=eligible or None,
+                    extract_memories=extract_memories,
+                    update_profiles=update_profiles,
                 )
+                extracted.append(window_result.candidates)
             except HistoryLearningOutputError as error:
                 logger.warning(f"历史学习窗口 {window.window_id} 输出无效，已跳过: {error}")
             model_call_count += 1
-            await _notify(progress, "extracting", index, len(selected))
+            extraction_completed += 1
+            await _notify(progress, "extracting", extraction_completed, extraction_total)
+
+            if window_result is None or not window_result.continuation.needs_follow_up:
+                continue
+            position = window_positions.get(window.window_id)
+            if position is None or position + 1 >= len(windows):
+                continue
+            following = windows[position + 1]
+            continuation_key = (window.window_id, following.window_id)
+            if continuation_key in continuation_keys:
+                continue
+            continuation_keys.add(continuation_key)
+            continuation = _build_continuation_window(window, following)
+            continuation_window_ids.append(continuation.window_id)
+            evidence.update({message.message_id: message for message in continuation.messages})
+            extraction_total += 1
+            await _notify(progress, "extracting", extraction_completed, extraction_total)
+            try:
+                follow_up_result = await self.extract_window_result(
+                    continuation,
+                    chat_name=chat_name,
+                    eligible_sender_ids=eligible or None,
+                    extract_memories=extract_memories,
+                    update_profiles=update_profiles,
+                )
+                extracted.append(follow_up_result.candidates)
+            except HistoryLearningOutputError as error:
+                logger.warning(f"历史学习续接窗口 {continuation.window_id} 输出无效，已跳过: {error}")
+            model_call_count += 1
+            extraction_completed += 1
+            await _notify(progress, "extracting", extraction_completed, extraction_total)
 
         if should_cancel and should_cancel():
             raise HistoryLearningCancelled("聊天记录学习已取消")
@@ -897,6 +1056,7 @@ class ChatHistoryLearner:
             selected_window_ids=tuple(window.window_id for window in selected),
             model_call_count=model_call_count,
             store_result=store_result,
+            continuation_window_ids=tuple(continuation_window_ids),
         )
 
 

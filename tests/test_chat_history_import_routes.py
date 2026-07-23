@@ -117,7 +117,7 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.analysis.total_messages, 3)
         self.assertEqual(response.analysis.retained_messages, 2)
         self.assertEqual(response.analysis.noise_counts, {"punctuation_only": 1})
-        self.assertEqual(response.estimated_model_calls, {"fast": 2, "balanced": 2, "deep": 2})
+        self.assertEqual(response.estimated_model_calls, {"fast": 2, "balanced": 2, "deep": 2, "full": 2})
         task_dir = self.root / response.import_id
         self.assertFalse((task_dir / "source.json").exists())
         self.assertTrue((task_dir / "normalized.jsonl").exists())
