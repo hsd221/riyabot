@@ -2,7 +2,9 @@ import {
   Activity,
   BrainCircuit,
   CheckCircle2,
+  CornerDownRight,
   Hash,
+  Layers3,
   MessageSquareText,
   Trash2,
   Users,
@@ -35,9 +37,7 @@ export function ChatHistoryImportResult({
         <p id="result-title" className="ios-section-label px-0">
           学习结果
         </p>
-        <span className="text-[13px] text-muted-foreground">
-          {result.model_call_count ?? 0} 次模型调用
-        </span>
+        <span className="text-[13px] text-muted-foreground">扫描与写入已完成</span>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
@@ -72,6 +72,31 @@ export function ChatHistoryImportResult({
             <p className="mt-5 text-[28px] font-semibold tabular-nums leading-none">{value}</p>
           </div>
         ))}
+      </div>
+      <div className="ios-group mt-4 overflow-hidden">
+        <div className="ios-row ios-row-plain">
+          <span className="flex items-center gap-3 text-[15px]">
+            <Layers3 className="h-4 w-4 text-primary" aria-hidden="true" />
+            基础窗口
+          </span>
+          <span className="ios-value">
+            {result.selected_window_count ?? 0} / {result.total_window_count ?? 0}
+          </span>
+        </div>
+        <div className="ios-row ios-row-plain">
+          <span className="flex items-center gap-3 text-[15px]">
+            <CornerDownRight className="h-4 w-4 text-primary" aria-hidden="true" />
+            边界续接窗口
+          </span>
+          <span className="ios-value">{result.continuation_window_ids?.length ?? 0}</span>
+        </div>
+        <div className="ios-row ios-row-plain">
+          <span className="flex items-center gap-3 text-[15px]">
+            <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
+            实际模型调用
+          </span>
+          <span className="ios-value">{result.model_call_count ?? 0}</span>
+        </div>
       </div>
       {result.enrichment_store_result && (
         <div className="ios-group mt-4 overflow-hidden">

@@ -22,7 +22,7 @@ output: strict_json
 6. extract_memories=false 时 memories 必须为空。开启时仅提取对未来对话仍有价值的明确事件、事实、关系、偏好或计划，atom_type 只能是 episodic/factual/relational/preference/planned；subject_id 有明确主体时填写发送者 ID，无明确主体时填空字符串。不得记录联系方式、地址、证件、凭据、健康、宗教、政治、财务或性取向等敏感信息，最多 5 条。
 7. update_profiles=false 时 profiles 必须为空。开启时只从主体本人直接发言提取稳定兴趣、偏好、性格、习惯、技能或普通事实；category 只能是 interest/preference/personality/habit/skill/fact，subject_id 必须是本人发送者 ID。不得猜测身份，不得提取姓名、学校班级、联系方式、地址、证件、健康、宗教、政治、财务、凭据或性取向。性格和习惯至少需要两条本人证据，最多 6 条。
 8. confidence 和 importance 使用 0 到 1 的数字。证据不足时输出空数组，不要为了凑数而猜测。
-9. 如果窗口最后几条消息明显处在同一段尚未结束的问答、接龙或行动链中，且需要下一时间窗口才能判断含义，设置 window_boundary.needs_follow_up=true，并且 tail_evidence_ids 必须按原顺序列出当前窗口连续的末尾消息。若对话自然结束、只是话题转换或证据已经完整，设置为 false。不要因为不确定就请求续接。
+9. 如果窗口最后几条消息明显处在同一段尚未结束的问答、接龙或行动链中，且需要下一时间窗口才能判断含义，设置 window_boundary.needs_follow_up=true，并且 tail_evidence_ids 必须按原顺序列出当前窗口连续的末尾消息，最多 12 条。若对话自然结束、只是话题转换或证据已经完整，设置为 false。不要因为不确定就请求续接。
 </rules>
 <output_protocol>
 只输出严格合法的 JSON 对象，不要 Markdown、解释或额外字段：

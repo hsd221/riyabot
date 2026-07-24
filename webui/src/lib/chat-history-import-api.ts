@@ -2,6 +2,8 @@ import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import type {
   ChatHistoryImportDeleteResponse,
   ChatHistoryImportListResponse,
+  ChatHistoryParticipantListResponse,
+  ChatHistoryProfileDecisionRequest,
   ChatHistoryImportStartRequest,
   ChatHistoryImportTask,
 } from '@/types/chat-history-import'
@@ -57,6 +59,26 @@ export async function getChatHistoryImport(
   return response.json()
 }
 
+export async function listChatHistoryParticipants(
+  importId: string,
+  params: { query?: string; page?: number; pageSize?: number },
+  signal?: AbortSignal
+): Promise<ChatHistoryParticipantListResponse> {
+  const search = new URLSearchParams({
+    page: String(params.page ?? 1),
+    page_size: String(params.pageSize ?? 30),
+  })
+  if (params.query?.trim()) search.set('query', params.query.trim())
+  const response = await fetchWithAuth(
+    `${API_BASE}/${encodeURIComponent(importId)}/participants?${search.toString()}`,
+    { signal, cache: 'no-store' }
+  )
+  if (!response.ok) {
+    throw await parseError(response, '获取参与者列表失败')
+  }
+  return response.json()
+}
+
 export async function startChatHistoryImport(
   importId: string,
   request: ChatHistoryImportStartRequest
@@ -67,6 +89,23 @@ export async function startChatHistoryImport(
   })
   if (!response.ok) {
     throw await parseError(response, '启动聊天记录学习失败')
+  }
+  return response.json()
+}
+
+export async function submitChatHistoryProfileDecisions(
+  importId: string,
+  request: ChatHistoryProfileDecisionRequest
+): Promise<ChatHistoryImportTask> {
+  const response = await fetchWithAuth(
+    `${API_BASE}/${encodeURIComponent(importId)}/profile-decisions`,
+    {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }
+  )
+  if (!response.ok) {
+    throw await parseError(response, '提交画像处理方式失败')
   }
   return response.json()
 }

@@ -20,7 +20,7 @@ from src.bw_learner.history_enrichment import (
     load_history_enrichment_evidence,
     store_history_enrichment,
 )
-from src.bw_learner.history_import import ChatHistoryFormatError, analyze_qq_chat_export, build_history_windows
+from src.bw_learner.history_import import ChatHistoryFormatError, analyze_qq_chat_export, index_history_windows
 from src.bw_learner.history_learning import (
     DEPTH_WINDOW_BUDGETS,
     ChatHistoryLearner,
@@ -46,6 +46,7 @@ MAX_PARTICIPANT_PREVIEW = 30
 MAX_PARTICIPANT_SELECTION_OVERRIDES = 200
 _IMPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _KNOWN_TASK_FILES = ("source.json", "normalized.jsonl", "result.json", "result.json.tmp")
+_NON_CANCELLABLE_PROGRESS_STAGES = frozenset({"storing", "storing_enrichment"})
 _running_tasks: dict[str, asyncio.Task[None]] = {}
 _analyzing_import_ids: set[str] = set()
 
@@ -74,6 +75,7 @@ class ChatHistoryAnalysisResponse(BaseModel):
     noise_counts: dict[str, int]
     participants: list[ImportedParticipantResponse]
     participant_count: int = 0
+    eligible_participant_count: int = 0
     start_timestamp: float | None
     end_timestamp: float | None
     total_window_count: int
@@ -207,6 +209,10 @@ def _task_to_response(task: ChatHistoryImportTask) -> ChatHistoryImportResponse:
     participants = analysis.get("participants", [])
     if isinstance(participants, list):
         analysis["participant_count"] = int(analysis.get("participant_count") or len(participants))
+        analysis["eligible_participant_count"] = int(
+            analysis.get("eligible_participant_count")
+            or sum(1 for participant in participants if isinstance(participant, dict) and not participant.get("is_bot"))
+        )
         analysis["participants"] = participants[:MAX_PARTICIPANT_PREVIEW]
     result = _load_json_object(task.result_json) if task.result_json else None
     return ChatHistoryImportResponse(
@@ -256,13 +262,16 @@ def _analysis_payload(analysis: Any, total_window_count: int) -> dict[str, Any]:
     payload.pop("normalized_path", None)
     payload["participants"] = list(payload.get("participants", ()))
     payload["participant_count"] = len(payload["participants"])
+    payload["eligible_participant_count"] = sum(
+        1 for participant in payload["participants"] if isinstance(participant, dict) and not participant.get("is_bot")
+    )
     payload["total_window_count"] = total_window_count
     payload["estimated_model_calls"] = {
         depth: (total_window_count if budget is None else min(total_window_count, budget)) + 1
         for depth, budget in DEPTH_WINDOW_BUDGETS.items()
     }
     payload["estimated_model_call_note"] = (
-        "每个自然窗口 1 次提取、最后 1 次跨窗口合并；若窗口边界未结束，可能追加 1 次续接提取。"
+        "每个入选自然窗口至少 1 次提取、至少 1 次跨窗口合并；边界续接或候选分层合并会追加调用。"
     )
     return payload
 
@@ -364,7 +373,7 @@ async def create_chat_history_import(
             ChatHistoryImportTask.select()
             .where(
                 (ChatHistoryImportTask.source_hash == source_hash)
-                & ChatHistoryImportTask.status.in_(("ready", "running", "completed"))
+                & ChatHistoryImportTask.status.in_(("ready", "running", "awaiting_profile_review", "completed"))
             )
             .first()
         )
@@ -387,8 +396,8 @@ async def create_chat_history_import(
             updated_at=now,
         )
         analysis = await asyncio.to_thread(analyze_qq_chat_export, source_path, normalized_path)
-        windows = await asyncio.to_thread(build_history_windows, normalized_path)
-        payload = _analysis_payload(analysis, len(windows))
+        window_index = await asyncio.to_thread(index_history_windows, normalized_path)
+        payload = _analysis_payload(analysis, len(window_index))
         now = time.time()
         task.status = "ready"
         task.chat_id = group_chat_id("qq", analysis.chat.source_id)
@@ -539,7 +548,9 @@ async def _commit_learning_result(
     evidence = await asyncio.to_thread(load_history_candidate_evidence, normalized_path, candidates)
     if should_cancel and should_cancel():
         raise HistoryLearningCancelled("聊天记录学习已取消")
+    await _update_progress(import_id, "storing", 0, 1)
     store_result = store_history_candidates(task.chat_id or "", candidates, evidence)
+    await _update_progress(import_id, "storing", 1, 1)
     result_payload["store_result"] = {
         "created": store_result.created,
         "updated": store_result.updated,
@@ -823,6 +834,8 @@ async def delete_chat_history_import(
     task = _get_task_or_404(import_id)
     running = _running_tasks.get(import_id)
     if task.status == "running":
+        if task.progress_stage in _NON_CANCELLABLE_PROGRESS_STAGES:
+            raise HTTPException(status_code=409, detail="学习结果正在提交，完成后才能删除任务")
         task.cancel_requested = True
         task.updated_at = time.time()
         task.save()

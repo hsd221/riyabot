@@ -26,15 +26,22 @@ import {
   getChatHistoryImport,
   listChatHistoryImports,
   startChatHistoryImport,
+  submitChatHistoryProfileDecisions,
   uploadChatHistory,
 } from '@/lib/chat-history-import-api'
-import { chatHistoryProgressPercent } from '@/lib/chat-history-import-view'
+import {
+  canCancelChatHistoryImport,
+  chatHistoryProgressPercent,
+} from '@/lib/chat-history-import-view'
 import { cn } from '@/lib/utils'
 import type {
   ChatHistoryImportStatus,
   ChatHistoryImportTask,
   ChatHistoryLearningDepth,
+  ChatHistoryParticipantScope,
+  ChatHistoryProfileDecision,
 } from '@/types/chat-history-import'
+import { ChatHistoryProfileReview } from './chat-history-profile-review'
 import { ChatHistoryImportResult } from './chat-history-import-result'
 import { ChatHistoryImportSettings } from './chat-history-import-settings'
 
@@ -44,6 +51,7 @@ const statusLabels: Record<ChatHistoryImportStatus, string> = {
   analyzing: '分析中',
   ready: '待确认',
   running: '学习中',
+  awaiting_profile_review: '待确认画像',
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
@@ -56,7 +64,8 @@ const stageLabels: Record<string, string> = {
   extracting: '正在分窗口联合提取',
   consolidating: '正在跨窗口合并候选',
   storing: '正在写入表达、行为与黑话库',
-  storing_enrichment: '正在写入记忆与未验证画像',
+  storing_enrichment: '正在写入记忆与成员画像',
+  awaiting_profile_review: '等待确认现有画像',
   completed: '学习完成',
   failed: '学习失败',
   cancelled: '任务已取消',
@@ -114,10 +123,14 @@ export function ChatHistoryImportPage() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [submittingProfiles, setSubmittingProfiles] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [depth, setDepth] = useState<ChatHistoryLearningDepth>('balanced')
-  const [participantIds, setParticipantIds] = useState<Set<string>>(new Set())
+  const [participantScope, setParticipantScope] = useState<ChatHistoryParticipantScope>({
+    mode: 'all',
+    excluded_ids: [],
+  })
   const [extractMemories, setExtractMemories] = useState(false)
   const [updateProfiles, setUpdateProfiles] = useState(false)
   const activeTaskId = activeTask?.import_id
@@ -183,16 +196,19 @@ export function ChatHistoryImportPage() {
 
   useEffect(() => {
     if (!activeTask?.analysis) {
-      setParticipantIds(new Set())
+      setParticipantScope({ mode: 'all', excluded_ids: [] })
       setExtractMemories(false)
       setUpdateProfiles(false)
       return
     }
-    const configured = activeTask.options.participant_ids
-    const defaults = activeTask.analysis.participants
-      .filter((participant) => !participant.is_bot)
-      .map((participant) => participant.source_id)
-    setParticipantIds(new Set(configured?.length ? configured : defaults))
+    const configuredScope = activeTask.options.participant_scope
+    if (configuredScope) {
+      setParticipantScope(configuredScope)
+    } else if (activeTask.options.participant_ids?.length) {
+      setParticipantScope({ mode: 'custom', included_ids: activeTask.options.participant_ids })
+    } else {
+      setParticipantScope({ mode: 'all', excluded_ids: [] })
+    }
     setDepth(activeTask.options.depth ?? 'balanced')
     setExtractMemories(activeTask.options.extract_memories ?? false)
     setUpdateProfiles(activeTask.options.update_profiles ?? false)
@@ -202,6 +218,7 @@ export function ChatHistoryImportPage() {
     activeTask?.options.depth,
     activeTask?.options.extract_memories,
     activeTask?.options.participant_ids,
+    activeTask?.options.participant_scope,
     activeTask?.options.update_profiles,
   ])
 
@@ -255,7 +272,7 @@ export function ChatHistoryImportPage() {
       setStarting(true)
       const updated = await startChatHistoryImport(activeTask.import_id, {
         depth,
-        participant_ids: Array.from(participantIds),
+        participant_scope: participantScope,
         extract_memories: extractMemories,
         update_profiles: updateProfiles,
       })
@@ -272,6 +289,27 @@ export function ChatHistoryImportPage() {
       })
     } finally {
       setStarting(false)
+    }
+  }
+
+  const handleProfileDecisions = async (decisions: Record<string, ChatHistoryProfileDecision>) => {
+    if (!activeTask) return
+    try {
+      setSubmittingProfiles(true)
+      const updated = await submitChatHistoryProfileDecisions(activeTask.import_id, { decisions })
+      setActiveTask(updated)
+      setTasks((current) =>
+        current.map((task) => (task.import_id === updated.import_id ? updated : task))
+      )
+      toast({ title: '画像选择已提交', description: '正在写入已确认的学习结果' })
+    } catch (error) {
+      toast({
+        title: '提交失败',
+        description: error instanceof Error ? error.message : '无法提交画像处理方式',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmittingProfiles(false)
     }
   }
 
@@ -308,6 +346,9 @@ export function ChatHistoryImportPage() {
         activeTask.progress.total
       )
     : 0
+  const canCancel = activeTask
+    ? canCancelChatHistoryImport(activeTask.status, activeTask.progress.stage)
+    : false
 
   return (
     <div className="ios-page flex h-[calc(100vh-4rem)] flex-col">
@@ -326,7 +367,7 @@ export function ChatHistoryImportPage() {
         </Button>
       </div>
 
-      <ScrollArea className="min-h-0 min-w-0 flex-1">
+      <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
         <div className="ios-content min-w-0 pb-6 sm:pr-4">
           <section aria-labelledby="upload-title">
             <p className="ios-section-label mb-2">导入</p>
@@ -465,7 +506,7 @@ export function ChatHistoryImportPage() {
                       },
                       {
                         label: '参与者',
-                        value: formatNumber(analysis.participants.length),
+                        value: formatNumber(analysis.participant_count),
                         icon: Users,
                       },
                     ].map(({ label, value, icon: Icon }) => (
@@ -529,16 +570,27 @@ export function ChatHistoryImportPage() {
                 <ChatHistoryImportSettings
                   task={activeTask}
                   depth={depth}
-                  participantIds={participantIds}
+                  participantScope={participantScope}
                   extractMemories={extractMemories}
                   updateProfiles={updateProfiles}
                   starting={starting}
                   deleting={deleting}
                   onDepthChange={setDepth}
-                  onParticipantsChange={setParticipantIds}
+                  onParticipantScopeChange={setParticipantScope}
                   onExtractMemoriesChange={setExtractMemories}
                   onUpdateProfilesChange={setUpdateProfiles}
                   onStart={handleStart}
+                  onDelete={handleDelete}
+                />
+              )}
+
+              {activeTask.status === 'awaiting_profile_review' && activeTask.result && (
+                <ChatHistoryProfileReview
+                  key={activeTask.import_id}
+                  task={activeTask}
+                  submitting={submittingProfiles}
+                  deleting={deleting}
+                  onSubmit={handleProfileDecisions}
                   onDelete={handleDelete}
                 />
               )}
@@ -549,7 +601,12 @@ export function ChatHistoryImportPage() {
                     学习进度
                   </p>
                   <div className="ios-group p-5 sm:p-6">
-                    <div className="flex items-start justify-between gap-4">
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      aria-atomic="true"
+                      className="flex items-start justify-between gap-4"
+                    >
                       <div className="flex min-w-0 items-center gap-3">
                         <span className="ios-symbol ios-symbol-md ios-symbol-purple">
                           <BrainCircuit className="h-5 w-5" />
@@ -569,9 +626,13 @@ export function ChatHistoryImportPage() {
                     </div>
                     <Progress value={progressValue} className="mt-5 h-2.5" />
                     <div className="mt-5 flex justify-end">
-                      <Button variant="outline" onClick={handleDelete} disabled={deleting}>
+                      <Button
+                        variant="outline"
+                        onClick={handleDelete}
+                        disabled={deleting || !canCancel}
+                      >
                         <XCircle className="mr-2 h-4 w-4" />
-                        取消任务
+                        {canCancel ? '取消任务' : '正在提交结果'}
                       </Button>
                     </div>
                   </div>

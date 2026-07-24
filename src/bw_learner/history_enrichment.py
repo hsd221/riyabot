@@ -294,6 +294,60 @@ def _profile_atom(
     return atom, detail
 
 
+def _apply_approved_profile_candidate(profile: Any, candidate: ProfileCandidate, atom: MemoryAtom) -> Any:
+    """Apply an explicitly approved field without replacing unrelated profile data."""
+
+    field_sources = profile.stats.setdefault(
+        "_profile_field_sources",
+        {"preferences": {}, "interests": {}, "facts": {}, "traits": {}},
+    )
+    if not isinstance(field_sources, dict):
+        field_sources = {"preferences": {}, "interests": {}, "facts": {}, "traits": {}}
+        profile.stats["_profile_field_sources"] = field_sources
+
+    def sources_for(section: str) -> dict[str, Any]:
+        sources = field_sources.get(section)
+        if not isinstance(sources, dict):
+            sources = {}
+            field_sources[section] = sources
+        return sources
+
+    if candidate.category == "preference":
+        section = "preferences"
+        profile.preferences[candidate.name] = candidate.value
+    elif candidate.category == "interest":
+        section = "interests"
+        previous = sources_for(section).get(candidate.name)
+        previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
+        if previous_value and previous_value != candidate.value and previous_value in profile.interests:
+            profile.interests.remove(previous_value)
+        if candidate.value not in profile.interests:
+            profile.interests.append(candidate.value)
+    elif candidate.category == "personality":
+        section = "traits"
+        previous = sources_for(section).get(candidate.name)
+        previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
+        if previous_value and previous_value != candidate.value:
+            profile.traits.pop(previous_value, None)
+        profile.traits[candidate.value] = candidate.confidence
+    else:
+        section = "facts"
+        profile.facts[candidate.name] = candidate.value
+
+    section_sources = sources_for(section)
+    section_sources[candidate.name] = {
+        "atom_id": atom.atom_id,
+        "weight": atom.weight,
+        "confidence": atom.confidence,
+        "evidence_counter": len(candidate.evidence_ids),
+        "created_at": atom.created_at,
+        "category": candidate.category,
+        "value": candidate.value,
+        "approved_history_import": True,
+    }
+    return profile
+
+
 async def store_history_enrichment(
     *,
     import_id: str,
@@ -318,9 +372,27 @@ async def store_history_enrichment(
     if total == 0:
         return HistoryEnrichmentStoreResult()
 
-    writer = memory_writer or await _default_memory_writer()
-    profiles = profile_store or ProfileStore()
-    builder = ProfileBuilder(profiles)
+    if should_cancel and should_cancel():
+        raise HistoryLearningCancelled("聊天记录学习已取消")
+    try:
+        writer = memory_writer or await _default_memory_writer()
+        profiles = profile_store or ProfileStore()
+        builder = ProfileBuilder(profiles)
+    except Exception as error:
+        logger.warning(
+            "历史导入记忆与画像存储初始化失败",
+            import_id=import_id,
+            error_type=type(error).__name__,
+        )
+        await _notify(progress, total, total)
+        return HistoryEnrichmentStoreResult(write_failures=total)
+    preexisting_profile_ids = {
+        profile_id
+        for candidate in selected_profiles
+        if (profile_id := make_profile_id(PROFILE_PLATFORM, candidate.subject_id))
+        and profiles.get_profile(profile_id) is not None
+    }
+    created_profile_ids: set[str] = set()
     memories_created = 0
     profiles_created = 0
     profiles_updated = 0
@@ -353,12 +425,15 @@ async def store_history_enrichment(
         identity = _profile_identity(candidate, evidence, group_id=group_id, chat_name=chat_name)
         existing = profiles.get_profile(identity.profile_id)
         decision = (profile_decisions or {}).get(identity.profile_id)
-        if decision == "keep_existing":
+        requires_decision = identity.profile_id in preexisting_profile_ids or (
+            existing is not None and identity.profile_id not in created_profile_ids
+        )
+        if requires_decision and decision == "keep_existing":
             profiles_skipped += 1
             current += 1
             await _notify(progress, current, total)
             continue
-        if existing is not None and decision not in {"apply_imported", "keep_existing"}:
+        if requires_decision and decision != "apply_imported":
             profiles_skipped += 1
             current += 1
             await _notify(progress, current, total)
@@ -367,8 +442,8 @@ async def store_history_enrichment(
             identity = PersonIdentity(
                 platform=identity.platform,
                 user_id=identity.user_id,
-                nickname=identity.nickname,
-                cardname=identity.cardname,
+                nickname=existing.nickname,
+                cardname=existing.cardname,
                 group_id=identity.group_id,
                 group_name=identity.group_name,
                 person_type=existing.person_type,
@@ -380,8 +455,13 @@ async def store_history_enrichment(
         try:
             await writer.write_atom(atom, semantic_detail=semantic_detail)
             _record_trace(atom.atom_id, import_id, atom.content)
-            updated = builder.update_profile_from_atom(identity, atom)
-            if updated is None:
+            profile_subject: str | PersonIdentity = identity.profile_id if existing is not None else identity
+            updated = builder.update_profile_from_atom(profile_subject, atom)
+            if requires_decision and existing is not None:
+                updated = profiles.get_profile(identity.profile_id) or existing
+                updated = _apply_approved_profile_candidate(updated, candidate, atom)
+                profiles.save_profile(updated)
+            elif updated is None:
                 raise RuntimeError("画像候选未产生有效更新")
             import_ids = updated.stats.setdefault("_history_import_ids", [])
             if not isinstance(import_ids, list):
@@ -392,6 +472,7 @@ async def store_history_enrichment(
                 del import_ids[:-20]
             profiles.save_profile(updated)
             if existing is None:
+                created_profile_ids.add(identity.profile_id)
                 profiles_created += 1
             else:
                 profiles_updated += 1

@@ -131,6 +131,7 @@ variants: light, standard
 | `chat_name_json` | 历史聊天导入任务的群名，按不可信 JSON 字符串注入动态输入层。 |
 | `window_id_json` | 历史聊天学习窗口的确定性编号，按 JSON 字符串注入动态输入层。 |
 | `eligible_sender_ids_json` | 本次允许贡献表达、行为、黑话、记忆与画像证据的人类发送者 ID 集合。 |
+| `excluded_sender_ids_json` | 全成员模式下不得成为学习证据、但仍可保留为对话上下文的人类发送者 ID 集合。 |
 | `extract_memories_json` | 历史聊天任务是否允许提取群聊记忆候选的布尔开关。 |
 | `update_profiles_json` | 历史聊天任务是否允许提取未验证人物画像候选的布尔开关。 |
 | `candidates_json` | 跨窗口合并器收到的、已通过程序证据校验的学习候选。 |

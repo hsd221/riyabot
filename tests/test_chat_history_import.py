@@ -302,6 +302,37 @@ class HistoryWindowSelectionTest(unittest.TestCase):
         self.assertEqual(len(selected_once), 3)
         self.assertEqual(set().union(*(window.sender_ids for window in selected_once)), {"u0", "u1", "u2"})
 
+    def test_window_index_keeps_metadata_without_retaining_message_payloads(self) -> None:
+        from src.bw_learner.history_import import (
+            ImportedMessage,
+            index_history_windows,
+            write_normalized_messages,
+        )
+
+        write_normalized_messages(
+            self.path,
+            [
+                ImportedMessage(
+                    message_id=f"m{index}",
+                    timestamp=1_750_000_000.0 + index * 3_000,
+                    sender_id="u1",
+                    sender_name="用户",
+                    sender_card="",
+                    content=f"第 {index} 段聊天内容",
+                    reply_to_id=None,
+                    is_bot=False,
+                    is_low_signal=False,
+                )
+                for index in range(2)
+            ],
+        )
+
+        summaries = index_history_windows(self.path, max_gap_seconds=60)
+
+        self.assertEqual([summary.window_id for summary in summaries], ["window-000001", "window-000002"])
+        self.assertEqual([summary.message_count for summary in summaries], [1, 1])
+        self.assertTrue(all(not hasattr(summary, "messages") for summary in summaries))
+
     def test_oversized_overlap_is_dropped_without_emitting_duplicate_windows(self) -> None:
         from src.bw_learner.history_import import (
             ImportedMessage,

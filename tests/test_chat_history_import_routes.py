@@ -503,6 +503,30 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.normalized_path, "")
         self.assertFalse((self.root / response.import_id / "normalized.jsonl").exists())
 
+    async def test_delete_rejects_while_results_are_being_committed(self) -> None:
+        response = await self._upload()
+        task = self.model.get()
+
+        for stage in ("storing", "storing_enrichment"):
+            with self.subTest(stage=stage):
+                blocker = asyncio.create_task(asyncio.Event().wait())
+                self.routes._running_tasks[response.import_id] = blocker
+                task.status = "running"
+                task.progress_stage = stage
+                task.cancel_requested = False
+                task.save()
+
+                with self.assertRaises(HTTPException) as committing:
+                    await self.routes.delete_chat_history_import(response.import_id, None, None)
+
+                self.assertEqual(committing.exception.status_code, 409)
+                self.assertFalse(self.model.get().cancel_requested)
+                self.assertFalse(blocker.cancelled())
+                blocker.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await blocker
+                self.routes._running_tasks.pop(response.import_id, None)
+
     async def test_cooperative_cancellation_marks_task_cancelled(self) -> None:
         from src.bw_learner.history_learning import HistoryLearningCancelled
 

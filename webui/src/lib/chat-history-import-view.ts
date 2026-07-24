@@ -40,3 +40,10 @@ export function chatHistoryProgressPercent(
   if (stage === 'storing_enrichment') return 96 + Math.round(localProgress * 3)
   return status === 'running' ? 2 : 0
 }
+
+export function canCancelChatHistoryImport(
+  status: ChatHistoryImportStatus,
+  stage: string
+): boolean {
+  return status === 'running' && stage !== 'storing' && stage !== 'storing_enrichment'
+}

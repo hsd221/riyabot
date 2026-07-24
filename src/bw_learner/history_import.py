@@ -11,7 +11,7 @@ from collections import Counter
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, TextIO
+from typing import Any, Callable, Iterable, Iterator, TextIO, TypeVar
 
 
 MAX_RAW_JSON_VALUE_CHARS = 2 * 1024 * 1024
@@ -104,6 +104,31 @@ class HistoryWindow:
     @property
     def evidence_ids(self) -> frozenset[str]:
         return frozenset(message.message_id for message in self.messages)
+
+
+@dataclass(frozen=True)
+class HistoryWindowSummary:
+    """Lightweight window metadata used to index large normalized exports."""
+
+    window_id: str
+    start_timestamp: float
+    end_timestamp: float
+    sender_ids: frozenset[str]
+    message_count: int
+    char_count: int
+    signal_score: float
+
+    @classmethod
+    def from_window(cls, window: HistoryWindow) -> HistoryWindowSummary:
+        return cls(
+            window_id=window.window_id,
+            start_timestamp=window.start_timestamp,
+            end_timestamp=window.end_timestamp,
+            sender_ids=window.sender_ids,
+            message_count=window.message_count,
+            char_count=window.char_count,
+            signal_score=window.signal_score,
+        )
 
 
 class _IncrementalJSONReader:
@@ -559,6 +584,58 @@ def _create_window(index: int, messages: list[ImportedMessage]) -> HistoryWindow
     )
 
 
+def iter_history_windows(
+    normalized_path: str | Path,
+    *,
+    max_messages: int = 80,
+    max_chars: int = 12_000,
+    max_gap_seconds: float = 20 * 60,
+    overlap_messages: int = 6,
+) -> Iterator[HistoryWindow]:
+    """Yield coherent windows without retaining the normalized export in memory."""
+
+    if max_messages <= 0 or max_chars <= 0:
+        raise ValueError("window limits must be greater than zero")
+    if overlap_messages < 0 or overlap_messages >= max_messages:
+        raise ValueError("overlap_messages must be between zero and max_messages - 1")
+
+    current: list[ImportedMessage] = []
+    current_chars = 0
+    window_index = 0
+
+    def flush(*, keep_overlap: bool) -> HistoryWindow | None:
+        nonlocal current, current_chars, window_index
+        if not current:
+            return None
+        window_index += 1
+        window = _create_window(window_index, current)
+        if keep_overlap and overlap_messages:
+            current = current[-overlap_messages:]
+            current_chars = sum(len(message.content) for message in current)
+        else:
+            current = []
+            current_chars = 0
+        return window
+
+    for message in iter_normalized_messages(normalized_path):
+        if current:
+            gap = message.timestamp - current[-1].timestamp
+            if gap > max_gap_seconds or gap < 0:
+                if window := flush(keep_overlap=False):
+                    yield window
+            elif len(current) >= max_messages or current_chars + len(message.content) > max_chars:
+                if window := flush(keep_overlap=True):
+                    yield window
+                if len(current) >= max_messages or current_chars + len(message.content) > max_chars:
+                    current = []
+                    current_chars = 0
+
+        current.append(message)
+        current_chars += len(message.content)
+    if window := flush(keep_overlap=False):
+        yield window
+
+
 def build_history_windows(
     normalized_path: str | Path,
     *,
@@ -567,52 +644,50 @@ def build_history_windows(
     max_gap_seconds: float = 20 * 60,
     overlap_messages: int = 6,
 ) -> list[HistoryWindow]:
-    """Build coherent windows bounded by time, count, and prompt size."""
+    """Build all windows for callers that explicitly need their message payloads."""
 
-    if max_messages <= 0 or max_chars <= 0:
-        raise ValueError("window limits must be greater than zero")
-    if overlap_messages < 0 or overlap_messages >= max_messages:
-        raise ValueError("overlap_messages must be between zero and max_messages - 1")
+    return list(
+        iter_history_windows(
+            normalized_path,
+            max_messages=max_messages,
+            max_chars=max_chars,
+            max_gap_seconds=max_gap_seconds,
+            overlap_messages=overlap_messages,
+        )
+    )
 
-    windows: list[HistoryWindow] = []
-    current: list[ImportedMessage] = []
-    current_chars = 0
 
-    def flush(*, keep_overlap: bool) -> None:
-        nonlocal current, current_chars
-        if not current:
-            return
-        windows.append(_create_window(len(windows) + 1, current))
-        if keep_overlap and overlap_messages:
-            current = current[-overlap_messages:]
-            current_chars = sum(len(message.content) for message in current)
-        else:
-            current = []
-            current_chars = 0
+def index_history_windows(
+    normalized_path: str | Path,
+    *,
+    max_messages: int = 80,
+    max_chars: int = 12_000,
+    max_gap_seconds: float = 20 * 60,
+    overlap_messages: int = 6,
+) -> list[HistoryWindowSummary]:
+    """Scan an export into lightweight metadata suitable for deterministic selection."""
 
-    for message in iter_normalized_messages(normalized_path):
-        if current:
-            gap = message.timestamp - current[-1].timestamp
-            if gap > max_gap_seconds or gap < 0:
-                flush(keep_overlap=False)
-            elif len(current) >= max_messages or current_chars + len(message.content) > max_chars:
-                flush(keep_overlap=True)
-                if len(current) >= max_messages or current_chars + len(message.content) > max_chars:
-                    current = []
-                    current_chars = 0
+    return [
+        HistoryWindowSummary.from_window(window)
+        for window in iter_history_windows(
+            normalized_path,
+            max_messages=max_messages,
+            max_chars=max_chars,
+            max_gap_seconds=max_gap_seconds,
+            overlap_messages=overlap_messages,
+        )
+    ]
 
-        current.append(message)
-        current_chars += len(message.content)
-    flush(keep_overlap=False)
-    return windows
+
+SelectableHistoryWindow = TypeVar("SelectableHistoryWindow", HistoryWindow, HistoryWindowSummary)
 
 
 def select_history_windows(
-    windows: Iterable[HistoryWindow],
+    windows: Iterable[SelectableHistoryWindow],
     *,
     budget: int,
     priority_sender_ids: Iterable[str] = (),
-) -> list[HistoryWindow]:
+) -> list[SelectableHistoryWindow]:
     """Select deterministic, time-distributed, participant-covering windows."""
 
     candidates = list(windows)

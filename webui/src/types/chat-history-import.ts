@@ -1,7 +1,18 @@
 export type ChatHistoryImportStatus =
-  'analyzing' | 'ready' | 'running' | 'completed' | 'failed' | 'cancelled'
+  | 'analyzing'
+  | 'ready'
+  | 'running'
+  | 'awaiting_profile_review'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
 
-export type ChatHistoryLearningDepth = 'fast' | 'balanced' | 'deep'
+export type ChatHistoryLearningDepth = 'fast' | 'balanced' | 'deep' | 'full'
+
+export type ChatHistoryParticipantScope =
+  { mode: 'all'; excluded_ids: string[] } | { mode: 'custom'; included_ids: string[] }
+
+export type ChatHistoryProfileDecision = 'keep_existing' | 'apply_imported'
 
 export interface ImportedChat {
   name: string
@@ -26,9 +37,12 @@ export interface ChatHistoryAnalysis {
   filtered_messages: number
   noise_counts: Record<string, number>
   participants: ImportedParticipant[]
+  participant_count: number
+  eligible_participant_count: number
   start_timestamp: number | null
   end_timestamp: number | null
   total_window_count: number
+  estimated_model_call_note: string
 }
 
 export interface ChatHistoryImportProgress {
@@ -86,6 +100,37 @@ export interface HistoryEnrichmentStoreResult {
   write_failures: number
 }
 
+export interface ExistingProfileSummary {
+  profile_id: string
+  nickname: string
+  cardname: string
+  verification_status: string
+  interests: string[]
+  preferences: Record<string, string>
+  facts: Record<string, string>
+  traits: Record<string, number>
+}
+
+export interface ImportedProfileConflictCandidate {
+  category: string
+  name: string
+  value: string
+  evidence_count: number
+  confidence: number
+}
+
+export interface ChatHistoryProfileConflict {
+  profile_id: string
+  subject_id: string
+  current: ExistingProfileSummary
+  imported: ImportedProfileConflictCandidate[]
+}
+
+export interface ChatHistoryProfileReview {
+  conflicts: ChatHistoryProfileConflict[]
+  decisions: Record<string, ChatHistoryProfileDecision> | null
+}
+
 export interface ChatHistoryLearningResult {
   candidates: {
     expressions: ImportedExpressionCandidate[]
@@ -97,12 +142,14 @@ export interface ChatHistoryLearningResult {
   total_window_count?: number
   selected_window_count?: number
   selected_window_ids?: string[]
+  continuation_window_ids?: string[]
   model_call_count?: number
   store_result?: {
     created: Record<string, number>
     updated: Record<string, number>
   } | null
   enrichment_store_result?: HistoryEnrichmentStoreResult | null
+  profile_review?: ChatHistoryProfileReview
 }
 
 export interface ChatHistoryImportTask {
@@ -117,6 +164,7 @@ export interface ChatHistoryImportTask {
   options: {
     depth?: ChatHistoryLearningDepth
     participant_ids?: string[]
+    participant_scope?: ChatHistoryParticipantScope
     extract_memories?: boolean
     update_profiles?: boolean
   }
@@ -135,9 +183,24 @@ export interface ChatHistoryImportListResponse {
 
 export interface ChatHistoryImportStartRequest {
   depth: ChatHistoryLearningDepth
-  participant_ids: string[]
+  participant_ids?: string[]
+  participant_scope: ChatHistoryParticipantScope
   extract_memories: boolean
   update_profiles: boolean
+}
+
+export interface ChatHistoryParticipantListResponse {
+  data: ImportedParticipant[]
+  pagination: {
+    page: number
+    page_size: number
+    total_items: number
+    total_pages: number
+  }
+}
+
+export interface ChatHistoryProfileDecisionRequest {
+  decisions: Record<string, ChatHistoryProfileDecision>
 }
 
 export interface ChatHistoryImportDeleteResponse {

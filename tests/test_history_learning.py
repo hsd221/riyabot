@@ -359,8 +359,37 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         invalid = parse_history_window_result(invalid_response, evidence)
         self.assertFalse(invalid.continuation.needs_follow_up)
 
+    def test_window_boundary_keeps_the_last_twelve_ids_from_an_oversized_tail(self) -> None:
+        from src.bw_learner.history_learning import parse_history_window_result
+
+        evidence = {f"m{index}": make_message(f"m{index}", f"第 {index} 条") for index in range(1, 16)}
+        response = json.dumps(
+            {
+                "expressions": [],
+                "behaviors": [],
+                "jargons": [],
+                "window_boundary": {
+                    "needs_follow_up": True,
+                    "tail_evidence_ids": list(evidence),
+                    "reason": "较长的尾段仍在等待后续",
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        parsed = parse_history_window_result(response, evidence)
+
+        self.assertTrue(parsed.continuation.needs_follow_up)
+        self.assertEqual(parsed.continuation.tail_evidence_ids, tuple(list(evidence)[-12:]))
+
     async def test_boundary_request_reprocesses_tail_with_following_window(self) -> None:
         from src.bw_learner.history_learning import ChatHistoryLearner
+
+        extracting_progress: list[tuple[int, int]] = []
+
+        async def record_progress(stage: str, current: int, total: int) -> None:
+            if stage == "extracting":
+                extracting_progress.append((current, total))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             normalized = Path(tmpdir) / "normalized.jsonl"
@@ -372,7 +401,14 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
             write_normalized_messages(normalized, messages)
             boundary_response = json.dumps(
                 {
-                    "expressions": [],
+                    "expressions": [
+                        {
+                            "situation": "等待回复时",
+                            "style": "错误地提前判断对话结论",
+                            "evidence_ids": ["m2"],
+                            "confidence": 0.8,
+                        }
+                    ],
                     "behaviors": [],
                     "jargons": [],
                     "window_boundary": {
@@ -383,12 +419,27 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
                 },
                 ensure_ascii=False,
             )
+            follow_up_response = json.dumps(
+                {
+                    "expressions": [
+                        {
+                            "situation": "问答完成后",
+                            "style": "结合问题与回答概括完整结论",
+                            "evidence_ids": ["m2", "m3"],
+                            "confidence": 0.88,
+                        }
+                    ],
+                    "behaviors": [],
+                    "jargons": [],
+                },
+                ensure_ascii=False,
+            )
             empty_response = json.dumps({"expressions": [], "behaviors": [], "jargons": []})
             llm = SimpleNamespace(
                 generate_response_async=AsyncMock(
                     side_effect=[
                         (boundary_response, None),
-                        (empty_response, None),
+                        (follow_up_response, None),
                         (empty_response, None),
                         (empty_response, None),
                     ]
@@ -402,6 +453,7 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
                 depth="full",
                 store=False,
                 window_options={"max_messages": 2, "max_gap_seconds": 60, "overlap_messages": 0},
+                progress=record_progress,
             )
 
         self.assertEqual(result.total_window_count, 2)
@@ -409,8 +461,14 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.model_call_count, 4)
         self.assertEqual(result.continuation_window_ids, ("window-000001+window-000002:continuation",))
         continuation_prompt = llm.generate_response_async.await_args_list[1].kwargs["prompt"]
+        self.assertNotIn('"evidence_id":"m1"', continuation_prompt)
         self.assertIn('"evidence_id":"m2"', continuation_prompt)
         self.assertIn('"evidence_id":"m3"', continuation_prompt)
+        consolidation_prompt = llm.generate_response_async.await_args_list[3].kwargs["prompt"]
+        self.assertNotIn("错误地提前判断对话结论", consolidation_prompt)
+        self.assertIn("结合问题与回答概括完整结论", consolidation_prompt)
+        extracting_ratios = [current / max(1, total) for current, total in extracting_progress]
+        self.assertEqual(extracting_ratios, sorted(extracting_ratios))
 
     async def test_window_prompt_keeps_untrusted_chat_only_in_user_role(self) -> None:
         from src.bw_learner.history_learning import ChatHistoryLearner
@@ -579,7 +637,7 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
                     evidence_ids[index : index + 12],
                     0.9,
                 )
-                for index in range(60)
+                for index in range(20)
             )
         )
 
@@ -589,12 +647,13 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(candidates_json) + len(evidence_json), MAX_CONSOLIDATION_DYNAMIC_CHARS)
         self.assertNotIn("证据" * 100, evidence_json)
 
-    def test_consolidation_prompt_drops_candidates_whose_evidence_does_not_fit(self) -> None:
+    def test_consolidation_partitions_every_candidate_into_bounded_prompts(self) -> None:
         from src.bw_learner.history_learning import (
             MAX_CONSOLIDATION_DYNAMIC_CHARS,
             ExpressionCandidate,
             HistoryCandidates,
             _consolidation_prompt_payload,
+            _partition_consolidation_candidates,
         )
 
         evidence = {}
@@ -621,17 +680,109 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-        bounded, candidates_json, evidence_json = _consolidation_prompt_payload(
+        batches = _partition_consolidation_candidates(
             HistoryCandidates(expressions=tuple(candidates)),
             evidence,
         )
-        included_evidence_ids = set(json.loads(evidence_json))
 
-        self.assertLess(len(bounded.expressions), len(candidates))
-        self.assertTrue(
-            all(set(candidate.evidence_ids).issubset(included_evidence_ids) for candidate in bounded.expressions)
+        self.assertGreater(len(batches), 1)
+        self.assertEqual(
+            [candidate.situation for batch in batches for candidate in batch.expressions],
+            [candidate.situation for candidate in candidates],
         )
-        self.assertLessEqual(len(candidates_json) + len(evidence_json), MAX_CONSOLIDATION_DYNAMIC_CHARS)
+        for batch in batches:
+            prompt_candidates, candidates_json, evidence_json = _consolidation_prompt_payload(batch, evidence)
+            included_evidence_ids = set(json.loads(evidence_json))
+            self.assertEqual(prompt_candidates, batch)
+            self.assertLessEqual(len(batch.expressions), 30)
+            self.assertLessEqual(len(batch.behaviors), 20)
+            self.assertLessEqual(len(batch.jargons), 30)
+            self.assertLessEqual(len(batch.memories), 25)
+            self.assertLessEqual(len(batch.profiles), 30)
+            self.assertTrue(
+                all(set(candidate.evidence_ids).issubset(included_evidence_ids) for candidate in batch.expressions)
+            )
+            self.assertLessEqual(len(candidates_json) + len(evidence_json), MAX_CONSOLIDATION_DYNAMIC_CHARS)
+
+    async def test_hierarchical_consolidation_processes_every_candidate_before_final_merge(self) -> None:
+        from src.bw_learner.history_learning import (
+            MAX_CONSOLIDATION_DYNAMIC_CHARS,
+            ChatHistoryLearner,
+            ExpressionCandidate,
+            HistoryCandidates,
+        )
+
+        evidence = {}
+        candidates = []
+        for index in range(500):
+            evidence_id = f"evidence-{index:03d}"
+            evidence[evidence_id] = make_message(evidence_id, "足够长的原始表达证据" * 80)
+            candidates.append(ExpressionCandidate(f"情境 {index}", f"表达风格 {index}", (evidence_id,), 0.8))
+
+        seen_situations: set[str] = set()
+        prompt_sizes: list[int] = []
+
+        async def respond(**kwargs):
+            prompt = kwargs["prompt"]
+            candidates_json = prompt.split("<validated_candidates>", 1)[1].split("</validated_candidates>", 1)[0]
+            evidence_json = prompt.split("<evidence>", 1)[1].split("</evidence>", 1)[0]
+            payload = json.loads(candidates_json)
+            seen_situations.update(item["situation"] for item in payload["expressions"])
+            prompt_sizes.append(len(candidates_json) + len(evidence_json))
+            response = {
+                "expressions": payload["expressions"][:1],
+                "behaviors": [],
+                "jargons": [],
+                "memories": [],
+                "profiles": [],
+            }
+            return json.dumps(response, ensure_ascii=False), None
+
+        learner = ChatHistoryLearner(llm=SimpleNamespace(generate_response_async=respond))
+
+        result, model_calls = await learner.consolidate_hierarchically(
+            HistoryCandidates(expressions=tuple(candidates)),
+            evidence,
+            chat_name="测试群",
+        )
+
+        self.assertEqual(seen_situations, {candidate.situation for candidate in candidates})
+        self.assertGreater(model_calls, 1)
+        self.assertEqual(len(result.expressions), 1)
+        self.assertTrue(all(size <= MAX_CONSOLIDATION_DYNAMIC_CHARS for size in prompt_sizes))
+
+    async def test_hierarchical_consolidation_stops_when_model_does_not_reduce_batches(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner, ExpressionCandidate, HistoryCandidates
+
+        evidence = {
+            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}") for index in range(90)
+        }
+        candidates = HistoryCandidates(
+            expressions=tuple(
+                ExpressionCandidate(f"情境 {index}", f"表达风格 {index}", (f"evidence-{index:03d}",), 0.8)
+                for index in range(90)
+            )
+        )
+        seen_situations: set[str] = set()
+
+        async def preserve_every_candidate(**kwargs):
+            prompt = kwargs["prompt"]
+            candidates_json = prompt.split("<validated_candidates>", 1)[1].split("</validated_candidates>", 1)[0]
+            payload = json.loads(candidates_json)
+            seen_situations.update(item["situation"] for item in payload["expressions"])
+            return json.dumps(payload, ensure_ascii=False), None
+
+        learner = ChatHistoryLearner(llm=SimpleNamespace(generate_response_async=preserve_every_candidate))
+
+        result, model_calls = await learner.consolidate_hierarchically(
+            candidates,
+            evidence,
+            chat_name="测试群",
+        )
+
+        self.assertEqual(seen_situations, {candidate.situation for candidate in candidates.expressions})
+        self.assertEqual(model_calls, 4)
+        self.assertEqual(len(result.expressions), 30)
 
     async def test_deterministic_fallback_keeps_only_repeated_jargon(self) -> None:
         from src.bw_learner.history_learning import HistoryCandidates, JargonCandidate, _final_fallback
