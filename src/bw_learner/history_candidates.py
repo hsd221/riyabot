@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass, replace
@@ -102,6 +103,8 @@ class ExpressionCandidate:
     style: str
     evidence_ids: tuple[str, ...]
     confidence: float
+    candidate_id: str = ""
+    provenance: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,8 @@ class BehaviorCandidate:
     outcome: str
     evidence_ids: tuple[str, ...]
     confidence: float
+    candidate_id: str = ""
+    provenance: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,8 @@ class JargonCandidate:
     meaning: str
     evidence_ids: tuple[str, ...]
     confidence: float
+    candidate_id: str = ""
+    provenance: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -130,6 +137,8 @@ class MemoryCandidate:
     evidence_ids: tuple[str, ...]
     confidence: float
     importance: float
+    candidate_id: str = ""
+    provenance: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,68 @@ class ProfileCandidate:
     value: str
     evidence_ids: tuple[str, ...]
     confidence: float
+    candidate_id: str = ""
+    provenance: tuple[str, ...] = ()
+
+
+def _candidate_kind(candidate: Any) -> str | None:
+    if isinstance(candidate, ExpressionCandidate):
+        return "expression"
+    if isinstance(candidate, BehaviorCandidate):
+        return "behavior"
+    if isinstance(candidate, JargonCandidate):
+        return "jargon"
+    if isinstance(candidate, MemoryCandidate):
+        return "memory"
+    if isinstance(candidate, ProfileCandidate):
+        return "profile"
+    return None
+
+
+def _candidate_identity(candidate: Any) -> tuple[str, ...]:
+    if isinstance(candidate, ExpressionCandidate):
+        return (candidate.situation.casefold(), candidate.style.casefold())
+    if isinstance(candidate, BehaviorCandidate):
+        return (
+            candidate.actor_type.casefold(),
+            candidate.learning_type.casefold(),
+            candidate.action.casefold(),
+            candidate.outcome.casefold(),
+        )
+    if isinstance(candidate, JargonCandidate):
+        return (candidate.content.casefold(),)
+    if isinstance(candidate, MemoryCandidate):
+        return (candidate.atom_type.casefold(), candidate.subject_id.casefold(), candidate.content.casefold())
+    if isinstance(candidate, ProfileCandidate):
+        return (
+            candidate.subject_id.casefold(),
+            candidate.category.casefold(),
+            candidate.name.casefold(),
+            candidate.value.casefold(),
+        )
+    return ()
+
+
+def _stable_candidate_id(candidate: Any) -> str:
+    kind = _candidate_kind(candidate) or "candidate"
+    identity = json.dumps((kind, *_candidate_identity(candidate)), ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+    return f"{kind}:{digest}"
+
+
+def _with_candidate_metadata(candidate: Any, *, provenance: Iterable[str] = ()) -> Any:
+    if _candidate_kind(candidate) is None:
+        return candidate
+    merged_provenance = tuple(
+        dict.fromkeys(
+            str(source) for source in (*getattr(candidate, "provenance", ()), *provenance) if str(source).strip()
+        )
+    )
+    return replace(
+        candidate,
+        candidate_id=_stable_candidate_id(candidate),
+        provenance=merged_provenance,
+    )
 
 
 @dataclass(frozen=True)
@@ -154,13 +225,26 @@ class HistoryCandidates:
     def total(self) -> int:
         return len(self.expressions) + len(self.behaviors) + len(self.jargons) + len(self.memories) + len(self.profiles)
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self, *, include_metadata: bool = True) -> dict[str, Any]:
+        def serialize(collection: Iterable[Any]) -> list[dict[str, Any]]:
+            result: list[dict[str, Any]] = []
+            for candidate in collection:
+                enriched = _with_candidate_metadata(candidate)
+                payload = asdict(enriched)
+                if include_metadata:
+                    payload["provenance"] = list(enriched.provenance)
+                else:
+                    payload.pop("candidate_id", None)
+                    payload.pop("provenance", None)
+                result.append(payload)
+            return result
+
         return {
-            "expressions": [asdict(candidate) for candidate in self.expressions],
-            "behaviors": [asdict(candidate) for candidate in self.behaviors],
-            "jargons": [asdict(candidate) for candidate in self.jargons],
-            "memories": [asdict(candidate) for candidate in self.memories],
-            "profiles": [asdict(candidate) for candidate in self.profiles],
+            "expressions": serialize(self.expressions),
+            "behaviors": serialize(self.behaviors),
+            "jargons": serialize(self.jargons),
+            "memories": serialize(self.memories),
+            "profiles": serialize(self.profiles),
         }
 
 
@@ -187,54 +271,75 @@ def history_candidates_from_json(value: Mapping[str, Any] | None) -> HistoryCand
         except (TypeError, ValueError):
             return default
 
+    def provenance(item: Mapping[str, Any]) -> tuple[str, ...]:
+        raw = item.get("provenance", [])
+        if not isinstance(raw, list):
+            return ()
+        return tuple(dict.fromkeys(str(source)[:128] for source in raw if isinstance(source, (str, int))))[:64]
+
     expressions = tuple(
-        ExpressionCandidate(
-            str(item.get("situation", "")),
-            str(item.get("style", "")),
-            evidence_ids(item),
-            number(item, "confidence"),
+        _with_candidate_metadata(
+            ExpressionCandidate(
+                str(item.get("situation", "")),
+                str(item.get("style", "")),
+                evidence_ids(item),
+                number(item, "confidence"),
+                provenance=provenance(item),
+            )
         )
         for item in items("expressions")
     )
     behaviors = tuple(
-        BehaviorCandidate(
-            str(item.get("actor_type", "")),
-            str(item.get("learning_type", "")),
-            str(item.get("action", "")),
-            str(item.get("outcome", "")),
-            evidence_ids(item),
-            number(item, "confidence"),
+        _with_candidate_metadata(
+            BehaviorCandidate(
+                str(item.get("actor_type", "")),
+                str(item.get("learning_type", "")),
+                str(item.get("action", "")),
+                str(item.get("outcome", "")),
+                evidence_ids(item),
+                number(item, "confidence"),
+                provenance=provenance(item),
+            )
         )
         for item in items("behaviors")
     )
     jargons = tuple(
-        JargonCandidate(
-            str(item.get("content", "")),
-            str(item.get("meaning", "")),
-            evidence_ids(item),
-            number(item, "confidence"),
+        _with_candidate_metadata(
+            JargonCandidate(
+                str(item.get("content", "")),
+                str(item.get("meaning", "")),
+                evidence_ids(item),
+                number(item, "confidence"),
+                provenance=provenance(item),
+            )
         )
         for item in items("jargons")
     )
     memories = tuple(
-        MemoryCandidate(
-            str(item.get("atom_type", "")),
-            str(item.get("content", "")),
-            str(item.get("subject_id", "")),
-            evidence_ids(item),
-            number(item, "confidence"),
-            number(item, "importance"),
+        _with_candidate_metadata(
+            MemoryCandidate(
+                str(item.get("atom_type", "")),
+                str(item.get("content", "")),
+                str(item.get("subject_id", "")),
+                evidence_ids(item),
+                number(item, "confidence"),
+                number(item, "importance"),
+                provenance=provenance(item),
+            )
         )
         for item in items("memories")
     )
     profiles = tuple(
-        ProfileCandidate(
-            str(item.get("subject_id", "")),
-            str(item.get("category", "")),
-            str(item.get("name", "")),
-            str(item.get("value", "")),
-            evidence_ids(item),
-            number(item, "confidence"),
+        _with_candidate_metadata(
+            ProfileCandidate(
+                str(item.get("subject_id", "")),
+                str(item.get("category", "")),
+                str(item.get("name", "")),
+                str(item.get("value", "")),
+                evidence_ids(item),
+                number(item, "confidence"),
+                provenance=provenance(item),
+            )
         )
         for item in items("profiles")
     )
@@ -372,12 +477,16 @@ def parse_history_window_result(
     require_repeated_jargon: bool = False,
     allow_memories: bool = False,
     allow_profiles: bool = False,
+    provenance: Iterable[str] | None = None,
 ) -> HistoryWindowResult:
     """Parse model JSON and reject every candidate not grounded in supplied evidence."""
 
     parsed = _load_model_object(response)
     eligible = frozenset(str(sender_id) for sender_id in eligible_sender_ids) if eligible_sender_ids else None
     excluded = frozenset(str(sender_id) for sender_id in excluded_sender_ids or ())
+    candidate_provenance = tuple(
+        dict.fromkeys(str(source)[:128] for source in provenance or () if str(source).strip())
+    )[:64]
 
     def sender_is_eligible(sender_id: str) -> bool:
         return sender_id not in excluded and (eligible is None or sender_id in eligible)
@@ -401,7 +510,9 @@ def parse_history_window_result(
             and sender_is_eligible(evidence[source_id].sender_id)
         )
         if situation and style and confidence is not None and source_ids:
-            expressions.append(ExpressionCandidate(situation, style, source_ids, confidence))
+            expressions.append(
+                ExpressionCandidate(situation, style, source_ids, confidence, provenance=candidate_provenance)
+            )
 
     for item in _candidate_items(parsed, "behaviors", 40):
         actor_type = _clean_model_text(item.get("actor_type"), minimum=4, maximum=32)
@@ -440,7 +551,15 @@ def parse_history_window_result(
             and not excluded_human_evidence
         ):
             behaviors.append(
-                BehaviorCandidate(actor_type, learning_type, action, outcome, source_ids, confidence)  # type: ignore[arg-type]
+                BehaviorCandidate(
+                    actor_type,
+                    learning_type,
+                    action,
+                    outcome,
+                    source_ids,
+                    confidence,
+                    provenance=candidate_provenance,
+                )  # type: ignore[arg-type]
             )
 
     for item in _candidate_items(parsed, "jargons", 60):
@@ -459,7 +578,7 @@ def parse_history_window_result(
             )
         minimum_evidence = 2 if require_repeated_jargon else 1
         if content and meaning and confidence is not None and len(source_ids) >= minimum_evidence:
-            jargons.append(JargonCandidate(content, meaning, source_ids, confidence))
+            jargons.append(JargonCandidate(content, meaning, source_ids, confidence, provenance=candidate_provenance))
 
     if allow_memories:
         for item in _candidate_items(parsed, "memories", 50):
@@ -487,7 +606,17 @@ def parse_history_window_result(
                 and any(not message.is_bot for message in source_messages)
                 and not _contains_sensitive_data(content)
             ):
-                memories.append(MemoryCandidate(atom_type, content, subject_id, source_ids, confidence, importance))
+                memories.append(
+                    MemoryCandidate(
+                        atom_type,
+                        content,
+                        subject_id,
+                        source_ids,
+                        confidence,
+                        importance,
+                        provenance=candidate_provenance,
+                    )
+                )
 
     if allow_profiles:
         for item in _candidate_items(parsed, "profiles", 50):
@@ -517,7 +646,17 @@ def parse_history_window_result(
                 and len(source_ids) >= minimum_evidence
                 and not _contains_disallowed_profile_data(name, value)
             ):
-                profiles.append(ProfileCandidate(subject_id, category, name, value, source_ids, confidence))
+                profiles.append(
+                    ProfileCandidate(
+                        subject_id,
+                        category,
+                        name,
+                        value,
+                        source_ids,
+                        confidence,
+                        provenance=candidate_provenance,
+                    )
+                )
 
     return HistoryWindowResult(
         candidates=HistoryCandidates(
@@ -562,6 +701,7 @@ def parse_history_candidates(
     require_repeated_jargon: bool = False,
     allow_memories: bool = False,
     allow_profiles: bool = False,
+    provenance: Iterable[str] | None = None,
 ) -> HistoryCandidates:
     """Parse model JSON and return only evidence-grounded learning candidates."""
 
@@ -573,47 +713,33 @@ def parse_history_candidates(
         require_repeated_jargon=require_repeated_jargon,
         allow_memories=allow_memories,
         allow_profiles=allow_profiles,
+        provenance=provenance,
     ).candidates
 
 
 def _merge_candidate_evidence(first: Any, second: Any) -> Any:
     merged_ids = tuple(dict.fromkeys((*first.evidence_ids, *second.evidence_ids)))[:12]
     confidence = max(first.confidence, second.confidence)
-    if isinstance(first, ExpressionCandidate):
-        return ExpressionCandidate(first.situation, first.style, merged_ids, confidence)
-    if isinstance(first, BehaviorCandidate):
-        return BehaviorCandidate(
-            first.actor_type,
-            first.learning_type,
-            first.action,
-            first.outcome,
-            merged_ids,
-            confidence,
-        )
-    if isinstance(first, JargonCandidate):
-        return JargonCandidate(first.content, first.meaning, merged_ids, confidence)
+    merged_provenance = tuple(dict.fromkeys((*first.provenance, *second.provenance)))[:64]
     if isinstance(first, MemoryCandidate):
-        return MemoryCandidate(
-            first.atom_type,
-            first.content,
-            first.subject_id,
-            merged_ids,
-            confidence,
-            max(first.importance, second.importance),
+        return _with_candidate_metadata(
+            replace(
+                first,
+                evidence_ids=merged_ids,
+                confidence=confidence,
+                importance=max(first.importance, second.importance),
+                provenance=merged_provenance,
+            )
         )
-    return ProfileCandidate(
-        first.subject_id,
-        first.category,
-        first.name,
-        first.value,
-        merged_ids,
-        confidence,
+    return _with_candidate_metadata(
+        replace(first, evidence_ids=merged_ids, confidence=confidence, provenance=merged_provenance)
     )
 
 
 def _deduplicate(items: Iterable[Any], key: Callable[[Any], Any]) -> list[Any]:
     merged: dict[Any, Any] = {}
     for item in items:
+        item = _with_candidate_metadata(item)
         item_key = key(item)
         if item_key in merged:
             merged[item_key] = _merge_candidate_evidence(merged[item_key], item)
@@ -765,8 +891,41 @@ def _restrict_consolidated_candidates(
     )
 
 
+def _inherit_candidate_provenance(candidates: HistoryCandidates, source: HistoryCandidates) -> HistoryCandidates:
+    """Carry source-window provenance onto model-consolidated candidates."""
+
+    source_collections = {
+        "expression": source.expressions,
+        "behavior": source.behaviors,
+        "jargon": source.jargons,
+        "memory": source.memories,
+        "profile": source.profiles,
+    }
+
+    def enrich(kind: str, collection: Iterable[Any]) -> tuple[Any, ...]:
+        source_items = source_collections[kind]
+        enriched: list[Any] = []
+        for candidate in collection:
+            candidate_ids = set(candidate.evidence_ids)
+            provenance: list[str] = list(candidate.provenance)
+            identity = _candidate_identity(candidate)
+            for original in source_items:
+                if candidate_ids.intersection(original.evidence_ids) or identity == _candidate_identity(original):
+                    provenance.extend(original.provenance)
+            enriched.append(_with_candidate_metadata(candidate, provenance=provenance))
+        return tuple(enriched)
+
+    return HistoryCandidates(
+        expressions=enrich("expression", candidates.expressions),
+        behaviors=enrich("behavior", candidates.behaviors),
+        jargons=enrich("jargon", candidates.jargons),
+        memories=enrich("memory", candidates.memories),
+        profiles=enrich("profile", candidates.profiles),
+    )
+
+
 def _candidate_prompt_payload(candidates: HistoryCandidates) -> dict[str, Any]:
-    return candidates.to_json()
+    return candidates.to_json(include_metadata=False)
 
 
 def _prompt_candidate(candidate: Any) -> Any:

@@ -382,6 +382,107 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(parsed.continuation.needs_follow_up)
         self.assertEqual(parsed.continuation.tail_evidence_ids, tuple(list(evidence)[-12:]))
 
+    def test_window_candidates_have_stable_ids_and_window_provenance(self) -> None:
+        from src.bw_learner.history_learning import parse_history_window_result
+
+        evidence = {"m1": make_message("m1", "这下真破防了")}
+        response = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "遇到意外时",
+                        "style": "用短句表达强烈反应",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.85,
+                    }
+                ],
+                "behaviors": [],
+                "jargons": [],
+            },
+            ensure_ascii=False,
+        )
+
+        first = parse_history_window_result(response, evidence, provenance=("window-000001",))
+        second = parse_history_window_result(response, evidence, provenance=("window-000002",))
+
+        self.assertTrue(first.candidates.expressions[0].candidate_id.startswith("expression:"))
+        self.assertEqual(first.candidates.expressions[0].provenance, ("window-000001",))
+        self.assertEqual(
+            first.candidates.expressions[0].candidate_id,
+            second.candidates.expressions[0].candidate_id,
+        )
+
+    def test_learning_result_serializes_catalog_and_runtime_candidates_separately(self) -> None:
+        from src.bw_learner.history_learning import (
+            ExpressionCandidate,
+            HistoryCandidates,
+            HistoryLearningResult,
+        )
+
+        catalog = HistoryCandidates(
+            expressions=tuple(
+                ExpressionCandidate(f"情境 {index}", f"表达风格 {index}", (f"m{index}",), 0.8) for index in range(31)
+            )
+        )
+        runtime = HistoryCandidates(expressions=catalog.expressions[:30])
+
+        payload = HistoryLearningResult(
+            candidates=runtime,
+            total_window_count=2,
+            selected_window_count=2,
+            selected_window_ids=("window-000001", "window-000002"),
+            model_call_count=3,
+            store_result=None,
+            candidate_catalog=catalog,
+        ).to_json()
+
+        self.assertEqual(len(payload["candidates"]["expressions"]), 30)
+        self.assertEqual(len(payload["candidate_catalog"]["expressions"]), 31)
+
+    async def test_learning_keeps_full_catalog_when_runtime_write_set_is_bounded(self) -> None:
+        from src.bw_learner.history_learning import (
+            ChatHistoryLearner,
+            ExpressionCandidate,
+            HistoryCandidates,
+            HistoryWindowResult,
+        )
+
+        catalog = HistoryCandidates(
+            expressions=tuple(
+                ExpressionCandidate(
+                    f"情境 {index}",
+                    f"表达风格 {index}",
+                    ("m1",),
+                    0.8,
+                    provenance=("window-000001",),
+                )
+                for index in range(31)
+            )
+        )
+
+        class CatalogLearner(ChatHistoryLearner):
+            async def extract_window_result(self, *args, **kwargs):
+                return HistoryWindowResult(candidates=catalog)
+
+            async def consolidate_hierarchically(self, candidates, evidence, **kwargs):
+                return candidates, 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(normalized, [make_message("m1", "这是一条足够长的表达证据")])
+
+            result = await CatalogLearner(llm=SimpleNamespace()).learn(
+                normalized,
+                chat_id="chat-1",
+                chat_name="测试群",
+                depth="full",
+                store=False,
+            )
+
+        self.assertEqual(len(result.candidates.expressions), 30)
+        self.assertIsNotNone(result.candidate_catalog)
+        self.assertEqual(len((result.candidate_catalog or HistoryCandidates()).expressions), 31)
+
     async def test_boundary_request_reprocesses_tail_with_following_window(self) -> None:
         from src.bw_learner.history_learning import ChatHistoryLearner
 
@@ -788,8 +889,7 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         from src.bw_learner.history_learning import ChatHistoryLearner, ExpressionCandidate, HistoryCandidates
 
         evidence = {
-            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}")
-            for index in range(91)
+            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}") for index in range(91)
         }
         candidates = HistoryCandidates(
             expressions=tuple(
@@ -822,8 +922,7 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         from src.bw_learner.history_learning import ExpressionCandidate, HistoryCandidates, _final_fallback
 
         evidence = {
-            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}")
-            for index in range(31)
+            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}") for index in range(31)
         }
         source = HistoryCandidates(
             expressions=tuple(

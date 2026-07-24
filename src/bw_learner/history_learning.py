@@ -25,6 +25,8 @@ from src.bw_learner.history_candidates import (
     _candidate_evidence_ids,
     _consolidation_prompt_payload,
     _final_fallback,
+    _inherit_candidate_provenance,
+    _limit_history_candidates,
     _merge_window_candidates,
     _partition_consolidation_candidates,
     _restrict_consolidated_candidates,
@@ -76,6 +78,14 @@ class HistoryStoreResult:
 
 @dataclass(frozen=True)
 class HistoryLearningResult:
+    """Learning output with a bounded write set and an unbounded audit catalog.
+
+    ``candidates`` is kept backward-compatible as the runtime write/review set.
+    ``candidate_catalog`` contains the complete validated window union plus any
+    consolidated representatives, so a large import is not hidden by the
+    runtime database safety cap.
+    """
+
     candidates: HistoryCandidates
     total_window_count: int
     selected_window_count: int
@@ -83,10 +93,13 @@ class HistoryLearningResult:
     model_call_count: int
     store_result: HistoryStoreResult | None
     continuation_window_ids: tuple[str, ...] = ()
+    candidate_catalog: HistoryCandidates | None = None
 
     def to_json(self) -> dict[str, Any]:
+        catalog = self.candidate_catalog or self.candidates
         result = {
             "candidates": self.candidates.to_json(),
+            "candidate_catalog": catalog.to_json(),
             "total_window_count": self.total_window_count,
             "selected_window_count": self.selected_window_count,
             "selected_window_ids": list(self.selected_window_ids),
@@ -255,6 +268,7 @@ class ChatHistoryLearner:
             excluded_sender_ids=excluded,
             allow_memories=extract_memories,
             allow_profiles=update_profiles,
+            provenance=(window.window_id,),
         )
 
     async def extract_window(
@@ -299,15 +313,18 @@ class ChatHistoryLearner:
             extract_memories_json=dump_prompt_json(extract_memories),
             update_profiles_json=dump_prompt_json(update_profiles),
         )
-        return _restrict_consolidated_candidates(
-            parse_history_candidates(
-                response,
-                evidence,
-                eligible_sender_ids=eligible_sender_ids,
-                excluded_sender_ids=excluded_sender_ids,
-                require_repeated_jargon=True,
-                allow_memories=extract_memories,
-                allow_profiles=update_profiles,
+        return _inherit_candidate_provenance(
+            _restrict_consolidated_candidates(
+                parse_history_candidates(
+                    response,
+                    evidence,
+                    eligible_sender_ids=eligible_sender_ids,
+                    excluded_sender_ids=excluded_sender_ids,
+                    require_repeated_jargon=True,
+                    allow_memories=extract_memories,
+                    allow_profiles=update_profiles,
+                ),
+                prompt_candidates,
             ),
             prompt_candidates,
         )
@@ -474,7 +491,7 @@ class ChatHistoryLearner:
         if should_cancel and should_cancel():
             raise HistoryLearningCancelled("聊天记录学习已取消")
         merged = _merge_window_candidates(extracted)
-        final_candidates, consolidation_calls = await self.consolidate_hierarchically(
+        consolidated_candidates, consolidation_calls = await self.consolidate_hierarchically(
             merged,
             evidence,
             chat_name=chat_name,
@@ -486,7 +503,9 @@ class ChatHistoryLearner:
             should_cancel=should_cancel,
         )
         model_call_count += consolidation_calls
-        final_evidence_ids = _candidate_evidence_ids(final_candidates)
+        candidate_catalog = _merge_window_candidates((merged, consolidated_candidates))
+        runtime_candidates = _limit_history_candidates(consolidated_candidates)
+        final_evidence_ids = _candidate_evidence_ids(runtime_candidates)
         evidence = {
             evidence_id: message for evidence_id, message in evidence.items() if evidence_id in final_evidence_ids
         }
@@ -496,16 +515,17 @@ class ChatHistoryLearner:
             if should_cancel and should_cancel():
                 raise HistoryLearningCancelled("聊天记录学习已取消")
             await _notify(progress, "storing", 0, 1)
-            store_result = store_history_candidates(chat_id, final_candidates, evidence)
+            store_result = store_history_candidates(chat_id, runtime_candidates, evidence)
             await _notify(progress, "storing", 1, 1)
         return HistoryLearningResult(
-            candidates=final_candidates,
+            candidates=runtime_candidates,
             total_window_count=len(window_index),
             selected_window_count=len(selected_summaries),
             selected_window_ids=selected_window_ids,
             model_call_count=model_call_count,
             store_result=store_result,
             continuation_window_ids=tuple(continuation_window_ids),
+            candidate_catalog=candidate_catalog,
         )
 
 
