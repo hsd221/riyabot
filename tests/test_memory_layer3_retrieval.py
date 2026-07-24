@@ -143,6 +143,12 @@ class Layer3UtilityTest(unittest.TestCase):
             {"atom_id": "public", "privacy_level": PRIVACY_PUBLIC, "source_scene": "private_chat", "source_id": "p1"},
             {"atom_id": "group", "privacy_level": PRIVACY_CONTEXT_SENSITIVE, "source_scene": "group_chat"},
             {
+                "atom_id": "group-scoped",
+                "privacy_level": PRIVACY_CONTEXT_SENSITIVE,
+                "source_scene": "group_chat",
+                "source_id": "group-1",
+            },
+            {
                 "atom_id": "private",
                 "privacy_level": PRIVACY_PRIVATE,
                 "source_scene": "private_chat",
@@ -152,9 +158,11 @@ class Layer3UtilityTest(unittest.TestCase):
         ]
 
         group_atoms = PrivacyFilter.filter_atoms(atoms, target_scene="group_chat", target_scope="group-1")
+        other_group_atoms = PrivacyFilter.filter_atoms(atoms, target_scene="group_chat", target_scope="group-2")
         private_atoms = PrivacyFilter.filter_atoms(atoms, target_scene="private_chat", target_scope="user-1")
 
-        self.assertEqual([atom["atom_id"] for atom in group_atoms], ["public", "group"])
+        self.assertEqual([atom["atom_id"] for atom in group_atoms], ["public", "group", "group-scoped"])
+        self.assertEqual([atom["atom_id"] for atom in other_group_atoms], ["public", "group"])
         self.assertEqual([atom["atom_id"] for atom in private_atoms], ["public", "private"])
         self.assertEqual(_resolve_scene_type("abc_group"), "group_chat")
         self.assertEqual(_resolve_scene_type("direct"), "private_chat")

@@ -381,10 +381,8 @@ class PrivacyFilter:
         if privacy == PRIVACY_CONTEXT_SENSITIVE:
             if target_scene != atom_scene:
                 return False
-            # 私聊的上下文敏感记忆只在同一 stream 内复用；历史数据缺少 source_id 时保守放行同私聊场景。
-            if target_scene == "private_chat":
-                return not atom_scope or atom_scope == target_scope
-            return True
+            # 有明确来源流的上下文记忆只能回到同一流；无 source_id 的历史数据保留旧场景级行为。
+            return not atom_scope or atom_scope == target_scope
 
         return False
 

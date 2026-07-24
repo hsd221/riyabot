@@ -32,6 +32,8 @@ PROMPT_IDS = {
     "learning.expression.learn_style",
     "learning.expression.reflect_judge",
     "learning.expression.situation_summary",
+    "learning.history.consolidate",
+    "learning.history.extract",
     "learning.jargon.compare_inference",
     "learning.jargon.explainer_summarize",
     "learning.jargon.inference_content_only",
@@ -72,6 +74,11 @@ MESSAGE_MAINLINE_PROMPT_IDS = {
     "chat.group.reply",
     "chat.private.planner",
     "chat.private.reply",
+}
+
+HISTORY_LEARNING_PROMPT_IDS = {
+    "learning.history.consolidate",
+    "learning.history.extract",
 }
 
 LAYERED_MAINLINE_PROMPTS = (
@@ -278,6 +285,21 @@ class PromptTemplateContractTest(unittest.TestCase):
                         self.assertGreater(template.index(field), boundary, field)
                     if name == "chat.private.reply":
                         self.assertGreater(template.index("{sender_name}"), boundary)
+
+    def test_history_learning_keeps_uploaded_chat_data_out_of_system_role(self) -> None:
+        for name in sorted(HISTORY_LEARNING_PROMPT_IDS):
+            with self.subTest(prompt=name):
+                template = load_prompt_template(name)
+                self.assertEqual(template.count(DYNAMIC_CONTEXT_BOUNDARY), 1)
+                boundary = template.index(DYNAMIC_CONTEXT_BOUNDARY)
+                self.assertLess(template.index("<security>"), boundary)
+                self.assertGreater(template.index("<input_data>"), boundary)
+
+                formatted = template.format(**_format_kwargs(template))
+                parts = split_chat_prompt(formatted)
+                self.assertIsNotNone(parts.system_prompt)
+                ElementTree.fromstring(parts.system_prompt or "")
+                ElementTree.fromstring(parts.user_prompt)
 
     def test_mainline_dynamic_context_ends_with_the_current_decision_or_reply_focus(self) -> None:
         for name in ("chat.group.planner", "chat.private.planner"):

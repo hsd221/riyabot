@@ -1,0 +1,495 @@
+"""Store evidence-grounded history memories and user-approved profile updates."""
+
+from __future__ import annotations
+
+import hashlib
+import inspect
+import json
+import time
+from contextlib import closing
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Mapping
+
+from src.bw_learner.history_import import ChatHistoryFormatError, ImportedMessage, iter_normalized_messages
+from src.bw_learner.history_learning import (
+    HistoryCandidates,
+    HistoryLearningCancelled,
+    MemoryCandidate,
+    ProfileCandidate,
+)
+from src.common.logger import get_logger
+from src.memory.atom import (
+    DEFAULT_DECAY,
+    DEFAULT_TTL,
+    AtomType,
+    EpisodicDetail,
+    MemoryAtom,
+    SemanticDetail,
+)
+from src.memory.layer3_retrieval import MemoryWriter
+from src.memory.schema import MemoryTraceChain
+from src.memory.store import MemoryStore
+from src.memory.user_profile import PersonIdentity, ProfileBuilder, ProfileStore, make_profile_id
+
+
+logger = get_logger("history_enrichment")
+ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
+CancellationCheck = Callable[[], bool]
+PROFILE_PLATFORM = "qq"
+
+
+@dataclass(frozen=True)
+class HistoryEnrichmentStoreResult:
+    memories_created: int = 0
+    profiles_created: int = 0
+    profiles_updated: int = 0
+    profiles_skipped: int = 0
+    write_failures: int = 0
+
+    def to_json(self) -> dict[str, int]:
+        return asdict(self)
+
+
+def load_history_candidate_evidence(
+    normalized_path: str | Path,
+    candidates: HistoryCandidates,
+) -> dict[str, ImportedMessage]:
+    """Stream only normalized messages referenced by any validated candidate."""
+
+    referenced_ids = {
+        evidence_id
+        for collection in (
+            candidates.expressions,
+            candidates.behaviors,
+            candidates.jargons,
+            candidates.memories,
+            candidates.profiles,
+        )
+        for candidate in collection
+        for evidence_id in candidate.evidence_ids
+    }
+    if not referenced_ids:
+        return {}
+
+    evidence: dict[str, ImportedMessage] = {}
+    with closing(iter_normalized_messages(normalized_path)) as messages:
+        for message in messages:
+            if message.message_id in referenced_ids:
+                evidence[message.message_id] = message
+                if len(evidence) == len(referenced_ids):
+                    break
+    if referenced_ids - evidence.keys():
+        raise ChatHistoryFormatError("规范化聊天记录缺少候选证据")
+    return evidence
+
+
+def load_history_enrichment_evidence(
+    normalized_path: str | Path,
+    candidates: HistoryCandidates,
+) -> dict[str, ImportedMessage]:
+    """Backward-compatible evidence loader for memory/profile callers."""
+
+    enrichment_candidates = HistoryCandidates(memories=candidates.memories, profiles=candidates.profiles)
+    return load_history_candidate_evidence(normalized_path, enrichment_candidates)
+
+
+async def _notify(callback: ProgressCallback | None, current: int, total: int) -> None:
+    if callback is None:
+        return
+    result = callback("storing_enrichment", current, max(1, total))
+    if inspect.isawaitable(result):
+        await result
+
+
+def _import_atom_id(import_id: str, kind: str, candidate: MemoryCandidate | ProfileCandidate) -> str:
+    payload = json.dumps(asdict(candidate), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(f"{import_id}\0{kind}\0{payload}".encode()).hexdigest()[:40]
+    return f"history-{digest}"
+
+
+def _evidence_messages(
+    evidence_ids: tuple[str, ...],
+    evidence: Mapping[str, ImportedMessage],
+) -> list[ImportedMessage]:
+    return [evidence[evidence_id] for evidence_id in evidence_ids if evidence_id in evidence]
+
+
+def _import_entities(messages: list[ImportedMessage], subject_id: str = "") -> list[str]:
+    sender_ids = [subject_id] if subject_id else [message.sender_id for message in messages if not message.is_bot]
+    return [make_profile_id(PROFILE_PLATFORM, sender_id) for sender_id in dict.fromkeys(sender_ids) if sender_id]
+
+
+def _record_trace(atom_id: str, import_id: str, content: str) -> None:
+    try:
+        MemoryTraceChain.create(
+            atom_id=atom_id,
+            step_number=1,
+            agent_name="ChatHistoryImportLearner",
+            operation_type="extract",
+            input_source=f"chat_history_import:{import_id}",
+            output_summary=content[:240],
+            confidence_decay=1.0,
+        )
+    except Exception as error:
+        logger.warning("历史导入记忆追溯链写入失败", atom_id=atom_id, error_type=type(error).__name__)
+
+
+async def _default_memory_writer() -> MemoryWriter:
+    store = MemoryStore()
+    if not getattr(store, "_initialized", False):
+        await store.initialize()
+    return MemoryWriter(store)
+
+
+def _memory_atom(
+    import_id: str,
+    chat_id: str,
+    candidate: MemoryCandidate,
+    evidence: Mapping[str, ImportedMessage],
+) -> tuple[MemoryAtom, EpisodicDetail | None]:
+    messages = _evidence_messages(candidate.evidence_ids, evidence)
+    atom_type = AtomType(candidate.atom_type)
+    event_time = max((message.timestamp for message in messages), default=time.time())
+    atom = MemoryAtom(
+        atom_id=_import_atom_id(import_id, "memory", candidate),
+        atom_type=atom_type,
+        content=candidate.content,
+        entities=_import_entities(messages, candidate.subject_id),
+        importance=candidate.importance,
+        confidence=candidate.confidence,
+        created_at=event_time,
+        last_accessed_at=time.time(),
+        ttl_days=DEFAULT_TTL[atom_type],
+        decay_type=DEFAULT_DECAY[atom_type],
+        source_scene="group_chat",
+        source_id=chat_id,
+        privacy_level="context_sensitive",
+        status="active",
+    )
+    if atom_type is not AtomType.EPISODIC:
+        return atom, None
+    return atom, EpisodicDetail(
+        atom_id=atom.atom_id,
+        event_time=event_time,
+        participants=_import_entities(messages, candidate.subject_id),
+    )
+
+
+def _profile_identity(
+    candidate: ProfileCandidate,
+    evidence: Mapping[str, ImportedMessage],
+    *,
+    group_id: str,
+    chat_name: str,
+) -> PersonIdentity:
+    messages = _evidence_messages(candidate.evidence_ids, evidence)
+    sender = next((message for message in reversed(messages) if message.sender_id == candidate.subject_id), None)
+    return PersonIdentity(
+        platform=PROFILE_PLATFORM,
+        user_id=candidate.subject_id,
+        nickname=sender.sender_name if sender else "",
+        cardname=sender.sender_card if sender else "",
+        group_id=group_id,
+        group_name=chat_name,
+        identity_source="chat_history_import",
+        verification_status="unverified",
+    )
+
+
+def _profile_summary(profile: Any) -> dict[str, Any]:
+    """Return a bounded, review-safe view of the existing profile."""
+
+    return {
+        "profile_id": profile.profile_id,
+        "nickname": str(profile.nickname or "")[:120],
+        "cardname": str(profile.cardname or "")[:120],
+        "verification_status": str(profile.verification_status or "unverified"),
+        "interests": [str(item)[:120] for item in profile.interests[:20]],
+        "preferences": {str(key)[:80]: str(value)[:160] for key, value in list(profile.preferences.items())[:20]},
+        "facts": {str(key)[:80]: str(value)[:160] for key, value in list(profile.facts.items())[:20]},
+        "traits": {str(key)[:80]: round(float(value), 3) for key, value in list(profile.traits.items())[:20]},
+    }
+
+
+def find_history_profile_conflicts(
+    *,
+    candidates: HistoryCandidates,
+    evidence: Mapping[str, ImportedMessage],
+    group_id: str,
+    chat_name: str,
+    profile_store: ProfileStore | None = None,
+) -> list[dict[str, Any]]:
+    """Find existing profiles that would be changed by imported candidates.
+
+    The returned data contains summaries only; raw normalized chat text remains on disk
+    until the user resolves every conflict.
+    """
+
+    profiles = profile_store or ProfileStore()
+    grouped: dict[str, dict[str, Any]] = {}
+    for candidate in candidates.profiles:
+        identity = _profile_identity(candidate, evidence, group_id=group_id, chat_name=chat_name)
+        existing = profiles.get_profile(identity.profile_id)
+        if existing is None:
+            continue
+        conflict = grouped.setdefault(
+            identity.profile_id,
+            {
+                "profile_id": identity.profile_id,
+                "subject_id": candidate.subject_id,
+                "current": _profile_summary(existing),
+                "imported": [],
+            },
+        )
+        conflict["imported"].append(
+            {
+                "category": candidate.category,
+                "name": candidate.name,
+                "value": candidate.value,
+                "evidence_count": len(candidate.evidence_ids),
+                "confidence": candidate.confidence,
+            }
+        )
+    return list(grouped.values())
+
+
+def _profile_atom(
+    import_id: str,
+    chat_id: str,
+    candidate: ProfileCandidate,
+    evidence: Mapping[str, ImportedMessage],
+    identity: PersonIdentity,
+) -> tuple[MemoryAtom, SemanticDetail]:
+    messages = _evidence_messages(candidate.evidence_ids, evidence)
+    atom_type = AtomType.PREFERENCE if candidate.category in {"interest", "preference"} else AtomType.FACTUAL
+    display_name = identity.cardname or identity.nickname or identity.user_id
+    event_time = max((message.timestamp for message in messages), default=time.time())
+    atom = MemoryAtom(
+        atom_id=_import_atom_id(import_id, "profile", candidate),
+        atom_type=atom_type,
+        content=f"{display_name}的{candidate.name}是{candidate.value}",
+        entities=[identity.profile_id],
+        importance=0.6,
+        confidence=min(candidate.confidence, 0.85),
+        created_at=event_time,
+        last_accessed_at=time.time(),
+        ttl_days=DEFAULT_TTL[atom_type],
+        decay_type=DEFAULT_DECAY[atom_type],
+        source_scene="group_chat",
+        source_id=chat_id,
+        privacy_level="context_sensitive",
+        status="active",
+    )
+    detail = SemanticDetail(
+        atom_id=atom.atom_id,
+        attr_category=candidate.category,
+        attr_name=candidate.name,
+        attr_value=candidate.value,
+        subject_key=identity.profile_id,
+        evidence_list=[f"history-import:{import_id}:{item}" for item in candidate.evidence_ids],
+        evidence_counter=len(candidate.evidence_ids),
+    )
+    atom.semantic_detail = detail
+    return atom, detail
+
+
+def _apply_approved_profile_candidate(profile: Any, candidate: ProfileCandidate, atom: MemoryAtom) -> Any:
+    """Apply an explicitly approved field without replacing unrelated profile data."""
+
+    field_sources = profile.stats.setdefault(
+        "_profile_field_sources",
+        {"preferences": {}, "interests": {}, "facts": {}, "traits": {}},
+    )
+    if not isinstance(field_sources, dict):
+        field_sources = {"preferences": {}, "interests": {}, "facts": {}, "traits": {}}
+        profile.stats["_profile_field_sources"] = field_sources
+
+    def sources_for(section: str) -> dict[str, Any]:
+        sources = field_sources.get(section)
+        if not isinstance(sources, dict):
+            sources = {}
+            field_sources[section] = sources
+        return sources
+
+    if candidate.category == "preference":
+        section = "preferences"
+        profile.preferences[candidate.name] = candidate.value
+    elif candidate.category == "interest":
+        section = "interests"
+        previous = sources_for(section).get(candidate.name)
+        previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
+        if previous_value and previous_value != candidate.value and previous_value in profile.interests:
+            profile.interests.remove(previous_value)
+        if candidate.value not in profile.interests:
+            profile.interests.append(candidate.value)
+    elif candidate.category == "personality":
+        section = "traits"
+        previous = sources_for(section).get(candidate.name)
+        previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
+        if previous_value and previous_value != candidate.value:
+            profile.traits.pop(previous_value, None)
+        profile.traits[candidate.value] = candidate.confidence
+    else:
+        section = "facts"
+        profile.facts[candidate.name] = candidate.value
+
+    section_sources = sources_for(section)
+    section_sources[candidate.name] = {
+        "atom_id": atom.atom_id,
+        "weight": atom.weight,
+        "confidence": atom.confidence,
+        "evidence_counter": len(candidate.evidence_ids),
+        "created_at": atom.created_at,
+        "category": candidate.category,
+        "value": candidate.value,
+        "approved_history_import": True,
+    }
+    return profile
+
+
+async def store_history_enrichment(
+    *,
+    import_id: str,
+    chat_id: str,
+    group_id: str,
+    chat_name: str,
+    candidates: HistoryCandidates,
+    evidence: Mapping[str, ImportedMessage],
+    extract_memories: bool,
+    update_profiles: bool,
+    memory_writer: MemoryWriter | Any | None = None,
+    profile_store: ProfileStore | None = None,
+    profile_decisions: Mapping[str, str] | None = None,
+    progress: ProgressCallback | None = None,
+    should_cancel: CancellationCheck | None = None,
+) -> HistoryEnrichmentStoreResult:
+    """Persist optional history enrichment without trusting imported runtime identities."""
+
+    selected_memories = candidates.memories if extract_memories else ()
+    selected_profiles = candidates.profiles if update_profiles else ()
+    total = len(selected_memories) + len(selected_profiles)
+    if total == 0:
+        return HistoryEnrichmentStoreResult()
+
+    if should_cancel and should_cancel():
+        raise HistoryLearningCancelled("聊天记录学习已取消")
+    try:
+        writer = memory_writer or await _default_memory_writer()
+        profiles = profile_store or ProfileStore()
+        builder = ProfileBuilder(profiles)
+    except Exception as error:
+        logger.warning(
+            "历史导入记忆与画像存储初始化失败",
+            import_id=import_id,
+            error_type=type(error).__name__,
+        )
+        await _notify(progress, total, total)
+        return HistoryEnrichmentStoreResult(write_failures=total)
+    preexisting_profile_ids = {
+        profile_id
+        for candidate in selected_profiles
+        if (profile_id := make_profile_id(PROFILE_PLATFORM, candidate.subject_id))
+        and profiles.get_profile(profile_id) is not None
+    }
+    created_profile_ids: set[str] = set()
+    memories_created = 0
+    profiles_created = 0
+    profiles_updated = 0
+    profiles_skipped = 0
+    write_failures = 0
+    current = 0
+    await _notify(progress, current, total)
+
+    for candidate in selected_memories:
+        if should_cancel and should_cancel():
+            raise HistoryLearningCancelled("聊天记录学习已取消")
+        atom, episodic_detail = _memory_atom(import_id, chat_id, candidate, evidence)
+        try:
+            await writer.write_atom(atom, episodic_detail=episodic_detail)
+            _record_trace(atom.atom_id, import_id, atom.content)
+            memories_created += 1
+        except Exception as error:
+            write_failures += 1
+            logger.warning(
+                "历史导入记忆写入失败",
+                atom_id=atom.atom_id,
+                error_type=type(error).__name__,
+            )
+        current += 1
+        await _notify(progress, current, total)
+
+    for candidate in selected_profiles:
+        if should_cancel and should_cancel():
+            raise HistoryLearningCancelled("聊天记录学习已取消")
+        identity = _profile_identity(candidate, evidence, group_id=group_id, chat_name=chat_name)
+        existing = profiles.get_profile(identity.profile_id)
+        decision = (profile_decisions or {}).get(identity.profile_id)
+        requires_decision = identity.profile_id in preexisting_profile_ids or (
+            existing is not None and identity.profile_id not in created_profile_ids
+        )
+        if requires_decision and decision == "keep_existing":
+            profiles_skipped += 1
+            current += 1
+            await _notify(progress, current, total)
+            continue
+        if requires_decision and decision != "apply_imported":
+            profiles_skipped += 1
+            current += 1
+            await _notify(progress, current, total)
+            continue
+        if existing is not None:
+            identity = PersonIdentity(
+                platform=identity.platform,
+                user_id=identity.user_id,
+                nickname=existing.nickname,
+                cardname=existing.cardname,
+                group_id=identity.group_id,
+                group_name=identity.group_name,
+                person_type=existing.person_type,
+                identity_source=existing.identity_source,
+                verification_status=existing.verification_status,
+            )
+
+        atom, semantic_detail = _profile_atom(import_id, chat_id, candidate, evidence, identity)
+        try:
+            await writer.write_atom(atom, semantic_detail=semantic_detail)
+            _record_trace(atom.atom_id, import_id, atom.content)
+            profile_subject: str | PersonIdentity = identity.profile_id if existing is not None else identity
+            updated = builder.update_profile_from_atom(profile_subject, atom)
+            if requires_decision and existing is not None:
+                updated = profiles.get_profile(identity.profile_id) or existing
+                updated = _apply_approved_profile_candidate(updated, candidate, atom)
+                profiles.save_profile(updated)
+            elif updated is None:
+                raise RuntimeError("画像候选未产生有效更新")
+            import_ids = updated.stats.setdefault("_history_import_ids", [])
+            if not isinstance(import_ids, list):
+                import_ids = []
+                updated.stats["_history_import_ids"] = import_ids
+            if import_id not in import_ids:
+                import_ids.append(import_id)
+                del import_ids[:-20]
+            profiles.save_profile(updated)
+            if existing is None:
+                created_profile_ids.add(identity.profile_id)
+                profiles_created += 1
+            else:
+                profiles_updated += 1
+        except Exception as error:
+            write_failures += 1
+            logger.warning(
+                "历史导入画像写入失败",
+                profile_id=identity.profile_id,
+                error_type=type(error).__name__,
+            )
+        current += 1
+        await _notify(progress, current, total)
+
+    return HistoryEnrichmentStoreResult(
+        memories_created=memories_created,
+        profiles_created=profiles_created,
+        profiles_updated=profiles_updated,
+        profiles_skipped=profiles_skipped,
+        write_failures=write_failures,
+    )
