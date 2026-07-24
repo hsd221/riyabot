@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { countHistoryCandidates } from '@/lib/chat-history-import-view'
 import type { ChatHistoryImportTask } from '@/types/chat-history-import'
+import { ChatHistoryCandidateCatalog } from './chat-history-candidate-catalog'
 
 interface ChatHistoryImportResultProps {
   task: ChatHistoryImportTask
@@ -34,33 +35,33 @@ export function ChatHistoryImportResult({
   return (
     <section aria-labelledby="result-title">
       <div className="mb-2 flex items-center justify-between gap-3 px-1">
-        <p id="result-title" className="ios-section-label px-0">
+        <h2 id="result-title" className="ios-section-label px-0">
           学习结果
-        </p>
-        <span className="text-[13px] text-muted-foreground">扫描与写入已完成</span>
+        </h2>
+        <span className="text-[13px] text-muted-foreground">扫描流程与精选写入已完成</span>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
           {
-            label: '表达方式',
+            label: '运行时表达',
             value: counts.expressions,
             icon: MessageSquareText,
             color: 'ios-symbol-orange',
           },
           {
-            label: '行为模式',
+            label: '运行时行为',
             value: counts.behaviors,
             icon: Activity,
             color: 'ios-symbol-purple',
           },
-          { label: '群内黑话', value: counts.jargons, icon: Hash, color: 'ios-symbol-pink' },
+          { label: '运行时黑话', value: counts.jargons, icon: Hash, color: 'ios-symbol-pink' },
           {
-            label: '聊天记忆',
+            label: '运行时记忆',
             value: counts.memories,
             icon: BrainCircuit,
             color: 'ios-symbol-blue',
           },
-          { label: '成员画像', value: counts.profiles, icon: Users, color: 'ios-symbol-teal' },
+          { label: '运行时画像', value: counts.profiles, icon: Users, color: 'ios-symbol-teal' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="ios-stat-card">
             <div className="flex items-center justify-between gap-3">
@@ -181,6 +182,7 @@ export function ChatHistoryImportResult({
           </div>
         )}
       </div>
+      <ChatHistoryCandidateCatalog task={task} />
       <div className="mt-4 flex justify-end">
         <Button variant="outline" onClick={onDelete} disabled={deleting}>
           <Trash2 className="mr-2 h-4 w-4" />

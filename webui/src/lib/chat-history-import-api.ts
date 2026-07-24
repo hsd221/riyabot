@@ -6,6 +6,8 @@ import type {
   ChatHistoryProfileDecisionRequest,
   ChatHistoryImportStartRequest,
   ChatHistoryImportTask,
+  ChatHistoryCandidateKind,
+  ChatHistoryCandidateListResponse,
 } from '@/types/chat-history-import'
 
 const API_BASE = '/api/webui/chat-history-imports'
@@ -75,6 +77,32 @@ export async function listChatHistoryParticipants(
   )
   if (!response.ok) {
     throw await parseError(response, '获取参与者列表失败')
+  }
+  return response.json()
+}
+
+export async function listChatHistoryCandidates(
+  importId: string,
+  params: {
+    kind: ChatHistoryCandidateKind
+    query?: string
+    page?: number
+    pageSize?: number
+  },
+  signal?: AbortSignal
+): Promise<ChatHistoryCandidateListResponse> {
+  const search = new URLSearchParams({
+    kind: params.kind,
+    page: String(params.page ?? 1),
+    page_size: String(params.pageSize ?? 20),
+  })
+  if (params.query?.trim()) search.set('query', params.query.trim())
+  const response = await fetchWithAuth(
+    `${API_BASE}/${encodeURIComponent(importId)}/candidates?${search.toString()}`,
+    { signal, cache: 'no-store' }
+  )
+  if (!response.ok) {
+    throw await parseError(response, '获取完整候选目录失败')
   }
   return response.json()
 }

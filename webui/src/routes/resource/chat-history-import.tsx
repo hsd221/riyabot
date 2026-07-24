@@ -63,6 +63,7 @@ const stageLabels: Record<string, string> = {
   queued: '已进入学习队列',
   extracting: '正在分窗口联合提取',
   consolidating: '正在跨窗口合并候选',
+  storing_catalog: '正在保存完整候选目录',
   storing: '正在写入表达、行为与黑话库',
   storing_enrichment: '正在写入记忆与成员画像',
   awaiting_profile_review: '等待确认现有画像',
@@ -411,6 +412,8 @@ export function ChatHistoryImportPage() {
               </div>
               <input
                 ref={fileInputRef}
+                id="chat-history-json-file"
+                name="chat-history-json-file"
                 type="file"
                 accept=".json,application/json"
                 aria-label="选择 QQChatExporter JSON 聊天记录"
@@ -641,6 +644,7 @@ export function ChatHistoryImportPage() {
 
               {activeTask.status === 'completed' && activeTask.result && (
                 <ChatHistoryImportResult
+                  key={activeTask.import_id}
                   task={activeTask}
                   deleting={deleting}
                   onDelete={handleDelete}

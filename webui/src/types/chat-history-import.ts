@@ -56,6 +56,8 @@ export interface ImportedExpressionCandidate {
   style: string
   evidence_ids: string[]
   confidence: number
+  candidate_id?: string
+  provenance?: string[]
 }
 
 export interface ImportedBehaviorCandidate {
@@ -65,6 +67,8 @@ export interface ImportedBehaviorCandidate {
   outcome: string
   evidence_ids: string[]
   confidence: number
+  candidate_id?: string
+  provenance?: string[]
 }
 
 export interface ImportedJargonCandidate {
@@ -72,6 +76,8 @@ export interface ImportedJargonCandidate {
   meaning: string
   evidence_ids: string[]
   confidence: number
+  candidate_id?: string
+  provenance?: string[]
 }
 
 export interface ImportedMemoryCandidate {
@@ -81,6 +87,8 @@ export interface ImportedMemoryCandidate {
   evidence_ids: string[]
   confidence: number
   importance: number
+  candidate_id?: string
+  provenance?: string[]
 }
 
 export interface ImportedProfileCandidate {
@@ -90,6 +98,26 @@ export interface ImportedProfileCandidate {
   value: string
   evidence_ids: string[]
   confidence: number
+  candidate_id?: string
+  provenance?: string[]
+}
+
+export type ChatHistoryCandidateKind =
+  'expressions' | 'behaviors' | 'jargons' | 'memories' | 'profiles'
+
+export type ImportedHistoryCandidate =
+  | ImportedExpressionCandidate
+  | ImportedBehaviorCandidate
+  | ImportedJargonCandidate
+  | ImportedMemoryCandidate
+  | ImportedProfileCandidate
+
+export interface ChatHistoryCandidateCatalogSummary {
+  total: number
+  counts: Record<ChatHistoryCandidateKind, number>
+  complete: boolean
+  incomplete_window_ids: string[]
+  storage?: 'paged' | 'external' | 'inline'
 }
 
 export interface HistoryEnrichmentStoreResult {
@@ -139,6 +167,17 @@ export interface ChatHistoryLearningResult {
     memories?: ImportedMemoryCandidate[]
     profiles?: ImportedProfileCandidate[]
   }
+  candidate_catalog?:
+    | ChatHistoryCandidateCatalogSummary
+    | {
+        expressions: ImportedExpressionCandidate[]
+        behaviors: ImportedBehaviorCandidate[]
+        jargons: ImportedJargonCandidate[]
+        memories?: ImportedMemoryCandidate[]
+        profiles?: ImportedProfileCandidate[]
+      }
+  candidate_catalog_complete?: boolean
+  incomplete_window_ids?: string[]
   total_window_count?: number
   selected_window_count?: number
   selected_window_ids?: string[]
@@ -191,6 +230,17 @@ export interface ChatHistoryImportStartRequest {
 
 export interface ChatHistoryParticipantListResponse {
   data: ImportedParticipant[]
+  pagination: {
+    page: number
+    page_size: number
+    total_items: number
+    total_pages: number
+  }
+}
+
+export interface ChatHistoryCandidateListResponse {
+  kind: ChatHistoryCandidateKind
+  data: ImportedHistoryCandidate[]
   pagination: {
     page: number
     page_size: number
