@@ -709,14 +709,12 @@ def _final_fallback(candidates: HistoryCandidates, evidence: Mapping[str, Import
         )
         >= 2
     )
-    return _limit_history_candidates(
-        HistoryCandidates(
-            expressions=candidates.expressions,
-            behaviors=candidates.behaviors,
-            jargons=jargons,
-            memories=candidates.memories,
-            profiles=candidates.profiles,
-        )
+    return HistoryCandidates(
+        expressions=candidates.expressions,
+        behaviors=candidates.behaviors,
+        jargons=jargons,
+        memories=candidates.memories,
+        profiles=candidates.profiles,
     )
 
 

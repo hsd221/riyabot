@@ -25,7 +25,6 @@ from src.bw_learner.history_candidates import (
     _candidate_evidence_ids,
     _consolidation_prompt_payload,
     _final_fallback,
-    _limit_history_candidates,
     _merge_window_candidates,
     _partition_consolidation_candidates,
     _restrict_consolidated_candidates,
@@ -300,19 +299,17 @@ class ChatHistoryLearner:
             extract_memories_json=dump_prompt_json(extract_memories),
             update_profiles_json=dump_prompt_json(update_profiles),
         )
-        return _limit_history_candidates(
-            _restrict_consolidated_candidates(
-                parse_history_candidates(
-                    response,
-                    evidence,
-                    eligible_sender_ids=eligible_sender_ids,
-                    excluded_sender_ids=excluded_sender_ids,
-                    require_repeated_jargon=True,
-                    allow_memories=extract_memories,
-                    allow_profiles=update_profiles,
-                ),
-                prompt_candidates,
-            )
+        return _restrict_consolidated_candidates(
+            parse_history_candidates(
+                response,
+                evidence,
+                eligible_sender_ids=eligible_sender_ids,
+                excluded_sender_ids=excluded_sender_ids,
+                require_repeated_jargon=True,
+                allow_memories=extract_memories,
+                allow_profiles=update_profiles,
+            ),
+            prompt_candidates,
         )
 
     async def consolidate_hierarchically(
@@ -362,7 +359,7 @@ class ChatHistoryLearner:
                 await _notify(progress, "consolidating", completed_calls, completed_calls)
                 return reduced[0], completed_calls
 
-            current = _limit_history_candidates(_merge_window_candidates(reduced))
+            current = _merge_window_candidates(reduced)
             next_batches = _partition_consolidation_candidates(current, evidence)
             if len(next_batches) >= len(batches):
                 logger.warning("历史学习分层合并未继续收敛，使用已完成首层审阅的确定性结果")

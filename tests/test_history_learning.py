@@ -781,8 +781,65 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(seen_situations, {candidate.situation for candidate in candidates.expressions})
-        self.assertEqual(model_calls, 4)
-        self.assertEqual(len(result.expressions), 30)
+        self.assertEqual(model_calls, 3)
+        self.assertEqual(len(result.expressions), len(candidates.expressions))
+
+    async def test_hierarchical_consolidation_keeps_every_candidate_when_model_preserves_batches(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner, ExpressionCandidate, HistoryCandidates
+
+        evidence = {
+            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}")
+            for index in range(91)
+        }
+        candidates = HistoryCandidates(
+            expressions=tuple(
+                ExpressionCandidate(
+                    f"情境 {index}",
+                    f"表达风格 {index}",
+                    (f"evidence-{index:03d}",),
+                    0.8,
+                )
+                for index in range(91)
+            )
+        )
+
+        async def preserve_every_candidate(**kwargs):
+            prompt = kwargs["prompt"]
+            candidates_json = prompt.split("<validated_candidates>", 1)[1].split("</validated_candidates>", 1)[0]
+            return json.dumps(json.loads(candidates_json), ensure_ascii=False), None
+
+        learner = ChatHistoryLearner(llm=SimpleNamespace(generate_response_async=preserve_every_candidate))
+
+        result, _ = await learner.consolidate_hierarchically(candidates, evidence, chat_name="测试群")
+
+        self.assertEqual(len(result.expressions), len(candidates.expressions))
+        self.assertEqual(
+            {candidate.situation for candidate in result.expressions},
+            {candidate.situation for candidate in candidates.expressions},
+        )
+
+    def test_deterministic_fallback_does_not_discard_large_candidate_catalog(self) -> None:
+        from src.bw_learner.history_learning import ExpressionCandidate, HistoryCandidates, _final_fallback
+
+        evidence = {
+            f"evidence-{index:03d}": make_message(f"evidence-{index:03d}", f"表达证据 {index}")
+            for index in range(31)
+        }
+        source = HistoryCandidates(
+            expressions=tuple(
+                ExpressionCandidate(
+                    f"情境 {index}",
+                    f"表达风格 {index}",
+                    (f"evidence-{index:03d}",),
+                    0.8,
+                )
+                for index in range(31)
+            )
+        )
+
+        result = _final_fallback(source, evidence)
+
+        self.assertEqual(len(result.expressions), len(source.expressions))
 
     async def test_deterministic_fallback_keeps_only_repeated_jargon(self) -> None:
         from src.bw_learner.history_learning import HistoryCandidates, JargonCandidate, _final_fallback
