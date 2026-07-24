@@ -583,7 +583,7 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         )
         runtime = HistoryCandidates(expressions=catalog.expressions[:30])
 
-        payload = HistoryLearningResult(
+        result = HistoryLearningResult(
             candidates=runtime,
             total_window_count=2,
             selected_window_count=2,
@@ -591,10 +591,14 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
             model_call_count=3,
             store_result=None,
             candidate_catalog=catalog,
-        ).to_json()
+        )
+        payload = result.to_json()
+        compact_payload = result.to_json(include_candidate_catalog=False)
 
         self.assertEqual(len(payload["candidates"]["expressions"]), 30)
         self.assertEqual(len(payload["candidate_catalog"]["expressions"]), 31)
+        self.assertEqual(compact_payload["candidate_catalog"]["total"], 31)
+        self.assertNotIn("expressions", compact_payload["candidate_catalog"])
 
     async def test_learning_keeps_full_catalog_when_runtime_write_set_is_bounded(self) -> None:
         from src.bw_learner.history_learning import (

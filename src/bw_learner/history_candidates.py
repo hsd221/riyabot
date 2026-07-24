@@ -225,6 +225,16 @@ class HistoryCandidates:
     def total(self) -> int:
         return len(self.expressions) + len(self.behaviors) + len(self.jargons) + len(self.memories) + len(self.profiles)
 
+    @property
+    def counts(self) -> dict[str, int]:
+        return {
+            "expressions": len(self.expressions),
+            "behaviors": len(self.behaviors),
+            "jargons": len(self.jargons),
+            "memories": len(self.memories),
+            "profiles": len(self.profiles),
+        }
+
     def to_json(self, *, include_metadata: bool = True) -> dict[str, Any]:
         def serialize(collection: Iterable[Any]) -> list[dict[str, Any]]:
             result: list[dict[str, Any]] = []

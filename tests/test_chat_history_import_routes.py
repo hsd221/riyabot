@@ -184,6 +184,163 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(page.data), 10)
         self.assertTrue(all("3" in participant.card for participant in page.data))
 
+    async def test_complete_candidate_catalog_is_stored_and_browsed_with_server_pagination(self) -> None:
+        from src.bw_learner.history_learning import ExpressionCandidate, HistoryCandidates
+
+        response = await self._upload()
+        catalog = HistoryCandidates(
+            expressions=tuple(
+                ExpressionCandidate(
+                    f"情境 {index}",
+                    f"表达风格 {index}",
+                    (f"m{index}",),
+                    0.8,
+                    provenance=(f"window-{index:06d}",),
+                )
+                for index in range(35)
+            )
+        )
+        summary = self.routes.write_candidate_catalog(
+            self.routes._task_dir(response.import_id),
+            catalog,
+            complete=True,
+            incomplete_window_ids=(),
+        )
+        task = self.model.get()
+        task.status = "completed"
+        task.result_json = json.dumps(
+            {
+                "candidates": HistoryCandidates(expressions=catalog.expressions[:30]).to_json(),
+                "candidate_catalog": summary,
+            },
+            ensure_ascii=False,
+        )
+        task.save()
+
+        page = await self.routes.list_chat_history_candidates(
+            response.import_id,
+            kind="expressions",
+            query="",
+            page=2,
+            page_size=10,
+            maibot_session=None,
+            authorization=None,
+        )
+        searched = await self.routes.list_chat_history_candidates(
+            response.import_id,
+            kind="expressions",
+            query="表达风格 3",
+            page=1,
+            page_size=20,
+            maibot_session=None,
+            authorization=None,
+        )
+
+        self.assertEqual(summary["total"], 35)
+        self.assertEqual(summary["counts"]["expressions"], 35)
+        self.assertEqual(page.pagination.total_items, 35)
+        self.assertEqual(page.data[0]["situation"], "情境 10")
+        self.assertTrue(page.data[0]["candidate_id"].startswith("expression:"))
+        self.assertEqual(page.data[0]["provenance"], ["window-000010"])
+        self.assertGreater(searched.pagination.total_items, 1)
+        self.assertTrue(all("表达风格 3" in item["style"] for item in searched.data))
+        self.assertTrue((self.root / response.import_id / "candidate_catalog.jsonl").exists())
+
+    async def test_paged_candidate_catalog_reports_missing_storage_instead_of_falling_back(self) -> None:
+        from src.bw_learner.history_learning import ExpressionCandidate, HistoryCandidates
+
+        response = await self._upload()
+        runtime_candidates = HistoryCandidates(
+            expressions=(ExpressionCandidate("当前场景", "仅运行时候选", ("m1",), 0.8),)
+        )
+        task = self.model.get()
+        task.status = "completed"
+        task.result_json = json.dumps(
+            {
+                "candidates": runtime_candidates.to_json(),
+                "candidate_catalog": {
+                    "total": 35,
+                    "counts": {
+                        "expressions": 35,
+                        "behaviors": 0,
+                        "jargons": 0,
+                        "memories": 0,
+                        "profiles": 0,
+                    },
+                    "complete": True,
+                    "incomplete_window_ids": [],
+                    "storage": "paged",
+                },
+            },
+            ensure_ascii=False,
+        )
+        task.save()
+
+        with self.assertRaises(HTTPException) as unavailable:
+            await self.routes.list_chat_history_candidates(
+                response.import_id,
+                kind="expressions",
+                query="",
+                page=1,
+                page_size=20,
+                maibot_session=None,
+                authorization=None,
+            )
+
+        self.assertEqual(unavailable.exception.status_code, 409)
+        self.assertEqual(unavailable.exception.detail, "完整候选目录文件缺失，请删除该任务后重新导入学习")
+
+    async def test_paged_candidate_catalog_validates_every_kind_before_claiming_completeness(self) -> None:
+        from src.bw_learner.history_learning import BehaviorCandidate, ExpressionCandidate, HistoryCandidates
+
+        response = await self._upload()
+        catalog = HistoryCandidates(
+            expressions=(ExpressionCandidate("当前场景", "完整表达", ("m1",), 0.8),),
+            behaviors=(
+                BehaviorCandidate(
+                    "other_user",
+                    "observed_behavior",
+                    "有人发起话题",
+                    "其他成员会接续讨论",
+                    ("m1", "m2"),
+                    0.8,
+                ),
+            ),
+        )
+        summary = self.routes.write_candidate_catalog(
+            self.routes._task_dir(response.import_id),
+            catalog,
+            complete=True,
+            incomplete_window_ids=(),
+        )
+        catalog_path = self.root / response.import_id / "candidate_catalog.jsonl"
+        catalog_lines = catalog_path.read_text(encoding="utf-8").splitlines()
+        catalog_path.write_text(f"{catalog_lines[0]}\n", encoding="utf-8")
+        task = self.model.get()
+        task.status = "completed"
+        task.result_json = json.dumps(
+            {
+                "candidates": HistoryCandidates(expressions=catalog.expressions).to_json(),
+                "candidate_catalog": summary,
+            },
+            ensure_ascii=False,
+        )
+        task.save()
+
+        with self.assertRaises(HTTPException) as corrupt:
+            await self.routes.list_chat_history_candidates(
+                response.import_id,
+                kind="expressions",
+                query="",
+                page=1,
+                page_size=20,
+                maibot_session=None,
+                authorization=None,
+            )
+
+        self.assertEqual(corrupt.exception.status_code, 409)
+        self.assertEqual(corrupt.exception.detail, "完整候选目录文件损坏，请删除该任务后重新导入学习")
+
     async def test_start_runs_in_background_persists_progress_and_cleans_normalized_text(self) -> None:
         from src.bw_learner.history_learning import HistoryCandidates
 
@@ -244,6 +401,8 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.status, "completed")
         self.assertEqual(detail.progress.stage, "completed")
         self.assertEqual(detail.result["model_call_count"], 2)
+        self.assertEqual(detail.result["candidate_catalog"]["storage"], "paged")
+        self.assertEqual(detail.result["candidate_catalog"]["total"], 0)
         self.assertTrue(detail.options["extract_memories"])
         self.assertTrue(detail.options["update_profiles"])
         self.assertTrue(captured_options["extract_memories"])
@@ -257,6 +416,7 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(enrichment_options["update_profiles"])
         self.assertFalse((self.root / response.import_id / "normalized.jsonl").exists())
         self.assertTrue((self.root / response.import_id / "result.json").exists())
+        self.assertTrue((self.root / response.import_id / "candidate_catalog.jsonl").exists())
 
         deleted = await self.routes.delete_chat_history_import(response.import_id, None, None)
         self.assertTrue(deleted.success)
@@ -507,7 +667,7 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         response = await self._upload()
         task = self.model.get()
 
-        for stage in ("storing", "storing_enrichment"):
+        for stage in ("storing_catalog", "storing", "storing_enrichment"):
             with self.subTest(stage=stage):
                 blocker = asyncio.create_task(asyncio.Event().wait())
                 self.routes._running_tasks[response.import_id] = blocker

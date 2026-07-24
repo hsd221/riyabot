@@ -24,7 +24,9 @@ from src.bw_learner.history_import import ChatHistoryFormatError, analyze_qq_cha
 from src.bw_learner.history_learning import (
     DEPTH_WINDOW_BUDGETS,
     ChatHistoryLearner,
+    HistoryCandidates,
     HistoryLearningCancelled,
+    HistoryLearningResult,
     group_chat_id,
     history_candidates_from_json,
     store_history_candidates,
@@ -32,6 +34,11 @@ from src.bw_learner.history_learning import (
 from src.common.database.database_model import ChatHistoryImportTask
 from src.common.logger import get_logger
 from src.webui.auth import verify_auth_token_from_cookie_or_header
+from src.webui.chat_history_candidate_catalog import (
+    CandidateCatalogUnavailableError,
+    page_candidate_catalog,
+    write_candidate_catalog,
+)
 from src.webui.error_utils import internal_server_error, log_exception_type
 
 
@@ -45,8 +52,15 @@ MAX_CONCURRENT_IMPORTS = 1
 MAX_PARTICIPANT_PREVIEW = 30
 MAX_PARTICIPANT_SELECTION_OVERRIDES = 200
 _IMPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_KNOWN_TASK_FILES = ("source.json", "normalized.jsonl", "result.json", "result.json.tmp")
-_NON_CANCELLABLE_PROGRESS_STAGES = frozenset({"storing", "storing_enrichment"})
+_KNOWN_TASK_FILES = (
+    "source.json",
+    "normalized.jsonl",
+    "result.json",
+    "result.json.tmp",
+    "candidate_catalog.jsonl",
+    "candidate_catalog.jsonl.tmp",
+)
+_NON_CANCELLABLE_PROGRESS_STAGES = frozenset({"storing_catalog", "storing", "storing_enrichment"})
 _running_tasks: dict[str, asyncio.Task[None]] = {}
 _analyzing_import_ids: set[str] = set()
 
@@ -140,6 +154,19 @@ class ChatHistoryParticipantPagination(BaseModel):
 class ChatHistoryParticipantListResponse(BaseModel):
     data: list[ImportedParticipantResponse]
     pagination: ChatHistoryParticipantPagination
+
+
+class ChatHistoryCandidatePagination(BaseModel):
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+
+
+class ChatHistoryCandidateListResponse(BaseModel):
+    kind: Literal["expressions", "behaviors", "jargons", "memories", "profiles"]
+    data: list[dict[str, Any]]
+    pagination: ChatHistoryCandidatePagination
 
 
 class ChatHistoryProfileDecisionRequest(BaseModel):
@@ -501,6 +528,51 @@ async def list_chat_history_participants(
     )
 
 
+@router.get("/{import_id}/candidates", response_model=ChatHistoryCandidateListResponse)
+async def list_chat_history_candidates(
+    import_id: str,
+    kind: Literal["expressions", "behaviors", "jargons", "memories", "profiles"] = "expressions",
+    query: Annotated[str, Query(max_length=100)] = "",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 30,
+    maibot_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+) -> ChatHistoryCandidateListResponse:
+    verify_auth_token(maibot_session, authorization)
+    task = _get_task_or_404(import_id)
+    normalized_query = query.casefold().strip()
+    try:
+        data, total_items = await asyncio.to_thread(
+            page_candidate_catalog,
+            _task_dir(import_id),
+            _load_json_object(task.result_json),
+            kind=kind,
+            query=normalized_query,
+            page=page,
+            page_size=page_size,
+        )
+    except CandidateCatalogUnavailableError as error:
+        detail = (
+            "完整候选目录文件缺失，请删除该任务后重新导入学习"
+            if error.reason == "missing"
+            else "完整候选目录文件损坏，请删除该任务后重新导入学习"
+        )
+        raise HTTPException(status_code=409, detail=detail) from None
+    total_pages = max(1, (total_items + page_size - 1) // page_size)
+    if page > total_pages and total_items:
+        raise HTTPException(status_code=422, detail="候选页码超出范围")
+    return ChatHistoryCandidateListResponse(
+        kind=kind,
+        data=data,
+        pagination=ChatHistoryCandidatePagination(
+            page=page,
+            page_size=page_size,
+            total_items=total_items,
+            total_pages=total_pages,
+        ),
+    )
+
+
 async def _update_progress(import_id: str, stage: str, current: int, total: int) -> None:
     ChatHistoryImportTask.update(
         progress_stage=stage[:32],
@@ -621,7 +693,31 @@ async def _run_learning(import_id: str) -> None:
             extract_memories=extract_memories,
             update_profiles=update_profiles,
         )
-        result_payload = result.to_json()
+        if isinstance(result, HistoryLearningResult):
+            result_payload = result.to_json(include_candidate_catalog=False)
+        else:
+            result_payload = result.to_json()
+        candidate_catalog = getattr(result, "candidate_catalog", None)
+        if not isinstance(candidate_catalog, HistoryCandidates):
+            runtime_candidates = getattr(result, "candidates", None)
+            candidate_catalog = (
+                runtime_candidates
+                if isinstance(runtime_candidates, HistoryCandidates)
+                else history_candidates_from_json(
+                    result_payload.get("candidate_catalog") or result_payload.get("candidates")
+                )
+            )
+        if should_cancel():
+            raise HistoryLearningCancelled("聊天记录学习已取消")
+        await _update_progress(import_id, "storing_catalog", 0, 1)
+        result_payload["candidate_catalog"] = await asyncio.to_thread(
+            write_candidate_catalog,
+            _task_dir(import_id),
+            candidate_catalog,
+            complete=bool(getattr(result, "candidate_catalog_complete", True)),
+            incomplete_window_ids=tuple(getattr(result, "incomplete_window_ids", ())),
+        )
+        await _update_progress(import_id, "storing_catalog", 1, 1)
         result_payload["enrichment_store_result"] = None
         if update_profiles and result.candidates.profiles:
             profile_evidence = await asyncio.to_thread(

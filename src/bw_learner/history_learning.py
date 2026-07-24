@@ -98,11 +98,22 @@ class HistoryLearningResult:
     candidate_catalog_complete: bool = True
     incomplete_window_ids: tuple[str, ...] = ()
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self, *, include_candidate_catalog: bool = True) -> dict[str, Any]:
         catalog = self.candidate_catalog or self.candidates
+        catalog_payload: dict[str, Any]
+        if include_candidate_catalog:
+            catalog_payload = catalog.to_json()
+        else:
+            catalog_payload = {
+                "total": catalog.total,
+                "counts": catalog.counts,
+                "complete": self.candidate_catalog_complete,
+                "incomplete_window_ids": list(self.incomplete_window_ids),
+                "storage": "external",
+            }
         result = {
             "candidates": self.candidates.to_json(),
-            "candidate_catalog": catalog.to_json(),
+            "candidate_catalog": catalog_payload,
             "total_window_count": self.total_window_count,
             "selected_window_count": self.selected_window_count,
             "selected_window_ids": list(self.selected_window_ids),
