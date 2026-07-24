@@ -131,9 +131,53 @@ class HistoryLearningResult:
         return result
 
 
+@dataclass(frozen=True)
+class HistoryWindowCheckpoint:
+    """Durable output for one fully processed natural window."""
+
+    window_id: str
+    candidates: HistoryCandidates
+    continuation_window_ids: tuple[str, ...] = ()
+    incomplete_window_ids: tuple[str, ...] = ()
+    model_call_count: int = 0
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "window_id": self.window_id,
+            "candidates": self.candidates.to_json(),
+            "continuation_window_ids": list(self.continuation_window_ids),
+            "incomplete_window_ids": list(self.incomplete_window_ids),
+            "model_call_count": max(0, self.model_call_count),
+        }
+
+    @classmethod
+    def from_json(cls, value: Mapping[str, Any]) -> HistoryWindowCheckpoint:
+        window_id = str(value.get("window_id") or "").strip()
+        if not window_id or len(window_id) > 128:
+            raise ValueError("invalid checkpoint window id")
+
+        def string_tuple(key: str) -> tuple[str, ...]:
+            raw = value.get(key, [])
+            if not isinstance(raw, list):
+                raise ValueError(f"invalid checkpoint {key}")
+            return tuple(dict.fromkeys(str(item)[:128] for item in raw if isinstance(item, (str, int))))[:64]
+
+        raw_model_call_count = value.get("model_call_count", 0)
+        if type(raw_model_call_count) is not int or not 0 <= raw_model_call_count <= 1_000_000:
+            raise ValueError("invalid checkpoint model call count")
+        return cls(
+            window_id=window_id,
+            candidates=history_candidates_from_json(value.get("candidates")),
+            continuation_window_ids=string_tuple("continuation_window_ids"),
+            incomplete_window_ids=string_tuple("incomplete_window_ids"),
+            model_call_count=raw_model_call_count,
+        )
+
+
 ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 CancellationCheck = Callable[[], bool]
 ExtractionPageCallback = Callable[[int], Awaitable[None] | None]
+CheckpointCallback = Callable[[HistoryWindowCheckpoint], Awaitable[None] | None]
 
 
 def group_chat_id(platform: str, group_id: str | int) -> str:
@@ -166,6 +210,14 @@ async def _notify_extraction_page(callback: ExtractionPageCallback | None, page:
     if callback is None:
         return
     result = callback(page)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _notify_checkpoint(callback: CheckpointCallback | None, checkpoint: HistoryWindowCheckpoint) -> None:
+    if callback is None:
+        return
+    result = callback(checkpoint)
     if inspect.isawaitable(result):
         await result
 
@@ -483,6 +535,8 @@ class ChatHistoryLearner:
         should_cancel: CancellationCheck | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
+        resume_checkpoints: Mapping[str, HistoryWindowCheckpoint] | None = None,
+        checkpoint_callback: CheckpointCallback | None = None,
     ) -> HistoryLearningResult:
         if depth not in DEPTH_WINDOW_BUDGETS:
             raise ValueError(f"unsupported learning depth: {depth}")
@@ -498,14 +552,24 @@ class ChatHistoryLearner:
         )
         selected_window_ids = tuple(summary.window_id for summary in selected_summaries)
         selected_window_id_set = frozenset(selected_window_ids)
+        checkpoints = {
+            window_id: checkpoint
+            for window_id, checkpoint in (resume_checkpoints or {}).items()
+            if window_id in selected_window_id_set
+            and isinstance(checkpoint, HistoryWindowCheckpoint)
+            and checkpoint.window_id == window_id
+        }
         evidence: dict[str, ImportedMessage] = {}
         extracted: list[HistoryCandidates] = []
         continuation_window_ids: list[str] = []
         continuation_keys: set[tuple[str, str]] = set()
         incomplete_window_ids: list[str] = []
-        model_call_count = 0
-        extraction_total = len(selected_summaries)
-        extraction_completed = 0
+        model_call_count = sum(checkpoint.model_call_count for checkpoint in checkpoints.values())
+        resumed_extraction_calls = sum(max(1, checkpoint.model_call_count) for checkpoint in checkpoints.values())
+        extraction_total = len(selected_summaries) + sum(
+            max(0, checkpoint.model_call_count - 1) for checkpoint in checkpoints.values()
+        )
+        extraction_completed = resumed_extraction_calls
         await _notify(progress, "extracting", extraction_completed, extraction_total)
 
         async def record_extraction_page(page: int) -> None:
@@ -519,10 +583,22 @@ class ChatHistoryLearner:
         for window, following in _with_following_window(iter_history_windows(normalized_path, **options)):
             if window.window_id not in selected_window_id_set:
                 continue
+            saved_checkpoint = checkpoints.get(window.window_id)
+            if saved_checkpoint is not None:
+                extracted.append(saved_checkpoint.candidates)
+                checkpoint_messages = (*window.messages, *(following.messages if following is not None else ()))
+                _retain_candidate_evidence(saved_checkpoint.candidates, checkpoint_messages, evidence)
+                continuation_window_ids.extend(saved_checkpoint.continuation_window_ids)
+                incomplete_window_ids.extend(saved_checkpoint.incomplete_window_ids)
+                continue
             if should_cancel and should_cancel():
                 raise HistoryLearningCancelled("聊天记录学习已取消")
             window_result: HistoryWindowResult | None = None
             continuation: HistoryWindow | None = None
+            window_candidates_parts: list[HistoryCandidates] = []
+            window_continuation_ids: list[str] = []
+            window_incomplete_ids: list[str] = []
+            model_calls_before_window = model_call_count
             try:
                 window_result = await self.extract_window_result(
                     window,
@@ -540,12 +616,15 @@ class ChatHistoryLearner:
                         window_result.continuation.tail_evidence_ids,
                     )
                 extracted.append(window_candidates)
+                window_candidates_parts.append(window_candidates)
                 _retain_candidate_evidence(window_candidates, window.messages, evidence)
                 if not window_result.catalog_complete:
                     incomplete_window_ids.append(window.window_id)
+                    window_incomplete_ids.append(window.window_id)
             except HistoryLearningOutputError as error:
                 logger.warning(f"历史学习窗口 {window.window_id} 输出无效，已跳过: {error}")
                 incomplete_window_ids.append(window.window_id)
+                window_incomplete_ids.append(window.window_id)
 
             if window_result is not None and window_result.continuation.needs_follow_up and following is not None:
                 continuation_key = (window.window_id, following.window_id)
@@ -557,27 +636,41 @@ class ChatHistoryLearner:
                         window_result.continuation.tail_evidence_ids,
                     )
                     continuation_window_ids.append(continuation.window_id)
+                    window_continuation_ids.append(continuation.window_id)
                     extraction_total += 1
 
-            if continuation is None:
-                continue
-            try:
-                follow_up_result = await self.extract_window_result(
-                    continuation,
-                    chat_name=chat_name,
-                    eligible_sender_ids=eligible or None,
-                    excluded_sender_ids=excluded,
-                    extract_memories=extract_memories,
-                    update_profiles=update_profiles,
-                    page_progress=record_extraction_page,
-                )
-                extracted.append(follow_up_result.candidates)
-                _retain_candidate_evidence(follow_up_result.candidates, continuation.messages, evidence)
-                if not follow_up_result.catalog_complete:
+            if continuation is not None:
+                try:
+                    follow_up_result = await self.extract_window_result(
+                        continuation,
+                        chat_name=chat_name,
+                        eligible_sender_ids=eligible or None,
+                        excluded_sender_ids=excluded,
+                        extract_memories=extract_memories,
+                        update_profiles=update_profiles,
+                        page_progress=record_extraction_page,
+                    )
+                    extracted.append(follow_up_result.candidates)
+                    window_candidates_parts.append(follow_up_result.candidates)
+                    _retain_candidate_evidence(follow_up_result.candidates, continuation.messages, evidence)
+                    if not follow_up_result.catalog_complete:
+                        incomplete_window_ids.append(continuation.window_id)
+                        window_incomplete_ids.append(continuation.window_id)
+                except HistoryLearningOutputError as error:
+                    logger.warning(f"历史学习续接窗口 {continuation.window_id} 输出无效，已跳过: {error}")
                     incomplete_window_ids.append(continuation.window_id)
-            except HistoryLearningOutputError as error:
-                logger.warning(f"历史学习续接窗口 {continuation.window_id} 输出无效，已跳过: {error}")
-                incomplete_window_ids.append(continuation.window_id)
+                    window_incomplete_ids.append(continuation.window_id)
+
+            await _notify_checkpoint(
+                checkpoint_callback,
+                HistoryWindowCheckpoint(
+                    window_id=window.window_id,
+                    candidates=_merge_window_candidates(window_candidates_parts),
+                    continuation_window_ids=tuple(window_continuation_ids),
+                    incomplete_window_ids=tuple(dict.fromkeys(window_incomplete_ids)),
+                    model_call_count=model_call_count - model_calls_before_window,
+                ),
+            )
 
         if should_cancel and should_cancel():
             raise HistoryLearningCancelled("聊天记录学习已取消")

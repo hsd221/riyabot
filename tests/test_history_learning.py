@@ -329,6 +329,102 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.model_call_count, 11)
         self.assertEqual(llm.generate_response_async.await_count, 11)
 
+    async def test_learning_resumes_after_the_last_completed_window_checkpoint(self) -> None:
+        from src.bw_learner.history_learning import (
+            ChatHistoryLearner,
+            ExpressionCandidate,
+            HistoryCandidates,
+            HistoryWindowCheckpoint,
+            HistoryWindowResult,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(
+                normalized,
+                [
+                    make_message("m1", "第一个窗口的有效表达", timestamp=1_750_000_000.0),
+                    make_message("m2", "第二个窗口的有效表达", timestamp=1_750_000_120.0),
+                ],
+            )
+            checkpoints: list[HistoryWindowCheckpoint] = []
+            first_attempt_windows: list[str] = []
+
+            class InterruptingLearner(ChatHistoryLearner):
+                async def extract_window_result(self, window, **kwargs):
+                    first_attempt_windows.append(window.window_id)
+                    if window.window_id == "window-000002":
+                        raise RuntimeError("model unavailable")
+                    await kwargs["page_progress"](1)
+                    return HistoryWindowResult(
+                        candidates=HistoryCandidates(
+                            expressions=(
+                                ExpressionCandidate(
+                                    "第一个场景",
+                                    "第一个窗口的表达方式",
+                                    (window.messages[0].message_id,),
+                                    0.8,
+                                ),
+                            )
+                        )
+                    )
+
+                async def consolidate_hierarchically(self, *_args, **_kwargs):
+                    raise AssertionError("提取中断后不应进入合并")
+
+            with self.assertRaisesRegex(RuntimeError, "model unavailable"):
+                await InterruptingLearner(llm=SimpleNamespace()).learn(
+                    normalized,
+                    chat_id="chat-1",
+                    chat_name="测试群",
+                    depth="full",
+                    store=False,
+                    window_options={"max_gap_seconds": 60},
+                    checkpoint_callback=checkpoints.append,
+                )
+
+            self.assertEqual(first_attempt_windows, ["window-000001", "window-000002"])
+            self.assertEqual([checkpoint.window_id for checkpoint in checkpoints], ["window-000001"])
+
+            resumed_windows: list[str] = []
+
+            class ResumingLearner(ChatHistoryLearner):
+                async def extract_window_result(self, window, **kwargs):
+                    resumed_windows.append(window.window_id)
+                    await kwargs["page_progress"](1)
+                    return HistoryWindowResult(
+                        candidates=HistoryCandidates(
+                            expressions=(
+                                ExpressionCandidate(
+                                    "第二个场景",
+                                    "第二个窗口的表达方式",
+                                    (window.messages[0].message_id,),
+                                    0.82,
+                                ),
+                            )
+                        )
+                    )
+
+                async def consolidate_hierarchically(self, candidates, _evidence, **_kwargs):
+                    return candidates, 0
+
+            result = await ResumingLearner(llm=SimpleNamespace()).learn(
+                normalized,
+                chat_id="chat-1",
+                chat_name="测试群",
+                depth="full",
+                store=False,
+                window_options={"max_gap_seconds": 60},
+                resume_checkpoints={checkpoint.window_id: checkpoint for checkpoint in checkpoints},
+            )
+
+        self.assertEqual(resumed_windows, ["window-000002"])
+        self.assertEqual(result.model_call_count, 2)
+        self.assertEqual(
+            [candidate.style for candidate in result.candidate_catalog.expressions],
+            ["第一个窗口的表达方式", "第二个窗口的表达方式"],
+        )
+
     def test_window_boundary_requires_a_contiguous_tail(self) -> None:
         from src.bw_learner.history_learning import parse_history_window_result
 
