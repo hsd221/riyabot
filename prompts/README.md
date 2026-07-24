@@ -134,6 +134,8 @@ variants: light, standard
 | `excluded_sender_ids_json` | 全成员模式下不得成为学习证据、但仍可保留为对话上下文的人类发送者 ID 集合。 |
 | `extract_memories_json` | 历史聊天任务是否允许提取群聊记忆候选的布尔开关。 |
 | `update_profiles_json` | 历史聊天任务是否允许提取未验证人物画像候选的布尔开关。 |
+| `extraction_page_json` | 同一历史窗口当前正在提取的候选页码，从 1 开始。 |
+| `already_extracted_candidates_json` | 同一窗口前序页面已通过程序校验的候选摘要，用于继续穷举且避免重复。 |
 | `candidates_json` | 跨窗口合并器收到的、已通过程序证据校验的学习候选。 |
 | `evidence_json` | 跨窗口合并器复核候选时使用的最小原始证据映射。 |
 | `context_block` | 表达反馈判定器读取的后续对话片段。 |

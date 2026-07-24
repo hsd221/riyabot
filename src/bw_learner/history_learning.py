@@ -60,6 +60,7 @@ MAX_CONTINUATION_FOLLOW_UP_MESSAGES = 40
 MAX_CONTINUATION_WINDOW_MESSAGES = 80
 MAX_CONTINUATION_WINDOW_CHARS = 12_000
 MAX_CONSOLIDATION_ROUNDS = 12
+MAX_WINDOW_EXTRACTION_PAGES = 20
 
 
 class HistoryLearningCancelled(RuntimeError):
@@ -94,6 +95,8 @@ class HistoryLearningResult:
     store_result: HistoryStoreResult | None
     continuation_window_ids: tuple[str, ...] = ()
     candidate_catalog: HistoryCandidates | None = None
+    candidate_catalog_complete: bool = True
+    incomplete_window_ids: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         catalog = self.candidate_catalog or self.candidates
@@ -104,6 +107,8 @@ class HistoryLearningResult:
             "selected_window_count": self.selected_window_count,
             "selected_window_ids": list(self.selected_window_ids),
             "continuation_window_ids": list(self.continuation_window_ids),
+            "candidate_catalog_complete": self.candidate_catalog_complete,
+            "incomplete_window_ids": list(self.incomplete_window_ids),
             "model_call_count": self.model_call_count,
             "store_result": None,
         }
@@ -117,6 +122,7 @@ class HistoryLearningResult:
 
 ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 CancellationCheck = Callable[[], bool]
+ExtractionPageCallback = Callable[[int], Awaitable[None] | None]
 
 
 def group_chat_id(platform: str, group_id: str | int) -> str:
@@ -143,6 +149,31 @@ async def _notify(callback: ProgressCallback | None, stage: str, current: int, t
     result = callback(stage, current, total)
     if inspect.isawaitable(result):
         await result
+
+
+async def _notify_extraction_page(callback: ExtractionPageCallback | None, page: int) -> None:
+    if callback is None:
+        return
+    result = callback(page)
+    if inspect.isawaitable(result):
+        await result
+
+
+def _already_extracted_payload(candidates: HistoryCandidates) -> dict[str, list[dict[str, Any]]]:
+    """Return compact semantic fingerprints that keep extraction pages distinct."""
+
+    payload = candidates.to_json()
+    fields = {
+        "expressions": ("candidate_id", "situation", "style"),
+        "behaviors": ("candidate_id", "actor_type", "learning_type", "action", "outcome"),
+        "jargons": ("candidate_id", "content", "meaning"),
+        "memories": ("candidate_id", "atom_type", "subject_id", "content"),
+        "profiles": ("candidate_id", "subject_id", "category", "name", "value"),
+    }
+    return {
+        kind: [{key: item[key] for key in keys if key in item} for item in payload[kind]]
+        for kind, keys in fields.items()
+    }
 
 
 def _build_continuation_window(
@@ -246,29 +277,67 @@ class ChatHistoryLearner:
         excluded_sender_ids: Iterable[str] | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
+        page_progress: ExtractionPageCallback | None = None,
     ) -> HistoryWindowResult:
         evidence = {message.message_id: message for message in window.messages}
         eligible = tuple(sorted(str(sender_id) for sender_id in eligible_sender_ids or ()))
         excluded = tuple(sorted(str(sender_id) for sender_id in excluded_sender_ids or ()))
-        response = await self._request(
-            "learning.history.extract",
-            max_tokens=3_500,
-            chat_name_json=dump_prompt_json(chat_name),
-            window_id_json=dump_prompt_json(window.window_id),
-            eligible_sender_ids_json=dump_prompt_json(eligible or "all_non_bot"),
-            excluded_sender_ids_json=dump_prompt_json(excluded),
-            extract_memories_json=dump_prompt_json(extract_memories),
-            update_profiles_json=dump_prompt_json(update_profiles),
-            messages_jsonl=history_window_to_jsonl(window),
-        )
-        return parse_history_window_result(
-            response,
-            evidence,
-            eligible_sender_ids=eligible or None,
-            excluded_sender_ids=excluded,
-            allow_memories=extract_memories,
-            allow_profiles=update_profiles,
-            provenance=(window.window_id,),
+        accumulated = HistoryCandidates()
+        continuation = WindowContinuation()
+        page_count = 0
+        catalog_complete = False
+
+        while page_count < MAX_WINDOW_EXTRACTION_PAGES:
+            page_count += 1
+            response = await self._request(
+                "learning.history.extract",
+                max_tokens=3_500,
+                chat_name_json=dump_prompt_json(chat_name),
+                window_id_json=dump_prompt_json(window.window_id),
+                eligible_sender_ids_json=dump_prompt_json(eligible or "all_non_bot"),
+                excluded_sender_ids_json=dump_prompt_json(excluded),
+                extract_memories_json=dump_prompt_json(extract_memories),
+                update_profiles_json=dump_prompt_json(update_profiles),
+                extraction_page_json=dump_prompt_json(page_count),
+                already_extracted_candidates_json=dump_prompt_json(_already_extracted_payload(accumulated)),
+                messages_jsonl=history_window_to_jsonl(window),
+            )
+            await _notify_extraction_page(page_progress, page_count)
+            try:
+                page_result = parse_history_window_result(
+                    response,
+                    evidence,
+                    eligible_sender_ids=eligible or None,
+                    excluded_sender_ids=excluded,
+                    allow_memories=extract_memories,
+                    allow_profiles=update_profiles,
+                    provenance=(window.window_id,),
+                )
+            except HistoryLearningOutputError:
+                if page_count == 1:
+                    raise
+                logger.warning(f"历史学习窗口 {window.window_id} 第 {page_count} 页输出无效，保留此前完整候选")
+                break
+
+            previous_total = accumulated.total
+            accumulated = _merge_window_candidates((accumulated, page_result.candidates))
+            if page_result.continuation.needs_follow_up:
+                continuation = page_result.continuation
+            if not page_result.has_more_candidates:
+                catalog_complete = True
+                break
+            if accumulated.total == previous_total:
+                logger.warning(f"历史学习窗口 {window.window_id} 第 {page_count} 页没有新增候选，停止继续翻页")
+                break
+
+        if not catalog_complete and page_count >= MAX_WINDOW_EXTRACTION_PAGES:
+            logger.warning(f"历史学习窗口 {window.window_id} 达到 {MAX_WINDOW_EXTRACTION_PAGES} 页安全上限")
+        return HistoryWindowResult(
+            candidates=accumulated,
+            continuation=continuation,
+            has_more_candidates=not catalog_complete,
+            extraction_page_count=page_count,
+            catalog_complete=catalog_complete,
         )
 
     async def extract_window(
@@ -422,10 +491,20 @@ class ChatHistoryLearner:
         extracted: list[HistoryCandidates] = []
         continuation_window_ids: list[str] = []
         continuation_keys: set[tuple[str, str]] = set()
+        incomplete_window_ids: list[str] = []
         model_call_count = 0
         extraction_total = len(selected_summaries)
         extraction_completed = 0
         await _notify(progress, "extracting", extraction_completed, extraction_total)
+
+        async def record_extraction_page(page: int) -> None:
+            nonlocal extraction_completed, extraction_total, model_call_count
+            if page > 1:
+                extraction_total += 1
+            model_call_count += 1
+            extraction_completed += 1
+            await _notify(progress, "extracting", extraction_completed, extraction_total)
+
         for window, following in _with_following_window(iter_history_windows(normalized_path, **options)):
             if window.window_id not in selected_window_id_set:
                 continue
@@ -441,6 +520,7 @@ class ChatHistoryLearner:
                     excluded_sender_ids=excluded,
                     extract_memories=extract_memories,
                     update_profiles=update_profiles,
+                    page_progress=record_extraction_page,
                 )
                 window_candidates = window_result.candidates
                 if window_result.continuation.needs_follow_up:
@@ -450,8 +530,11 @@ class ChatHistoryLearner:
                     )
                 extracted.append(window_candidates)
                 _retain_candidate_evidence(window_candidates, window.messages, evidence)
+                if not window_result.catalog_complete:
+                    incomplete_window_ids.append(window.window_id)
             except HistoryLearningOutputError as error:
                 logger.warning(f"历史学习窗口 {window.window_id} 输出无效，已跳过: {error}")
+                incomplete_window_ids.append(window.window_id)
 
             if window_result is not None and window_result.continuation.needs_follow_up and following is not None:
                 continuation_key = (window.window_id, following.window_id)
@@ -465,10 +548,6 @@ class ChatHistoryLearner:
                     continuation_window_ids.append(continuation.window_id)
                     extraction_total += 1
 
-            model_call_count += 1
-            extraction_completed += 1
-            await _notify(progress, "extracting", extraction_completed, extraction_total)
-
             if continuation is None:
                 continue
             try:
@@ -479,14 +558,15 @@ class ChatHistoryLearner:
                     excluded_sender_ids=excluded,
                     extract_memories=extract_memories,
                     update_profiles=update_profiles,
+                    page_progress=record_extraction_page,
                 )
                 extracted.append(follow_up_result.candidates)
                 _retain_candidate_evidence(follow_up_result.candidates, continuation.messages, evidence)
+                if not follow_up_result.catalog_complete:
+                    incomplete_window_ids.append(continuation.window_id)
             except HistoryLearningOutputError as error:
                 logger.warning(f"历史学习续接窗口 {continuation.window_id} 输出无效，已跳过: {error}")
-            model_call_count += 1
-            extraction_completed += 1
-            await _notify(progress, "extracting", extraction_completed, extraction_total)
+                incomplete_window_ids.append(continuation.window_id)
 
         if should_cancel and should_cancel():
             raise HistoryLearningCancelled("聊天记录学习已取消")
@@ -526,6 +606,8 @@ class ChatHistoryLearner:
             store_result=store_result,
             continuation_window_ids=tuple(continuation_window_ids),
             candidate_catalog=candidate_catalog,
+            candidate_catalog_complete=not incomplete_window_ids,
+            incomplete_window_ids=tuple(dict.fromkeys(incomplete_window_ids)),
         )
 
 

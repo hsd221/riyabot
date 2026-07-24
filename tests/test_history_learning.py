@@ -412,6 +412,163 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
             second.candidates.expressions[0].candidate_id,
         )
 
+    async def test_window_extraction_pages_until_model_reports_exhausted(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner
+
+        message = make_message("m1", "这下真破防了，但还是先看日志")
+        window = HistoryWindow(
+            window_id="window-000001",
+            messages=(message,),
+            start_timestamp=message.timestamp,
+            end_timestamp=message.timestamp,
+            sender_ids=frozenset({message.sender_id}),
+            char_count=len(message.content),
+            signal_score=1.0,
+        )
+        first_page = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "遇到意外时",
+                        "style": "用‘这下真…了’快速表达反应",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.85,
+                    }
+                ],
+                "behaviors": [],
+                "jargons": [],
+                "extraction_page": {"has_more": True},
+            },
+            ensure_ascii=False,
+        )
+        second_page = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "提出排查建议时",
+                        "style": "先转折，再用短句给出下一步",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.82,
+                    }
+                ],
+                "behaviors": [],
+                "jargons": [],
+                "extraction_page": {"has_more": False},
+            },
+            ensure_ascii=False,
+        )
+        llm = SimpleNamespace(generate_response_async=AsyncMock(side_effect=[(first_page, None), (second_page, None)]))
+
+        result = await ChatHistoryLearner(llm=llm).extract_window_result(window, chat_name="测试群")
+
+        self.assertEqual(len(result.candidates.expressions), 2)
+        self.assertEqual(result.extraction_page_count, 2)
+        self.assertTrue(result.catalog_complete)
+        second_prompt = llm.generate_response_async.await_args_list[1].kwargs["prompt"]
+        self.assertIn("用‘这下真…了’快速表达反应", second_prompt)
+        self.assertIn("<extraction_page>2</extraction_page>", second_prompt)
+
+    async def test_window_extraction_stops_on_repeated_non_exhausting_page(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner
+
+        message = make_message("m1", "这下真破防了")
+        window = HistoryWindow(
+            window_id="window-000001",
+            messages=(message,),
+            start_timestamp=message.timestamp,
+            end_timestamp=message.timestamp,
+            sender_ids=frozenset({message.sender_id}),
+            char_count=len(message.content),
+            signal_score=1.0,
+        )
+        repeated_page = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "遇到意外时",
+                        "style": "用短句表达强烈反应",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.85,
+                    }
+                ],
+                "behaviors": [],
+                "jargons": [],
+                "extraction_page": {"has_more": True},
+            },
+            ensure_ascii=False,
+        )
+        llm = SimpleNamespace(
+            generate_response_async=AsyncMock(side_effect=[(repeated_page, None), (repeated_page, None)])
+        )
+
+        result = await ChatHistoryLearner(llm=llm).extract_window_result(window, chat_name="测试群")
+
+        self.assertEqual(len(result.candidates.expressions), 1)
+        self.assertEqual(result.extraction_page_count, 2)
+        self.assertFalse(result.catalog_complete)
+        self.assertEqual(llm.generate_response_async.await_count, 2)
+
+    async def test_learning_counts_all_extraction_pages_and_reports_catalog_completeness(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner
+
+        first_page = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "遇到意外时",
+                        "style": "用短句表达强烈反应",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.85,
+                    }
+                ],
+                "behaviors": [],
+                "jargons": [],
+                "extraction_page": {"has_more": True},
+            },
+            ensure_ascii=False,
+        )
+        second_page = json.dumps(
+            {
+                "expressions": [
+                    {
+                        "situation": "给出建议时",
+                        "style": "先转折再给出简短动作",
+                        "evidence_ids": ["m1"],
+                        "confidence": 0.8,
+                    }
+                ],
+                "behaviors": [],
+                "jargons": [],
+                "extraction_page": {"has_more": False},
+            },
+            ensure_ascii=False,
+        )
+        consolidation = json.dumps(
+            {"expressions": [], "behaviors": [], "jargons": [], "memories": [], "profiles": []},
+            ensure_ascii=False,
+        )
+        llm = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                side_effect=[(first_page, None), (second_page, None), (consolidation, None)]
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(normalized, [make_message("m1", "这下真破防了，但还是先看日志")])
+
+            result = await ChatHistoryLearner(llm=llm).learn(
+                normalized,
+                chat_id="chat-1",
+                chat_name="测试群",
+                depth="full",
+                store=False,
+            )
+
+        self.assertEqual(result.model_call_count, 3)
+        self.assertTrue(result.candidate_catalog_complete)
+        self.assertEqual(result.incomplete_window_ids, ())
+
     def test_learning_result_serializes_catalog_and_runtime_candidates_separately(self) -> None:
         from src.bw_learner.history_learning import (
             ExpressionCandidate,

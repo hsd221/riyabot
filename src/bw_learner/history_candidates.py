@@ -359,6 +359,9 @@ class WindowContinuation:
 class HistoryWindowResult:
     candidates: HistoryCandidates
     continuation: WindowContinuation = WindowContinuation()
+    has_more_candidates: bool = False
+    extraction_page_count: int = 1
+    catalog_complete: bool = True
 
 
 def _clean_model_text(value: Any, *, minimum: int, maximum: int) -> str | None:
@@ -435,6 +438,11 @@ def _parse_window_continuation(
 
     reason = _clean_model_text(raw.get("reason"), minimum=1, maximum=240) or ""
     return WindowContinuation(needs_follow_up=True, tail_evidence_ids=tail_ids, reason=reason)
+
+
+def _parse_has_more_candidates(parsed: Mapping[str, Any]) -> bool:
+    raw = parsed.get("extraction_page")
+    return isinstance(raw, dict) and raw.get("has_more") is True
 
 
 def _load_model_object(response: str) -> dict[str, Any]:
@@ -658,6 +666,7 @@ def parse_history_window_result(
                     )
                 )
 
+    has_more_candidates = _parse_has_more_candidates(parsed)
     return HistoryWindowResult(
         candidates=HistoryCandidates(
             expressions=tuple(
@@ -689,6 +698,8 @@ def parse_history_window_result(
             ),
         ),
         continuation=_parse_window_continuation(parsed, evidence),
+        has_more_candidates=has_more_candidates,
+        catalog_complete=not has_more_candidates,
     )
 
 
