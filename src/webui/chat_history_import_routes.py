@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Annotated, Any, Callable, Literal, Optional
 
 from fastapi import APIRouter, Cookie, File, Header, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
 
 from src.bw_learner.history_enrichment import (
     find_history_profile_conflicts,
@@ -39,6 +38,41 @@ from src.webui.chat_history_candidate_catalog import (
     page_candidate_catalog,
     write_candidate_catalog,
 )
+from src.webui.chat_history_checkpoint import (
+    EXTRACTION_CHECKPOINT_FILENAME,
+    PENDING_RESULT_FILENAME,
+    PENDING_RESULT_TEMP_FILENAME,
+    HistoryCheckpointUnavailableError,
+    load_pending_learning_result,
+    remove_history_resume_artifacts,
+    write_pending_learning_result,
+)
+from src.webui.chat_history_import_schemas import (
+    MAX_PARTICIPANT_SELECTION_OVERRIDES as MAX_PARTICIPANT_SELECTION_OVERRIDES,
+    ChatHistoryAnalysisResponse,
+    ChatHistoryCandidateListResponse,
+    ChatHistoryCandidatePagination,
+    ChatHistoryImportDeleteResponse,
+    ChatHistoryImportListResponse,
+    ChatHistoryImportProgress,
+    ChatHistoryImportResponse,
+    ChatHistoryImportResume,
+    ChatHistoryImportStartRequest,
+    ChatHistoryParticipantListResponse,
+    ChatHistoryParticipantPagination,
+    ChatHistoryParticipantScopeRequest as ChatHistoryParticipantScopeRequest,
+    ChatHistoryProfileDecisionRequest,
+    ImportedChatResponse as ImportedChatResponse,
+    ImportedParticipantResponse,
+)
+from src.webui.chat_history_resume import (
+    ExtractionCheckpointSession,
+    can_resume_task,
+    has_submitted_profile_decisions,
+    mark_task_failed,
+    store_core_candidates_once,
+    validate_learning_resume_artifacts,
+)
 from src.webui.error_utils import internal_server_error, log_exception_type
 
 
@@ -50,7 +84,6 @@ MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 MAX_CONCURRENT_IMPORTS = 1
 MAX_PARTICIPANT_PREVIEW = 30
-MAX_PARTICIPANT_SELECTION_OVERRIDES = 200
 _IMPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _KNOWN_TASK_FILES = (
     "source.json",
@@ -59,121 +92,13 @@ _KNOWN_TASK_FILES = (
     "result.json.tmp",
     "candidate_catalog.jsonl",
     "candidate_catalog.jsonl.tmp",
+    EXTRACTION_CHECKPOINT_FILENAME,
+    PENDING_RESULT_FILENAME,
+    PENDING_RESULT_TEMP_FILENAME,
 )
 _NON_CANCELLABLE_PROGRESS_STAGES = frozenset({"storing_catalog", "storing", "storing_enrichment"})
 _running_tasks: dict[str, asyncio.Task[None]] = {}
 _analyzing_import_ids: set[str] = set()
-
-
-class ImportedChatResponse(BaseModel):
-    name: str
-    source_id: str
-    chat_type: str
-    self_user_id: str
-
-
-class ImportedParticipantResponse(BaseModel):
-    source_id: str
-    name: str
-    card: str
-    message_count: int
-    is_bot: bool
-
-
-class ChatHistoryAnalysisResponse(BaseModel):
-    source_format: str
-    chat: ImportedChatResponse
-    total_messages: int
-    retained_messages: int
-    filtered_messages: int
-    noise_counts: dict[str, int]
-    participants: list[ImportedParticipantResponse]
-    participant_count: int = 0
-    eligible_participant_count: int = 0
-    start_timestamp: float | None
-    end_timestamp: float | None
-    total_window_count: int
-    estimated_model_call_note: str = ""
-
-
-class ChatHistoryImportProgress(BaseModel):
-    stage: str
-    current: int
-    total: int
-
-
-class ChatHistoryImportResponse(BaseModel):
-    import_id: str
-    source_name: str
-    source_size: int
-    status: str
-    chat_id: str | None
-    analysis: ChatHistoryAnalysisResponse | None
-    estimated_model_calls: dict[str, int]
-    progress: ChatHistoryImportProgress
-    options: dict[str, Any]
-    result: dict[str, Any] | None
-    error_message: str | None
-    created_at: float
-    updated_at: float
-    started_at: float | None
-    completed_at: float | None
-
-
-class ChatHistoryImportListResponse(BaseModel):
-    success: bool = True
-    data: list[ChatHistoryImportResponse]
-
-
-class ChatHistoryParticipantScopeRequest(BaseModel):
-    mode: Literal["all", "custom"] = "all"
-    included_ids: list[str] = Field(default_factory=list, max_length=MAX_PARTICIPANT_SELECTION_OVERRIDES)
-    excluded_ids: list[str] = Field(default_factory=list, max_length=MAX_PARTICIPANT_SELECTION_OVERRIDES)
-
-
-class ChatHistoryImportStartRequest(BaseModel):
-    depth: Literal["fast", "balanced", "deep", "full"] = "balanced"
-    participant_ids: list[str] = Field(default_factory=list, max_length=MAX_PARTICIPANT_SELECTION_OVERRIDES)
-    participant_scope: ChatHistoryParticipantScopeRequest | None = None
-    extract_memories: bool = False
-    update_profiles: bool = False
-
-
-class ChatHistoryImportDeleteResponse(BaseModel):
-    success: bool
-    message: str
-
-
-class ChatHistoryParticipantPagination(BaseModel):
-    page: int
-    page_size: int
-    total_items: int
-    total_pages: int
-
-
-class ChatHistoryParticipantListResponse(BaseModel):
-    data: list[ImportedParticipantResponse]
-    pagination: ChatHistoryParticipantPagination
-
-
-class ChatHistoryCandidatePagination(BaseModel):
-    page: int
-    page_size: int
-    total_items: int
-    total_pages: int
-
-
-class ChatHistoryCandidateListResponse(BaseModel):
-    kind: Literal["expressions", "behaviors", "jargons", "memories", "profiles"]
-    data: list[dict[str, Any]]
-    pagination: ChatHistoryCandidatePagination
-
-
-class ChatHistoryProfileDecisionRequest(BaseModel):
-    decisions: dict[str, Literal["keep_existing", "apply_imported"]] = Field(
-        default_factory=dict,
-        max_length=100,
-    )
 
 
 def verify_auth_token(maibot_session: Optional[str] = None, authorization: Optional[str] = None) -> bool:
@@ -230,8 +155,16 @@ def _load_json_object(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _can_resume_task(task: ChatHistoryImportTask, options: dict[str, Any]) -> bool:
+    try:
+        return can_resume_task(task, _task_dir(task.import_id), options)
+    except ValueError:
+        return False
+
+
 def _task_to_response(task: ChatHistoryImportTask) -> ChatHistoryImportResponse:
     analysis = _load_json_object(task.analysis_json)
+    options = _load_json_object(task.options_json)
     estimates = analysis.pop("estimated_model_calls", {})
     participants = analysis.get("participants", [])
     if isinstance(participants, list):
@@ -255,7 +188,13 @@ def _task_to_response(task: ChatHistoryImportTask) -> ChatHistoryImportResponse:
             current=max(0, task.progress_current),
             total=max(1, task.progress_total),
         ),
-        options=_load_json_object(task.options_json),
+        resume=ChatHistoryImportResume(
+            can_resume=_can_resume_task(task, options),
+            stage=task.resume_stage,
+            completed_windows=max(0, task.checkpoint_window_count),
+            attempt_count=max(0, task.attempt_count),
+        ),
+        options=options,
         result=result,
         error_message=task.error_message,
         created_at=task.created_at,
@@ -356,15 +295,19 @@ def _reconcile_interrupted_task(task: ChatHistoryImportTask) -> None:
     is_interrupted_learning = task.status == "running" and task.import_id not in _running_tasks
     if not (is_interrupted_analysis or is_interrupted_learning):
         return
-    _cleanup_task_files(task.import_id, remove_directory=False)
-    task.status = "failed"
-    task.progress_stage = "failed"
-    task.error_message = "任务因服务重启而中断，请删除后重新导入"
-    task.source_path = ""
-    task.normalized_path = ""
-    task.updated_at = time.time()
-    task.completed_at = task.updated_at
-    task.save()
+    if is_interrupted_analysis:
+        _cleanup_task_files(task.import_id, remove_directory=False)
+        task.source_path = ""
+        task.normalized_path = ""
+        mark_task_failed(task, "任务在文件分析时因服务重启而中断，请删除后重新导入", resume_stage="analyzing")
+        return
+
+    resume_stage = "profile_commit" if has_submitted_profile_decisions(task) else task.progress_stage
+    mark_task_failed(
+        task,
+        "任务因服务重启而中断，已保留最近断点，可以继续执行",
+        resume_stage=resume_stage,
+    )
 
 
 @router.post("", response_model=ChatHistoryImportResponse)
@@ -596,12 +539,15 @@ def _mark_task_cancelled(import_id: str, normalized_path: Path) -> None:
     ChatHistoryImportTask.update(
         status="cancelled",
         progress_stage="cancelled",
+        resume_stage=None,
+        checkpoint_window_count=0,
         error_message=None,
         normalized_path="",
         updated_at=now,
         completed_at=now,
     ).where(ChatHistoryImportTask.import_id == import_id).execute()
     normalized_path.unlink(missing_ok=True)
+    remove_history_resume_artifacts(_task_dir(import_id))
 
 
 async def _commit_learning_result(
@@ -621,28 +567,41 @@ async def _commit_learning_result(
     if should_cancel and should_cancel():
         raise HistoryLearningCancelled("聊天记录学习已取消")
     await _update_progress(import_id, "storing", 0, 1)
-    store_result = store_history_candidates(task.chat_id or "", candidates, evidence)
+    store_core_candidates_once(
+        task=task,
+        result_payload=result_payload,
+        candidates=candidates,
+        evidence=evidence,
+        store_candidates=store_history_candidates,
+    )
     await _update_progress(import_id, "storing", 1, 1)
-    result_payload["store_result"] = {
-        "created": store_result.created,
-        "updated": store_result.updated,
-    }
     result_payload["enrichment_store_result"] = None
     if options.get("extract_memories") is True or options.get("update_profiles") is True:
-        enrichment_result = await store_history_enrichment(
-            import_id=import_id,
-            chat_id=task.chat_id or "",
-            group_id=task.group_id or "",
-            chat_name=task.chat_name or task.group_id or "群聊",
-            candidates=candidates,
-            evidence=evidence,
-            extract_memories=options.get("extract_memories") is True,
-            update_profiles=options.get("update_profiles") is True,
-            profile_decisions=profile_decisions,
-            progress=lambda stage, current, total: _update_progress(import_id, stage, current, total),
-            should_cancel=should_cancel,
-        )
-        result_payload["enrichment_store_result"] = enrichment_result.to_json()
+        current_task = ChatHistoryImportTask.get_by_id(task.id)
+        persisted_payload = _load_json_object(current_task.result_json)
+        persisted_enrichment_result = persisted_payload.get("enrichment_store_result")
+        if current_task.enrichment_store_completed and isinstance(persisted_enrichment_result, dict):
+            result_payload["enrichment_store_result"] = persisted_enrichment_result
+        else:
+            enrichment_result = await store_history_enrichment(
+                import_id=import_id,
+                chat_id=task.chat_id or "",
+                group_id=task.group_id or "",
+                chat_name=task.chat_name or task.group_id or "群聊",
+                candidates=candidates,
+                evidence=evidence,
+                extract_memories=options.get("extract_memories") is True,
+                update_profiles=options.get("update_profiles") is True,
+                profile_decisions=profile_decisions,
+                progress=lambda stage, current, total: _update_progress(import_id, stage, current, total),
+                should_cancel=should_cancel,
+            )
+            result_payload["enrichment_store_result"] = enrichment_result.to_json()
+            ChatHistoryImportTask.update(
+                enrichment_store_completed=True,
+                result_json=json.dumps(result_payload, ensure_ascii=False, separators=(",", ":")),
+                updated_at=time.time(),
+            ).where(ChatHistoryImportTask.import_id == import_id).execute()
 
     _write_result(import_id, result_payload)
     now = time.time()
@@ -652,11 +611,14 @@ async def _commit_learning_result(
         progress_stage="completed",
         progress_current=1,
         progress_total=1,
+        resume_stage=None,
+        checkpoint_window_count=0,
         normalized_path="",
         updated_at=now,
         completed_at=now,
     ).where(ChatHistoryImportTask.import_id == import_id).execute()
     normalized_path.unlink(missing_ok=True)
+    remove_history_resume_artifacts(_task_dir(import_id))
     return result_payload
 
 
@@ -680,53 +642,63 @@ async def _run_learning(import_id: str) -> None:
         return current is None or bool(current.cancel_requested)
 
     try:
-        result = await ChatHistoryLearner().learn(
-            normalized_path,
-            chat_id=task.chat_id or "",
-            chat_name=task.chat_name or task.group_id or "群聊",
-            depth=str(options.get("depth") or "balanced"),
-            eligible_sender_ids=eligible_sender_ids,
-            excluded_sender_ids=excluded_sender_ids,
-            store=False,
-            progress=lambda stage, current, total: _update_progress(import_id, stage, current, total),
-            should_cancel=should_cancel,
-            extract_memories=extract_memories,
-            update_profiles=update_profiles,
-        )
-        if isinstance(result, HistoryLearningResult):
-            result_payload = result.to_json(include_candidate_catalog=False)
-        else:
-            result_payload = result.to_json()
-        candidate_catalog = getattr(result, "candidate_catalog", None)
-        if not isinstance(candidate_catalog, HistoryCandidates):
-            runtime_candidates = getattr(result, "candidates", None)
-            candidate_catalog = (
-                runtime_candidates
-                if isinstance(runtime_candidates, HistoryCandidates)
-                else history_candidates_from_json(
-                    result_payload.get("candidate_catalog") or result_payload.get("candidates")
-                )
+        task_dir = _task_dir(import_id)
+        result_payload = await asyncio.to_thread(load_pending_learning_result, task_dir)
+        if result_payload is None:
+            checkpoint_session = await ExtractionCheckpointSession.load(task, task_dir, options)
+
+            result = await ChatHistoryLearner().learn(
+                normalized_path,
+                chat_id=task.chat_id or "",
+                chat_name=task.chat_name or task.group_id or "群聊",
+                depth=str(options.get("depth") or "balanced"),
+                eligible_sender_ids=eligible_sender_ids,
+                excluded_sender_ids=excluded_sender_ids,
+                store=False,
+                progress=lambda stage, current, total: _update_progress(import_id, stage, current, total),
+                should_cancel=should_cancel,
+                extract_memories=extract_memories,
+                update_profiles=update_profiles,
+                resume_checkpoints=checkpoint_session.checkpoints,
+                checkpoint_callback=checkpoint_session.persist,
             )
-        if should_cancel():
-            raise HistoryLearningCancelled("聊天记录学习已取消")
-        await _update_progress(import_id, "storing_catalog", 0, 1)
-        result_payload["candidate_catalog"] = await asyncio.to_thread(
-            write_candidate_catalog,
-            _task_dir(import_id),
-            candidate_catalog,
-            complete=bool(getattr(result, "candidate_catalog_complete", True)),
-            incomplete_window_ids=tuple(getattr(result, "incomplete_window_ids", ())),
-        )
-        await _update_progress(import_id, "storing_catalog", 1, 1)
-        result_payload["enrichment_store_result"] = None
-        if update_profiles and result.candidates.profiles:
+            if isinstance(result, HistoryLearningResult):
+                result_payload = result.to_json(include_candidate_catalog=False)
+            else:
+                result_payload = result.to_json()
+            candidate_catalog = getattr(result, "candidate_catalog", None)
+            if not isinstance(candidate_catalog, HistoryCandidates):
+                runtime_candidates = getattr(result, "candidates", None)
+                candidate_catalog = (
+                    runtime_candidates
+                    if isinstance(runtime_candidates, HistoryCandidates)
+                    else history_candidates_from_json(
+                        result_payload.get("candidate_catalog") or result_payload.get("candidates")
+                    )
+                )
+            if should_cancel():
+                raise HistoryLearningCancelled("聊天记录学习已取消")
+            await _update_progress(import_id, "storing_catalog", 0, 1)
+            result_payload["candidate_catalog"] = await asyncio.to_thread(
+                write_candidate_catalog,
+                task_dir,
+                candidate_catalog,
+                complete=bool(getattr(result, "candidate_catalog_complete", True)),
+                incomplete_window_ids=tuple(getattr(result, "incomplete_window_ids", ())),
+            )
+            await _update_progress(import_id, "storing_catalog", 1, 1)
+            result_payload["enrichment_store_result"] = None
+            await asyncio.to_thread(write_pending_learning_result, task_dir, result_payload)
+
+        runtime_candidates = history_candidates_from_json(result_payload.get("candidates"))
+        if update_profiles and runtime_candidates.profiles:
             profile_evidence = await asyncio.to_thread(
                 load_history_enrichment_evidence,
                 normalized_path,
-                result.candidates,
+                runtime_candidates,
             )
             conflicts = find_history_profile_conflicts(
-                candidates=result.candidates,
+                candidates=runtime_candidates,
                 evidence=profile_evidence,
                 group_id=task.group_id or "",
                 chat_name=task.chat_name or task.group_id or "群聊",
@@ -741,9 +713,12 @@ async def _run_learning(import_id: str) -> None:
                     progress_stage="awaiting_profile_review",
                     progress_current=0,
                     progress_total=1,
+                    resume_stage=None,
+                    checkpoint_window_count=0,
                     normalized_path=str(normalized_path),
                     updated_at=now,
                 ).where(ChatHistoryImportTask.import_id == import_id).execute()
+                remove_history_resume_artifacts(task_dir)
                 return
         await _commit_learning_result(
             import_id=import_id,
@@ -759,17 +734,14 @@ async def _run_learning(import_id: str) -> None:
         _mark_task_cancelled(import_id, normalized_path)
     except Exception as error:
         log_exception_type(logger, "聊天记录后台学习失败", error, import_id=import_id)
-        _cleanup_task_files(import_id, remove_directory=False)
-        now = time.time()
-        ChatHistoryImportTask.update(
-            status="failed",
-            progress_stage="failed",
-            error_message="学习失败，请检查模型配置和服务日志",
-            source_path="",
-            normalized_path="",
-            updated_at=now,
-            completed_at=now,
-        ).where(ChatHistoryImportTask.import_id == import_id).execute()
+        current = ChatHistoryImportTask.get_or_none(ChatHistoryImportTask.import_id == import_id)
+        if current is not None:
+            message = (
+                "学习断点损坏，无法安全继续，请删除任务后重新导入"
+                if isinstance(error, HistoryCheckpointUnavailableError)
+                else "学习失败，已保留最近断点；请检查模型配置和服务日志后继续"
+            )
+            mark_task_failed(current, message, resume_stage=current.progress_stage)
 
 
 async def _run_profile_decisions(import_id: str) -> None:
@@ -801,17 +773,13 @@ async def _run_profile_decisions(import_id: str) -> None:
         _mark_task_cancelled(import_id, normalized_path)
     except Exception as error:
         log_exception_type(logger, "聊天记录画像决策写入失败", error, import_id=import_id)
-        _cleanup_task_files(import_id, remove_directory=False)
-        now = time.time()
-        ChatHistoryImportTask.update(
-            status="failed",
-            progress_stage="failed",
-            error_message="画像决策写入失败，请检查服务日志",
-            source_path="",
-            normalized_path="",
-            updated_at=now,
-            completed_at=now,
-        ).where(ChatHistoryImportTask.import_id == import_id).execute()
+        current = ChatHistoryImportTask.get_or_none(ChatHistoryImportTask.import_id == import_id)
+        if current is not None:
+            mark_task_failed(
+                current,
+                "画像决策写入失败，已保留待提交结果；请检查服务日志后继续",
+                resume_stage="profile_commit",
+            )
 
 
 @router.post("/{import_id}/start", response_model=ChatHistoryImportResponse)
@@ -842,16 +810,24 @@ async def start_chat_history_import(
         "extract_memories": request_body.extract_memories,
         "update_profiles": request_body.update_profiles,
     }
+    remove_history_resume_artifacts(_task_dir(import_id))
     updated = (
         ChatHistoryImportTask.update(
             status="running",
             options_json=json.dumps(options, ensure_ascii=False, separators=(",", ":")),
+            result_json=None,
             error_message=None,
             progress_stage="queued",
             progress_current=0,
             progress_total=1,
+            resume_stage=None,
+            checkpoint_window_count=0,
+            attempt_count=1,
+            core_store_completed=False,
+            enrichment_store_completed=False,
             cancel_requested=False,
             started_at=now,
+            completed_at=None,
             updated_at=now,
         )
         .where((ChatHistoryImportTask.import_id == import_id) & (ChatHistoryImportTask.status == "ready"))
@@ -915,6 +891,62 @@ async def submit_chat_history_profile_decisions(
     if updated != 1:
         raise HTTPException(status_code=409, detail="画像决策已由其他请求提交")
     background = asyncio.create_task(_run_profile_decisions(import_id), name=f"chat-history-profile-{import_id}")
+    _running_tasks[import_id] = background
+    background.add_done_callback(lambda _task: _running_tasks.pop(import_id, None))
+    return _task_to_response(_get_task_or_404(import_id))
+
+
+@router.post("/{import_id}/resume", response_model=ChatHistoryImportResponse)
+async def resume_chat_history_import(
+    import_id: str,
+    maibot_session: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
+) -> ChatHistoryImportResponse:
+    verify_auth_token(maibot_session, authorization)
+    task = _get_task_or_404(import_id)
+    if task.status != "failed":
+        raise HTTPException(status_code=409, detail="只有失败的任务可以继续")
+    options = _load_json_object(task.options_json)
+    if not _can_resume_task(task, options):
+        raise HTTPException(status_code=409, detail="该任务没有可用的降噪记录，无法继续")
+    if _active_local_import_count() >= MAX_CONCURRENT_IMPORTS:
+        raise HTTPException(status_code=409, detail="已有聊天记录学习任务正在运行")
+
+    task_dir = _task_dir(import_id)
+    if task.resume_stage == "profile_commit":
+        if not has_submitted_profile_decisions(task):
+            raise HTTPException(status_code=409, detail="画像确认结果缺失，无法继续写入")
+    else:
+        try:
+            await asyncio.to_thread(validate_learning_resume_artifacts, task, task_dir, options)
+        except (HistoryCheckpointUnavailableError, CandidateCatalogUnavailableError) as error:
+            log_exception_type(logger, "聊天记录学习断点校验失败", error, import_id=import_id)
+            raise HTTPException(
+                status_code=409, detail="保存的断点已损坏，无法安全继续；请删除任务后重新导入"
+            ) from None
+
+    now = time.time()
+    updated = (
+        ChatHistoryImportTask.update(
+            status="running",
+            error_message=None,
+            progress_stage="resuming",
+            progress_current=0,
+            progress_total=1,
+            cancel_requested=False,
+            attempt_count=max(0, task.attempt_count) + 1,
+            completed_at=None,
+            updated_at=now,
+        )
+        .where((ChatHistoryImportTask.import_id == import_id) & (ChatHistoryImportTask.status == "failed"))
+        .execute()
+    )
+    if updated != 1:
+        raise HTTPException(status_code=409, detail="任务已由其他请求继续")
+
+    runner = _run_profile_decisions if task.resume_stage == "profile_commit" else _run_learning
+    task_name = f"chat-history-resume-{import_id}"
+    background = asyncio.create_task(runner(import_id), name=task_name)
     _running_tasks[import_id] = background
     background.add_done_callback(lambda _task: _running_tasks.pop(import_id, None))
     return _task_to_response(_get_task_or_404(import_id))

@@ -583,6 +583,8 @@ class ChatHistoryLearner:
         for window, following in _with_following_window(iter_history_windows(normalized_path, **options)):
             if window.window_id not in selected_window_id_set:
                 continue
+            if should_cancel and should_cancel():
+                raise HistoryLearningCancelled("聊天记录学习已取消")
             saved_checkpoint = checkpoints.get(window.window_id)
             if saved_checkpoint is not None:
                 extracted.append(saved_checkpoint.candidates)
@@ -591,8 +593,6 @@ class ChatHistoryLearner:
                 continuation_window_ids.extend(saved_checkpoint.continuation_window_ids)
                 incomplete_window_ids.extend(saved_checkpoint.incomplete_window_ids)
                 continue
-            if should_cancel and should_cancel():
-                raise HistoryLearningCancelled("聊天记录学习已取消")
             window_result: HistoryWindowResult | None = None
             continuation: HistoryWindow | None = None
             window_candidates_parts: list[HistoryCandidates] = []

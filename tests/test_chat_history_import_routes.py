@@ -632,6 +632,8 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         task = self.model.get()
         task.status = "running"
         task.progress_stage = "extracting"
+        task.options_json = json.dumps({"depth": "full"})
+        task.attempt_count = 1
         task.save()
 
         recovered = await self.routes.get_chat_history_import(response.import_id, None, None)
@@ -639,10 +641,12 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recovered.status, "failed")
         self.assertEqual(recovered.progress.stage, "failed")
         self.assertIn("服务重启", recovered.error_message)
-        self.assertFalse((self.root / response.import_id / "normalized.jsonl").exists())
-        self.assertEqual(self.model.get().normalized_path, "")
+        self.assertTrue(recovered.resume.can_resume)
+        self.assertEqual(recovered.resume.stage, "extracting")
+        self.assertTrue((self.root / response.import_id / "normalized.jsonl").exists())
+        self.assertNotEqual(self.model.get().normalized_path, "")
 
-    async def test_failed_learning_removes_normalized_chat_text(self) -> None:
+    async def test_failed_learning_retains_normalized_chat_for_resume(self) -> None:
         response = await self._upload()
 
         class FailingLearner:
@@ -660,8 +664,216 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
 
         task = self.model.get()
         self.assertEqual(task.status, "failed")
-        self.assertEqual(task.normalized_path, "")
-        self.assertFalse((self.root / response.import_id / "normalized.jsonl").exists())
+        self.assertNotEqual(task.normalized_path, "")
+        self.assertTrue((self.root / response.import_id / "normalized.jsonl").exists())
+        detail = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertTrue(detail.resume.can_resume)
+
+    async def test_resume_rejects_corrupt_checkpoint_without_mutating_failed_task(self) -> None:
+        response = await self._upload()
+        task = self.model.get()
+        task.status = "failed"
+        task.options_json = json.dumps({"depth": "full"})
+        task.resume_stage = "extracting"
+        task.attempt_count = 1
+        task.save()
+        checkpoint_path = self.root / response.import_id / "extraction_checkpoints.jsonl"
+        checkpoint_path.write_text('{"version":1,"broken":true}\n', encoding="utf-8")
+
+        with self.assertRaises(HTTPException) as rejected:
+            await self.routes.resume_chat_history_import(response.import_id, None, None)
+
+        self.assertEqual(rejected.exception.status_code, 409)
+        failed = self.model.get_by_id(task.id)
+        self.assertEqual(failed.status, "failed")
+        self.assertEqual(failed.attempt_count, 1)
+        self.assertNotIn(response.import_id, self.routes._running_tasks)
+
+    async def test_failed_learning_resumes_with_persisted_window_checkpoints(self) -> None:
+        from src.bw_learner.history_learning import (
+            HistoryCandidates,
+            HistoryLearningResult,
+            HistoryWindowCheckpoint,
+        )
+
+        response = await self._upload()
+
+        class CheckpointingFailure:
+            async def learn(self, _path, **kwargs):
+                checkpoint = HistoryWindowCheckpoint(
+                    window_id="window-000001",
+                    candidates=HistoryCandidates(),
+                    model_call_count=1,
+                )
+                await kwargs["checkpoint_callback"](checkpoint)
+                raise RuntimeError("model unavailable")
+
+        with patch.object(self.routes, "ChatHistoryLearner", return_value=CheckpointingFailure()):
+            await self.routes.start_chat_history_import(
+                response.import_id,
+                self.routes.ChatHistoryImportStartRequest(depth="full"),
+                None,
+                None,
+            )
+            await self.routes._running_tasks[response.import_id]
+
+        failed = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(failed.status, "failed")
+        self.assertTrue(failed.resume.can_resume)
+        self.assertEqual(failed.resume.completed_windows, 1)
+        self.assertTrue((self.root / response.import_id / "extraction_checkpoints.jsonl").exists())
+
+        captured_resume = {}
+
+        class ResumingLearner:
+            async def learn(self, _path, **kwargs):
+                captured_resume.update(kwargs["resume_checkpoints"])
+                return HistoryLearningResult(
+                    candidates=HistoryCandidates(),
+                    total_window_count=1,
+                    selected_window_count=1,
+                    selected_window_ids=("window-000001",),
+                    model_call_count=1,
+                    store_result=None,
+                    candidate_catalog=HistoryCandidates(),
+                )
+
+        with patch.object(self.routes, "ChatHistoryLearner", return_value=ResumingLearner()):
+            resumed = await self.routes.resume_chat_history_import(response.import_id, None, None)
+            await self.routes._running_tasks[response.import_id]
+
+        self.assertEqual(resumed.status, "running")
+        self.assertEqual(list(captured_resume), ["window-000001"])
+        completed = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.resume.attempt_count, 2)
+        self.assertFalse((self.root / response.import_id / "extraction_checkpoints.jsonl").exists())
+
+    async def test_resume_after_catalog_write_reuses_pending_result_without_model_calls(self) -> None:
+        from src.bw_learner.history_learning import HistoryCandidates, HistoryLearningResult
+
+        response = await self._upload()
+
+        class CompletedLearner:
+            async def learn(self, _path, **_kwargs):
+                return HistoryLearningResult(
+                    candidates=HistoryCandidates(),
+                    total_window_count=1,
+                    selected_window_count=1,
+                    selected_window_ids=("window-000001",),
+                    model_call_count=2,
+                    store_result=None,
+                    candidate_catalog=HistoryCandidates(),
+                )
+
+        failing_commit = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        with (
+            patch.object(self.routes, "ChatHistoryLearner", return_value=CompletedLearner()),
+            patch.object(self.routes, "_commit_learning_result", failing_commit),
+        ):
+            await self.routes.start_chat_history_import(
+                response.import_id,
+                self.routes.ChatHistoryImportStartRequest(depth="full"),
+                None,
+                None,
+            )
+            await self.routes._running_tasks[response.import_id]
+
+        task_dir = self.root / response.import_id
+        self.assertEqual(self.model.get().status, "failed")
+        self.assertTrue((task_dir / "pending_result.json").exists())
+        self.assertTrue((task_dir / "candidate_catalog.jsonl").exists())
+
+        with patch.object(self.routes, "ChatHistoryLearner") as learner_factory:
+            await self.routes.resume_chat_history_import(response.import_id, None, None)
+            await self.routes._running_tasks[response.import_id]
+
+        learner_factory.assert_not_called()
+        completed = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(completed.status, "completed")
+        self.assertFalse((task_dir / "pending_result.json").exists())
+
+    async def test_failed_profile_commit_resumes_without_repeating_profile_review(self) -> None:
+        response = await self._upload()
+        task = self.model.get()
+        task.status = "awaiting_profile_review"
+        task.options_json = json.dumps({"depth": "full", "update_profiles": True})
+        task.attempt_count = 1
+        task.result_json = json.dumps(
+            {
+                "candidates": {
+                    "expressions": [],
+                    "behaviors": [],
+                    "jargons": [],
+                    "memories": [],
+                    "profiles": [],
+                },
+                "profile_review": {
+                    "conflicts": [{"profile_id": "qq:20001"}],
+                    "decisions": None,
+                },
+            }
+        )
+        task.save()
+
+        with patch.object(
+            self.routes,
+            "_commit_learning_result",
+            AsyncMock(side_effect=RuntimeError("profile store unavailable")),
+        ):
+            await self.routes.submit_chat_history_profile_decisions(
+                response.import_id,
+                self.routes.ChatHistoryProfileDecisionRequest(decisions={"qq:20001": "keep_existing"}),
+                None,
+                None,
+            )
+            await self.routes._running_tasks[response.import_id]
+
+        failed = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(failed.status, "failed")
+        self.assertEqual(failed.resume.stage, "profile_commit")
+
+        await self.routes.resume_chat_history_import(response.import_id, None, None)
+        await self.routes._running_tasks[response.import_id]
+
+        completed = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.resume.attempt_count, 2)
+
+    async def test_commit_skips_core_candidate_store_after_atomic_marker(self) -> None:
+        response = await self._upload()
+        task = self.model.get()
+        task.status = "running"
+        task.core_store_completed = True
+        task.result_json = json.dumps(
+            {
+                "candidates": {
+                    "expressions": [],
+                    "behaviors": [],
+                    "jargons": [],
+                    "memories": [],
+                    "profiles": [],
+                },
+                "store_result": {
+                    "created": {"expressions": 1, "behaviors": 0, "jargons": 0},
+                    "updated": {"expressions": 0, "behaviors": 0, "jargons": 0},
+                },
+            }
+        )
+        task.save()
+        result_payload = json.loads(task.result_json)
+
+        with patch.object(self.routes, "store_history_candidates") as store_candidates:
+            await self.routes._commit_learning_result(
+                import_id=response.import_id,
+                task=task,
+                normalized_path=self.root / response.import_id / "normalized.jsonl",
+                result_payload=result_payload,
+            )
+
+        store_candidates.assert_not_called()
+        completed = await self.routes.get_chat_history_import(response.import_id, None, None)
+        self.assertEqual(completed.result["store_result"]["created"]["expressions"], 1)
 
     async def test_delete_rejects_while_results_are_being_committed(self) -> None:
         response = await self._upload()
