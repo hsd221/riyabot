@@ -51,6 +51,13 @@ export interface ChatHistoryImportProgress {
   total: number
 }
 
+export interface ChatHistoryImportResume {
+  can_resume: boolean
+  stage: string | null
+  completed_windows: number
+  attempt_count: number
+}
+
 export interface ImportedExpressionCandidate {
   situation: string
   style: string
@@ -200,6 +207,7 @@ export interface ChatHistoryImportTask {
   analysis: ChatHistoryAnalysis | null
   estimated_model_calls: Record<ChatHistoryLearningDepth, number>
   progress: ChatHistoryImportProgress
+  resume: ChatHistoryImportResume
   options: {
     depth?: ChatHistoryLearningDepth
     participant_ids?: string[]

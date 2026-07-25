@@ -147,12 +147,20 @@ describe('Chat history import enrichment', () => {
     const pageSource = await Bun.file(
       new URL('../src/routes/resource/chat-history-import.tsx', import.meta.url)
     ).text()
+    const apiSource = await Bun.file(
+      new URL('../src/lib/chat-history-import-api.ts', import.meta.url)
+    ).text()
 
     expect(pageSource).toContain(
       "activeTask.status === 'failed' || activeTask.status === 'cancelled'"
     )
+    expect(pageSource).toContain('activeTask.resume.can_resume')
+    expect(pageSource).toContain('从断点继续')
+    expect(pageSource).toContain('已完成窗口')
+    expect(pageSource).toContain('onClick={handleResume}')
     expect(pageSource).toContain('删除任务记录')
     expect(pageSource).toContain('onClick={handleDelete}')
+    expect(apiSource).toContain('resumeChatHistoryImport')
   })
 
   it('labels the upload control and avoids skipping heading levels in alerts', async () => {

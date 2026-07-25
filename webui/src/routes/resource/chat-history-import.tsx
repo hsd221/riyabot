@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   MessageSquareText,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   Trash2,
   UploadCloud,
@@ -25,6 +26,7 @@ import {
   deleteChatHistoryImport,
   getChatHistoryImport,
   listChatHistoryImports,
+  resumeChatHistoryImport,
   startChatHistoryImport,
   submitChatHistoryProfileDecisions,
   uploadChatHistory,
@@ -61,6 +63,7 @@ const stageLabels: Record<string, string> = {
   analyzing: '正在解析和降噪',
   ready: '等待确认学习设置',
   queued: '已进入学习队列',
+  resuming: '正在校验断点并继续',
   extracting: '正在分窗口联合提取',
   consolidating: '正在跨窗口合并候选',
   storing_catalog: '正在保存完整候选目录',
@@ -124,6 +127,7 @@ export function ChatHistoryImportPage() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [resuming, setResuming] = useState(false)
   const [submittingProfiles, setSubmittingProfiles] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -311,6 +315,34 @@ export function ChatHistoryImportPage() {
       })
     } finally {
       setSubmittingProfiles(false)
+    }
+  }
+
+  const handleResume = async () => {
+    if (!activeTask || !activeTask.resume.can_resume) return
+    try {
+      setResuming(true)
+      const completedWindows = activeTask.resume.completed_windows
+      const updated = await resumeChatHistoryImport(activeTask.import_id)
+      setActiveTask(updated)
+      setTasks((current) =>
+        current.map((task) => (task.import_id === updated.import_id ? updated : task))
+      )
+      toast({
+        title: '任务已继续',
+        description:
+          completedWindows > 0
+            ? `已复用 ${formatNumber(completedWindows)} 个完整窗口的提取结果`
+            : '将从第一个未完成窗口重新尝试',
+      })
+    } catch (error) {
+      toast({
+        title: '继续失败',
+        description: error instanceof Error ? error.message : '无法从断点继续任务',
+        variant: 'destructive',
+      })
+    } finally {
+      setResuming(false)
     }
   }
 
@@ -662,11 +694,59 @@ export function ChatHistoryImportPage() {
                       {activeTask.error_message ?? '该任务没有产生学习结果。'}
                     </AlertDescription>
                   </Alert>
-                  <div className="flex justify-end">
-                    <Button variant="outline" onClick={handleDelete} disabled={deleting}>
+                  {activeTask.status === 'failed' && activeTask.resume.can_resume && (
+                    <div
+                      className="ios-group overflow-hidden"
+                      role="status"
+                      aria-live="polite"
+                      aria-atomic="true"
+                    >
+                      <div className="ios-row ios-row-plain">
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                            <RotateCcw className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-[16px] font-medium leading-6">
+                              可从断点继续
+                            </span>
+                            <span className="block text-[13px] leading-5 text-muted-foreground">
+                              {activeTask.resume.completed_windows > 0
+                                ? `已完成窗口 ${formatNumber(activeTask.resume.completed_windows)} 个，将从下一个窗口继续`
+                                : '尚无完整窗口，继续后会重试当前窗口'}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="ios-value whitespace-nowrap">
+                          第 {Math.max(1, activeTask.resume.attempt_count)} 次
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+                    <Button
+                      variant="outline"
+                      className="min-h-11"
+                      onClick={handleDelete}
+                      disabled={deleting || resuming}
+                    >
                       <Trash2 className="mr-2 h-4 w-4" />
                       删除任务记录
                     </Button>
+                    {activeTask.status === 'failed' && activeTask.resume.can_resume && (
+                      <Button
+                        className="min-h-11"
+                        onClick={handleResume}
+                        disabled={resuming || deleting}
+                      >
+                        {resuming ? (
+                          <LoaderCircle className="ios-spin-slow mr-2 h-4 w-4" />
+                        ) : (
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                        )}
+                        {resuming ? '正在继续' : '从断点继续'}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}

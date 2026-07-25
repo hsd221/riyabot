@@ -121,6 +121,16 @@ export async function startChatHistoryImport(
   return response.json()
 }
 
+export async function resumeChatHistoryImport(importId: string): Promise<ChatHistoryImportTask> {
+  const response = await fetchWithAuth(`${API_BASE}/${encodeURIComponent(importId)}/resume`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    throw await parseError(response, '继续聊天记录学习失败')
+  }
+  return response.json()
+}
+
 export async function submitChatHistoryProfileDecisions(
   importId: string,
   request: ChatHistoryProfileDecisionRequest
