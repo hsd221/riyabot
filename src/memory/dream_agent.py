@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from src.common.logger import get_logger
+from src.llm_models.embedding import embedding_source_hash
 from src.manager.async_task_manager import AsyncTask
 from src.memory.atom import (
     MemoryAtom as MemoryAtomDC,
@@ -39,6 +40,7 @@ from src.memory.schema import (
     memory_db,
 )
 from src.memory.forgetting import _safe_timestamp
+from src.memory.embedding_utils import generate_embedding
 from src.memory.store import MemoryStore
 
 logger = get_logger("memory.dream")
@@ -156,7 +158,7 @@ USER_MEMORY_SOFT_CAP: int = 120
 """单个主实体/用户默认活跃记忆软上限"""
 
 SOFT_CAP_BATCH_SIZE: int = 500
-"""单次软上限合并扫描的最大原子数量"""
+"""单次软上限合并最多归档的原子数量"""
 
 SOFT_CAP_SOURCE_PREFIX: str = "dream_soft_cap:"
 """软上限泛化摘要的 source_id 前缀"""
@@ -438,8 +440,8 @@ class DreamTask(AsyncTask):
             return active_count == 0
 
         except Exception as e:
-            logger.warning(f"空闲检测失败（默认允许执行梦境）: {e}")
-            return True  # 安全兜底：检测失败时允许梦境继续
+            logger.warning(f"空闲检测失败（跳过本轮梦境维护）: {e}")
+            return False
 
     # ── Phase 1: 记忆巩固 ─────────────────────────────────────────────
 
@@ -711,19 +713,18 @@ class DreamTask(AsyncTask):
                     stats["skipped"] += 1
                     continue
 
-                created = self._record_raw_candidate(record, significance)
-
-                self._mark_raw_triaged(record, route, significance, dream_run_id)
+                created = self._record_raw_candidate_and_mark_triaged(
+                    record,
+                    route,
+                    significance,
+                    dream_run_id,
+                )
                 if created:
                     stats[route] += 1
                 else:
                     stats["skipped"] += 1
             except Exception as e:
                 logger.warning("原始消息分诊失败 id=%s: %s", getattr(record, "id", "?"), e)
-                try:
-                    self._mark_raw_triaged(record, "skipped", 0.0, dream_run_id)
-                except Exception:
-                    pass
                 stats["skipped"] += 1
 
         if any(stats.values()):
@@ -827,21 +828,28 @@ class DreamTask(AsyncTask):
         """生成可追溯的原始消息来源 ID。"""
         return f"raw_message_archive:{record.id}"
 
-    def _record_raw_candidate(self, record: RawMessageArchive, significance: float) -> bool:
-        """将 raw message 留在候选层，等待后续交叉验证。"""
+    def _record_raw_candidate_and_mark_triaged(
+        self,
+        record: RawMessageArchive,
+        route: str,
+        significance: float,
+        dream_run_id: int | None = None,
+    ) -> bool:
+        """原子地写入候选并确认分诊状态，失败时保留 pending 供重试。"""
         source_id = self._raw_source_id(record)
-        if NoisePool.select().where(NoisePool.source_id == source_id).exists():
-            return False
-
+        created = False
         with memory_db.atomic():
-            NoisePool.create(
-                content=(record.content or "")[:200],
-                source_scene=self._raw_source_scene(record),
-                source_id=source_id,
-                significance=significance,
-                ttl_days=NOISE_CLEANUP_DAYS,
-            )
-        return True
+            if not NoisePool.select().where(NoisePool.source_id == source_id).exists():
+                NoisePool.create(
+                    content=(record.content or "")[:200],
+                    source_scene=self._raw_source_scene(record),
+                    source_id=source_id,
+                    significance=significance,
+                    ttl_days=NOISE_CLEANUP_DAYS,
+                )
+                created = True
+            self._mark_raw_triaged(record, route, significance, dream_run_id)
+        return created
 
     @staticmethod
     def _mark_raw_triaged(
@@ -1209,9 +1217,9 @@ class DreamTask(AsyncTask):
         较旧、可合并的碎片归档，并生成或更新一条 dream 来源的泛化摘要。
         """
         cap = soft_cap or USER_MEMORY_SOFT_CAP
-        limit = batch_size or SOFT_CAP_BATCH_SIZE
+        archive_limit = batch_size or SOFT_CAP_BATCH_SIZE
         stats = {"users_compacted": 0, "atoms_archived": 0, "summaries_created": 0, "summaries_updated": 0}
-        if cap <= 0:
+        if cap <= 0 or archive_limit <= 0:
             return stats
 
         try:
@@ -1220,7 +1228,6 @@ class DreamTask(AsyncTask):
                     MemoryAtomModel.select()
                     .where(MemoryAtomModel.status == "active")
                     .order_by(MemoryAtomModel.last_accessed_at.asc())
-                    .limit(limit)
                 )
         except Exception as e:
             logger.error(f"梦境软上限扫描失败: {e}")
@@ -1233,7 +1240,10 @@ class DreamTask(AsyncTask):
                 continue
             groups.setdefault(entity, []).append(atom_model)
 
+        remaining_archive_budget = archive_limit
         for entity, entity_atoms in groups.items():
+            if remaining_archive_budget <= 0:
+                break
             try:
                 existing_summary = self._get_soft_cap_summary(entity)
                 active_count = len(entity_atoms)
@@ -1251,7 +1261,7 @@ class DreamTask(AsyncTask):
                 archive_target = active_count - cap
                 if existing_summary is None:
                     archive_target += 1
-                archive_count = min(len(candidates), archive_target)
+                archive_count = min(len(candidates), archive_target, remaining_archive_budget)
                 if archive_count <= 0:
                     continue
 
@@ -1268,6 +1278,7 @@ class DreamTask(AsyncTask):
 
                 stats["users_compacted"] += 1
                 stats["atoms_archived"] += len(to_archive)
+                remaining_archive_budget -= len(to_archive)
                 if created:
                     stats["summaries_created"] += 1
                 else:
@@ -1424,23 +1435,27 @@ class DreamTask(AsyncTask):
         if callable(invalidate_bm25):
             invalidate_bm25()
 
-        try:
-            await self._store.qdrant.set_atom_payload(
-                atom_id,
-                {
-                    "content": content,
-                    "atom_type": AtomType.FACTUAL.value,
-                    "weight": weight,
-                    "importance": importance,
-                    "confidence": confidence,
-                    "status": "active",
-                    "source_scene": "dream",
-                    "source_id": source_id,
-                    "privacy_level": privacy_level,
-                },
-            )
-        except Exception:
-            pass
+        qdrant_payload = {
+            "atom_id": atom_id,
+            "atom_type": AtomType.FACTUAL.value,
+            "weight": weight,
+            "importance": importance,
+            "confidence": confidence,
+            "status": "active",
+            "source_scene": "dream",
+            "source_id": source_id,
+            "privacy_level": privacy_level,
+            "embedding_source_hash": embedding_source_hash(content),
+        }
+        embedding = await generate_embedding(content)
+        if not embedding:
+            raise RuntimeError(f"软上限摘要 embedding 生成失败: {atom_id}")
+        if not await self._store.qdrant.upsert_atom_vector(
+            point_id=atom_id,
+            vector=embedding,
+            payload=qdrant_payload,
+        ):
+            raise RuntimeError(f"软上限摘要 Qdrant 写入失败: {atom_id}")
 
         return summary, created
 
@@ -1463,16 +1478,8 @@ class DreamTask(AsyncTask):
                 output_summary=f"已被软上限泛化摘要 {summary_atom_id} 吸收",
                 confidence_decay=1.0,
             )
-            try:
-                await self._store.qdrant.set_atom_payload(
-                    atom.atom_id,
-                    {
-                        "status": "archived",
-                        "merged_into": summary_atom_id,
-                    },
-                )
-            except Exception:
-                pass
+            if not await self._store.qdrant.delete_atom_vector(atom.atom_id):
+                logger.warning("软上限归档原子向量删除失败 atom_id=%s", atom.atom_id)
 
     @staticmethod
     def _build_soft_cap_summary_content(entity: str, atoms: list[MemoryAtomModel]) -> str:
@@ -1645,7 +1652,10 @@ class DreamTask(AsyncTask):
                         try:
                             parsed = json.loads(atom_model.entities)
                             if isinstance(parsed, list):
-                                entities = [str(e) for e in parsed]
+                                for item in parsed:
+                                    entity = str(item).strip()
+                                    if entity and entity not in entities:
+                                        entities.append(entity)
                         except (json.JSONDecodeError, TypeError):
                             pass
                     atom_entities[atom_model.atom_id] = entities
@@ -1656,7 +1666,7 @@ class DreamTask(AsyncTask):
                     all_entities.update(ent_list)
 
                 entity_node_map: dict[str, int] = {}
-                for entity in all_entities:
+                for entity in sorted(all_entities):
                     nid = self._graph_store.find_or_create_node("entity", entity)
                     entity_node_map[entity] = nid
 
@@ -1911,21 +1921,32 @@ class DreamTask(AsyncTask):
                 entity_types[e].add(atom.atom_type)
                 entity_atoms[e].append(atom.atom_id)
 
-        # 检查哪些实体有多个 atom_type
+        # 检查哪些实体有多个 atom_type；相同实体、类型和来源原子集合只记录一次。
         for entity, types in entity_types.items():
-            if len(types) >= 2:
+            if len(types) < 2:
+                continue
+
+            source_atom_ids = sorted(set(entity_atoms[entity]))
+            content = f"跨日模式: 实体 '{entity}' 出现在 {len(types)} 种记忆类型中 ({', '.join(sorted(types))})"
+            source_atoms = json.dumps(source_atom_ids, ensure_ascii=False)
+            try:
+                with memory_db:
+                    existing = InsightPool.get_or_none(
+                        InsightPool.agent_name == "dream_weekly",
+                        InsightPool.content == content,
+                        InsightPool.source_atoms == source_atoms,
+                    )
+                    if existing is not None:
+                        continue
+                    InsightPool.create(
+                        content=content,
+                        source_atoms=source_atoms,
+                        agent_name="dream_weekly",
+                        confidence=0.5,
+                    )
                 patterns += 1
-                content = f"跨日模式: 实体 '{entity}' 出现在 {len(types)} 种记忆类型中 ({', '.join(sorted(types))})"
-                try:
-                    with memory_db:
-                        InsightPool.create(
-                            content=content,
-                            source_atoms=json.dumps(entity_atoms[entity], ensure_ascii=False),
-                            agent_name="dream_weekly",
-                            confidence=0.5,
-                        )
-                except Exception as e:
-                    logger.error(f"写入跨日模式到 InsightPool 失败: {e}")
+            except Exception as e:
+                logger.error(f"写入跨日模式到 InsightPool 失败: {e}")
 
         return patterns
 

@@ -35,12 +35,12 @@ class SystemRoutesTest(unittest.IsolatedAsyncioTestCase):
     async def test_restart_schedules_delayed_restart_without_exiting_current_process(self) -> None:
         scheduled = []
 
-        def fake_create_task(coro):
+        def fake_create_task(coro, **_kwargs):
             scheduled.append(coro)
             coro.close()
             return object()
 
-        with patch("asyncio.create_task", side_effect=fake_create_task):
+        with patch.object(system_routes, "spawn_background_task", side_effect=fake_create_task):
             response = await system_routes.restart_riyabot(_auth=True)
 
         self.assertTrue(response.success)
@@ -48,11 +48,11 @@ class SystemRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(scheduled), 1)
 
     async def test_restart_translates_scheduler_failures_to_http_500(self) -> None:
-        def failing_create_task(coro):
+        def failing_create_task(coro, **_kwargs):
             coro.close()
             raise RuntimeError("scheduler down")
 
-        with patch("asyncio.create_task", side_effect=failing_create_task):
+        with patch.object(system_routes, "spawn_background_task", side_effect=failing_create_task):
             with self.assertRaises(HTTPException) as exc:
                 await system_routes.restart_riyabot(_auth=True)
 

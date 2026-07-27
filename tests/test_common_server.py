@@ -41,14 +41,14 @@ class CommonServerTest(unittest.IsolatedAsyncioTestCase):
         fake_module.chat_bot = FakeChatBot()
         created_tasks = []
 
-        def fake_create_task(coro):
+        def fake_create_task(coro, **_kwargs):
             created_tasks.append(coro)
             coro.close()
             return SimpleNamespace(cancel=Mock())
 
         with (
             patch.dict(sys.modules, {"src.chat.message_receive.bot": fake_module}),
-            patch.object(common_server.asyncio, "create_task", side_effect=fake_create_task) as create_task,
+            patch.object(common_server, "spawn_background_task", side_effect=fake_create_task) as create_task,
         ):
             self.assertEqual(await endpoint({"message": "hello"}), {"status": "accepted"})
 

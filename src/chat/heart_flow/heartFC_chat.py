@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from rich.traceback import install
 
 from src.config.config import global_config
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.common.data_models.message_data_model import ReplyContentType
@@ -334,11 +335,11 @@ class HeartFChatting:
         async with prompt_manager.async_message_scope(self.chat_stream.context.get_template_name()):
             # 通过 MessageRecorder 统一提取消息并分发给 expression_learner 和 jargon_miner
             # 在 replyer 执行时触发，统一管理时间窗口，避免重复获取消息
-            asyncio.create_task(extract_and_distribute_messages(self.stream_id))
+            spawn_background_task(extract_and_distribute_messages(self.stream_id), name="message-distribute")
 
             # 异步归档原始消息到第0层
             if self.message_archiver is not None and recent_messages_list:
-                asyncio.create_task(self._archive_recent_messages(recent_messages_list))
+                spawn_background_task(self._archive_recent_messages(recent_messages_list), name="archive-messages")
 
             cycle_timers, thinking_id = self.start_cycle()
             logger.debug(

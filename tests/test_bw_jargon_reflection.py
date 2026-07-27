@@ -73,7 +73,7 @@ class JargonDatabaseTest(unittest.IsolatedAsyncioTestCase):
         miner = self.make_miner()
         scheduled = []
 
-        def fake_create_task(coro):
+        def fake_create_task(coro, **_kwargs):
             scheduled.append(coro)
             coro.close()
             return SimpleNamespace(cancel=Mock())
@@ -81,7 +81,7 @@ class JargonDatabaseTest(unittest.IsolatedAsyncioTestCase):
         fake_config = SimpleNamespace(expression=SimpleNamespace(all_global_jargon=False))
         with (
             patch.object(jargon_miner, "global_config", fake_config),
-            patch.object(jargon_miner.asyncio, "create_task", side_effect=fake_create_task),
+            patch.object(jargon_miner, "spawn_background_task", side_effect=fake_create_task),
         ):
             await miner.process_extracted_entries(
                 [

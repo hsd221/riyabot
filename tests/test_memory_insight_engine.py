@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from peewee import IntegrityError
+
 from src.memory.insight_engine import InsightEngine, _assoc_label, _atype_label, _display_name
 from src.memory.schema import (
     AtomAssociationModel,
@@ -115,6 +117,24 @@ class InsightEngineDatabaseTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(any("以共现关系为主" in insight["content"] for insight in insights))
 
+    def test_association_scan_ignores_edges_connected_to_archived_atoms(self) -> None:
+        create_atom("archived-hub", "factual", content="这条归档记忆不应继续形成洞见")
+        MemoryAtom.update(status="archived").where(MemoryAtom.atom_id == "archived-hub").execute()
+        for index in range(4):
+            leaf_id = f"active-leaf-{index}"
+            create_atom(leaf_id, "episodic")
+            AtomAssociationModel.create(
+                atom_a_id="archived-hub",
+                atom_b_id=leaf_id,
+                association_type="causal",
+                weight=0.8,
+                evidence_count=2,
+            )
+
+        insights = InsightEngine(object())._scan_association_network()
+
+        self.assertEqual(insights, [])
+
     def test_dream_synthesis_scan_summarizes_repeated_recent_themes(self) -> None:
         now = datetime.datetime.now()
         for index in range(3):
@@ -157,6 +177,89 @@ class InsightEngineDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.content for item in saved], ["原子洞察", "关联洞察"])
         self.assertEqual(saved[1].source_atoms, json.dumps(["atom-1"]))
         self.assertAlmostEqual(saved[1].confidence, 0.72)
+
+        with (
+            patch.object(engine, "_scan_atomic_patterns", return_value=[atomic]),
+            patch.object(engine, "_scan_profile_evolution", return_value=[]),
+            patch.object(engine, "_scan_association_network", return_value=[association]),
+            patch.object(engine, "_scan_dream_synthesis", return_value=[]),
+        ):
+            repeated = await engine.generate_monthly_insights()
+
+        self.assertEqual(repeated, [])
+        self.assertEqual(InsightPool.select().where(InsightPool.agent_name == "insight_engine").count(), 2)
+
+    async def test_generate_monthly_insights_normalizes_source_order_before_deduplication(self) -> None:
+        engine = InsightEngine(object())
+        first = {
+            "content": "来源顺序不应制造重复",
+            "source_atoms": json.dumps(["atom-b", "atom-a", "atom-a"]),
+            "confidence": 0.7,
+        }
+        second = {
+            "content": "来源顺序不应制造重复",
+            "source_atoms": json.dumps(["atom-a", "atom-b"]),
+            "confidence": 0.7,
+        }
+
+        with (
+            patch.object(engine, "_scan_atomic_patterns", side_effect=[[first], [second]]),
+            patch.object(engine, "_scan_profile_evolution", return_value=[]),
+            patch.object(engine, "_scan_association_network", return_value=[]),
+            patch.object(engine, "_scan_dream_synthesis", return_value=[]),
+        ):
+            first_saved = await engine.generate_monthly_insights()
+            second_saved = await engine.generate_monthly_insights()
+
+        self.assertEqual(first_saved, [first])
+        self.assertEqual(second_saved, [])
+        saved = InsightPool.get(InsightPool.agent_name == "insight_engine")
+        self.assertEqual(json.loads(saved.source_atoms), ["atom-a", "atom-b"])
+
+    def test_initialize_database_normalizes_existing_insights_and_adds_unique_identity_index(self) -> None:
+        memory_db.execute_sql("DROP INDEX IF EXISTS idx_insight_pool_identity")
+        InsightPool.create(
+            content="并发幂等洞见",
+            source_atoms=json.dumps(["atom-b", "atom-a", "atom-a"]),
+            agent_name="insight_engine",
+            confidence=0.6,
+        )
+        InsightPool.create(
+            content="并发幂等洞见",
+            source_atoms=json.dumps(["atom-a", "atom-b"]),
+            agent_name="insight_engine",
+            confidence=0.8,
+        )
+
+        initialize_database()
+
+        rows = list(InsightPool.select().where(InsightPool.content == "并发幂等洞见"))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(json.loads(rows[0].source_atoms), ["atom-a", "atom-b"])
+        self.assertEqual(rows[0].confidence, 0.8)
+        with self.assertRaises(IntegrityError):
+            InsightPool.create(
+                content="并发幂等洞见",
+                source_atoms=json.dumps(["atom-a", "atom-b"]),
+                agent_name="insight_engine",
+                confidence=0.4,
+            )
+
+    def test_unique_identity_index_treats_null_sources_as_same_identity(self) -> None:
+        InsightPool.create(
+            content="无来源洞见",
+            source_atoms=None,
+            agent_name="insight_engine",
+            confidence=0.6,
+        )
+
+        with self.assertRaises(IntegrityError):
+            InsightPool.create(
+                content="无来源洞见",
+                source_atoms=None,
+                agent_name="insight_engine",
+                confidence=0.7,
+            )
 
 
 class InsightEngineHelperTest(unittest.TestCase):

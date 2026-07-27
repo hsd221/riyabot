@@ -1,7 +1,10 @@
 import asyncio
 import base64
+import contextlib
 import hashlib
 import re
+from collections import OrderedDict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -14,6 +17,7 @@ from src.chat.utils.utils_image import (
     read_gif_description_cache,
 )
 from src.chat.utils.utils_voice import get_voice_text
+from src.common.background_tasks import spawn_background_task
 from src.common.database.database_model import Emoji, EmojiDescriptionCache, ImageDescriptions, Messages
 from src.common.logger import get_logger
 
@@ -45,10 +49,32 @@ class _MessageMediaRef:
     chat_id: str | None = None
 
 
-_media_task_states: dict[str, _MediaTaskState] = {}
-_message_media_refs: dict[str, list[_MessageMediaRef]] = {}
+# 下面两个结构是识别结果缓存，键（媒体哈希 / message_id）随消息量无限增长，
+# 必须设上界，否则长期运行的进程会把每条历史消息的媒体状态永久留在内存里。
+_MAX_TRACKED_MEDIA_TASKS = 2048
+_MAX_TRACKED_MESSAGES = 2048
+
+_media_task_states: "OrderedDict[str, _MediaTaskState]" = OrderedDict()
+_message_media_refs: "OrderedDict[str, list[_MessageMediaRef]]" = OrderedDict()
+# 回填锁则是纯粹的临时互斥，用引用计数在最后一个使用者退出时立即回收。
 _backfill_locks: dict[str, asyncio.Lock] = {}
+_backfill_lock_users: dict[str, int] = {}
 _media_analysis_semaphore = asyncio.Semaphore(3)
+
+
+def _trim_media_task_states() -> None:
+    """裁剪识别缓存，优先淘汰最旧且已结束的任务。"""
+    if len(_media_task_states) <= _MAX_TRACKED_MEDIA_TASKS:
+        return
+    # 正在识别中的条目不能淘汰：_run_media_task 结束后还要回写状态供复用。
+    evictable = [key for key, state in _media_task_states.items() if state.status != "processing"]
+    for key in evictable[: len(_media_task_states) - _MAX_TRACKED_MEDIA_TASKS]:
+        _media_task_states.pop(key, None)
+
+
+def _trim_message_media_refs() -> None:
+    while len(_message_media_refs) > _MAX_TRACKED_MESSAGES:
+        _message_media_refs.popitem(last=False)
 
 
 def _hash_media_data(media_data: str) -> str:
@@ -165,6 +191,8 @@ def _remember_message_ref(
     message_id = str(message_id)
     normalized_chat_id = str(chat_id or "").strip() or None
     refs = _message_media_refs.setdefault(message_id, [])
+    _message_media_refs.move_to_end(message_id)
+    _trim_message_media_refs()
     occurrence_index = sum(1 for ref in refs if ref.kind == state.kind and ref.chat_id == normalized_chat_id)
     refs.append(
         _MessageMediaRef(
@@ -179,23 +207,44 @@ def _remember_message_ref(
 
 def _schedule_placeholder_backfill(kind: str, message_id: str, result_text: str, occurrence_index: int) -> None:
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         logger.debug("当前没有运行中的事件循环，跳过媒体占位回填调度")
         return
-    loop.create_task(_backfill_message_placeholder(kind, message_id, result_text, occurrence_index))
+    # 必须持有强引用：事件循环只弱引用任务，丢弃返回值会让回填在执行中途被回收，
+    # 表现为图片/语音描述偶尔不落库。
+    spawn_background_task(
+        _backfill_message_placeholder(kind, message_id, result_text, occurrence_index),
+        name=f"media-backfill-{kind}",
+    )
 
 
-def _get_backfill_lock(message_id: str) -> asyncio.Lock:
+@contextlib.asynccontextmanager
+async def _backfill_lock(message_id: str) -> AsyncIterator[None]:
+    """按 message_id 串行化回填，并在最后一个使用者退出时回收锁。
+
+    锁只在回填期间有意义，若按 message_id 无限留存，每条含媒体的消息都会
+    永久占用一个 Lock 对象。引用计数的增减之间没有 await，不会与其他协程交错。
+    """
     lock = _backfill_locks.get(message_id)
     if lock is None:
         lock = asyncio.Lock()
         _backfill_locks[message_id] = lock
-    return lock
+    _backfill_lock_users[message_id] = _backfill_lock_users.get(message_id, 0) + 1
+    try:
+        async with lock:
+            yield
+    finally:
+        remaining = _backfill_lock_users.get(message_id, 1) - 1
+        if remaining > 0:
+            _backfill_lock_users[message_id] = remaining
+        else:
+            _backfill_lock_users.pop(message_id, None)
+            _backfill_locks.pop(message_id, None)
 
 
 async def _backfill_message_placeholder(kind: str, message_id: str, result_text: str, occurrence_index: int) -> None:
-    async with _get_backfill_lock(message_id):
+    async with _backfill_lock(message_id):
         for attempt in range(6):
             try:
                 message_record = (
@@ -230,7 +279,11 @@ async def _analyze_media(kind: str, media_data: str) -> Optional[str]:
 
 
 async def _run_media_task(task_key: str, media_data: str) -> None:
-    state = _media_task_states[task_key]
+    state = _media_task_states.get(task_key)
+    if state is None:
+        # 裁剪不会淘汰 processing 中的条目，走到这里说明状态已被外部清理，直接放弃。
+        logger.debug(f"媒体识别任务状态已不存在，跳过: {task_key}")
+        return
     try:
         async with _media_analysis_semaphore:
             result_text = await _analyze_media(state.kind, media_data)
@@ -274,6 +327,9 @@ def _schedule_media_task(
     if state is None:
         state = _MediaTaskState(kind=kind, media_hash=media_hash)
         _media_task_states[task_key] = state
+        _trim_media_task_states()
+    else:
+        _media_task_states.move_to_end(task_key)
 
     _remember_message_ref(message_id, task_key, state, chat_id)
 

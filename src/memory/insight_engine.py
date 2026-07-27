@@ -93,23 +93,44 @@ class InsightEngine:
         except Exception as e:
             logger.error("Scan 4 (梦境综合) 异常: %s", e)
 
-        # 写入 InsightPool
-        saved_count = 0
+        # 幂等写入 InsightPool，只返回本轮实际新增的洞见。
+        saved_insights: list[InsightItem] = []
         for insight in all_insights:
             try:
-                with memory_db:
+                content = str(insight["content"]).strip()
+                if not content:
+                    continue
+                source_atoms = insight.get("source_atoms")
+                if source_atoms:
+                    try:
+                        parsed_sources = json.loads(source_atoms)
+                        if isinstance(parsed_sources, list):
+                            source_atoms = json.dumps(
+                                sorted({str(atom_id) for atom_id in parsed_sources}),
+                                ensure_ascii=False,
+                            )
+                    except (TypeError, json.JSONDecodeError):
+                        pass
+                with memory_db.atomic():
+                    existing = InsightPool.get_or_none(
+                        InsightPool.agent_name == "insight_engine",
+                        InsightPool.content == content,
+                        InsightPool.source_atoms == source_atoms,
+                    )
+                    if existing is not None:
+                        continue
                     InsightPool.create(
-                        content=insight["content"],
-                        source_atoms=insight.get("source_atoms"),
+                        content=content,
+                        source_atoms=source_atoms,
                         agent_name="insight_engine",
                         confidence=insight.get("confidence", _DEFAULT_CONFIDENCE),
                     )
-                saved_count += 1
+                saved_insights.append(insight)
             except Exception as e:
                 logger.warning("写入洞察失败: %s", e)
 
-        logger.info("月度洞察: %d 条洞察已保存", saved_count)
-        return all_insights
+        logger.info("月度洞察: %d 条新洞察已保存", len(saved_insights))
+        return saved_insights
 
     # ── Scan 1: 原子模式发现 ────────────────────────────────────────────
 
@@ -281,7 +302,13 @@ class InsightEngine:
         insights: list[InsightItem] = []
 
         with memory_db:
-            associations = list(AtomAssociationModel.select())
+            active_atom_ids = MemoryAtomModel.select(MemoryAtomModel.atom_id).where(MemoryAtomModel.status == "active")
+            associations = list(
+                AtomAssociationModel.select().where(
+                    AtomAssociationModel.atom_a_id.in_(active_atom_ids),
+                    AtomAssociationModel.atom_b_id.in_(active_atom_ids),
+                )
+            )
             if not associations:
                 return insights
 

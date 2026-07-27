@@ -1,3 +1,4 @@
+import asyncio
 import json
 import math
 import tempfile
@@ -232,6 +233,34 @@ class BM25RetrievalTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([atom.atom_id for atom in results], ["target"])
 
+    async def test_bm25_equal_scores_use_newest_then_atom_id_for_stable_order(self) -> None:
+        """同分候选不能继承 set 的随机顺序，否则 RRF 排名会随进程重启漂移。"""
+        shared = {
+            "atom_type": "factual",
+            "content": "Alpha 发布代号",
+            "source_scene": "group_chat",
+            "status": "active",
+        }
+        MemoryAtomModel.create(
+            atom_id="older",
+            created_at=datetime(2026, 7, 1),
+            **shared,
+        )
+        MemoryAtomModel.create(
+            atom_id="newer-b",
+            created_at=datetime(2026, 7, 2),
+            **shared,
+        )
+        MemoryAtomModel.create(
+            atom_id="newer-a",
+            created_at=datetime(2026, 7, 2),
+            **shared,
+        )
+
+        results = await BM25Retriever(store=SimpleNamespace()).search("Alpha", top_k=10)
+
+        self.assertEqual([atom.atom_id for atom in results], ["newer-a", "newer-b", "older"])
+
     async def test_hybrid_search_handles_empty_query_empty_sides_and_weighted_rrf(self) -> None:
         retriever = BM25Retriever(store=SimpleNamespace())
         vector_atom = retrieved("vector")
@@ -423,6 +452,75 @@ class ForgettingManagerTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncio
 
         self.assertEqual(deleted, 1)
         self.assertEqual([call.args[0] for call in store.delete_atom.await_args_list], ["delete-ok", "delete-fail"])
+
+    async def test_purge_expired_archives_every_atom_before_hard_delete(self) -> None:
+        """硬删除的契约是"先归档再删除"，非 active 状态的原子不能绕过归档被直接抹掉。"""
+        create_memory_atom("archived-atom", weight=0.005, status="archived")
+        create_memory_atom("forgotten-atom", weight=0.005, status="forgotten")
+        store = SimpleNamespace(delete_atom=AsyncMock(return_value=True))
+        manager = ForgettingManager(store, delete_threshold=0.01)  # type: ignore[arg-type]
+
+        deleted = await manager._purge_expired()
+
+        self.assertEqual(deleted, 2)
+        archived_ids = {row.message_id for row in RawMessageArchive.select()}
+        self.assertEqual(archived_ids, {"archived-atom", "forgotten-atom"})
+
+    async def test_purge_expired_keeps_atom_when_archiving_fails(self) -> None:
+        """归档失败还继续硬删除，等于永久销毁数据；此时必须保留原子。"""
+        create_memory_atom("archive-broken", weight=0.005)
+        store = SimpleNamespace(delete_atom=AsyncMock(return_value=True))
+        manager = ForgettingManager(store, delete_threshold=0.01)  # type: ignore[arg-type]
+
+        with patch.object(manager, "_archive_one", side_effect=RuntimeError("磁盘写入失败")):
+            deleted = await manager._purge_expired()
+
+        self.assertEqual(deleted, 0)
+        store.delete_atom.assert_not_awaited()
+        self.assertTrue(MemoryAtomModel.select().where(MemoryAtomModel.atom_id == "archive-broken").exists())
+
+    async def test_archive_is_idempotent_for_already_archived_atom(self) -> None:
+        """归档表对 (stream_id, message_id, chat_type) 有唯一索引，重复归档不能抛异常。"""
+        create_memory_atom("twice", weight=0.005, content="原始内容")
+        store = SimpleNamespace(delete_atom=AsyncMock(return_value=True))
+        manager = ForgettingManager(store, delete_threshold=0.01)  # type: ignore[arg-type]
+
+        await manager.archive_atom(MemoryAtomModel.get_by_id("twice"))
+        forgotten = await manager.force_forget(["twice"])
+
+        rows = list(RawMessageArchive.select().where(RawMessageArchive.message_id == "twice"))
+        self.assertEqual(forgotten, 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(json.loads(rows[0].content)["content"], "原始内容")
+
+    async def test_run_sweep_skips_concurrent_invocation(self) -> None:
+        """ "忙则跳过"必须真的跳过：locked() 判断与加锁之间存在挂起点。"""
+        manager = ForgettingManager(SimpleNamespace())  # type: ignore[arg-type]
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def slow_decay() -> int:
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return 0
+
+        with (
+            patch.object(manager, "_decay_atoms", side_effect=slow_decay),
+            patch.object(manager, "_archive_faded", AsyncMock(return_value=0)),
+            patch.object(manager, "_purge_expired", AsyncMock(return_value=0)),
+        ):
+            first = asyncio.ensure_future(manager.run_sweep())
+            await started.wait()
+            second = await manager.run_sweep()
+            release.set()
+            await first
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(second, {"decayed": 0, "archived": 0, "deleted": 0})
+        self.assertFalse(manager._sweep_running)
 
     async def test_force_forget_archives_existing_atoms_before_store_delete(self) -> None:
         create_memory_atom("forget-me", weight=0.9, content="需要强制遗忘的内容")

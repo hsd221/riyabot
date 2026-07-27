@@ -32,6 +32,22 @@ def _validate_checkpoint_key(checkpoint_key: str) -> None:
         raise ValueError("invalid checkpoint key")
 
 
+def fsync_directory(directory: Path) -> None:
+    """把目录项刷盘，否则新建/改名后的文件在断电时可能整体丢失。"""
+
+    try:
+        descriptor = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        # 部分文件系统（如 Windows、某些网络盘）不支持目录 fsync，忽略即可。
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def append_extraction_checkpoint(
     task_dir: Path,
     checkpoint_key: str,
@@ -53,12 +69,15 @@ def append_extraction_checkpoint(
         raise HistoryCheckpointUnavailableError("corrupt")
 
     destination = task_dir / EXTRACTION_CHECKPOINT_FILENAME
+    is_new_file = not destination.exists()
     with destination.open("ab") as output:
         destination.chmod(0o600)
         output.write(payload)
         output.write(b"\n")
         output.flush()
         os.fsync(output.fileno())
+    if is_new_file:
+        fsync_directory(task_dir)
 
 
 def load_extraction_checkpoints(
@@ -117,6 +136,7 @@ def write_pending_learning_result(task_dir: Path, result: dict[str, Any]) -> Non
         output.flush()
         os.fsync(output.fileno())
     temporary.replace(destination)
+    fsync_directory(task_dir)
 
 
 def load_pending_learning_result(task_dir: Path) -> dict[str, Any] | None:

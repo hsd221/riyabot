@@ -4,6 +4,7 @@
 """
 
 import datetime
+import json
 import os
 
 from peewee import (
@@ -379,6 +380,24 @@ class VectorIndexState(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 15. 编码写入 Outbox
+# ---------------------------------------------------------------------------
+
+
+class PendingAtomWrite(BaseModel):
+    """已完成 Layer 2 校验、等待 Layer 3 提交的固定原子写入单元。"""
+
+    atom_id = TextField(primary_key=True)
+    stream_id = TextField(index=True)
+    payload = TextField()
+    created_at = DateTimeField(default=datetime.datetime.now)
+    updated_at = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        table_name = "pending_atom_writes"
+
+
+# ---------------------------------------------------------------------------
 # 模型注册表 & 自动建表
 # ---------------------------------------------------------------------------
 
@@ -397,6 +416,7 @@ MODELS = [
     AtomAssociationModel,
     DreamRun,
     VectorIndexState,
+    PendingAtomWrite,
 ]
 
 
@@ -453,6 +473,11 @@ def _ensure_indexes():
             "idx_conflict_status_created",
             "CREATE INDEX IF NOT EXISTS idx_conflict_status_created ON conflict_observations(status, created_at)",
         ),
+        (
+            "idx_insight_pool_identity",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_insight_pool_identity "
+            "ON insight_pool(agent_name, content, COALESCE(source_atoms, ''))",
+        ),
     ]
     for idx_name, ddl in index_defs:
         try:
@@ -507,6 +532,61 @@ def _dedupe_raw_message_archive() -> int:
 
     if removed:
         logger.warning("原始消息归档表已合并重复记录", removed=removed)
+    return removed
+
+
+def _normalize_insight_sources(source_atoms: str | None) -> str | None:
+    """规范洞见来源集合，使等价 JSON 在数据库中使用同一身份。"""
+    if source_atoms is None:
+        return None
+    try:
+        parsed = json.loads(source_atoms)
+    except (TypeError, json.JSONDecodeError):
+        return source_atoms
+    if not isinstance(parsed, list):
+        return source_atoms
+    return json.dumps(
+        sorted({str(source_id) for source_id in parsed}),
+        ensure_ascii=False,
+    )
+
+
+def _dedupe_insight_pool() -> int:
+    """规范化并合并历史重复洞见，确保唯一索引可安全创建。"""
+    if not memory_db.table_exists(InsightPool):
+        return 0
+
+    removed = 0
+    grouped: dict[tuple[str, str, str], list[tuple[InsightPool, str | None]]] = {}
+    rows = list(InsightPool.select().order_by(InsightPool.id.asc()))
+    for row in rows:
+        normalized_sources = _normalize_insight_sources(row.source_atoms)
+        identity = (
+            str(row.agent_name),
+            str(row.content),
+            normalized_sources or "",
+        )
+        grouped.setdefault(identity, []).append((row, normalized_sources))
+
+    for group in grouped.values():
+        keep, normalized_sources = group[0]
+        highest_confidence = max(row.confidence for row, _ in group)
+        for row, _ in group[1:]:
+            row.delete_instance()
+            removed += 1
+
+        changed_fields = []
+        if keep.source_atoms != normalized_sources:
+            keep.source_atoms = normalized_sources
+            changed_fields.append(InsightPool.source_atoms)
+        if keep.confidence != highest_confidence:
+            keep.confidence = highest_confidence
+            changed_fields.append(InsightPool.confidence)
+        if changed_fields:
+            keep.save(only=changed_fields)
+
+    if removed:
+        logger.warning("洞见池已合并重复记录", removed=removed)
     return removed
 
 
@@ -572,6 +652,7 @@ def create_tables():
         memory_db.create_tables(MODELS, safe=True)
         _ensure_columns()
         _dedupe_raw_message_archive()
+        _dedupe_insight_pool()
         _ensure_indexes()
     logger.info(f"记忆数据库表已创建: {_MEMORY_DB_FILE}")
 
@@ -587,6 +668,7 @@ def initialize_database():
                     logger.info(f"记忆表 '{model._meta.table_name}' 创建成功")
             _ensure_columns()
             _dedupe_raw_message_archive()
+            _dedupe_insight_pool()
             _ensure_indexes()
         logger.info("记忆数据库初始化完成")
     except Exception as e:

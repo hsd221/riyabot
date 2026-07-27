@@ -11,6 +11,7 @@ from src.chat.emoji_system.emoji_manager import get_emoji_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.config.config import CONFIG_DIR, global_config, get_created_config_files, model_config
 from src.chat.message_receive.bot import chat_bot
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.common.agreement import are_agreements_confirmed
 from src.common.prompt_manager import prompt_manager
@@ -141,7 +142,7 @@ class MainSystem:
 
         # 初始化聊天管理器
         await get_chat_manager()._initialize()
-        asyncio.create_task(get_chat_manager()._auto_save_task())
+        spawn_background_task(get_chat_manager()._auto_save_task(), name="chat-manager-auto-save")
 
         logger.info("聊天管理器初始化完成", event_code="chat.manager.initialized")
 

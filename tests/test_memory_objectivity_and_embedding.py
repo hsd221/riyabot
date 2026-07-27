@@ -111,6 +111,24 @@ class ObjectivityTextHelperTest(unittest.TestCase):
         self.assertTrue(check_contradiction("小明喜欢爵士乐", "小明不喜欢爵士乐"))
         self.assertFalse(check_contradiction("小明喜欢爵士乐", "小红喜欢摇滚乐"))
 
+    def test_bare_numbers_are_not_numeric_facts(self) -> None:
+        """裸数字没有单位可比：订单号、日期不能仅因数值不同就判成矛盾。"""
+        self.assertEqual(_extract_numeric_facts("订单编号 12345 已确认"), [])
+        self.assertEqual(_extract_numeric_facts("2026-07-26 小明来过"), [])
+        self.assertEqual(_extract_numeric_facts("小明取了 3 号"), [(3.0, "号")])
+        self.assertFalse(check_contradiction("订单编号 12345 已确认", "订单编号 999 已确认"))
+        self.assertFalse(check_contradiction("2026-07-26 小明来过", "2026-07-25 小明来过"))
+
+    def test_negation_removal_keeps_the_negated_predicate_and_is_deterministic(self) -> None:
+        """剥掉否定语素后要能和肯定说法对上，且不能受字符串哈希随机化影响。"""
+        self.assertEqual(_remove_negations("他不是学生"), "他是学生")
+        self.assertEqual(_remove_negations("他不可能来"), "他可能来")
+        self.assertEqual(_remove_negations("他没有钱"), "他有钱")
+        self.assertEqual(_remove_negations("他从不迟到"), "他迟到")
+        # 整词删掉"不是"会让 b 变成"他这个班的学生"，清洗后相似度掉到阈值以下，矛盾被漏掉
+        self.assertTrue(check_contradiction("他是这个班的学生", "他不是这个班的学生"))
+        self.assertTrue(check_contradiction("这件事他可能知道", "这件事他不可能知道"))
+
 
 class ObjectivityCheckerTest(MemoryObjectivityDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
     async def test_noise_self_consistency_confidence_and_recommendation_boundaries(self) -> None:
@@ -188,6 +206,15 @@ class ObjectivityCheckerTest(MemoryObjectivityDatabaseFixtureMixin, unittest.Iso
             {(conflict.existing_atom_id, conflict.conflict_type) for conflict in conflicts},
             {("duplicate", "duplicate"), ("contradiction", "contradiction")},
         )
+
+    async def test_conflict_candidates_only_include_active_atoms(self) -> None:
+        """已被仲裁归档的败方原子若还当候选，结案的矛盾会对每条新记忆反复触发。"""
+        store = FakeStore()
+        checker = ObjectivityChecker(store)  # type: ignore[arg-type]
+
+        await checker.detect_conflicts(make_atom())
+
+        self.assertEqual([call.get("status") for call in store.calls], ["active", "active"])
 
     async def test_check_before_write_records_noise_trace_and_persistent_conflict_rows(self) -> None:
         checker = ObjectivityChecker(FakeStore())  # type: ignore[arg-type]

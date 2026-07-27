@@ -139,6 +139,14 @@ class EncodingBuffer:
             self.messages = self.messages[-self.max_buffer_size :]
         return True
 
+    def acknowledge(self, processed_messages: list[BufferMessage]) -> None:
+        """只移除已成功编码的消息快照，保留积压和编码期间新到的消息。"""
+        processed_ids = {id(message) for message in processed_messages}
+        self.messages = [message for message in self.messages if id(message) not in processed_ids]
+        self.last_trigger_time = time.time()
+        # 触发计数应描述当前仍待编码的消息；历史溢出或已确认批次不能继续触发空转。
+        self.message_count_since_trigger = len(self.messages)
+
     def clear(self) -> None:
         """清空缓冲区但保留流状态"""
         self.messages.clear()
@@ -371,8 +379,9 @@ class BatchEncoder:
         )
         start_time = time.time()
 
-        # 1. 截取最近 N 条消息
-        messages = buf.messages[-self.max_messages_per_batch :]
+        # 1. 从最旧消息开始分批处理。若取最近 N 条后清空整个缓冲，较旧积压会永久丢失；
+        # 同时保留对象快照，以便 LLM await 期间新摄入的消息不会被成功确认误删。
+        messages = list(buf.messages[: self.max_messages_per_batch])
 
         # 2. 获取第1层话题摘要
         topic_summary = self._get_topic_summary(stream_id, buf.stream_type)
@@ -412,8 +421,8 @@ class BatchEncoder:
                 detail[SOURCE_IDENTITIES_DETAIL_KEY] = source_identities
                 detail[SOURCE_MESSAGE_IDS_DETAIL_KEY] = source_message_ids
 
-        # 6. 清空缓冲区
-        buf.clear()
+        # 6. 只确认本次成功编码的快照；积压批次和 LLM 调用期间的新消息留待下一轮。
+        buf.acknowledge(messages)
 
         elapsed = time.time() - start_time
         logger.info(

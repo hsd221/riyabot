@@ -477,6 +477,10 @@ class ChatHistoryLearner:
         """Reduce all candidates through bounded model batches until one final result remains."""
 
         current = candidates
+        if not current.total:
+            # 没有任何候选时再调用模型既浪费一次请求，也给了模型凭空编造候选的机会。
+            await _notify(progress, "consolidating", 1, 1)
+            return current, 0
         batches = _partition_consolidation_candidates(current, evidence)
         estimated_calls = max(1, len(batches) * 2 - 1)
         completed_calls = 0

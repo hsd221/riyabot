@@ -6,6 +6,7 @@ from typing import List, Dict, Optional, Callable
 from json_repair import repair_json
 from peewee import fn
 
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.common.database.database_model import Jargon
 from src.common.prompt_manager import prompt_manager
@@ -459,7 +460,7 @@ class JargonMiner:
                             # 异步触发推断，不阻塞主流程
                             # 重新加载对象以确保数据最新
                             jargon_id = obj.id
-                            asyncio.create_task(self._infer_meaning_by_id(jargon_id))
+                            spawn_background_task(self._infer_meaning_by_id(jargon_id), name="jargon-infer")
 
                         updated += 1
                     else:

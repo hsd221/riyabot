@@ -247,6 +247,7 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         media_background._media_task_states.clear()
         media_background._message_media_refs.clear()
         media_background._backfill_locks.clear()
+        media_background._backfill_lock_users.clear()
         self.db = SqliteDatabase(":memory:")
         self.models = [Messages, Images, ImageDescriptions, Emoji, EmojiDescriptionCache]
         self.original_dbs = {model: model._meta.database for model in self.models}
@@ -258,10 +259,57 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
         media_background._media_task_states.clear()
         media_background._message_media_refs.clear()
         media_background._backfill_locks.clear()
+        media_background._backfill_lock_users.clear()
         self.db.drop_tables(self.models)
         self.db.close()
         for model, database in self.original_dbs.items():
             model._meta.set_database(database)
+
+    async def test_backfill_lock_is_released_after_last_user_exits(self) -> None:
+        """回填锁按 message_id 创建，用完必须回收，否则每条含媒体的消息永久占一个 Lock。"""
+        async with media_background._backfill_lock("msg-1"):
+            self.assertIn("msg-1", media_background._backfill_locks)
+
+            # 嵌套使用者仍在时不能提前回收
+            async def nested() -> None:
+                async with media_background._backfill_lock("msg-1"):
+                    pass
+
+            waiter = asyncio.ensure_future(nested())
+            await asyncio.sleep(0)
+            self.assertEqual(media_background._backfill_lock_users["msg-1"], 2)
+
+        await waiter
+        self.assertEqual(media_background._backfill_locks, {})
+        self.assertEqual(media_background._backfill_lock_users, {})
+
+    def test_media_caches_are_bounded(self) -> None:
+        """识别缓存的键随消息量无限增长，必须有上界。"""
+        with (
+            patch.object(media_background, "_MAX_TRACKED_MEDIA_TASKS", 3),
+            patch.object(media_background, "_MAX_TRACKED_MESSAGES", 3),
+        ):
+            for index in range(10):
+                state = media_background._MediaTaskState(kind="image", media_hash=f"h{index}")
+                media_background._media_task_states[f"image:h{index}"] = state
+                media_background._trim_media_task_states()
+                media_background._remember_message_ref(f"msg-{index}", f"image:h{index}", state)
+
+            self.assertEqual(len(media_background._media_task_states), 3)
+            self.assertEqual(len(media_background._message_media_refs), 3)
+            # 保留的是最近使用的条目
+            self.assertEqual(list(media_background._message_media_refs), ["msg-7", "msg-8", "msg-9"])
+
+            # 识别中的任务不能被淘汰，否则 _run_media_task 回写时状态已消失
+            for key in list(media_background._media_task_states):
+                media_background._media_task_states[key].status = "processing"
+            for index in range(10, 14):
+                state = media_background._MediaTaskState(kind="image", media_hash=f"h{index}")
+                state.status = "processing"
+                media_background._media_task_states[f"image:h{index}"] = state
+                media_background._trim_media_task_states()
+
+            self.assertEqual(len(media_background._media_task_states), 7)
 
     def test_hash_format_and_placeholder_replacement_helpers_are_stable(self) -> None:
         encoded = base64.b64encode(b"image-bytes").decode()

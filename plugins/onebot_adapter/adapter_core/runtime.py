@@ -62,6 +62,9 @@ class OneBotAdapterRuntime:
         self._config_callback_registered = False
         self._active_connections: set[int] = set()
         self._identity_tasks: dict[int, asyncio.Task] = {}
+        # 通知处理器的初始化任务同样要按连接持有强引用：
+        # 事件循环只弱引用任务，丢弃返回值会让禁言列表拉取与三个常驻循环在启动途中被回收。
+        self._notice_setup_tasks: dict[int, asyncio.Task] = {}
         self._identity_retry_after: dict[int, float] = {}
         self._connected_at: float | None = None
         self._last_event_at: float | None = None
@@ -174,13 +177,43 @@ class OneBotAdapterRuntime:
             )
         self._active_connections.add(connection_id)
 
+    def _schedule_notice_setup(self, server_connection: object) -> None:
+        """启动通知处理器初始化，并按连接保留强引用直至连接关闭"""
+        connection_id = id(server_connection)
+        previous = self._notice_setup_tasks.get(connection_id)
+        if previous is not None and not previous.done():
+            return
+
+        task = asyncio.create_task(
+            notice_handler.set_server_connection(server_connection),
+            name=f"onebot_adapter.notice_setup.{connection_id}",
+        )
+        self._notice_setup_tasks[connection_id] = task
+
+        def clear_finished_task(done_task: asyncio.Task) -> None:
+            if self._notice_setup_tasks.get(connection_id) is done_task:
+                self._notice_setup_tasks.pop(connection_id, None)
+            if done_task.cancelled():
+                return
+            try:
+                error = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if error:
+                logger.warning(f"初始化 OneBot 通知处理器失败: error_type={type(error).__name__}")
+
+        task.add_done_callback(clear_finished_task)
+
     def _connection_closed(self, server_connection: object) -> None:
         connection_id = id(server_connection)
         self._active_connections.discard(connection_id)
         identity_task = self._identity_tasks.pop(connection_id, None)
+        notice_task = self._notice_setup_tasks.pop(connection_id, None)
         self._identity_retry_after.pop(connection_id, None)
         if identity_task and not identity_task.done():
             identity_task.cancel()
+        if notice_task and not notice_task.done():
+            notice_task.cancel()
         if not self._active_connections:
             self._connected_at = None
             get_adapter_identity_registry().unregister(ADAPTER_INSTANCE_ID)
@@ -331,7 +364,7 @@ class OneBotAdapterRuntime:
         self._connection_opened(server_connection)
         try:
             await message_handler.set_server_connection(server_connection)
-            asyncio.create_task(notice_handler.set_server_connection(server_connection))
+            self._schedule_notice_setup(server_connection)
             await nc_message_sender.set_server_connection(server_connection)
             self._schedule_identity_discovery(server_connection, "")
             async for raw_message in server_connection:

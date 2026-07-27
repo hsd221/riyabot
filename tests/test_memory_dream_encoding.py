@@ -13,7 +13,14 @@ from src.memory.dream_weaver import DreamWeaver, _escape_prompt_data, _validate_
 from src.memory.encoding_pipeline import EncodingPipeline, EncodingTask, get_encoding_pipeline
 from src.memory.layer2_encoder import SOURCE_USER_IDS_DETAIL_KEY
 from src.memory.user_profile import PersonIdentity
-from src.memory.schema import InsightPool, NoisePool, configure_memory_database, initialize_database, memory_db
+from src.memory.schema import (
+    InsightPool,
+    NoisePool,
+    PendingAtomWrite,
+    configure_memory_database,
+    initialize_database,
+    memory_db,
+)
 
 
 class MemoryDatabaseFixtureMixin:
@@ -53,7 +60,11 @@ class DreamWeaverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCa
 
         valid = _validate_insights(
             [
-                {"insight": "可能有弱关联", "confidence": 9.0, "noise_sources": [1, 2, "bad", -1]},
+                {
+                    "insight": "可能有弱关联",
+                    "confidence": 9.0,
+                    "noise_sources": [2, 1, 2, True, "bad", -1],
+                },
                 {"insight": "!!!", "noise_sources": [1, 2]},
                 {"insight": "只有一个来源", "noise_sources": [1]},
                 {"bad": "shape"},
@@ -91,7 +102,12 @@ class DreamWeaverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCa
                     "confidence": 0.5,
                     "noise_sources": [1, 3],
                 },
-                {"insight": "来源越界时仍应保存有效来源", "confidence": 0.7, "noise_sources": [2, 99]},
+                {
+                    "insight": "重复来源编号应被规范化后保存",
+                    "confidence": 0.7,
+                    "noise_sources": [2, 4, 2],
+                },
+                {"insight": "来源越界后不足两个时应跳过", "confidence": 0.7, "noise_sources": [2, 99]},
             ],
             ensure_ascii=False,
         )
@@ -107,8 +123,41 @@ class DreamWeaverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCa
         rows = list(InsightPool.select().order_by(InsightPool.id.asc()))
         self.assertEqual([row.agent_name for row in rows], ["dream_weaver", "dream_weaver"])
         self.assertEqual(json.loads(rows[0].source_atoms), [str(entries[0].id), str(entries[2].id)])
-        self.assertEqual(json.loads(rows[1].source_atoms), [str(entries[1].id)])
+        self.assertEqual(json.loads(rows[1].source_atoms), sorted([str(entries[1].id), str(entries[3].id)]))
         self.assertEqual(rows[1].confidence, 0.6)
+        self.assertEqual(saved[1]["noise_sources"], [2, 4])
+
+        with (
+            patch.object(weaver, "_query_noise_entries", return_value=entries),
+            patch.object(weaver, "_call_llm", new=AsyncMock(return_value=response)),
+        ):
+            repeated = await weaver.weave()
+
+        self.assertEqual(repeated, [])
+        self.assertEqual(InsightPool.select().where(InsightPool.agent_name == "dream_weaver").count(), 2)
+
+    async def test_weave_rejects_sources_outside_prompt_subset(self) -> None:
+        weaver = DreamWeaver(store=SimpleNamespace(), noise_retention_hours=72)
+        entries = [self.make_noise(f"素材{i}") for i in range(25)]
+        response = json.dumps(
+            [
+                {"insight": "不得引用未展示的第21条素材", "noise_sources": [1, 21]},
+                {"insight": "展示范围内的两个来源有效", "noise_sources": [1, 20]},
+            ],
+            ensure_ascii=False,
+        )
+
+        with (
+            patch.object(weaver, "_query_noise_entries", return_value=entries),
+            patch.object(weaver, "_call_llm", new=AsyncMock(return_value=response)),
+        ):
+            saved = await weaver.weave()
+
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["insight"], "展示范围内的两个来源有效")
+        row = InsightPool.get(InsightPool.agent_name == "dream_weaver")
+        self.assertEqual(json.loads(row.source_atoms), sorted([str(entries[0].id), str(entries[19].id)]))
+        self.assertNotIn(str(entries[20].id), json.loads(row.source_atoms))
 
     def test_query_noise_entries_filters_by_retention_window_and_handles_database_errors(self) -> None:
         recent = self.make_noise("recent", hours_ago=1)
@@ -121,6 +170,89 @@ class DreamWeaverTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCa
             self.assertEqual(weaver._query_noise_entries(), [])
 
 
+class EncodingPipelineOutboxTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTestCase):
+    def make_pipeline(self) -> EncodingPipeline:
+        pipeline = object.__new__(EncodingPipeline)
+        pipeline.encoder = SimpleNamespace(
+            buffers=[],
+            encode_all_ready=AsyncMock(return_value={}),
+            get_buffer=Mock(return_value=None),
+        )
+        pipeline.writer = SimpleNamespace(
+            store=SimpleNamespace(get_atom=AsyncMock(return_value=None)),
+            write_atom=AsyncMock(),
+        )
+        pipeline.trace_recorder = None
+        pipeline._pending_writes = []
+        pipeline._pending_loaded = False
+        pipeline._outbox_enabled = True
+        return pipeline
+
+    def make_pending(self, pipeline: EncodingPipeline, atom_id: str = "outbox-atom"):
+        atom, semantic_detail, episodic_detail = pipeline._build_atom(
+            content="user-1 喜欢爵士乐",
+            atom_type=AtomType.PREFERENCE,
+            detail={
+                "importance": 0.8,
+                "entities": ["user-1"],
+                SOURCE_USER_IDS_DETAIL_KEY: ["user-1"],
+                "attr_name": "music",
+                "attr_value": "jazz",
+            },
+            source_scene="group_chat",
+            source_id="stream-1",
+        )
+        atom.atom_id = atom_id
+        if semantic_detail is not None:
+            semantic_detail.atom_id = atom_id
+            atom.semantic_detail = semantic_detail
+        identities = [PersonIdentity(platform="qq", user_id="user-1", nickname="Alice")]
+        return encoding_pipeline._PendingAtomWrite(
+            stream_id="stream-1",
+            atom=atom,
+            semantic_detail=semantic_detail,
+            episodic_detail=episodic_detail,
+            profile_identities=identities,
+        )
+
+    async def test_persisted_outbox_survives_pipeline_recreation_and_retries_same_atom_id(self) -> None:
+        first = self.make_pipeline()
+        pending = self.make_pending(first)
+        first._persist_pending_write(pending)
+        self.assertEqual(PendingAtomWrite.select().count(), 1)
+
+        recovered = self.make_pipeline()
+        stats = await recovered.run_cycle()
+
+        self.assertEqual(stats["atoms_written"], 1)
+        recovered.writer.write_atom.assert_awaited_once()
+        kwargs = recovered.writer.write_atom.await_args.kwargs
+        self.assertEqual(kwargs["atom"].atom_id, "outbox-atom")
+        self.assertEqual(kwargs["semantic_detail"].attr_value, "jazz")
+        self.assertEqual(recovered._pending_writes, [])
+        self.assertEqual(PendingAtomWrite.select().count(), 0)
+
+    async def test_failed_recovery_keeps_outbox_for_next_restart(self) -> None:
+        first = self.make_pipeline()
+        first._persist_pending_write(self.make_pending(first, atom_id="retry-outbox-atom"))
+
+        failing = self.make_pipeline()
+        failing.writer.write_atom = AsyncMock(side_effect=RuntimeError("db down"))
+        stats = await failing.run_cycle()
+
+        self.assertEqual(stats["atoms_written"], 0)
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual([item.atom.atom_id for item in failing._pending_writes], ["retry-outbox-atom"])
+        self.assertTrue(PendingAtomWrite.select().where(PendingAtomWrite.atom_id == "retry-outbox-atom").exists())
+
+        recovered = self.make_pipeline()
+        retry_stats = await recovered.run_cycle()
+
+        self.assertEqual(retry_stats["atoms_written"], 1)
+        self.assertEqual(recovered.writer.write_atom.await_args.kwargs["atom"].atom_id, "retry-outbox-atom")
+        self.assertEqual(PendingAtomWrite.select().count(), 0)
+
+
 class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
     def make_pipeline(self) -> EncodingPipeline:
         pipeline = object.__new__(EncodingPipeline)
@@ -131,6 +263,9 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
         )
         pipeline.writer = SimpleNamespace(store=SimpleNamespace(), write_atom=AsyncMock())
         pipeline.trace_recorder = None
+        pipeline._pending_writes = []
+        pipeline._pending_loaded = True
+        pipeline._outbox_enabled = False
         return pipeline
 
     async def run_single_atom_cycle(
@@ -408,6 +543,18 @@ class EncodingPipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["errors"], 1)
         self.assertEqual(stats["atoms_written"], 0)
         self.assertEqual(stats["streams"], {"stream-1": 0})
+        self.assertEqual(len(pipeline._pending_writes), 1)
+        failed_atom_id = pipeline._pending_writes[0].atom.atom_id
+
+        pipeline.writer.write_atom = AsyncMock(return_value=failed_atom_id)
+        pipeline.encoder.encode_all_ready = AsyncMock(return_value={})
+        retry_stats = await pipeline.run_cycle()
+
+        self.assertEqual(retry_stats["atoms_written"], 1)
+        self.assertEqual(retry_stats["streams"], {"stream-1": 1})
+        self.assertEqual(pipeline._pending_writes, [])
+        pipeline.writer.write_atom.assert_awaited_once()
+        self.assertEqual(pipeline.writer.write_atom.await_args.kwargs["atom"].atom_id, failed_atom_id)
 
     async def test_run_cycle_updates_episodic_profiles_with_sensory_detail(self) -> None:
         fake_builder = SimpleNamespace(update_profile_from_atom=Mock())

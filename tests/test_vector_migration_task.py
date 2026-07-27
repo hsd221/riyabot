@@ -164,6 +164,44 @@ class VectorIndexMigrationTaskTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(self.qdrant.activated)
 
+    async def test_weight_change_during_embedding_does_not_wedge_the_batch(self) -> None:
+        """weight 只影响载荷、不影响向量：热点原子被反复强化不能让整批迁移卡死。"""
+        create_atom("atom-a", "alpha")
+        task = VectorIndexMigrationTask(self.store, batch_size=1, interval=1)
+        embed_calls = 0
+
+        async def embed_with_weight_churn(text: str, **kwargs):
+            del text, kwargs
+            nonlocal embed_calls
+            embed_calls += 1
+            MemoryAtom.update(weight=0.1 * embed_calls).where(MemoryAtom.atom_id == "atom-a").execute()
+            return self.embedding_result([1.0, 0.0])
+
+        with patch("src.memory.vector_migration.embed_text", new=embed_with_weight_churn):
+            self.assertEqual(await task.run(), 1)
+
+        self.assertEqual(embed_calls, 1)
+        self.assertEqual(self.qdrant.failures, [])
+        self.assertIn("atom-a", self.qdrant.points)
+
+    async def test_unembeddable_source_is_skipped_instead_of_blocking_migration(self) -> None:
+        """一条内容为空的原子不能让整个索引重建永远无法完成。"""
+        create_atom("atom-a", "   ")
+        create_atom("atom-b", "beta")
+        task = VectorIndexMigrationTask(self.store, batch_size=2, interval=1)
+
+        with patch(
+            "src.memory.vector_migration.embed_text",
+            new=AsyncMock(return_value=self.embedding_result([1.0, 0.0])),
+        ):
+            self.assertEqual(await task.run(), 1)
+            self.assertEqual(self.qdrant.state.last_processed_id, "atom-b")
+            self.assertEqual(await task.run(), 0)
+
+        self.assertEqual(self.qdrant.failures, [])
+        self.assertTrue(self.qdrant.activated)
+        self.assertEqual(set(self.qdrant.points), {"atom-b"})
+
     async def test_embedding_failure_keeps_old_alias_and_records_error(self) -> None:
         create_atom("atom-a", "alpha")
         task = VectorIndexMigrationTask(self.store, batch_size=1, interval=1)

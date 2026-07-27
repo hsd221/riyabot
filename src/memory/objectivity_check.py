@@ -175,11 +175,23 @@ def extract_entity_set(text: str, known_entities: Optional[list[str]] = None) ->
     return entities
 
 
+# 末尾的 `号` 不能写成 `号?`：那样整个单位分组都变成可选，任何裸数字都会被当成
+# 一条"数值事实"并带上空单位，于是两段文本里的订单号、日期（2026-07-26 会拆成三个
+# 裸数字）只要不相等就会被判成矛盾，正常记忆因此被拦下来还写进冲突观察表。
+_NUMERIC_FACT_RE = re.compile(r"(\d+\.?\d*)\s*(岁|年|月|日|天|小时|分钟|分|秒|cm|m|kg|g|元|块|级|星|个|次|号)")
+# 清洗时的移除顺序必须固定：直接遍历 set 会受字符串哈希随机化影响，同一对文本在不同
+# 进程里得到不同的清洗结果，矛盾判定因此不可复现。
+# 顺序之外还要剥对成分——"不是/不会/不可能/没有"去掉否定语素后剩下的"是/会/可能/有"
+# 正是对应的肯定说法，整词删掉会把谓语一起抹走，"他不是学生"与"他是学生"的清洗结果就
+# 再也对不上；而"从不/从未/未曾"这类整体状语的肯定说法本就是整个删掉。
+_NEGATION_PHRASES_TO_STRIP: tuple[str, ...] = ("从未", "从不", "未曾")
+_NEGATION_PARTICLES_TO_STRIP: tuple[str, ...] = ("不", "没", "无", "非", "未", "莫", "勿")
+
+
 def _extract_numeric_facts(text: str) -> list[tuple[float, str]]:
     """从文本中提取数值事实（如 "25岁"、"180cm"）"""
     facts: list[tuple[float, str]] = []
-    pattern = re.compile(r"(\d+\.?\d*)\s*(岁|年|月|日|天|小时|分|秒|cm|m|kg|g|元|块|分|级|星|个|次|号?)")
-    for match in pattern.finditer(text):
+    for match in _NUMERIC_FACT_RE.finditer(text):
         try:
             value = float(match.group(1))
             unit = match.group(2)
@@ -190,9 +202,11 @@ def _extract_numeric_facts(text: str) -> list[tuple[float, str]]:
 
 
 def _remove_negations(text: str) -> str:
-    """移除文本中的否定词"""
-    for neg in _NEGATION_WORDS:
-        text = text.replace(neg, "")
+    """移除文本中的否定成分，保留被否定的谓语"""
+    for phrase in _NEGATION_PHRASES_TO_STRIP:
+        text = text.replace(phrase, "")
+    for particle in _NEGATION_PARTICLES_TO_STRIP:
+        text = text.replace(particle, "")
     return text.strip()
 
 
@@ -488,10 +502,13 @@ class ObjectivityChecker:
                 return False
             return True
 
-        # 按相同 atom_type 筛选
+        # 按相同 atom_type 筛选。必须限定 status="active"：已被仲裁归档的败方原子
+        # 若还留在候选里，同一桩早就结案的矛盾会对每条新记忆反复触发，既拦下新记忆
+        # 又不断往冲突观察表里堆指向归档原子的新记录。
         if atom.atom_type and atom.atom_type.value:
             type_list = await self.store.list_atoms(
                 atom_type=atom.atom_type.value,
+                status="active",
                 limit=_MAX_CONFLICT_CANDIDATES,
             )
             for c in type_list:
@@ -504,7 +521,7 @@ class ObjectivityChecker:
 
         # 补充其他类型
         if len(candidates) < _MAX_CONFLICT_CANDIDATES:
-            recent = await self.store.list_atoms(limit=_MAX_RECENT_ATOMS)
+            recent = await self.store.list_atoms(status="active", limit=_MAX_RECENT_ATOMS)
             for c in recent:
                 if not in_same_scope(c):
                     continue

@@ -626,6 +626,22 @@ class MemoryStoreCrudTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsyncioTe
             await store.list_atom_source_hashes(status="active"),
             {"active-atom": embedding_source_hash("active-atom 内容")},
         )
+        self.assertEqual(
+            await store.list_atom_index_payloads(status="active"),
+            {
+                "active-atom": {
+                    "atom_type": "factual",
+                    "weight": 0.6,
+                    "importance": 0.8,
+                    "confidence": 0.7,
+                    "status": "active",
+                    "source_scene": "group_chat",
+                    "source_id": "stream-1",
+                    "privacy_level": "context_sensitive",
+                    "embedding_source_hash": embedding_source_hash("active-atom 内容"),
+                }
+            },
+        )
 
     async def test_singleton_initialize_close_and_statistics(self) -> None:
         with self.assertRaises(RuntimeError):

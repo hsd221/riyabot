@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
 from src.bw_learner.history_candidates import HistoryCandidates
+from src.webui.chat_history_checkpoint import fsync_directory
 
 
 CandidateKind = Literal["expressions", "behaviors", "jargons", "memories", "profiles"]
@@ -53,7 +55,10 @@ def write_candidate_catalog(
                     )
                 )
                 output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
     temporary.replace(destination)
+    fsync_directory(task_dir)
     return {
         "total": candidates.total,
         "counts": candidates.counts,

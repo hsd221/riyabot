@@ -177,7 +177,7 @@ class BatchEncoderEncodeBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await encoder.encode_batch("waiting"), [])
         self.assertEqual(len(encoder.buffers["waiting"]), 1)
 
-    async def test_encode_batch_keeps_buffer_on_llm_or_parse_failure_and_clears_after_success(self) -> None:
+    async def test_encode_batch_keeps_buffer_on_failure_and_acknowledges_only_the_oldest_successful_batch(self) -> None:
         failing = StubEncoder(store=FakeStore(), llm_error=RuntimeError("llm down"))  # type: ignore[arg-type]
         failing.group_summarizer = SimpleNamespace(get_topic_summaries=Mock(return_value=[]))
         failing.buffers["stream-1"] = EncodingBuffer(stream_id="stream-1")
@@ -220,10 +220,41 @@ class BatchEncoderEncodeBatchTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(extracted), 1)
         self.assertEqual(extracted[0][1], AtomType.PREFERENCE)
-        self.assertEqual(extracted[0][2][SOURCE_USER_IDS_DETAIL_KEY], ["user-2"])
+        self.assertEqual(extracted[0][2][SOURCE_USER_IDS_DETAIL_KEY], ["user-1"])
         self.assertEqual(extracted[0][2][SOURCE_MESSAGE_IDS_DETAIL_KEY], [])
         self.assertEqual(extracted[0][2][SOURCE_IDENTITIES_DETAIL_KEY][0]["platform"], "legacy")
-        self.assertEqual(len(encoder.buffers["stream-1"]), 0)
+        self.assertEqual([message["content"] for message in encoder.buffers["stream-1"].messages], ["new"])
+        self.assertEqual(encoder.buffers["stream-1"].message_count_since_trigger, 1)
+
+    async def test_encode_batch_preserves_messages_arriving_during_llm_call(self) -> None:
+        response = json.dumps(
+            [
+                {
+                    "content": "user-1 喜欢茶",
+                    "atom_type": "preference",
+                    "entities": ["user-1"],
+                    "detail": {"attr_name": "drink", "attr_value": "tea"},
+                }
+            ],
+            ensure_ascii=False,
+        )
+        encoder = StubEncoder(store=FakeStore(), llm_response=response)  # type: ignore[arg-type]
+        encoder.group_summarizer = SimpleNamespace(get_topic_summaries=Mock(return_value=[]))
+        buffer = EncodingBuffer(stream_id="stream-1")
+        buffer.add_message("user-1", "Alice", "first", 1.0, message_id="msg-1")
+        encoder.buffers["stream-1"] = buffer
+
+        async def append_during_call(prompt: str) -> str:
+            buffer.add_message("user-2", "Bob", "arrived-later", 2.0, message_id="msg-2")
+            return response
+
+        encoder._call_llm = append_during_call  # type: ignore[method-assign]
+
+        extracted = await encoder.encode_batch("stream-1", force=True)
+
+        self.assertEqual(len(extracted), 1)
+        self.assertEqual([message["message_id"] for message in buffer.messages], ["msg-2"])
+        self.assertEqual(buffer.message_count_since_trigger, 1)
 
     async def test_encode_all_ready_filters_empty_results(self) -> None:
         encoder = make_encoder()

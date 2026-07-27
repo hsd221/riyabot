@@ -100,6 +100,7 @@ class ForgettingManager:
         self.delete_threshold = delete_threshold
         self.sweep_interval = sweep_interval
         self._sweep_lock = asyncio.Lock()
+        self._sweep_running = False
 
     # ── 主扫描入口 ──────────────────────────────────────────────────────
 
@@ -111,27 +112,34 @@ class ForgettingManager:
         Returns:
             dict: {"decayed": N, "archived": M, "deleted": K}
         """
-        if self._sweep_lock.locked():
+        # locked() 与 async with 之间存在挂起点：两个并发调用可能都看到"未加锁"，
+        # 第二个在等到锁之后又会跑一遍完整扫描，"忙则跳过"的语义就失效了。
+        # 置位与判断之间没有 await，布尔标志才是真正的守卫。
+        if self._sweep_running:
             logger.debug("遗忘扫描已在执行中，跳过本轮扫描")
             return {"decayed": 0, "archived": 0, "deleted": 0}
+        self._sweep_running = True
 
-        async with self._sweep_lock:
-            _sweep_start = time.monotonic()
-            logger.info("遗忘扫描开始")
+        try:
+            async with self._sweep_lock:
+                _sweep_start = time.monotonic()
+                logger.info("遗忘扫描开始")
 
-            decayed = await self._decay_atoms()
-            archived = await self._archive_faded()
-            deleted = await self._purge_expired()
+                decayed = await self._decay_atoms()
+                archived = await self._archive_faded()
+                deleted = await self._purge_expired()
 
-            result: dict[str, int] = {
-                "decayed": decayed,
-                "archived": archived,
-                "deleted": deleted,
-            }
-            duration = time.monotonic() - _sweep_start
-            logger.info(f"遗忘扫描完成: {decayed} 个衰减, {archived} 个归档, {deleted} 个删除")
-            logger.info("遗忘扫描完成", total_duration_ms=round(duration * 1000))
-            return result
+                result: dict[str, int] = {
+                    "decayed": decayed,
+                    "archived": archived,
+                    "deleted": deleted,
+                }
+                duration = time.monotonic() - _sweep_start
+                logger.info(f"遗忘扫描完成: {decayed} 个衰减, {archived} 个归档, {deleted} 个删除")
+                logger.info("遗忘扫描完成", total_duration_ms=round(duration * 1000))
+                return result
+        finally:
+            self._sweep_running = False
 
     # ── 衰减 ─────────────────────────────────────────────────────────────
 
@@ -149,7 +157,9 @@ class ForgettingManager:
         qdrant_updates: list[tuple[str, dict[str, Any]]] = []
 
         with memory_db:
-            query = MemoryAtomModel.select().where(MemoryAtomModel.status == "active")
+            # 分页必须有确定的排序：paginate 逐页重跑 LIMIT/OFFSET，
+            # 扫描期间新插入的原子会顶掉后续页的偏移，导致部分原子整轮被跳过。
+            query = MemoryAtomModel.select().where(MemoryAtomModel.status == "active").order_by(MemoryAtomModel.atom_id)
             total = query.count()
             if total == 0:
                 return 0
@@ -248,9 +258,13 @@ class ForgettingManager:
         qdrant_delete_ids: list[str] = []
 
         with memory_db:
-            query = MemoryAtomModel.select().where(
-                MemoryAtomModel.status == "active",
-                MemoryAtomModel.weight < self.archive_threshold,
+            # 先物化再改写：循环内 save() 会改变 status，边遍历游标边改动匹配行
+            # 在 SQLite 下属于未定义行为，可能漏掉或重复处理记录。
+            query = list(
+                MemoryAtomModel.select().where(
+                    MemoryAtomModel.status == "active",
+                    MemoryAtomModel.weight < self.archive_threshold,
+                )
             )
             for atom_model in query:
                 try:
@@ -290,6 +304,11 @@ class ForgettingManager:
     def _archive_one(self, atom: MemoryAtomModel) -> None:
         """内部：将单个原子内容 + 元数据写入 RawMessageArchive
 
+        归档必须幂等：raw_message_archive 对 (stream_id, message_id, chat_type) 建了唯一索引，
+        重复插入会抛 IntegrityError。原子完全可能先被扫描归档、之后又被强制遗忘再次走到这里，
+        若不忽略冲突，force_forget 会卡在归档步骤并连带跳过删除。
+        冲突时保留既有行，避免把梦境系统已推进的 dream_status 重置回 pending。
+
         Args:
             atom: Peewee MemoryAtom 模型实例
         """
@@ -308,7 +327,7 @@ class ForgettingManager:
             "trace_chain_id": atom.trace_chain_id,
             "embedding_id": atom.embedding_id,
         }
-        RawMessageArchive.create(
+        RawMessageArchive.insert(
             stream_id=f"memory_archive_{atom.source_scene or 'unknown'}",
             message_id=atom.atom_id,
             user_id="system",
@@ -318,7 +337,7 @@ class ForgettingManager:
             ),
             timestamp=_safe_timestamp(atom.created_at),
             chat_type=f"memory_archive_{atom.atom_type or 'unknown'}",
-        )
+        ).on_conflict_ignore().execute()
         logger.debug("原子归档成功", atom_id=atom.atom_id, archive_table="RawMessageArchive")
 
     # ── 硬删除 ───────────────────────────────────────────────────────────
@@ -327,8 +346,9 @@ class ForgettingManager:
         """硬删除权重低于删除阈值的记忆原子
 
         将 weight < delete_threshold 的原子：
-        1. 从 Qdrant 删除向量索引
-        2. 从 SQLite 删除记录
+        1. 确认内容已进入归档表
+        2. 从 Qdrant 删除向量索引
+        3. 从 SQLite 删除记录
 
         Returns:
             int: 删除的原子数量
@@ -336,14 +356,23 @@ class ForgettingManager:
         count = 0
 
         with memory_db:
-            atom_ids = [
-                atom.atom_id
-                for atom in MemoryAtomModel.select(MemoryAtomModel.atom_id).where(
+            expired_atoms = list(
+                MemoryAtomModel.select().where(
                     MemoryAtomModel.weight < self.delete_threshold,
                 )
-            ]
+            )
 
-        for atom_id in atom_ids:
+        for atom_model in expired_atoms:
+            atom_id = atom_model.atom_id
+            # 本模块的契约是"先归档再硬删除"，但 _archive_faded 只覆盖 status="active"
+            # 且归档失败时只记日志不阻止后续删除。这里必须自己兜底确认归档成功，
+            # 否则非 active 状态的原子、以及归档报错的原子会被直接抹掉且无法恢复。
+            try:
+                self._archive_one(atom_model)
+            except Exception as e:
+                logger.error(f"硬删除前归档失败，保留原子 ({atom_id}): {e}")
+                continue
+
             try:
                 if await self._store.delete_atom(atom_id):
                     count += 1

@@ -6,6 +6,7 @@ from src.chat.utils.chat_message_builder import get_raw_msg_before_timestamp_wit
 
 # from src.config.config import global_config
 from typing import Dict, Any, Optional
+from src.common.background_tasks import spawn_background_task
 from src.chat.message_receive.message import Message
 from .pfc_types import ConversationState
 from .pfc import ChatObserver, GoalAnalyzer
@@ -136,13 +137,14 @@ class Conversation:
             # 出错也要继续，只是没有历史记录而已
         # 组件准备完成，启动该论对话
         self.should_continue = True
-        asyncio.create_task(self.start())
+        # 事件循环只弱引用任务：丢弃返回值会让整轮私聊对话在启动后被随时回收。
+        spawn_background_task(self.start(), name=f"pfc-start-{self.stream_id}")
 
     async def start(self):
         """开始对话流程"""
         try:
             logger.info(f"[私聊][{self.private_name}]对话系统启动中...")
-            asyncio.create_task(self._plan_and_action_loop())
+            self._loop_task = spawn_background_task(self._plan_and_action_loop(), name=f"pfc-loop-{self.stream_id}")
         except Exception as e:
             logger.error(f"[私聊][{self.private_name}]启动对话系统失败: {e}")
             raise

@@ -12,11 +12,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from src.memory import dream_agent
 from src.memory.bm25_retrieval import BM25Retriever
 from src.memory.dream_agent import DreamTask
+from src.memory.graph_store import GraphStore
 from src.memory.layer1_summarizer import UnclosedTopicBridge
 from src.memory.schema import (
     ConflictObservation,
@@ -39,6 +40,7 @@ class FakeQdrant:
     def __init__(self) -> None:
         self.payload_updates: list[tuple[str, dict[str, Any]]] = []
         self.vector_upserts: list[tuple[str, list[float], dict[str, Any]]] = []
+        self.vector_deletes: list[str] = []
 
     async def set_atom_payload(self, atom_id: str, payload: dict[str, Any]) -> None:
         self.payload_updates.append((atom_id, payload))
@@ -50,6 +52,10 @@ class FakeQdrant:
         payload: dict[str, Any],
     ) -> bool:
         self.vector_upserts.append((point_id, vector, payload))
+        return True
+
+    async def delete_atom_vector(self, point_id: str) -> bool:
+        self.vector_deletes.append(point_id)
         return True
 
 
@@ -114,6 +120,15 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.wait_before_start, 1800)
         self.assertEqual(task.run_interval, 3600)
         task._check_idle.assert_awaited_once_with()
+
+    async def test_idle_check_fails_closed_when_stream_state_is_unavailable(self) -> None:
+        task = DreamTask(FakeStore())
+
+        with patch(
+            "src.common.database.database_model.ChatStreams.select",
+            side_effect=RuntimeError("database busy"),
+        ):
+            self.assertFalse(await task._check_idle())
 
     async def test_consolidate_persists_last_accessed_at_to_keep_dream_boost_effective(self) -> None:
         old_access = datetime.datetime.now() - datetime.timedelta(days=10)
@@ -325,6 +340,34 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repeated, {"high": 0, "medium": 0, "low": 0, "skipped": 0})
         self.assertEqual(MemoryAtom.select().count(), 0)
         self.assertEqual(NoisePool.select().count(), 3)
+
+    async def test_triage_keeps_pending_when_candidate_transaction_fails(self) -> None:
+        raw = RawMessageArchive.create(
+            stream_id="group-1",
+            message_id="msg-triage-retry",
+            user_id="user-a",
+            content="小明说今天开始练钢琴",
+            timestamp=datetime.datetime.now().timestamp(),
+            chat_type="group",
+        )
+        task = DreamTask(FakeStore())
+
+        with patch.object(
+            task,
+            "_mark_raw_triaged",
+            side_effect=RuntimeError("status write failed"),
+        ):
+            failed = await task._triage_raw_archive(max_age_days=1)
+
+        self.assertEqual(failed, {"high": 0, "medium": 0, "low": 0, "skipped": 1})
+        self.assertEqual(NoisePool.select().count(), 0)
+        self.assertEqual(RawMessageArchive.get_by_id(raw.id).dream_status, "pending")
+
+        retried = await task._triage_raw_archive(max_age_days=1)
+
+        self.assertEqual(retried["medium"], 1)
+        self.assertEqual(NoisePool.select().count(), 1)
+        self.assertEqual(RawMessageArchive.get_by_id(raw.id).dream_status, "triaged")
 
     async def test_triage_keeps_raw_material_out_of_active_memory_and_qdrant(self) -> None:
         raw = RawMessageArchive.create(
@@ -649,6 +692,37 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_build_graph_deduplicates_repeated_entities_without_self_edges(self) -> None:
+        now = datetime.datetime.now()
+        MemoryAtom.create(
+            atom_id="atom-graph-duplicates",
+            atom_type="factual",
+            content="小明与钢琴有关",
+            entities='["小明", "小明", "钢琴", ""]',
+            importance=0.8,
+            confidence=0.8,
+            weight=0.64,
+            created_at=now,
+            last_accessed_at=now,
+            last_reinforced_at=now,
+            ttl_days=180,
+            decay_type="exponential",
+            reinforcement_count=0,
+            source_scene="group_chat",
+            source_id="group-1",
+            privacy_level="context_sensitive",
+            status="active",
+        )
+        graph_store = GraphStore()
+        task = DreamTask(FakeStore(), graph_store=graph_store)
+
+        edges, entries = await task._build_graph(limit=10)
+
+        self.assertEqual((edges, entries), (1, 0))
+        stored_edges = list(dream_agent.GraphEdge.select())
+        self.assertEqual(len(stored_edges), 1)
+        self.assertNotEqual(stored_edges[0].source_node_id, stored_edges[0].target_node_id)
+
     async def test_merge_overflowing_user_memories_generalizes_soft_cap_overflow(self) -> None:
         now = datetime.datetime.now()
         for index in range(5):
@@ -677,7 +751,12 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await retriever.search("爵士钢琴", top_k=10)), 5)
         task = DreamTask(store)
 
-        stats = await task._merge_overflowing_user_memories(soft_cap=3, batch_size=10)
+        with patch.object(
+            dream_agent,
+            "generate_embedding",
+            new=AsyncMock(return_value=[0.25, 0.75]),
+        ) as generate_embedding:
+            stats = await task._merge_overflowing_user_memories(soft_cap=3, batch_size=10)
 
         active_atoms = list(MemoryAtom.select().where(MemoryAtom.status == "active"))
         archived_atoms = list(MemoryAtom.select().where(MemoryAtom.status == "archived"))
@@ -691,6 +770,28 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("小明", summary.content)
         self.assertIn("泛化", summary.content)
         self.assertEqual(summary.atom_type, "factual")
+        generate_embedding.assert_awaited_once_with(summary.content)
+        self.assertEqual(
+            task._store.qdrant.vector_upserts,
+            [
+                (
+                    summary.atom_id,
+                    [0.25, 0.75],
+                    {
+                        "atom_id": summary.atom_id,
+                        "atom_type": "factual",
+                        "weight": summary.weight,
+                        "importance": summary.importance,
+                        "confidence": summary.confidence,
+                        "status": "active",
+                        "source_scene": "dream",
+                        "source_id": summary.source_id,
+                        "privacy_level": summary.privacy_level,
+                        "embedding_source_hash": dream_agent.embedding_source_hash(summary.content),
+                    },
+                )
+            ],
+        )
         self.assertEqual([atom.atom_id for atom in await retriever.search("泛化")], [summary.atom_id])
         self.assertTrue(
             MemoryTraceChain.select()
@@ -704,16 +805,111 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             any(
                 atom_id == summary.atom_id and payload.get("status") == "active"
-                for atom_id, payload in task._store.qdrant.payload_updates
+                for atom_id, _, payload in task._store.qdrant.vector_upserts
             )
         )
-        self.assertTrue(any(payload.get("status") == "archived" for _, payload in task._store.qdrant.payload_updates))
+        self.assertEqual(
+            set(task._store.qdrant.vector_deletes),
+            {atom.atom_id for atom in archived_atoms},
+        )
 
-        repeated = await task._merge_overflowing_user_memories(soft_cap=3, batch_size=10)
+        with patch.object(
+            dream_agent,
+            "generate_embedding",
+            new=AsyncMock(side_effect=AssertionError("无需再次压缩时不应生成 embedding")),
+        ):
+            repeated = await task._merge_overflowing_user_memories(soft_cap=3, batch_size=10)
 
         self.assertEqual(
             repeated,
             {"users_compacted": 0, "atoms_archived": 0, "summaries_created": 0, "summaries_updated": 0},
+        )
+
+    async def test_merge_soft_cap_counts_complete_entity_history_beyond_archive_batch_limit(self) -> None:
+        now = datetime.datetime.now()
+        for index in range(4):
+            MemoryAtom.create(
+                atom_id=f"atom-soft-cap-batch-{index}",
+                atom_type="episodic",
+                content=f"小明第 {index} 条跨批次软上限记忆",
+                entities='["小明"]',
+                importance=0.5,
+                confidence=0.7,
+                weight=0.1 + index * 0.1,
+                created_at=now - datetime.timedelta(days=4 - index),
+                last_accessed_at=now - datetime.timedelta(days=4 - index),
+                last_reinforced_at=now - datetime.timedelta(days=4 - index),
+                ttl_days=30,
+                decay_type="exponential",
+                reinforcement_count=0,
+                source_scene="group_chat",
+                source_id=f"group-1-batch-{index}",
+                privacy_level="context_sensitive",
+                status="active",
+            )
+        task = DreamTask(FakeStore())
+
+        with patch.object(
+            dream_agent,
+            "generate_embedding",
+            new=AsyncMock(return_value=[0.4, 0.6]),
+        ):
+            stats = await task._merge_overflowing_user_memories(soft_cap=3, batch_size=2)
+
+        self.assertEqual(
+            stats,
+            {"users_compacted": 1, "atoms_archived": 2, "summaries_created": 1, "summaries_updated": 0},
+        )
+        self.assertEqual(
+            MemoryAtom.select().where(MemoryAtom.status == "active", MemoryAtom.entities.contains("小明")).count(),
+            3,
+        )
+        archived_ids = {
+            atom.atom_id
+            for atom in MemoryAtom.select().where(
+                MemoryAtom.status == "archived",
+                MemoryAtom.entities.contains("小明"),
+            )
+        }
+        self.assertEqual(set(task._store.qdrant.vector_deletes), archived_ids)
+
+    async def test_detect_cross_day_patterns_does_not_duplicate_unchanged_insights(self) -> None:
+        now = datetime.datetime.now()
+        for atom_id, atom_type in (
+            ("atom-pattern-fact", "factual"),
+            ("atom-pattern-preference", "preference"),
+        ):
+            MemoryAtom.create(
+                atom_id=atom_id,
+                atom_type=atom_type,
+                content=f"小明的跨日模式证据 {atom_type}",
+                entities='["小明"]',
+                importance=0.7,
+                confidence=0.8,
+                weight=0.56,
+                created_at=now,
+                last_accessed_at=now,
+                last_reinforced_at=now,
+                ttl_days=180,
+                decay_type="exponential",
+                reinforcement_count=0,
+                source_scene="group_chat",
+                source_id="group-1",
+                privacy_level="context_sensitive",
+                status="active",
+            )
+        task = DreamTask(FakeStore())
+
+        first = await task._detect_cross_day_patterns()
+        second = await task._detect_cross_day_patterns()
+
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 0)
+        insights = list(InsightPool.select().where(InsightPool.agent_name == "dream_weekly"))
+        self.assertEqual(len(insights), 1)
+        self.assertEqual(
+            json.loads(insights[0].source_atoms or "[]"),
+            ["atom-pattern-fact", "atom-pattern-preference"],
         )
 
     async def test_audit_profiles_rebuilds_stale_profile_and_records_insight(self) -> None:

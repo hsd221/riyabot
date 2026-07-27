@@ -30,7 +30,16 @@ from src.memory.atom import (
 from src.memory.layer3_retrieval import MemoryWriter
 from src.memory.schema import MemoryTraceChain
 from src.memory.store import MemoryStore
-from src.memory.user_profile import PersonIdentity, ProfileBuilder, ProfileStore, make_profile_id
+from src.memory.user_profile import (
+    PersonIdentity,
+    ProfileBuilder,
+    ProfileStore,
+    _preference_interest,
+    _profile_section,
+    _supported_profile_interests,
+    _trait_confidence_from_sources,
+    make_profile_id,
+)
 
 
 logger = get_logger("history_enrichment")
@@ -312,29 +321,12 @@ def _apply_approved_profile_candidate(profile: Any, candidate: ProfileCandidate,
             field_sources[section] = sources
         return sources
 
-    if candidate.category == "preference":
-        section = "preferences"
-        profile.preferences[candidate.name] = candidate.value
-    elif candidate.category == "interest":
-        section = "interests"
-        previous = sources_for(section).get(candidate.name)
-        previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
-        if previous_value and previous_value != candidate.value and previous_value in profile.interests:
-            profile.interests.remove(previous_value)
-        if candidate.value not in profile.interests:
-            profile.interests.append(candidate.value)
-    elif candidate.category == "personality":
-        section = "traits"
-        previous = sources_for(section).get(candidate.name)
-        previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
-        if previous_value and previous_value != candidate.value:
-            profile.traits.pop(previous_value, None)
-        profile.traits[candidate.value] = candidate.confidence
-    else:
-        section = "facts"
-        profile.facts[candidate.name] = candidate.value
-
+    section = _profile_section(candidate.category, candidate.name)
     section_sources = sources_for(section)
+    previous = section_sources.get(candidate.name)
+    previous_value = str(previous.get("value", "")) if isinstance(previous, dict) else ""
+    # 与 ProfileBuilder.update_profile_from_atom 保持一致：先落新来源，
+    # 再基于最新来源集合判断旧值是否仍被其他字段支撑。
     section_sources[candidate.name] = {
         "atom_id": atom.atom_id,
         "weight": atom.weight,
@@ -345,6 +337,31 @@ def _apply_approved_profile_candidate(profile: Any, candidate: ProfileCandidate,
         "value": candidate.value,
         "approved_history_import": True,
     }
+
+    if section in {"preferences", "interests"}:
+        if section == "preferences":
+            profile.preferences[candidate.name] = candidate.value
+        previous_interest = _preference_interest(candidate.name, previous_value) if previous_value else ""
+        interest = _preference_interest(candidate.name, candidate.value)
+        supported_interests = _supported_profile_interests(profile.preferences, field_sources)
+        if previous_interest not in supported_interests and previous_interest in profile.interests:
+            profile.interests.remove(previous_interest)
+        if interest and interest not in profile.interests:
+            profile.interests.append(interest)
+    elif section == "traits":
+        if previous_value and previous_value != candidate.value:
+            previous_confidence = _trait_confidence_from_sources(field_sources, previous_value)
+            if previous_confidence is None:
+                profile.traits.pop(previous_value, None)
+            else:
+                profile.traits[previous_value] = previous_confidence
+        if profile.facts.get(candidate.name) in {previous_value, candidate.value}:
+            profile.facts.pop(candidate.name, None)
+        trait_confidence = _trait_confidence_from_sources(field_sources, candidate.value)
+        if trait_confidence is not None:
+            profile.traits[candidate.value] = trait_confidence
+    else:
+        profile.facts[candidate.name] = candidate.value
     return profile
 
 

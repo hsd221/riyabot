@@ -168,7 +168,18 @@ class ConflictArbiter:
                 )
                 continue
 
-            await self._apply_resolution(resolution, latest_obs)
+            if not await self._apply_resolution(resolution, latest_obs):
+                # 决策没落库就把整组标记为 resolved，等于销毁证据：剩下的观测被清空后，
+                # 该组会掉回累积阈值以下，冲突再也不会被重新仲裁，而两个互相矛盾的原子
+                # 仍然留在库里。应用失败时必须整组保留，等下一轮重试。
+                logger.warning(
+                    "仲裁结果应用失败，保留冲突组等待下轮重试: %s ↔ %s type=%s decision=%s",
+                    left_atom_id,
+                    right_atom_id,
+                    conflict_type,
+                    resolution.decision.value,
+                )
+                continue
 
             # 将该组所有观测记录标记为 resolved
             ids_to_mark = [o.id for o in obs_list if o.id != latest_obs.id]
@@ -238,13 +249,16 @@ class ConflictArbiter:
         # Step 1: 仅对重复事实尝试合并；矛盾事实必须进入证据仲裁，不能拼接成一条记忆。
         if self._can_merge(conflict.conflict_type, atom_a, atom_b):
             merged = self._merge_atoms(atom_a, atom_b)
-            return Resolution(
-                decision=ConflictDecision.MERGE,
-                atom_a_id=conflict.atom_a_id,
-                atom_b_id=conflict.atom_b_id,
-                merged_content=merged,
-                reason="相同实体和类型，合并两个原子",
-            )
+            # 双方内容都为空时合并结果也为空，写回去等于把原子清空；
+            # 这种情况交给证据仲裁去决定留哪一条，不要返回一个无法执行的 MERGE。
+            if merged:
+                return Resolution(
+                    decision=ConflictDecision.MERGE,
+                    atom_a_id=conflict.atom_a_id,
+                    atom_b_id=conflict.atom_b_id,
+                    merged_content=merged,
+                    reason="相同实体和类型，合并两个原子",
+                )
 
         # Step 2: 基于证据的仲裁
         return await self._evidence_based_arbitrate(atom_a, atom_b)
@@ -549,11 +563,26 @@ class ConflictArbiter:
 
     # ── 应用仲裁结果 ───────────────────────────────────────────────────────
 
+    async def _archive_losing_atom(self, atom_id: str) -> bool:
+        """归档败方原子并清掉它的向量。
+
+        两步都必须成功：只归档 SQLite 而向量还留在 Qdrant，检索仍会命中这条已被
+        裁掉的记忆——而对账任务是按"SQLite 里还有没有这一行"判断孤儿的，归档行仍然
+        存在，所以残留向量永远不会被它清理掉。
+        """
+        if not await self.store.update_atom(atom_id, {"status": "archived"}):
+            logger.error("归档败方原子失败 (%s)", atom_id)
+            return False
+        if not await self.store.qdrant.delete_atom_vector(atom_id):
+            logger.error("败方原子向量清理失败，检索仍会命中该原子 (%s)", atom_id)
+            return False
+        return True
+
     async def _apply_resolution(
         self,
         resolution: Resolution,
         conflict: ConflictObservation,
-    ) -> None:
+    ) -> bool:
         """应用仲裁结果到存储层
 
         根据决策类型更新原子状态：
@@ -565,6 +594,11 @@ class ConflictArbiter:
         Args:
             resolution: 仲裁结果
             conflict: 原始冲突观测记录
+
+        Returns:
+            bool: 决策是否真正落库。store.update_atom 内部吞掉异常后只返回 False，
+                所以这里必须逐步检查返回值——否则一次失败的写入会被当成仲裁成功，
+                调用方随即清空整组观测证据。
         """
         decision = resolution.decision
         a_id = resolution.atom_a_id
@@ -580,24 +614,36 @@ class ConflictArbiter:
 
         try:
             if decision == ConflictDecision.KEEP_A:
-                await self.store.update_atom(b_id, {"status": "archived"})
-                await self.store.qdrant.delete_atom_vector(b_id)
+                if not await self._archive_losing_atom(b_id):
+                    return False
 
             elif decision == ConflictDecision.KEEP_B:
-                await self.store.update_atom(a_id, {"status": "archived"})
-                await self.store.qdrant.delete_atom_vector(a_id)
+                if not await self._archive_losing_atom(a_id):
+                    return False
 
             elif decision == ConflictDecision.MERGE and resolution.merged_content:
-                # 合并到原子 A：内容变更，重新生成 embedding
-                await self.store.update_atom(
+                # 合并到原子 A：内容变更，重新生成 embedding。删除败方向量失败时败方已被
+                # 标记为 archived，而整组观测会保留并重试；若胜方内容已经是本次合并结果，
+                # 此时只需继续清理败方，不能每次重试都再把 confidence 增加 0.05。
+                existing_atom_a = await self.store.get_atom(a_id)
+                existing_atom_b = await self.store.get_atom(b_id)
+                merge_already_applied = bool(
+                    existing_atom_a
+                    and (existing_atom_a.get("content") or "").strip() == resolution.merged_content
+                    and existing_atom_b
+                    and existing_atom_b.get("status") == "archived"
+                )
+                if not merge_already_applied and not await self.store.update_atom(
                     a_id,
                     {
                         "content": resolution.merged_content,
                         "confidence": min(1.0, await self._get_confidence(a_id) + 0.05),
                     },
-                )
+                ):
+                    logger.error("合并内容写入失败，保留原子 B (%s)", a_id)
+                    return False
                 try:
-                    atom_a = await self.store.get_atom(a_id)
+                    atom_a = existing_atom_a if merge_already_applied else await self.store.get_atom(a_id)
                     if atom_a:
                         embedding = await generate_embedding(resolution.merged_content)
                         if embedding:
@@ -618,32 +664,45 @@ class ConflictArbiter:
                                 },
                             )
                 except Exception as e:
+                    # 向量落后于内容会被对账任务按 embedding_source_hash 判定为陈旧并重建，
+                    # 不必因此回滚整组观测。
                     logger.warning("Qdrant 同步失败 (MERGE A): %s", e)
 
                 # 归档原子 B
-                await self.store.update_atom(b_id, {"status": "archived"})
-                await self.store.qdrant.delete_atom_vector(b_id)
+                if not await self._archive_losing_atom(b_id):
+                    return False
 
             elif decision == ConflictDecision.BOTH:
                 impact = resolution.confidence_impact or 0.1
                 for atom_id in (a_id, b_id):
                     atom = await self.store.get_atom(atom_id)
-                    if atom:
-                        current_conf = atom.get("confidence") or 0.5
-                        new_conf = max(0.0, min(1.0, current_conf * (1.0 - impact)))
-                        await self.store.update_atom(atom_id, {"confidence": new_conf})
-                        await self.store.qdrant.set_atom_payload(atom_id, {"confidence": new_conf})
+                    if atom is None:
+                        logger.error("降置信度目标原子不存在 (%s)", atom_id)
+                        return False
+                    current_conf = atom.get("confidence") or 0.5
+                    new_conf = max(0.0, min(1.0, current_conf * (1.0 - impact)))
+                    if not await self.store.update_atom(atom_id, {"confidence": new_conf}):
+                        logger.error("降置信度写入失败 (%s)", atom_id)
+                        return False
+                    # confidence 只是载荷副本，SQLite 才是权威值，同步失败不阻断仲裁
+                    await self.store.qdrant.set_atom_payload(atom_id, {"confidence": new_conf})
+
+            else:
+                logger.warning("仲裁决策无法执行，保留冲突观测: %s", decision.value)
+                return False
 
         except Exception as e:
             logger.error("应用仲裁结果失败: %s", e, exc_info=True)
-            return
+            return False
 
-        # 标记冲突观测为 resolved
+        # 标记冲突观测为 resolved。决策已经落库，标记失败只会导致下一轮重跑一次幂等的仲裁，
+        # 不能因此让调用方把这次仲裁当成失败。
         try:
             with memory_db:
                 ConflictObservation.update(status="resolved").where(ConflictObservation.id == conflict.id).execute()
         except Exception as e:
             logger.error("标记冲突为已解决失败: %s", e)
+        return True
 
     async def _get_confidence(self, atom_id: str) -> float:
         """获取原子的置信度

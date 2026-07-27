@@ -120,20 +120,44 @@ class DreamWeaver:
             logger.debug("洞见编织: 解析 LLM 响应后无有效洞见")
             return []
 
-        # 6. 写入 InsightPool
+        # 6. 写入 InsightPool。模型输出不可信：来源编号只能指向实际进入
+        # prompt 的 weave_entries，且去重后仍须有至少两个有效来源。
         saved_insights: list[dict[str, Any]] = []
         for insight in insights:
             try:
-                noise_sources = insight.get("noise_sources", [])
-                source_atom_ids = [str(entries[i - 1].id) for i in noise_sources if 1 <= i <= len(entries)]
-                with memory_db:
+                noise_sources = sorted(
+                    {
+                        source_index
+                        for source_index in insight.get("noise_sources", [])
+                        if type(source_index) is int and 1 <= source_index <= len(weave_entries)
+                    }
+                )
+                if len(noise_sources) < 2:
+                    logger.debug("洞见编织: 有效噪声来源少于两个，跳过")
+                    continue
+                source_ids = sorted({str(weave_entries[i - 1].id) for i in noise_sources})
+                if len(source_ids) < 2:
+                    logger.debug("洞见编织: 去重后的来源记录少于两个，跳过")
+                    continue
+                content = str(insight["insight"]).strip()
+                source_atoms = json.dumps(source_ids, ensure_ascii=False)
+                with memory_db.atomic():
+                    existing = InsightPool.get_or_none(
+                        InsightPool.content == content,
+                        InsightPool.source_atoms == source_atoms,
+                        InsightPool.agent_name == "dream_weaver",
+                    )
+                    if existing is not None:
+                        continue
                     InsightPool.create(
-                        content=insight["insight"],
-                        source_atoms=json.dumps(source_atom_ids, ensure_ascii=False),
+                        content=content,
+                        source_atoms=source_atoms,
                         agent_name="dream_weaver",
                         confidence=insight.get("confidence", _DEFAULT_INSIGHT_CONFIDENCE),
                     )
-                saved_insights.append(insight)
+                saved_insight = dict(insight)
+                saved_insight["noise_sources"] = noise_sources
+                saved_insights.append(saved_insight)
             except Exception as e:
                 logger.warning("洞见编织: 写入 InsightPool 失败: %s", e)
 
@@ -319,7 +343,7 @@ def _validate_insights(insights: list[Any]) -> list[dict[str, Any]]:
         if not isinstance(sources, list):
             logger.debug("洞见语义校验失败: noise_sources 不是列表")
             continue
-        sources = [s for s in sources if isinstance(s, int) and s > 0]
+        sources = sorted({source for source in sources if type(source) is int and source > 0})
         if len(sources) < 2:
             logger.debug("洞见语义校验失败: noise_sources 少于两个")
             continue

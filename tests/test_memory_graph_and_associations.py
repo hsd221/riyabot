@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.memory import graph_store as graph_store_module
 from src.memory.atom_association import AssociationType, AtomAssociationStore
 from src.memory.graph_store import GraphStore
 from src.memory.schema import (
@@ -136,6 +137,24 @@ class GraphStoreTest(MemoryGraphDatabaseFixtureMixin, unittest.TestCase):
         self.assertEqual(search_results[0]["node"]["label"], "Jazz")
         self.assertEqual(len(search_results[0]["edges"]), 2)
         self.assertEqual(len(search_results[0]["entries"]), 2)
+
+    def test_related_atoms_traversal_is_bounded_and_batches_in_queries(self) -> None:
+        """稠密图不能拉满整张图，IN 查询也不能一次性塞入全部节点（SQLite 变量上限）。"""
+        store = GraphStore()
+        # 链式图：节点数超过遍历上限与 IN 分批阈值
+        node_ids = [store.add_node("entity", f"n{index}") for index in range(30)]
+        for left, right in zip(node_ids, node_ids[1:], strict=False):
+            store.add_edge(left, right, "related_to")
+        store.add_entry("n0", "related_to", "n1")
+
+        with (
+            patch.object(graph_store_module, "_MAX_TRAVERSAL_NODES", 5),
+            patch.object(graph_store_module, "_SQL_IN_CHUNK", 2),
+        ):
+            related = store.get_related_atoms("n0", max_depth=10)
+
+        self.assertIn("n0", related)
+        self.assertLessEqual(len(related), 30)
 
     def test_graph_store_safe_defaults_on_query_failures(self) -> None:
         store = GraphStore()

@@ -323,7 +323,7 @@ class MessageRecorderTest(unittest.IsolatedAsyncioTestCase):
         recorder._trigger_behavior_learning = AsyncMock()
         created_tasks = []
 
-        def fake_create_task(coro):
+        def fake_create_task(coro, **_kwargs):
             created_tasks.append(coro)
             coro.close()
             return SimpleNamespace(cancel=Mock())
@@ -336,7 +336,7 @@ class MessageRecorderTest(unittest.IsolatedAsyncioTestCase):
                 "get_raw_msg_by_timestamp_with_chat_inclusive",
                 return_value=[first, second],
             ) as get_messages,
-            patch.object(message_recorder.asyncio, "create_task", side_effect=fake_create_task) as create_task,
+            patch.object(message_recorder, "spawn_background_task", side_effect=fake_create_task) as create_task,
         ):
             await recorder.extract_and_distribute()
 

@@ -4,10 +4,12 @@ from fastapi import APIRouter, HTTPException, Header, Query, UploadFile, File, F
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Annotated
+from collections.abc import Iterator
 from src.common.logger import get_logger, hash_id
 from src.common.database.database_model import Emoji
 from .token_manager import get_token_manager
 from .auth import verify_auth_token_from_cookie_or_header
+import contextlib
 import time
 import os
 import hashlib
@@ -37,8 +39,11 @@ MAX_EMOJI_DESCRIPTION_CHARS = 500
 MAX_EMOJI_EMOTION_CHARS = 500
 ALLOWED_EMOJI_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 ALLOWED_EMOJI_FORMATS = {"jpeg", "png", "gif", "webp"}
-# 缓存锁，防止并发生成同一缩略图
+# 缓存锁，防止并发生成同一缩略图。
+# 锁只在生成期间有意义，按哈希无限留存会让每张表情包永久占用一个 Lock 对象，
+# 因此用引用计数在最后一个使用者退出时立即回收。
 _thumbnail_locks: dict[str, threading.Lock] = {}
+_thumbnail_lock_users: dict[str, int] = {}
 _locks_lock = threading.Lock()
 # 缩略图生成专用线程池（避免阻塞事件循环）
 _thumbnail_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="thumbnail")
@@ -47,12 +52,26 @@ _generating_thumbnails: set[str] = set()
 _generating_lock = threading.Lock()
 
 
-def _get_thumbnail_lock(file_hash: str) -> threading.Lock:
-    """获取指定文件哈希的锁，用于防止并发生成同一缩略图"""
+@contextlib.contextmanager
+def _thumbnail_lock(file_hash: str) -> Iterator[None]:
+    """按文件哈希串行化缩略图生成，并在最后一个使用者退出时回收锁"""
     with _locks_lock:
-        if file_hash not in _thumbnail_locks:
-            _thumbnail_locks[file_hash] = threading.Lock()
-        return _thumbnail_locks[file_hash]
+        lock = _thumbnail_locks.get(file_hash)
+        if lock is None:
+            lock = threading.Lock()
+            _thumbnail_locks[file_hash] = lock
+        _thumbnail_lock_users[file_hash] = _thumbnail_lock_users.get(file_hash, 0) + 1
+    try:
+        with lock:
+            yield
+    finally:
+        with _locks_lock:
+            remaining = _thumbnail_lock_users.get(file_hash, 1) - 1
+            if remaining > 0:
+                _thumbnail_lock_users[file_hash] = remaining
+            else:
+                _thumbnail_lock_users.pop(file_hash, None)
+                _thumbnail_locks.pop(file_hash, None)
 
 
 def _background_generate_thumbnail(source_path: str, file_hash: str) -> None:
@@ -101,8 +120,7 @@ def _generate_thumbnail(source_path: str, file_hash: str) -> Path:
     cache_path = _get_thumbnail_cache_path(file_hash)
 
     # 使用锁防止并发生成同一缩略图
-    lock = _get_thumbnail_lock(file_hash)
-    with lock:
+    with _thumbnail_lock(file_hash):
         # 双重检查，可能在等待锁时已被其他线程生成
         if cache_path.exists():
             return cache_path

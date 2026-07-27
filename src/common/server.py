@@ -8,6 +8,8 @@ from fastapi import APIRouter, Body, FastAPI, Header, HTTPException
 from rich.traceback import install
 from uvicorn import Config, Server as UvicornServer
 
+from src.common.background_tasks import spawn_background_task
+
 install(extra_lines=3)
 
 
@@ -54,7 +56,7 @@ def _register_inject_endpoint(app: FastAPI, required_token: Optional[str] = None
 
         from src.chat.message_receive.bot import chat_bot
 
-        asyncio.create_task(chat_bot.message_process(message))
+        spawn_background_task(chat_bot.message_process(message), name="inject-message-process")
         return {"status": "accepted"}
 
 

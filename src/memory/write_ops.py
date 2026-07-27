@@ -14,12 +14,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
 import json
 import os
+import threading
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -164,13 +167,60 @@ class WriteOpLogger:
     def __init__(self, db_path: str, max_entries: int = 10000):
         self.db_path = db_path
         self.log_file = _default_log_path(db_path)
+        # 锁必须挂在独立文件上：_rotate_log 会 rename 数据文件，
+        # 若把锁挂在数据文件的 inode 上，轮转前后的写入者会锁到两个不同的 inode，
+        # 互斥语义直接失效。锁文件本身永不改名。
+        self.lock_file = self.log_file + ".lock"
         self.max_entries = max_entries
+        # 同进程内的可重入互斥：flock 是按 fd 生效的，
+        # 同一进程重复 LOCK_EX 会把自己挂死（如 _append_op 内嵌套 _auto_trim）。
+        self._thread_lock = threading.RLock()
+        self._lock_depth = 0
+        self._lock_handle: Optional[Any] = None
         # 确保日志目录存在
         log_dir = os.path.dirname(self.log_file)
         if log_dir and not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
 
     # ── 文件 I/O ──────────────────────────────────────────────
+
+    @contextlib.contextmanager
+    def _exclusive_access(self) -> Iterator[None]:
+        """持有 WAL 的跨进程排他锁，覆盖读取/截断/写入/轮转全过程。
+
+        必须把「读-改-写」整体包进同一个临界区，否则两个并发的 _update_op
+        会各自读到同一份快照、各自写回，后写者静默覆盖先写者的修改。
+        本上下文可重入，嵌套调用只在最外层真正 flock。
+        """
+
+        with self._thread_lock:
+            if self._lock_depth == 0:
+                # 打不开锁文件时降级为「仅进程内互斥」，与 _acquire_lock 在
+                # fcntl 不可用时的处理一致：锁是可用性增强，不该成为单点故障。
+                try:
+                    handle = open(self.lock_file, "a+", encoding="utf-8")
+                except OSError:
+                    logger.debug("打开写操作日志锁文件失败，降级为进程内互斥", exc_info=True)
+                    handle = None
+                if handle is not None:
+                    try:
+                        os.chmod(self.lock_file, 0o600)
+                    except OSError:
+                        pass
+                    self._acquire_lock(handle)
+                    self._lock_handle = handle
+            self._lock_depth += 1
+            try:
+                yield
+            finally:
+                self._lock_depth -= 1
+                if self._lock_depth == 0 and self._lock_handle is not None:
+                    handle = self._lock_handle
+                    self._lock_handle = None
+                    try:
+                        self._release_lock(handle)
+                    finally:
+                        handle.close()
 
     def _acquire_lock(self, f) -> None:
         """获取文件排他锁（fcntl.flock），保障并发安全"""
@@ -195,22 +245,23 @@ class WriteOpLogger:
 
     def _check_rotate(self) -> None:
         """检查日志文件是否超过大小/行数阈值，若是则触发轮转"""
-        if not os.path.exists(self.log_file):
-            return
-
-        # 快速路径：检查文件大小（O(1)）
-        file_size = os.path.getsize(self.log_file)
-        if file_size < self.MAX_FILE_SIZE:
-            # 大小未超限，再检查行数（需读取文件）
-            try:
-                with open(self.log_file, "r", encoding="utf-8") as f:
-                    line_count = sum(1 for _ in f)
-            except OSError:
-                return
-            if line_count < self.MAX_LINE_COUNT:
+        with self._exclusive_access():
+            if not os.path.exists(self.log_file):
                 return
 
-        self._rotate_log()
+            # 快速路径：检查文件大小（O(1)）
+            file_size = os.path.getsize(self.log_file)
+            if file_size < self.MAX_FILE_SIZE:
+                # 大小未超限，再检查行数（需读取文件）
+                try:
+                    with open(self.log_file, "r", encoding="utf-8") as f:
+                        line_count = sum(1 for _ in f)
+                except OSError:
+                    return
+                if line_count < self.MAX_LINE_COUNT:
+                    return
+
+            self._rotate_log()
 
     def _rotate_log(self) -> None:
         """执行日志轮转：重命名当前文件 → 新建空文件
@@ -266,75 +317,77 @@ class WriteOpLogger:
                     logger.warning("删除最旧轮转文件失败", extra={"path": first, "error": str(e)})
 
     def _read_all_ops(self) -> list[WriteOp]:
-        """从 JSONL 文件读取所有操作记录"""
-        if not os.path.exists(self.log_file):
-            return []
-        ops: list[WriteOp] = []
-        with open(self.log_file, "r", encoding="utf-8") as f:
-            for line_num, raw in enumerate(f, 1):
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    data = json.loads(raw)
-                    ops.append(WriteOp.from_dict(data))
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    logger.warning(
-                        "解析写操作日志行失败",
-                        extra={
-                            "line": line_num,
-                            "error": str(e),
-                            "content_preview": raw[:120],
-                        },
-                    )
-        return ops
+        """从 JSONL 文件读取所有操作记录（带文件锁）"""
+        with self._exclusive_access():
+            if not os.path.exists(self.log_file):
+                return []
+            ops: list[WriteOp] = []
+            with open(self.log_file, "r", encoding="utf-8") as f:
+                for line_num, raw in enumerate(f, 1):
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        data = json.loads(raw)
+                        ops.append(WriteOp.from_dict(data))
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        logger.warning(
+                            "解析写操作日志行失败",
+                            extra={
+                                "line": line_num,
+                                "error": str(e),
+                                "content_preview": raw[:120],
+                            },
+                        )
+            return ops
 
     def _write_all_ops(self, ops: list[WriteOp]) -> None:
-        """将操作记录全量写回 JSONL 文件（带文件锁）"""
-        self._check_rotate()
-        with open(self.log_file, "w", encoding="utf-8") as f:
-            self._acquire_lock(f)
-            try:
+        """将操作记录全量写回 JSONL 文件（带文件锁）
+
+        截断必须发生在持锁之后：`open(path, "w")` 会在返回前就清空文件，
+        若先 open 再 flock，等锁期间日志已经没了，锁等于没加。
+        """
+        with self._exclusive_access():
+            self._check_rotate()
+            with open(self.log_file, "w", encoding="utf-8") as f:
                 for op in ops:
                     f.write(json.dumps(op.to_dict(), ensure_ascii=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
-            finally:
-                self._release_lock(f)
 
     def _append_op(self, op: WriteOp) -> None:
         """追加一条新操作记录到文件末尾（带文件锁）"""
-        self._check_rotate()
-        with open(self.log_file, "a", encoding="utf-8") as f:
-            self._acquire_lock(f)
-            try:
+        with self._exclusive_access():
+            self._check_rotate()
+            with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(op.to_dict(), ensure_ascii=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
-            finally:
-                self._release_lock(f)
-        # 每次追加后尝试裁剪，防止累积过多已完成记录
-        self._auto_trim()
+            # 每次追加后尝试裁剪，防止累积过多已完成记录
+            self._auto_trim()
 
     def _update_op(self, op_id: str, **updates: Any) -> Optional[WriteOp]:
-        """更新指定操作的状态字段（读-改-写模式）
+        """更新指定操作的状态字段（读-改-写模式，全程持锁）
 
         返回更新后的 WriteOp，若未找到则返回 None。
         """
-        ops = self._read_all_ops()
-        found = None
-        for i, op in enumerate(ops):
-            if op.op_id == op_id:
-                for key, val in updates.items():
-                    if hasattr(op, key):
-                        setattr(op, key, val)
-                ops[i] = op
-                found = op
-                break
-        if found:
-            self._write_all_ops(ops)
-            self._auto_trim(ops)
-        return found
+        # 读和写之间不能放锁：否则两个并发更新会各自读到同一份快照再写回，
+        # 后写者会把先写者的状态变更整条覆盖掉。
+        with self._exclusive_access():
+            ops = self._read_all_ops()
+            found = None
+            for i, op in enumerate(ops):
+                if op.op_id == op_id:
+                    for key, val in updates.items():
+                        if hasattr(op, key):
+                            setattr(op, key, val)
+                    ops[i] = op
+                    found = op
+                    break
+            if found:
+                self._write_all_ops(ops)
+                self._auto_trim(ops)
+            return found
 
     def _auto_trim(self, ops: Optional[list[WriteOp]] = None) -> int:
         """自动裁剪超过阈值的已完成/已回滚记录
@@ -342,39 +395,40 @@ class WriteOpLogger:
         Returns:
             被裁剪的条目数
         """
-        if ops is None:
-            ops = self._read_all_ops()
-        if len(ops) <= self.max_entries:
-            return 0
+        with self._exclusive_access():
+            if ops is None:
+                ops = self._read_all_ops()
+            if len(ops) <= self.max_entries:
+                return 0
 
-        # 区分可裁剪（终态）和不可裁剪（非终态）的记录
-        retainable = [op for op in ops if not op.is_terminal]
-        cleanable = [op for op in ops if op.is_terminal]
+            # 区分可裁剪（终态）和不可裁剪（非终态）的记录
+            retainable = [op for op in ops if not op.is_terminal]
+            cleanable = [op for op in ops if op.is_terminal]
 
-        # 按创建时间排序（最旧优先裁剪）
-        cleanable.sort(key=lambda op: op.created_at)
+            # 按创建时间排序（最旧优先裁剪）
+            cleanable.sort(key=lambda op: op.created_at)
 
-        # 裁剪直到总条数 <= max_entries 或无可裁剪条目
-        to_remove = len(ops) - self.max_entries
-        trimmed = 0
-        while to_remove > 0 and cleanable:
-            cleanable.pop(0)
-            to_remove -= 1
-            trimmed += 1
+            # 裁剪直到总条数 <= max_entries 或无可裁剪条目
+            to_remove = len(ops) - self.max_entries
+            trimmed = 0
+            while to_remove > 0 and cleanable:
+                cleanable.pop(0)
+                to_remove -= 1
+                trimmed += 1
 
-        remaining = retainable + cleanable
-        # 按 created_at 稳定排序，保持原有顺序
-        remaining.sort(key=lambda op: op.created_at)
-        self._write_all_ops(remaining)
-        logger.info(
-            "自动裁剪写操作日志",
-            extra={
-                "trimmed": trimmed,
-                "remaining": len(remaining),
-                "max_entries": self.max_entries,
-            },
-        )
-        return trimmed
+            remaining = retainable + cleanable
+            # 按 created_at 稳定排序，保持原有顺序
+            remaining.sort(key=lambda op: op.created_at)
+            self._write_all_ops(remaining)
+            logger.info(
+                "自动裁剪写操作日志",
+                extra={
+                    "trimmed": trimmed,
+                    "remaining": len(remaining),
+                    "max_entries": self.max_entries,
+                },
+            )
+            return trimmed
 
     # ── 操作生命周期管理 ─────────────────────────────────────
 

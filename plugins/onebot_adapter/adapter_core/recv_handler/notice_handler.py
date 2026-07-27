@@ -31,6 +31,9 @@ class NoticeHandler:
 
     def __init__(self):
         self.server_connection: Server.ServerConnection = None
+        # 事件循环只弱引用任务：丢弃返回值会让这三个常驻循环在运行途中被回收，
+        # 表现为解禁检测与通知投递毫无征兆地停摆。
+        self._background_tasks: list[asyncio.Task] = []
 
     async def set_server_connection(self, server_connection: Server.ServerConnection) -> None:
         """设置Napcat连接"""
@@ -40,9 +43,19 @@ class NoticeHandler:
             await asyncio.sleep(0.5)
         self.banned_list, self.lifted_list = await read_ban_list(self.server_connection)
 
-        asyncio.create_task(self.auto_lift_detect())
-        asyncio.create_task(self.send_notice())
-        asyncio.create_task(self.handle_natural_lift())
+        # 重连时先撤掉旧循环，避免每次重连都叠加一组常驻协程
+        self._cancel_background_tasks()
+        self._background_tasks = [
+            asyncio.create_task(self.auto_lift_detect()),
+            asyncio.create_task(self.send_notice()),
+            asyncio.create_task(self.handle_natural_lift()),
+        ]
+
+    def _cancel_background_tasks(self) -> None:
+        for task in self._background_tasks:
+            if not task.done():
+                task.cancel()
+        self._background_tasks = []
 
     def _ban_operation(self, group_id: int, user_id: Optional[int] = None, lift_time: Optional[int] = None) -> None:
         """

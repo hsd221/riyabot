@@ -33,5 +33,6 @@
         "description": "将当前 QQ 账号的收藏表情同步到待注册目录"
       }
     ]
-  }
+  },
+  "id": "RiyaBot.riyabot"
 }

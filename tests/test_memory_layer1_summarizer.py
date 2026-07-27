@@ -98,7 +98,7 @@ class GroupTopicSummarizerSyncTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotEqual(first, second)
         self.assertNotEqual(second, third)
-        self.assertEqual(summarizer.get_topic_count("group-1"), 1)
+        self.assertEqual(summarizer.get_topic_count("group-1"), 2)
         summaries = summarizer.get_topic_summaries("group-1")
         self.assertEqual(len(summaries), 3)
         self.assertTrue(any(item["is_closed"] for item in summaries))
@@ -126,6 +126,48 @@ class GroupTopicSummarizerSyncTest(unittest.IsolatedAsyncioTestCase):
         summarizer.reset_stream("group-1")
         self.assertEqual(summarizer.get_topic_count("group-1"), 0)
         self.assertEqual(summarizer.get_topic_summaries("group-1"), [])
+
+    def test_topic_trimming_only_merges_the_overflow_count(self) -> None:
+        summarizer = GroupTopicSummarizer(max_topics_per_stream=3, match_threshold=1.0)
+        texts = [
+            "爵士演奏萨克斯管排练安排。乐手确认独奏段落。",
+            "量子物理粒子实验报告。研究员校准探测设备。",
+            "烘焙面包黄油烤箱温度。厨师检查发酵程度。",
+            "山地骑行头盔路线补给。车手规划爬坡路段。",
+        ]
+        topic_ids = [
+            summarizer.add_message("group-1", text, f"u{index}", float(index)) for index, text in enumerate(texts)
+        ]
+
+        self.assertEqual(summarizer.get_topic_count("group-1"), 3)
+        topics = summarizer.topics["group-1"]
+        self.assertTrue(topics[topic_ids[0]].is_closed)
+        self.assertFalse(topics[topic_ids[1]].is_closed)
+        self.assertFalse(topics[topic_ids[2]].is_closed)
+        self.assertFalse(topics[topic_ids[3]].is_closed)
+
+    async def test_reset_stream_discards_pending_and_open_tail_state(self) -> None:
+        summarizer = GroupTopicSummarizer(judge_trigger_count=3, topic_judge=RaisingTopicJudge())
+        await summarizer.add_messages(
+            "group-1",
+            [
+                msg("m1", "旧会话第一条"),
+                msg("m2", "旧会话第二条"),
+            ],
+        )
+        summarizer.open_topic_messages["group-1"] = [msg("open", "旧未闭合尾段")]
+        summarizer.open_topic_ids["group-1"] = ["topic-old"]
+
+        summarizer.reset_stream("group-1")
+
+        self.assertNotIn("group-1", summarizer.pending_messages)
+        self.assertNotIn("group-1", summarizer.open_topic_messages)
+        self.assertNotIn("group-1", summarizer.open_topic_ids)
+        await summarizer.add_messages("group-1", [msg("m3", "新会话唯一消息")], force=True)
+        self.assertEqual(
+            [item["message_id"] for item in summarizer.get_open_topic_messages("group-1")],
+            ["m3"],
+        )
 
     async def test_async_batch_judging_falls_back_to_heuristic_and_restores_open_topics(self) -> None:
         summarizer = GroupTopicSummarizer(judge_trigger_count=10, topic_judge=RaisingTopicJudge())
@@ -251,6 +293,24 @@ class UnclosedTopicBridgeTest(unittest.TestCase):
                 self.assertEqual(len(saved["group-1"]), 1)
                 self.assertLessEqual(len(saved["group-1"][0]["messages"][0]["text"]), 803)
 
+                # 两个实例都从 group-1 的旧快照开始，后续保存必须合并磁盘最新状态，
+                # 不能由最后一个实例把另一个刚写入的 stream 整份覆盖掉。
+                stale_instance = UnclosedTopicBridge()
+                peer_instance = UnclosedTopicBridge()
+                active_topic = {
+                    "topic_id": "open",
+                    "keywords": ["持续"],
+                    "key_points": ["仍在讨论"],
+                    "last_updated": 999.0,
+                    "is_closed": False,
+                }
+                with patch.object(layer1_summarizer.time, "time", return_value=1_000.0):
+                    peer_instance.save_unclosed_topics("group-2", [active_topic])
+                    stale_instance.save_unclosed_topics("group-3", [active_topic])
+                merged = json.loads(Path(UnclosedTopicBridge._FILE_PATH).read_text(encoding="utf-8"))
+                self.assertEqual(set(merged), {"group-1", "group-2", "group-3"})
+                self.assertFalse(Path(f"{UnclosedTopicBridge._FILE_PATH}.tmp").exists())
+
                 restored = UnclosedTopicBridge().restore_topics("group-1")
                 self.assertEqual(restored[0]["topic_id"], "open")
                 self.assertEqual(UnclosedTopicBridge().restore_topics("group-1"), [])
@@ -260,9 +320,14 @@ class UnclosedTopicBridgeTest(unittest.TestCase):
                     "fresh": [{"topic_id": "fresh", "last_active": 4_900.0}],
                     "old": [{"topic_id": "old", "last_active": 0.0}],
                 }
+                bridge._save()
                 with patch.object(layer1_summarizer.time, "time", return_value=5_000.0):
                     bridge.cleanup_stale(max_age_hours=1)
                 self.assertEqual(set(bridge._data), {"fresh"})
+                self.assertEqual(
+                    set(json.loads(Path(UnclosedTopicBridge._FILE_PATH).read_text(encoding="utf-8"))),
+                    {"fresh"},
+                )
 
                 Path(UnclosedTopicBridge._FILE_PATH).write_text("{bad json", encoding="utf-8")
                 self.assertEqual(UnclosedTopicBridge()._data, {})
@@ -270,11 +335,17 @@ class UnclosedTopicBridgeTest(unittest.TestCase):
                 UnclosedTopicBridge.MAX_FILE_SIZE = 1
                 self.assertEqual(UnclosedTopicBridge()._data, {})
 
+                UnclosedTopicBridge.MAX_FILE_SIZE = old_max_size
                 bridge = UnclosedTopicBridge()
                 bridge._data = {"group-2": [{"topic_id": "open", "is_closed": False, "last_active": 999.0}]}
+                bridge._save()
                 with patch.object(layer1_summarizer.time, "time", return_value=3_000.0):
                     bridge.save_unclosed_topics("group-2", [])
                 self.assertNotIn("group-2", bridge._data)
+                self.assertEqual(
+                    json.loads(Path(UnclosedTopicBridge._FILE_PATH).read_text(encoding="utf-8")),
+                    {},
+                )
             finally:
                 UnclosedTopicBridge._DATA_DIR = old_data_dir
                 UnclosedTopicBridge._FILE_PATH = old_file_path

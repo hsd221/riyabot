@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, Tuple, List
 
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.common.database.database import db
 from src.common.database.database_model import OnlineTime, LLMUsage, Messages, ActionRecords
@@ -276,7 +277,7 @@ class StatisticOutputTask(AsyncTask):
                 logger.exception(f"后台统计数据输出过程中发生异常：{e}")
 
         # 创建后台任务，立即返回
-        asyncio.create_task(_async_collect_and_output())
+        spawn_background_task(_async_collect_and_output(), name="statistic-output")
 
     # -- 以下为统计数据收集方法 --
 
@@ -885,7 +886,7 @@ class AsyncStatisticOutputTask(AsyncTask):
                 logger.exception(f"后台统计数据输出过程中发生异常：{e}")
 
         # 创建后台任务，立即返回
-        asyncio.create_task(_async_collect_and_output())
+        spawn_background_task(_async_collect_and_output(), name="statistic-output")
 
     # 复用 StatisticOutputTask 的所有方法
     def _collect_all_statistics(self, now: datetime):

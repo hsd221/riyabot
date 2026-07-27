@@ -1,6 +1,7 @@
 import time
 import asyncio
 from typing import List, Any
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
@@ -125,9 +126,9 @@ class MessageRecorder:
 
                 # 触发 expression_learner 和 jargon_miner 的处理
                 if self.enable_expression_learning:
-                    asyncio.create_task(self._trigger_expression_learning(messages))
+                    spawn_background_task(self._trigger_expression_learning(messages), name="expression-learning")
                 if self.enable_behavior_learning:
-                    asyncio.create_task(self._trigger_behavior_learning(messages))
+                    spawn_background_task(self._trigger_behavior_learning(messages), name="behavior-learning")
 
             except Exception as e:
                 logger.error(f"为聊天流 {self.chat_name} 提取和分发消息失败: {e}")

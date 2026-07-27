@@ -416,8 +416,22 @@ class BM25Retriever:
         if not doc_scores:
             return []
 
+        # 分数相同在同长度、同词频文档之间很常见。candidate_docs 是 set，若只按分数排序，
+        # 同分项会继承受 PYTHONHASHSEED 影响的集合迭代顺序，随后 RRF 的 rank 也会跨进程漂移。
+        # 用创建时间和 atom_id 补齐稳定次序：同分时优先较新的记忆，最终以 ID 确定顺序。
+        def _sort_key(item: tuple[str, float]) -> tuple[float, float, str]:
+            doc_id, score = item
+            created_at = self._doc_metadata.get(doc_id, {}).get("created_at")
+            if isinstance(created_at, (int, float)):
+                created_ts = float(created_at)
+            elif hasattr(created_at, "timestamp"):
+                created_ts = float(created_at.timestamp())
+            else:
+                created_ts = 0.0
+            return (-score, -created_ts, doc_id)
+
         # 排序并取 top_k
-        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        sorted_docs = sorted(doc_scores.items(), key=_sort_key)
         top_docs = sorted_docs[:top_k]
 
         # 构建结果

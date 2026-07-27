@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Cookie, Header
 from pydantic import BaseModel
 from src.config.config import MMC_VERSION
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.webui.auth import verify_auth_token_from_cookie_or_header
 from src.webui.error_utils import internal_server_error
@@ -68,8 +69,8 @@ async def restart_riyabot(_auth: bool = Depends(require_auth)):
             logger.info("WebUI 请求重启，退出代码 42")
             os._exit(42)
 
-        # 创建后台任务执行重启
-        asyncio.create_task(delayed_restart())
+        # 创建后台任务执行重启（必须持有强引用，否则任务可能在触发前被回收）
+        spawn_background_task(delayed_restart(), name="webui-delayed-restart")
 
         # 立即返回成功响应
         return RestartResponse(success=True, message="璃夜正在重启中...")

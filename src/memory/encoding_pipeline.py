@@ -15,7 +15,9 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 from datetime import datetime
+import json
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -38,6 +40,7 @@ from src.memory.layer2_encoder import (
     BatchEncoder,
 )
 from src.memory.layer3_retrieval import MemoryWriter
+from src.memory.schema import PendingAtomWrite, memory_db
 from src.memory.store import MemoryStore
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
 from src.memory.write_ops import WriteOpLogger
@@ -71,6 +74,17 @@ def _safe_internal_text_list(value: Any) -> list[str]:
             result.append(text)
             seen.add(text)
     return result
+
+
+@dataclass
+class _PendingAtomWrite:
+    """已通过校验但尚未成功落库的确定性写入单元。"""
+
+    stream_id: str
+    atom: MemoryAtomDC
+    semantic_detail: Optional[SemanticDetail]
+    episodic_detail: Optional[EpisodicDetail]
+    profile_identities: list[Any]
 
 
 class EncodingPipeline:
@@ -109,6 +123,9 @@ class EncodingPipeline:
         )
         self.writer = MemoryWriter(store, op_logger=op_logger)
         self.trace_recorder: Optional[TraceChainRecorder] = None
+        self._pending_writes: list[_PendingAtomWrite] = []
+        self._pending_loaded = False
+        self._outbox_enabled = True
 
         global _encoding_pipeline
         _encoding_pipeline = self
@@ -128,6 +145,189 @@ class EncodingPipeline:
         """
         self.trace_recorder = recorder
         logger.info("TraceChainRecorder 已设置", event_code="memory.encoding.trace_recorder_set")
+
+    @staticmethod
+    def _serialize_pending_write(pending: _PendingAtomWrite) -> str:
+        atom_data = asdict(pending.atom)
+        atom_data["atom_type"] = pending.atom.atom_type.value
+        atom_data["decay_type"] = pending.atom.decay_type.value
+        atom_data.pop("semantic_detail", None)
+        atom_data.pop("episodic_detail", None)
+        identities = [
+            {
+                "platform": str(getattr(identity, "platform", "legacy") or "legacy"),
+                "user_id": str(getattr(identity, "user_id", "") or ""),
+                "nickname": str(getattr(identity, "nickname", "") or ""),
+                "cardname": str(getattr(identity, "cardname", "") or ""),
+                "group_id": str(getattr(identity, "group_id", "") or ""),
+                "group_name": str(getattr(identity, "group_name", "") or ""),
+            }
+            for identity in pending.profile_identities
+        ]
+        return json.dumps(
+            {
+                "atom": atom_data,
+                "semantic_detail": asdict(pending.semantic_detail) if pending.semantic_detail is not None else None,
+                "episodic_detail": asdict(pending.episodic_detail) if pending.episodic_detail is not None else None,
+                "profile_identities": identities,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _deserialize_pending_write(stream_id: str, payload: str) -> _PendingAtomWrite:
+        from src.memory.user_profile import PersonIdentity
+
+        parsed = json.loads(payload)
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("atom"), dict):
+            raise ValueError("待写 outbox 载荷格式无效")
+        atom_data = dict(parsed["atom"])
+        atom_data["atom_type"] = AtomType(atom_data["atom_type"])
+        atom_data["decay_type"] = DecayType(atom_data["decay_type"])
+        atom = MemoryAtomDC(**atom_data)
+
+        semantic_data = parsed.get("semantic_detail")
+        semantic_detail = SemanticDetail(**semantic_data) if isinstance(semantic_data, dict) else None
+        episodic_data = parsed.get("episodic_detail")
+        episodic_detail = EpisodicDetail(**episodic_data) if isinstance(episodic_data, dict) else None
+        profile_identities = []
+        for identity_data in parsed.get("profile_identities", []):
+            if not isinstance(identity_data, dict):
+                continue
+            try:
+                profile_identities.append(PersonIdentity(**identity_data))
+            except (TypeError, ValueError):
+                continue
+        return _PendingAtomWrite(
+            stream_id=stream_id,
+            atom=atom,
+            semantic_detail=semantic_detail,
+            episodic_detail=episodic_detail,
+            profile_identities=profile_identities,
+        )
+
+    def _persist_pending_write(self, pending: _PendingAtomWrite) -> None:
+        if not getattr(self, "_outbox_enabled", False):
+            return
+        payload = self._serialize_pending_write(pending)
+        with memory_db.atomic():
+            PendingAtomWrite.insert(
+                atom_id=pending.atom.atom_id,
+                stream_id=pending.stream_id,
+                payload=payload,
+                updated_at=datetime.now(),
+            ).on_conflict(
+                conflict_target=[PendingAtomWrite.atom_id],
+                update={
+                    PendingAtomWrite.stream_id: pending.stream_id,
+                    PendingAtomWrite.payload: payload,
+                    PendingAtomWrite.updated_at: datetime.now(),
+                },
+            ).execute()
+
+    def _delete_pending_write(self, atom_id: str) -> None:
+        if not getattr(self, "_outbox_enabled", False):
+            return
+        with memory_db.atomic():
+            PendingAtomWrite.delete().where(PendingAtomWrite.atom_id == atom_id).execute()
+
+    def _load_pending_writes(self) -> None:
+        if getattr(self, "_pending_loaded", False):
+            return
+        if not getattr(self, "_outbox_enabled", False):
+            self._pending_loaded = True
+            return
+
+        loaded_ids = {pending.atom.atom_id for pending in self._pending_writes}
+        with memory_db:
+            rows = list(PendingAtomWrite.select().order_by(PendingAtomWrite.created_at.asc()))
+        self._pending_loaded = True
+        for row in rows:
+            if row.atom_id in loaded_ids:
+                continue
+            try:
+                pending = self._deserialize_pending_write(row.stream_id, row.payload)
+            except Exception:
+                logger.exception(
+                    "待写记忆 outbox 载荷损坏，保留记录等待人工处理",
+                    event_code="memory.encoding.outbox_payload_invalid",
+                    atom_id=row.atom_id,
+                )
+                continue
+            self._pending_writes.append(pending)
+            loaded_ids.add(pending.atom.atom_id)
+
+    async def _commit_atom_write(self, pending: _PendingAtomWrite) -> None:
+        """提交一个确定性原子写入，并在成功后执行画像与追溯副作用。"""
+        # 写操作日志等外围步骤若在 SQLite 提交后抛错，重试时主记录可能已经存在；
+        # 先按固定 atom_id 查库，让队列重试具备幂等性，避免主键冲突把任务永久卡住。
+        existing = None
+        get_atom = getattr(self.writer.store, "get_atom", None)
+        if callable(get_atom):
+            existing = await get_atom(pending.atom.atom_id)
+        if existing is None:
+            await self.writer.write_atom(
+                atom=pending.atom,
+                semantic_detail=pending.semantic_detail,
+                episodic_detail=pending.episodic_detail,
+            )
+
+        if self.trace_recorder is not None:
+            try:
+                self.trace_recorder.record(
+                    TraceStep(
+                        atom_id=pending.atom.atom_id,
+                        step_order=3,
+                        agent_name="MemoryWriter",
+                        operation="write",
+                        input_source=pending.atom.atom_id,
+                        output_summary="stored in SQLite+Qdrant",
+                        confidence_decay=0.0,
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "记忆写入追溯记录失败",
+                    event_code="memory.encoding.write_trace_failed",
+                    atom_id=pending.atom.atom_id,
+                    exc_info=True,
+                )
+
+        if pending.atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and pending.profile_identities:
+            try:
+                from src.memory.user_profile import ProfileBuilder, ProfileStore
+
+                pb = ProfileBuilder(ProfileStore())
+                for identity in pending.profile_identities:
+                    pb.update_profile_from_atom(identity, pending.atom)
+            except Exception:
+                logger.warning(
+                    "语义原子画像更新失败",
+                    event_code="memory.encoding.profile_update_failed",
+                    atom_id=pending.atom.atom_id,
+                    exc_info=True,
+                )
+
+        if (
+            pending.atom.atom_type == AtomType.EPISODIC
+            and pending.episodic_detail is not None
+            and (pending.episodic_detail.sensory_tags or pending.episodic_detail.emotion_tags)
+            and pending.profile_identities
+        ):
+            try:
+                from src.memory.user_profile import ProfileBuilder, ProfileStore
+
+                pb = ProfileBuilder(ProfileStore())
+                for identity in pending.profile_identities:
+                    pb.update_profile_from_atom(identity, pending.atom)
+            except Exception:
+                logger.warning(
+                    "情景原子画像更新失败",
+                    event_code="memory.encoding.episodic_profile_update_failed",
+                    atom_id=pending.atom.atom_id,
+                    exc_info=True,
+                )
 
     async def ingest(
         self,
@@ -198,6 +398,29 @@ class EncodingPipeline:
         written_atoms: list[Any] = []
         stream_map: dict[str, str] = {}
 
+        # Layer2 成功后原始消息已从缓冲确认；写库失败必须保留确定性的原子对象，
+        # 否则下一轮没有任何载体可重试。启动后先恢复持久化 outbox，再处理旧失败项。
+        self._load_pending_writes()
+        pending_writes = list(getattr(self, "_pending_writes", []))
+        self._pending_writes = []
+        for pending in pending_writes:
+            try:
+                await self._commit_atom_write(pending)
+                self._delete_pending_write(pending.atom.atom_id)
+                written_atoms.append(pending.atom)
+                stream_map[pending.atom.atom_id] = pending.stream_id
+                stats["atoms_written"] += 1
+                stats["streams"][pending.stream_id] = stats["streams"].get(pending.stream_id, 0) + 1
+            except Exception:
+                self._pending_writes.append(pending)
+                stats["errors"] += 1
+                logger.exception(
+                    "重试写入记忆原子失败，继续保留队列",
+                    event_code="memory.encoding.atom_write_retry_failed",
+                    stream_id=pending.stream_id,
+                    atom_id=pending.atom.atom_id,
+                )
+
         logger.debug(
             "开始编码周期",
             event_code="memory.encoding.cycle_started",
@@ -209,7 +432,6 @@ class EncodingPipeline:
 
             if not encoded:
                 logger.debug("编码周期无就绪流", event_code="memory.encoding.no_ready_stream")
-                return stats
 
             stats["streams_processed"] = len(encoded)
 
@@ -299,52 +521,28 @@ class EncodingPipeline:
                         if atom.weight == 0.5:
                             atom = update_weight(atom)
 
-                        await self.writer.write_atom(
+                        profile_identities = self._profile_target_identities(atom, detail)
+                        pending = _PendingAtomWrite(
+                            stream_id=stream_id,
                             atom=atom,
                             semantic_detail=semantic_detail,
                             episodic_detail=episodic_detail,
+                            profile_identities=profile_identities,
                         )
+                        try:
+                            self._persist_pending_write(pending)
+                        except Exception:
+                            self._pending_writes.append(pending)
+                            raise
+                        try:
+                            await self._commit_atom_write(pending)
+                            self._delete_pending_write(pending.atom.atom_id)
+                        except Exception:
+                            # Layer2 已确认并移除了原消息，必须保存这个固定 atom_id 的写入单元；
+                            # 下一轮直接重试落库，不能重新跑 LLM，也不能重复已成功的同批原子。
+                            self._pending_writes.append(pending)
+                            raise
 
-                        if self.trace_recorder is not None:
-                            self.trace_recorder.record(
-                                TraceStep(
-                                    atom_id=atom.atom_id,
-                                    step_order=3,
-                                    agent_name="MemoryWriter",
-                                    operation="write",
-                                    input_source=atom.atom_id,
-                                    output_summary="stored in SQLite+Qdrant",
-                                    confidence_decay=0.0,
-                                )
-                            )
-
-                        profile_identities = self._profile_target_identities(atom, detail)
-                        if atom.atom_type in (AtomType.PREFERENCE, AtomType.FACTUAL) and profile_identities:
-                            try:
-                                from src.memory.user_profile import ProfileBuilder, ProfileStore
-
-                                ps = ProfileStore()
-                                pb = ProfileBuilder(ps)
-                                for identity in profile_identities:
-                                    pb.update_profile_from_atom(identity, atom)
-                            except Exception:
-                                pass
-
-                        # 情景原子感官数据 → 画像 mood_history
-                        if (
-                            atom.atom_type == AtomType.EPISODIC
-                            and episodic_detail is not None
-                            and (episodic_detail.sensory_tags or episodic_detail.emotion_tags)
-                        ):
-                            try:
-                                from src.memory.user_profile import ProfileBuilder, ProfileStore
-
-                                ps = ProfileStore()
-                                pb = ProfileBuilder(ps)
-                                for identity in profile_identities:
-                                    pb.update_profile_from_atom(identity, atom)
-                            except Exception:
-                                pass
                         # 收集已写入原子供关联构建
                         written_atoms.append(atom)
                         stream_map[atom.atom_id] = stream_id

@@ -69,10 +69,12 @@ class EmojiRoutesTestCase(unittest.IsolatedAsyncioTestCase):
         self.cache_dir_patch.start()
         self.registered_dir_patch.start()
         emoji_routes._thumbnail_locks.clear()
+        emoji_routes._thumbnail_lock_users.clear()
         emoji_routes._generating_thumbnails.clear()
 
     def tearDown(self) -> None:
         emoji_routes._thumbnail_locks.clear()
+        emoji_routes._thumbnail_lock_users.clear()
         emoji_routes._generating_thumbnails.clear()
         self.registered_dir_patch.stop()
         self.cache_dir_patch.stop()
@@ -272,9 +274,15 @@ class EmojiThumbnailRoutesTest(EmojiRoutesTestCase):
         generated = emoji_routes._generate_thumbnail(str(source_path), valid.emoji_hash)
         self.assertTrue(generated.exists())
         self.assertEqual(generated.suffix, ".webp")
-        self.assertIs(
-            emoji_routes._get_thumbnail_lock(valid.emoji_hash), emoji_routes._get_thumbnail_lock(valid.emoji_hash)
-        )
+        # 同一哈希在持锁期间复用同一个 Lock，退出后立即回收，避免每张表情包永久占一个锁对象
+        with emoji_routes._thumbnail_lock(valid.emoji_hash):
+            outer_lock = emoji_routes._thumbnail_locks[valid.emoji_hash]
+            with emoji_routes._thumbnail_lock(valid.emoji_hash + "-other"):
+                pass
+            self.assertIs(emoji_routes._thumbnail_locks[valid.emoji_hash], outer_lock)
+            self.assertNotIn(valid.emoji_hash + "-other", emoji_routes._thumbnail_locks)
+        self.assertEqual(emoji_routes._thumbnail_locks, {})
+        self.assertEqual(emoji_routes._thumbnail_lock_users, {})
 
         (self.thumbnail_dir / "orphan-hash.webp").write_bytes(b"orphan")
         cleaned, kept = emoji_routes.cleanup_orphaned_thumbnails()

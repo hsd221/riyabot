@@ -94,6 +94,7 @@ class InspirationEngineTest(unittest.IsolatedAsyncioTestCase):
         writer.write_atom.assert_awaited_once()
         promoted_atom = writer.write_atom.await_args.kwargs["atom"]
         self.assertTrue(promoted_atom.atom_id.startswith("recycled_"))
+        self.assertEqual(promoted_atom.source_id, f"noise_pool:{promoted_atom.atom_id.removeprefix('recycled_')}")
         self.assertEqual(promoted_atom.content, "昨天 小明 钢琴 训练 比赛 的片段")
         self.assertEqual(promoted_atom.importance, 1.0)
         self.assertEqual(promoted_atom.confidence, engine.PROMOTED_CONFIDENCE)
@@ -182,13 +183,24 @@ class InspirationEngineTest(unittest.IsolatedAsyncioTestCase):
         with patch("src.memory.inspiration_engine.MemoryAtomModel.select", side_effect=RuntimeError("db down")):
             self.assertEqual(engine._matched_keyword_atoms(["钢琴"]), [])
 
-    def test_temporal_gap_requires_marker_and_absence_of_recent_active_memory(self) -> None:
+    def test_temporal_gap_requires_marker_and_absence_of_recent_related_memory(self) -> None:
         engine = InspirationEngine(store=SimpleNamespace(), writer=SimpleNamespace(), retention_days=7)
 
         self.assertFalse(engine._has_temporal_gap("钢琴训练"))
         self.assertTrue(engine._has_temporal_gap("昨天的钢琴训练"))
 
-        create_atom("recent", content="最近已经覆盖过", created_at=datetime.datetime.now())
+        create_atom(
+            "recent-unrelated",
+            content="今天讨论量子物理实验",
+            created_at=datetime.datetime.now(),
+        )
+        self.assertTrue(engine._has_temporal_gap("昨天的钢琴训练"))
+
+        create_atom(
+            "recent-related",
+            content="钢琴训练已经覆盖过",
+            created_at=datetime.datetime.now(),
+        )
         self.assertFalse(engine._has_temporal_gap("昨天的钢琴训练"))
 
         with patch("src.memory.inspiration_engine.MemoryAtomModel.select", side_effect=RuntimeError("db down")):
@@ -205,21 +217,76 @@ class InspirationEngineTest(unittest.IsolatedAsyncioTestCase):
         with patch("src.memory.inspiration_engine.NoisePool.delete", side_effect=RuntimeError("db down")):
             InspirationEngine._delete_noise(noise.id)
 
+    async def test_promote_is_idempotent_when_noise_delete_fails_after_atom_write(self) -> None:
+        noise = create_noise("昨天的重要噪声", significance=0.8, source_id="triaged:42")
+        writer = SimpleNamespace(write_atom=AsyncMock())
+        engine = InspirationEngine(store=SimpleNamespace(), writer=writer, retention_days=7)
+
+        async def persist_atom(*, atom) -> str:
+            create_atom(
+                atom.atom_id,
+                content=atom.content,
+                atom_type=atom.atom_type.value,
+                importance=atom.importance,
+                confidence=atom.confidence,
+                source_scene=atom.source_scene,
+                source_id=atom.source_id,
+            )
+            return atom.atom_id
+
+        writer.write_atom.side_effect = persist_atom
+        with patch.object(engine, "_delete_noise", return_value=False):
+            first_result = await engine._promote(noise)
+
+        first_atom = writer.write_atom.await_args.kwargs["atom"]
+        self.assertFalse(first_result)
+        self.assertTrue(NoisePool.select().where(NoisePool.id == noise.id).exists())
+        self.assertTrue(MemoryAtomModel.select().where(MemoryAtomModel.atom_id == first_atom.atom_id).exists())
+
+        second_result = await engine._promote(noise)
+
+        self.assertTrue(second_result)
+        self.assertFalse(NoisePool.select().where(NoisePool.id == noise.id).exists())
+        self.assertEqual(MemoryAtomModel.select().where(MemoryAtomModel.atom_id == first_atom.atom_id).count(), 1)
+        writer.write_atom.assert_awaited_once()
+
+    async def test_recycle_keeps_noise_when_foreshadowing_write_fails(self) -> None:
+        create_atom("piano", content="钢琴 伏笔线索", weight=0.9)
+        create_atom("training", content="钢琴 训练线索", weight=0.8)
+        noise = create_noise("钢琴 伏笔片段", significance=0.4)
+        engine = InspirationEngine(
+            store=SimpleNamespace(), writer=SimpleNamespace(write_atom=AsyncMock()), retention_days=7
+        )
+
+        with (
+            patch("src.memory.inspiration_engine.extract_keywords", return_value=["钢琴"]),
+            patch("src.memory.inspiration_engine.InsightPool.create", side_effect=RuntimeError("db down")),
+        ):
+            result = await engine.recycle()
+
+        self.assertEqual(result, {"promoted": 0, "discarded": 0, "insights": 0})
+        self.assertTrue(NoisePool.select().where(NoisePool.id == noise.id).exists())
+        self.assertEqual(InsightPool.select().count(), 0)
+
     def test_foreshadowing_insight_truncates_sources_uses_fallback_keywords_and_handles_errors(self) -> None:
         noise = create_noise("  伏笔   内容   " * 20, significance=0.2)
         matched_atoms = [SimpleNamespace(atom_id=f"atom-{index}") for index in range(4)]
         engine = InspirationEngine(store=SimpleNamespace(), writer=SimpleNamespace(), retention_days=7)
         engine.FORESHADOW_SOURCE_LIMIT = 2
 
-        engine._write_foreshadowing_insight(noise, [], matched_atoms)
+        created = engine._write_foreshadowing_insight(noise, [], matched_atoms)
 
+        self.assertTrue(created)
+        self.assertFalse(NoisePool.select().where(NoisePool.id == noise.id).exists())
         insight = InsightPool.get()
         self.assertIn("相关线索", insight.content)
         self.assertLessEqual(len(insight.content), 160)
         self.assertEqual(json.loads(insight.source_atoms), ["atom-0", "atom-1"])
 
+        retry_noise = create_noise("重试伏笔内容", significance=0.2)
         with patch("src.memory.inspiration_engine.InsightPool.create", side_effect=RuntimeError("db down")):
-            engine._write_foreshadowing_insight(noise, ["钢琴"], matched_atoms)
+            self.assertFalse(engine._write_foreshadowing_insight(retry_noise, ["钢琴"], matched_atoms))
+        self.assertTrue(NoisePool.select().where(NoisePool.id == retry_noise.id).exists())
 
 
 if __name__ == "__main__":

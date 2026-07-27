@@ -174,9 +174,6 @@ class _VersionedVectorIndexMigrationTask(AsyncTask, ABC):
             and str(point.get("embedding_source_hash") or "") == source_hash
         )
 
-    def _source_signature(self, source: dict[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
-        return self._embedding_text(source), tuple(sorted(self._business_payload(source).items()))
-
     async def _migrate_source(self, target: str, source_id: str) -> bool:
         expected_dimension = int(self._store.config.embedding_dimension)
         expected_signature = str(self._store.config.embedding_signature or "")
@@ -189,7 +186,17 @@ class _VersionedVectorIndexMigrationTask(AsyncTask, ABC):
 
             embedding_text = self._embedding_text(source)
             if not embedding_text.strip():
-                raise ValueError(f"{self._index_label} source {source_id} has empty embedding text")
+                # 空文本无法嵌入。若在此抛错，整批都会回滚且游标不前进，
+                # 一条内容为空的记录就能让整个索引重建每 15 秒重试一次、永远无法完成。
+                # 跳过它并清掉残留点，_source_hashes 也会同步排除，收敛校验才能通过。
+                logger.warning(
+                    "跳过无法嵌入的迁移来源",
+                    event_code="memory.vector_migration.source_not_embeddable",
+                    index_name=self._index_label,
+                    source_id=source_id,
+                )
+                await self._delete_target(target, source_id)
+                return False
 
             result = await embed_text(
                 embedding_text,
@@ -206,13 +213,17 @@ class _VersionedVectorIndexMigrationTask(AsyncTask, ABC):
             if latest_source is None:
                 await self._delete_target(target, source_id)
                 return False
-            if self._source_signature(latest_source) != self._source_signature(source):
+            # 只有嵌入文本变化才需要重新嵌入。weight 等业务载荷字段会被衰减扫描和
+            # 检索强化持续改写，把它们并入变更判定会让热点记录连续三次判定为"来源在变"，
+            # 最终删点抛错并卡死整批迁移；而收敛校验本身也只比对嵌入文本的哈希。
+            if self._embedding_text(latest_source) != embedding_text:
                 continue
 
             written = await self._upsert_target(
                 target,
                 source_id,
                 result.vector,
+                # 载荷取最新一次读到的值，剩余漂移在 alias 切换后由 set_atom_payload 收敛
                 self._migration_payload(latest_source),
             )
             if not written:
@@ -222,7 +233,7 @@ class _VersionedVectorIndexMigrationTask(AsyncTask, ABC):
             if post_write_source is None:
                 await self._delete_target(target, source_id)
                 return False
-            if self._source_signature(post_write_source) == self._source_signature(latest_source):
+            if self._embedding_text(post_write_source) == embedding_text:
                 return True
 
         await self._delete_target(target, source_id)
@@ -368,11 +379,14 @@ class VectorIndexMigrationTask(_VersionedVectorIndexMigrationTask):
 
     def _source_hashes(self) -> dict[str, str]:
         with memory_db:
+            # 内容为空的原子无法嵌入，_migrate_source 会跳过它们；
+            # 这里必须同步排除，否则收敛校验永远认为目标集合缺点，迁移无法激活。
             return {
                 str(atom.atom_id): embedding_source_hash(str(atom.content or ""))
                 for atom in MemoryAtom.select(MemoryAtom.atom_id, MemoryAtom.content).where(
                     MemoryAtom.status == "active"
                 )
+                if str(atom.content or "").strip()
             }
 
     def _read_source(self, source_id: str) -> Optional[dict[str, Any]]:

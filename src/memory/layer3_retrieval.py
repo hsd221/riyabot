@@ -59,6 +59,16 @@ _CJK_RELEVANCE_STOP_CHARS = set("的一是在了有和与及或也就都还很�
 _HYBRID_VECTOR_WEIGHT = 0.7
 _HYBRID_BM25_WEIGHT = 0.3
 _RRF_K = 60
+_MEMORY_FILTER_FIELDS = frozenset(
+    {
+        "atom_id",
+        "atom_type",
+        "privacy_level",
+        "source_id",
+        "source_scene",
+        "status",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -574,6 +584,9 @@ class MemoryWriter:
                 atom_ids=[atom.atom_id],
                 payload={"atom": store_dict},
             ):
+                # peewee 的事务栈是线程局部的，asyncio 单线程下所有协程共用同一个栈。
+                # 下面三个协程内部只有同步 SQL、没有真正的挂起点，事务才不会跨协程串扰；
+                # 若将来在其中引入真实 await，并发写入会被并进同一个事务（一方回滚即全丢）。
                 with memory_db.atomic():
                     await self.store.insert_atom(dict(store_dict))
                     if episodic_detail is not None:
@@ -703,6 +716,7 @@ class MemoryWriter:
 
         # 合并更新并重新计算 weight
         merged = {**current, **updates}
+        effective_updates = dict(updates)
 
         # 如果 importance / confidence 变更，重新计算 weight
         weight_keys = {"importance", "confidence"}
@@ -711,13 +725,15 @@ class MemoryWriter:
                 temp_atom = self._dict_to_atom(merged)
                 temp_atom = update_weight(temp_atom)
                 merged["weight"] = temp_atom.weight
+                effective_updates["weight"] = temp_atom.weight
             except Exception as e:
                 logger.warning(f"权重重新计算失败: {e}")
 
-        # 提取需要传递给 store.update_atom 的字段（排除 store 不接受的字段）
+        # 只写入调用方实际修改的字段；current 仅用于计算权重和构造 Qdrant 完整 payload。
+        # 若把 merged 整条记录写回，任何更新都会因包含 content 而误走 embedding 重建路径。
         store_updates = {}
         skip_fields = {"embedding", "created_at", "atom_id"}
-        for key, value in merged.items():
+        for key, value in effective_updates.items():
             if key in skip_fields:
                 continue
             if key == "atom_type" and isinstance(value, AtomType):
@@ -743,7 +759,7 @@ class MemoryWriter:
             ):
                 success = await self.store.update_atom(atom_id, dict(store_updates))
                 if not success:
-                    logger.warning(f"更新记忆原子返回 False: {atom_id}")
+                    raise RuntimeError(f"SQLite 更新返回 False: {atom_id}")
         except Exception as e:
             logger.error(f"更新记忆原子失败: {atom_id}, {e}")
             return None
@@ -1083,6 +1099,23 @@ class MemoryRetriever:
             logger.warning("BM25 检索失败，继续使用其他检索路径", error=str(e))
             return []
 
+    @staticmethod
+    def _matches_filter_value(actual: Any, expected: Any) -> bool:
+        """按 Qdrant 的 MatchValue/MatchAny 语义复核 SQLite 真值。"""
+        if isinstance(expected, (list, tuple, set)):
+            return not expected or actual in expected
+        return actual == expected
+
+    @classmethod
+    def _matches_filters(cls, atom: dict[str, Any], filters: Optional[dict[str, Any]]) -> bool:
+        """使用 SQLite 返回字段复核所有受支持的记忆过滤条件。"""
+        for key, expected in (filters or {}).items():
+            if key not in _MEMORY_FILTER_FIELDS or expected is None:
+                continue
+            if not cls._matches_filter_value(atom.get(key), expected):
+                return False
+        return True
+
     # ── 向量检索 ───────────────────────────────────────────
 
     async def retrieve_by_vector(
@@ -1150,7 +1183,7 @@ class MemoryRetriever:
                 return []
             logger.warning("Qdrant向量检索失败或返回为空，回退到关键词检索")
             logger.debug("向量检索回退详情", filters=filters, top_k=top_k)
-            kw_query = filters.get("keyword", "") if filters else ""
+            kw_query = (filters or {}).get("keyword", query_text)
             return await self.keyword_search(
                 query=kw_query,
                 filters=filters,
@@ -1167,9 +1200,12 @@ class MemoryRetriever:
 
         full_atoms = await self._fetch_atoms_by_ids(list(atom_id_to_score.keys()))
 
-        # 3. 计算综合评分
+        # 3. 使用 SQLite 真值复核过滤条件并计算综合评分。Qdrant payload 可能因
+        # 双层同步失败而落后，不能仅依赖其 source/privacy/status 过滤结果。
         results: list[dict[str, Any]] = []
         for atom_data in full_atoms:
+            if not self._matches_filters(atom_data, filters):
+                continue
             aid = atom_data.get("atom_id", "")
             sim_score = atom_id_to_score.get(aid, 0.0)
             weight = float(atom_data.get("weight", 0.0))
@@ -1258,7 +1294,7 @@ class MemoryRetriever:
         results: list[dict[str, Any]] = []
         for fused_atom in fused:
             atom_data = full_atom_map.get(fused_atom.atom_id)
-            if atom_data is None:
+            if atom_data is None or not self._matches_filters(atom_data, filters):
                 continue
             weight = float(atom_data.get("weight", 0.0))
             if weight < min_weight:
@@ -1420,16 +1456,18 @@ class MemoryRetriever:
                     MemoryAtomModel.status == "active",
                 ]
 
-                # 额外过滤条件
-                if filters:
-                    if "source_scene" in filters:
-                        conditions.append(MemoryAtomModel.source_scene == filters["source_scene"])
-                    if "source_id" in filters:
-                        conditions.append(MemoryAtomModel.source_id == filters["source_id"])
-                    if "atom_type" in filters:
-                        conditions.append(MemoryAtomModel.atom_type == filters["atom_type"])
-                    if "status" in filters:
-                        conditions.append(MemoryAtomModel.status == filters["status"])
+                # 额外过滤条件。即使调用方传入 Qdrant 控制字段，SQLite 回退也必须
+                # 使用相同真值语义，避免后端切换时扩大记忆可见范围。
+                for key, expected in (filters or {}).items():
+                    if key not in _MEMORY_FILTER_FIELDS or expected is None:
+                        continue
+                    field = getattr(MemoryAtomModel, key)
+                    if isinstance(expected, (list, tuple, set)):
+                        values = list(expected)
+                        if values:
+                            conditions.append(field.in_(values))
+                    else:
+                        conditions.append(field == expected)
 
                 query_result = (
                     MemoryAtomModel.select().where(*conditions).order_by(MemoryAtomModel.weight.desc()).limit(limit)
@@ -2142,7 +2180,10 @@ class MemoryRetriever:
 
         results: list[dict[str, Any]] = []
         with memory_db:
-            query = MemoryAtomModel.select().where(MemoryAtomModel.atom_id.in_(atom_ids))
+            query = MemoryAtomModel.select().where(
+                MemoryAtomModel.atom_id.in_(atom_ids),
+                MemoryAtomModel.status == "active",
+            )
             for model_instance in query:
                 results.append(self._model_to_result(model_instance))
 

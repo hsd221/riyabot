@@ -16,8 +16,8 @@ Classes:
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
-import uuid
 from functools import reduce
 from typing import Any
 
@@ -101,8 +101,8 @@ class InspirationEngine:
             keywords = extract_keywords(content, max_keywords=5)
             if not keywords:
                 # 没有可提取的关键词 → 直接丢弃
-                self._delete_noise(noise.id)
-                discarded += 1
+                if self._delete_noise(noise.id):
+                    discarded += 1
                 continue
 
             matched_atoms = self._matched_keyword_atoms(keywords)
@@ -111,11 +111,10 @@ class InspirationEngine:
             # 原始聊天只能作为待核验线索，不能绕过语义提取直接晋升为记忆原子。
             if self._is_raw_archive_candidate(noise):
                 if match_count >= self.FORESHADOW_MATCH_MIN:
-                    self._write_foreshadowing_insight(noise, keywords, matched_atoms)
-                    insights += 1
-                else:
+                    if self._write_foreshadowing_insight(noise, keywords, matched_atoms):
+                        insights += 1
+                elif self._delete_noise(noise.id):
                     discarded += 1
-                self._delete_noise(noise.id)
                 continue
 
             # ── Step 3: 时间覆盖率验证 ──
@@ -123,23 +122,21 @@ class InspirationEngine:
 
             # ── Step 4: 晋升、生成伏笔洞见或丢弃 ──
             if match_count >= self.KEYWORD_MATCH_MIN and temporal_gap:
-                await self._promote(noise)
-                promoted += 1
-                logger.info(
-                    "噪声回收: 晋升",
-                    extra={
-                        "noise_id": noise.id,
-                        "content_preview": content[:60],
-                        "significance": significance,
-                        "keyword_matches": match_count,
-                    },
-                )
+                if await self._promote(noise):
+                    promoted += 1
+                    logger.info(
+                        "噪声回收: 晋升",
+                        extra={
+                            "noise_id": noise.id,
+                            "content_preview": content[:60],
+                            "significance": significance,
+                            "keyword_matches": match_count,
+                        },
+                    )
             elif match_count >= self.FORESHADOW_MATCH_MIN:
-                self._write_foreshadowing_insight(noise, keywords, matched_atoms)
-                self._delete_noise(noise.id)
-                insights += 1
-            else:
-                self._delete_noise(noise.id)
+                if self._write_foreshadowing_insight(noise, keywords, matched_atoms):
+                    insights += 1
+            elif self._delete_noise(noise.id):
                 discarded += 1
 
         logger.info(
@@ -236,12 +233,12 @@ class InspirationEngine:
             return []
 
     def _has_temporal_gap(self, content: str) -> bool:
-        """检查噪声内容是否指向一个未被记忆原子覆盖的时间段
+        """检查噪声内容是否指向一个未被相关记忆覆盖的时间段
 
         简单启发式:
             1. 检查内容中是否包含时间语境词（如"昨天"、"上周"等）
-            2. 如果含时间词，检查 retention_days 内是否有任何活跃原子
-            3. 若无活跃原子 → 该时间段未被覆盖 → 噪声可能被误分类
+            2. 去掉时间词后提取主题关键词
+            3. 若 retention_days 内无共享主题关键词的活跃原子，则视为存在缺口
 
         Args:
             content: 噪声内容
@@ -261,58 +258,67 @@ class InspirationEngine:
             "最近",
             "不久",
         ]
-        has_temporal = any(marker in content for marker in temporal_markers)
-
-        if not has_temporal:
+        if not any(marker in content for marker in temporal_markers):
             return False
 
-        # 检查 retention_days 内是否有任何活跃原子
+        # 时间词本身不能证明主题相关，否则任何一条包含“昨天”的近期记忆
+        # 都会阻断完全不同主题的噪声晋升。
+        semantic_content = content
+        for marker in temporal_markers:
+            semantic_content = semantic_content.replace(marker, " ")
+        keywords = extract_keywords(semantic_content, max_keywords=5)
+        if not keywords:
+            return False
+
         cutoff = datetime.datetime.now() - datetime.timedelta(days=self._retention_days)
         try:
             with memory_db:
-                recent_count = (
+                keyword_conditions = [MemoryAtomModel.content.contains(keyword) for keyword in keywords]
+                related_condition = reduce(lambda a, b: a | b, keyword_conditions)
+                recent_related_count = (
                     MemoryAtomModel.select()
                     .where(
                         MemoryAtomModel.status == "active",
                         MemoryAtomModel.created_at >= cutoff,
+                        related_condition,
                     )
                     .count()
                 )
-                # recent_count == 0 表示该时间段无记忆覆盖 → 存在缺口
-                return recent_count == 0
+                return recent_related_count == 0
         except Exception as e:
             logger.warning(f"噪声回收: 时间验证失败: {e}")
             return False
 
-    async def _promote(self, noise: Any) -> None:
-        """将噪声晋升为正式记忆原子
-
-        创建一个 EPISODIC 类型的 MemoryAtom:
-            - atom_id: recycled_{uuid}
-            - importance: 继承 noise.significance（上限 1.0）
-            - confidence: 固定 PROMOTED_CONFIDENCE=0.3（低置信度回收品）
-            - source_scene: "dream"（表示是梦境回收产生的记忆）
-
-        Args:
-            noise: NoisePool 模型实例
-        """
+    async def _promote(self, noise: Any) -> bool:
+        """将噪声幂等晋升为正式记忆原子，成功确认后删除候选。"""
         if self._is_raw_archive_candidate(noise):
             logger.warning("噪声回收跳过原始聊天直写晋升: source_id=%s", noise.source_id)
-            return
+            return False
 
+        # 固定 ID 使“原子已写入、候选删除失败”的重试不会创建重复记忆。
+        source_identity = getattr(noise, "source_id", None) or f"noise:{int(noise.id)}"
+        identity = f"{source_identity}\0{str(noise.content or '')}"
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+        atom_id = f"recycled_{digest}"
         atom = MemoryAtomDC(
-            atom_id=f"recycled_{uuid.uuid4().hex[:12]}",
+            atom_id=atom_id,
             atom_type=AtomType.EPISODIC,
             content=noise.content,
             importance=min(noise.significance, 1.0),
             confidence=self.PROMOTED_CONFIDENCE,
             source_scene="dream",
+            source_id=f"noise_pool:{digest}",
         )
         try:
-            await self._writer.write_atom(atom=atom)
-            self._delete_noise(noise.id)
+            if not MemoryAtomModel.select().where(MemoryAtomModel.atom_id == atom_id).exists():
+                await self._writer.write_atom(atom=atom)
+            if not self._delete_noise(noise.id):
+                logger.warning("噪声回收: 晋升已写入但候选确认删除失败 (id=%s)", noise.id)
+                return False
+            return True
         except Exception as e:
             logger.error(f"噪声回收: 晋升失败 (id={noise.id}): {e}")
+            return False
 
     @staticmethod
     def _is_raw_archive_candidate(noise: Any) -> bool:
@@ -324,41 +330,57 @@ class InspirationEngine:
         noise: Any,
         keywords: list[str],
         matched_atoms: list[MemoryAtomModel],
-    ) -> None:
-        """把能和已有记忆串起来的噪声保存为低置信伏笔洞见。"""
-        source_atoms = [atom.atom_id for atom in matched_atoms[: self.FORESHADOW_SOURCE_LIMIT]]
+    ) -> bool:
+        """幂等保存伏笔洞见，并在同一事务中消费来源噪声。"""
+        source_atoms = sorted({atom.atom_id for atom in matched_atoms[: self.FORESHADOW_SOURCE_LIMIT]})
         keyword_text = "、".join(keywords[:5]) if keywords else "相关线索"
         content_preview = " ".join(str(noise.content or "").split())[:100]
         content = f"伏笔洞见: 噪声片段可能与已有记忆通过「{keyword_text}」串联；原片段：{content_preview}"
 
+        source_atoms_json = json.dumps(source_atoms, ensure_ascii=False)
         try:
-            with memory_db:
-                InsightPool.create(
-                    content=content,
-                    source_atoms=json.dumps(source_atoms, ensure_ascii=False),
-                    agent_name="dream_foreshadowing",
-                    confidence=self.FORESHADOW_CONFIDENCE,
+            created = False
+            with memory_db.atomic():
+                existing = InsightPool.get_or_none(
+                    InsightPool.content == content,
+                    InsightPool.source_atoms == source_atoms_json,
+                    InsightPool.agent_name == "dream_foreshadowing",
                 )
+                if existing is None:
+                    InsightPool.create(
+                        content=content,
+                        source_atoms=source_atoms_json,
+                        agent_name="dream_foreshadowing",
+                        confidence=self.FORESHADOW_CONFIDENCE,
+                    )
+                    created = True
+                deleted = NoisePool.delete().where(NoisePool.id == noise.id).execute()
+                if deleted != 1:
+                    raise RuntimeError(f"待消费噪声不存在或删除数量异常: {deleted}")
             logger.info(
                 "噪声回收: 生成伏笔洞见",
                 extra={
                     "noise_id": noise.id,
                     "matched_atoms": len(source_atoms),
                     "content_preview": content_preview[:60],
+                    "created": created,
                 },
             )
+            return True
         except Exception as e:
             logger.warning(f"噪声回收: 写入伏笔洞见失败 (id={noise.id}): {e}")
+            return False
 
     @staticmethod
-    def _delete_noise(noise_id: int) -> None:
+    def _delete_noise(noise_id: int) -> bool:
         """删除一条噪声记录
 
-        Args:
-            noise_id: NoisePool 记录 ID
+        Returns:
+            是否成功删除唯一候选
         """
         try:
             with memory_db:
-                NoisePool.delete().where(NoisePool.id == noise_id).execute()
+                return NoisePool.delete().where(NoisePool.id == noise_id).execute() == 1
         except Exception as e:
             logger.warning(f"噪声回收: 删除噪声失败 (id={noise_id}): {e}")
+            return False

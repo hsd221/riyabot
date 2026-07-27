@@ -210,7 +210,7 @@ class Layer3SQLiteRetrievalTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsy
             filters={"source_scene": "group_chat", "source_id": "stream-1", "atom_type": "preference"},
             limit=10,
         )
-        fetched = await retriever._fetch_atoms_by_ids(["private", "group-high", "missing"])
+        fetched = await retriever._fetch_atoms_by_ids(["private", "group-high", "archived", "missing"])
 
         self.assertEqual(PartitionManager.get_partition("group_chat"), "群聊记忆")
         self.assertEqual(PartitionManager.get_partition("unknown"), "unknown")
@@ -224,6 +224,7 @@ class Layer3SQLiteRetrievalTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAsy
         self.assertEqual([atom["atom_id"] for atom in user_results], ["group-high", "group-low"])
         self.assertEqual([atom["atom_id"] for atom in keyword_results], ["group-high", "group-low"])
         self.assertEqual([atom["atom_id"] for atom in fetched], ["private", "group-high"])
+        self.assertNotIn("archived", [atom["atom_id"] for atom in fetched])
         self.assertEqual(retriever._model_to_result(MemoryAtomModel.get_by_id("bad-json"))["entities"], "not-json")
         self.assertEqual(await retriever.retrieve_by_source(""), [])
 
@@ -295,6 +296,9 @@ class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAs
                 "content": atom_id,
                 "atom_type": "factual",
                 "weight": 0.8,
+                "source_scene": "group_chat",
+                "source_id": "stream-1",
+                "status": "active",
             }
             for atom_id in ("shared", "semantic-only", "exact-only")
         }
@@ -472,11 +476,87 @@ class Layer3VectorAndContextTest(MemoryDatabaseFixtureMixin, unittest.IsolatedAs
             self.assertEqual(
                 await retriever.retrieve_by_vector(
                     query_embedding=[1.0],
+                    query_text="爵士乐",
+                ),
+                [],
+            )
+        empty_keyword.assert_awaited_once_with(query="爵士乐", filters=None, limit=10)
+
+        store.search_similar = AsyncMock(return_value=[])
+        with patch.object(retriever, "keyword_search", new=AsyncMock(return_value=[])) as filtered_keyword:
+            self.assertEqual(
+                await retriever.retrieve_by_vector(
+                    query_embedding=[1.0],
+                    query_text="爵士乐",
                     filters={"keyword": "fallback"},
                 ),
                 [],
             )
-        empty_keyword.assert_awaited_once_with(query="fallback", filters={"keyword": "fallback"}, limit=10)
+        filtered_keyword.assert_awaited_once_with(query="fallback", filters={"keyword": "fallback"}, limit=10)
+
+    async def test_retrieve_by_vector_rechecks_stale_qdrant_filters_against_sqlite(self) -> None:
+        create_model_atom(
+            "allowed",
+            content="允许范围内的爵士乐记忆",
+            source_id="stream-1",
+            privacy_level=PRIVACY_CONTEXT_SENSITIVE,
+        )
+        create_model_atom(
+            "wrong-source",
+            content="其他聊天流的爵士乐记忆",
+            source_id="stream-2",
+            privacy_level=PRIVACY_CONTEXT_SENSITIVE,
+        )
+        create_model_atom(
+            "wrong-privacy",
+            content="当前聊天流的私密爵士乐记忆",
+            source_id="stream-1",
+            privacy_level=PRIVACY_PRIVATE,
+        )
+        create_model_atom(
+            "wrong-type",
+            atom_type="factual",
+            content="当前聊天流的事实型爵士乐记忆",
+            source_id="stream-1",
+            privacy_level=PRIVACY_CONTEXT_SENSITIVE,
+        )
+        store = SimpleNamespace(
+            search_similar=AsyncMock(
+                return_value=[
+                    {"payload": {"atom_id": atom_id}, "score": score}
+                    for atom_id, score in (
+                        ("wrong-source", 0.99),
+                        ("wrong-privacy", 0.98),
+                        ("wrong-type", 0.97),
+                        ("allowed", 0.8),
+                    )
+                ]
+            )
+        )
+        retriever = MemoryRetriever(store)
+        filters = {
+            "source_scene": "group_chat",
+            "source_id": "stream-1",
+            "privacy_level": [PRIVACY_PUBLIC, PRIVACY_CONTEXT_SENSITIVE],
+            "atom_type": "preference",
+            "status": "active",
+            "keyword": "爵士乐",
+        }
+
+        vector_results = await retriever.retrieve_by_vector(
+            query_embedding=[1.0],
+            filters=filters,
+            top_k=10,
+        )
+        keyword_results = await retriever.keyword_search("爵士乐", filters=filters, limit=10)
+
+        self.assertEqual([atom["atom_id"] for atom in vector_results], ["allowed"])
+        self.assertEqual([atom["atom_id"] for atom in keyword_results], ["allowed"])
+        store.search_similar.assert_awaited_once_with(
+            query_vector=[1.0],
+            filters=filters,
+            limit=20,
+        )
 
     async def test_context_for_reply_merges_dedupes_sensory_tags_and_associations(self) -> None:
         EpisodicDetailModel.create(
@@ -651,7 +731,8 @@ class MemoryWriterLayer3Test(MemoryDatabaseFixtureMixin, unittest.IsolatedAsynci
 
         async def update_atom(atom_id: str, atom_updates: dict) -> bool:
             for field_name in ("last_accessed_at", "last_reinforced_at"):
-                atom_updates[field_name] = datetime.fromtimestamp(atom_updates[field_name])
+                if field_name in atom_updates:
+                    atom_updates[field_name] = datetime.fromtimestamp(atom_updates[field_name])
             persisted[atom_id].update(atom_updates)
             return True
 
@@ -680,10 +761,13 @@ class MemoryWriterLayer3Test(MemoryDatabaseFixtureMixin, unittest.IsolatedAsynci
         self.assertEqual(content_updated["content"], "更新后的爵士乐事实")
         self.assertEqual(payload_updated["weight"], 0.65)
         self.assertEqual(store.update_atom.await_count, 2)
+        self.assertEqual(set(store.update_atom.await_args_list[0].args[1]), {"content", "last_accessed_at"})
+        self.assertEqual(set(store.update_atom.await_args_list[1].args[1]), {"weight", "last_accessed_at"})
         qdrant.upsert_atom_vector.assert_awaited_once()
         qdrant.set_atom_payload.assert_awaited_once()
         self.assertEqual(qdrant.upsert_atom_vector.await_args.kwargs["payload"]["atom_id"], "content-update")
         self.assertEqual(qdrant.set_atom_payload.await_args.args[1]["weight"], 0.65)
+        self.assertNotIn("source_scene", qdrant.set_atom_payload.await_args.args[1])
         with open(op_logger.log_file, encoding="utf-8") as log_file:
             write_ops = [json.loads(line) for line in log_file if line.strip()]
         self.assertEqual(
@@ -695,6 +779,49 @@ class MemoryWriterLayer3Test(MemoryDatabaseFixtureMixin, unittest.IsolatedAsynci
                 ("qdrant", "completed"),
             ],
         )
+
+    async def test_update_atom_stops_before_qdrant_when_sqlite_update_returns_false(self) -> None:
+        writer = MemoryWriter(
+            SimpleNamespace(
+                get_atom=AsyncMock(return_value=MemoryWriter(SimpleNamespace())._atom_to_store_dict(make_atom())),
+                update_atom=AsyncMock(return_value=False),
+                qdrant=SimpleNamespace(
+                    upsert_atom_vector=AsyncMock(return_value=True),
+                    set_atom_payload=AsyncMock(return_value=True),
+                ),
+            )
+        )
+
+        result = await writer.update_atom("atom-1", {"weight": 0.75})
+
+        self.assertIsNone(result)
+        writer.store.get_atom.assert_awaited_once_with("atom-1")
+        writer.store.update_atom.assert_awaited_once()
+        writer.store.qdrant.upsert_atom_vector.assert_not_awaited()
+        writer.store.qdrant.set_atom_payload.assert_not_awaited()
+
+    async def test_non_content_update_only_writes_changed_fields_and_skips_embedding_rebuild(self) -> None:
+        current = MemoryWriter(SimpleNamespace())._atom_to_store_dict(make_atom())
+        updated = {**current, "status": "archived"}
+        qdrant = SimpleNamespace(
+            upsert_atom_vector=AsyncMock(return_value=True),
+            set_atom_payload=AsyncMock(return_value=True),
+        )
+        store = SimpleNamespace(
+            get_atom=AsyncMock(side_effect=[current, updated]),
+            update_atom=AsyncMock(return_value=True),
+            qdrant=qdrant,
+        )
+        writer = MemoryWriter(store)
+
+        with patch.object(layer3_retrieval, "generate_embedding", new=AsyncMock()) as generate_embedding:
+            result = await writer.update_atom("atom-1", {"status": "archived"})
+
+        self.assertEqual(result["status"], "archived")
+        store.update_atom.assert_awaited_once_with("atom-1", {"status": "archived"})
+        generate_embedding.assert_not_awaited()
+        qdrant.upsert_atom_vector.assert_not_awaited()
+        qdrant.set_atom_payload.assert_awaited_once_with("atom-1", {"status": "archived"})
 
     async def test_writer_validation_conversion_detail_writes_and_qdrant_payloads(self) -> None:
         qdrant = SimpleNamespace(upsert_atom_vector=AsyncMock(return_value=True))
@@ -820,8 +947,7 @@ class MemoryWriterLayer3Test(MemoryDatabaseFixtureMixin, unittest.IsolatedAsynci
         qdrant.set_atom_payload.assert_awaited_once()
         payload_args = qdrant.set_atom_payload.await_args.args
         self.assertEqual(payload_args[0], "update-me")
-        self.assertEqual(payload_args[1]["weight"], 0.65)
-        self.assertEqual(payload_args[1]["source_scene"], "group_chat")
+        self.assertEqual(payload_args[1], {"weight": 0.65})
 
 
 if __name__ == "__main__":

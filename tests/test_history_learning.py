@@ -326,8 +326,9 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.total_window_count, 10)
         self.assertEqual(result.selected_window_count, 10)
-        self.assertEqual(result.model_call_count, 11)
-        self.assertEqual(llm.generate_response_async.await_count, 11)
+        # 每个窗口各一次抽取；全部窗口都没抽到候选时不再空跑一次聚合调用。
+        self.assertEqual(result.model_call_count, 10)
+        self.assertEqual(llm.generate_response_async.await_count, 10)
 
     async def test_learning_resumes_after_the_last_completed_window_checkpoint(self) -> None:
         from src.bw_learner.history_learning import (
@@ -886,8 +887,9 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.selected_window_count, 8)
-        self.assertEqual(result.model_call_count, 9)
-        self.assertEqual(llm.generate_response_async.await_count, 9)
+        # 预算限定 8 个窗口各一次抽取；没有候选时跳过聚合调用。
+        self.assertEqual(result.model_call_count, 8)
+        self.assertEqual(llm.generate_response_async.await_count, 8)
 
     async def test_consolidation_cannot_promote_cross_category_evidence(self) -> None:
         from src.bw_learner.history_learning import ChatHistoryLearner, ExpressionCandidate, HistoryCandidates
@@ -1174,6 +1176,22 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
             {candidate.situation for candidate in result.expressions},
             {candidate.situation for candidate in candidates.expressions},
         )
+
+    async def test_hierarchical_consolidation_skips_model_when_no_candidate_survived(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner, HistoryCandidates
+
+        llm = SimpleNamespace(generate_response_async=AsyncMock(return_value=("{}", None)))
+        learner = ChatHistoryLearner(llm=llm)
+
+        result, model_calls = await learner.consolidate_hierarchically(
+            HistoryCandidates(),
+            {},
+            chat_name="测试群",
+        )
+
+        self.assertEqual(model_calls, 0)
+        self.assertEqual(result.total, 0)
+        llm.generate_response_async.assert_not_awaited()
 
     def test_deterministic_fallback_does_not_discard_large_candidate_catalog(self) -> None:
         from src.bw_learner.history_learning import ExpressionCandidate, HistoryCandidates, _final_fallback

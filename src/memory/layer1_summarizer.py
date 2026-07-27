@@ -19,6 +19,7 @@ from src.memory.types import TopicSummary
 import json
 import os
 import re
+import threading
 import time
 
 from src.common.logger import get_logger
@@ -520,7 +521,7 @@ class GroupTopicSummarizer:
         topic_judge: Optional[Any] = None,
         topic_judge_task_name: str = "memory_encoder",
     ):
-        self.max_topics = max_topics_per_stream
+        self.max_topics = max(1, max_topics_per_stream)
         self.match_threshold = match_threshold
         self.judge_trigger_count = max(1, judge_trigger_count)
         self.topic_judge = topic_judge
@@ -855,6 +856,9 @@ class GroupTopicSummarizer:
             stream_id: 聊天流 ID
         """
         self.topics.pop(stream_id, None)
+        self.pending_messages.pop(stream_id, None)
+        self.open_topic_messages.pop(stream_id, None)
+        self.open_topic_ids.pop(stream_id, None)
 
     # ── 内部方法 ──────────────────────────────────────────────
 
@@ -1130,11 +1134,13 @@ class GroupTopicSummarizer:
         if len(active) <= self.max_topics:
             return
 
-        # 按 last_updated 升序排列，最久未更新的排最前
-        sorted_active = sorted(active.items(), key=lambda x: x[1].last_updated)
-        # 将最旧的 N 个合并到最新的话题
+        # 按 last_updated 升序排列，最久未更新的排最前。同分再按 topic_id 排序，
+        # 避免依赖字典构造顺序导致测试和重启后的裁剪对象漂移。
+        sorted_active = sorted(active.items(), key=lambda x: (x[1].last_updated, x[0]))
+        # 只合并超出上限的最旧话题；原实现把除最新外全部合并，11 个话题会直接塌成 1 个。
         newest_tid = sorted_active[-1][0]
-        to_merge = sorted_active[:-1]  # 除最新的之外全部合并
+        overflow = len(sorted_active) - self.max_topics
+        to_merge = sorted_active[:overflow]
 
         for tid, _ in to_merge:
             self.merge_topics(stream_id, newest_tid, tid)
@@ -1396,6 +1402,7 @@ class UnclosedTopicBridge:
         "data",
     )
     _FILE_PATH = os.path.join(_DATA_DIR, "topic_bridge.json")
+    _IO_LOCK = threading.RLock()
 
     def __init__(self):
         self._data: dict[str, list[TopicSummary]] = {}
@@ -1453,18 +1460,22 @@ class UnclosedTopicBridge:
                 }
             )
 
-        if active:
-            self._data[stream_id] = active
-            self._save()
-            logger.info(
-                "未闭合话题已保存",
-                stream_id=stream_id,
-                count=len(active),
-            )
-        elif stream_id in self._data:
-            # 没有活跃话题了，清理该流的记录
-            del self._data[stream_id]
-            self._save()
+        with self._IO_LOCK:
+            # 每次写前重载最新文件：回复链路会为不同 stream 新建 bridge 实例，若沿用构造时的
+            # 整体快照，后保存的实例会把先保存的其他 stream 记录整份覆盖掉。
+            self._load()
+            if active:
+                self._data[stream_id] = active
+                self._save()
+                logger.info(
+                    "未闭合话题已保存",
+                    stream_id=stream_id,
+                    count=len(active),
+                )
+            elif stream_id in self._data:
+                # 没有活跃话题了，清理该流的记录
+                del self._data[stream_id]
+                self._save()
 
     def restore_topics(self, stream_id: str) -> list[TopicSummary]:
         """恢复未闭合话题并从存储中清除
@@ -1475,15 +1486,17 @@ class UnclosedTopicBridge:
         Returns:
             保存的话题字典列表（若无则为空列表）
         """
-        topics = self._data.pop(stream_id, [])
-        if topics:
-            self._save()
-            logger.info(
-                "未闭合话题已恢复",
-                stream_id=stream_id,
-                count=len(topics),
-            )
-        return topics
+        with self._IO_LOCK:
+            self._load()
+            topics = self._data.pop(stream_id, [])
+            if topics:
+                self._save()
+                logger.info(
+                    "未闭合话题已恢复",
+                    stream_id=stream_id,
+                    count=len(topics),
+                )
+            return topics
 
     def cleanup_stale(self, max_age_hours: int = 24) -> None:
         """清理过期的未闭合话题
@@ -1491,28 +1504,31 @@ class UnclosedTopicBridge:
         Args:
             max_age_hours: 最大保留时间（小时）
         """
-        now = time.time()
-        max_age = max_age_hours * 3600
-        changed = False
-        stale_streams: list[str] = []
-        for sid, topics in self._data.items():
-            fresh = [t for t in topics if now - t.get("last_active", 0) < max_age]
-            if len(fresh) != len(topics):
-                changed = True
-                if fresh:
-                    self._data[sid] = fresh
-                else:
-                    stale_streams.append(sid)
-        for sid in stale_streams:
-            del self._data[sid]
-        if changed:
-            self._save()
+        with self._IO_LOCK:
+            self._load()
+            now = time.time()
+            max_age = max_age_hours * 3600
+            changed = False
+            stale_streams: list[str] = []
+            for sid, topics in self._data.items():
+                fresh = [t for t in topics if now - t.get("last_active", 0) < max_age]
+                if len(fresh) != len(topics):
+                    changed = True
+                    if fresh:
+                        self._data[sid] = fresh
+                    else:
+                        stale_streams.append(sid)
+            for sid in stale_streams:
+                del self._data[sid]
+            if changed:
+                self._save()
 
     # ── 内部 IO ───────────────────────────────────────────────
 
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 上限
 
     def _load(self) -> None:
+        self._data = {}
         try:
             if os.path.exists(self._FILE_PATH):
                 file_size = os.path.getsize(self._FILE_PATH)
@@ -1521,17 +1537,28 @@ class UnclosedTopicBridge:
                         "topic_bridge.json 文件过大，跳过加载",
                         extra={"path": self._FILE_PATH, "size": file_size, "max": self.MAX_FILE_SIZE},
                     )
-                    self._data = {}
                     return
                 with open(self._FILE_PATH, "r", encoding="utf-8") as f:
-                    self._data = json.load(f)
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    self._data = loaded
+                else:
+                    logger.warning("topic_bridge.json 顶层结构无效，已忽略", path=self._FILE_PATH)
         except Exception:
-            self._data = {}
+            logger.warning("topic_bridge.json 加载失败，已忽略损坏快照", path=self._FILE_PATH, exc_info=True)
 
     def _save(self) -> None:
+        temp_path = f"{self._FILE_PATH}.tmp"
         try:
             os.makedirs(os.path.dirname(self._FILE_PATH), exist_ok=True)
-            with open(self._FILE_PATH, "w", encoding="utf-8") as f:
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self._FILE_PATH)
         except Exception:
-            pass
+            logger.warning("topic_bridge.json 保存失败", path=self._FILE_PATH, exc_info=True)
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass

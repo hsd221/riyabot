@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Optional
 
@@ -63,9 +64,11 @@ class ReconciliationTask(AsyncTask):
 
     async def run(self) -> None:
         inconsistent_pairs: list[tuple[WriteOp, WriteOp]] = []
+        ops_readable = False
         if self._op_logger is not None:
             try:
                 inconsistent_pairs = self._op_logger.get_inconsistent_ops()
+                ops_readable = True
             except Exception as e:
                 logger.error("获取不一致操作记录失败", error=str(e), exc_info=True)
 
@@ -74,8 +77,10 @@ class ReconciliationTask(AsyncTask):
 
         reconciled = 0
         skipped = 0
+        current_failed_ids: set[str] = set()
 
         for completed_op, failed_op in inconsistent_pairs:
+            current_failed_ids.add(failed_op.op_id)
             if failed_op.op_id in self._blacklist:
                 skipped += 1
                 continue
@@ -115,6 +120,12 @@ class ReconciliationTask(AsyncTask):
                     },
                 )
 
+        # 黑名单只保留本轮仍然不一致的 op：否则每个达到重试上限的 op_id 会永久驻留，
+        # 而 WAL 本身会裁剪旧记录，集合将随进程寿命单调增长。
+        # 读取失败时 inconsistent_pairs 为空，此时收缩会误清空整个黑名单。
+        if ops_readable:
+            self._blacklist &= current_failed_ids
+
         drift_repaired, drift_removed = await self._reconcile_storage_drift()
         if reconciled > 0 or skipped > 0 or drift_repaired > 0 or drift_removed > 0:
             logger.info(
@@ -133,9 +144,15 @@ class ReconciliationTask(AsyncTask):
             qdrant_points = await self._list_qdrant_points()
             sqlite_all_ids = await self._store.list_atom_ids()
             sqlite_active_ids = await self._store.list_atom_ids(status="active")
+            list_index_payloads = getattr(self._store, "list_atom_index_payloads", None)
+            sqlite_active_payloads = (
+                await list_index_payloads(status="active") if callable(list_index_payloads) else None
+            )
             list_source_hashes = getattr(self._store, "list_atom_source_hashes", None)
             sqlite_active_source_hashes = (
-                await list_source_hashes(status="active") if callable(list_source_hashes) else None
+                await list_source_hashes(status="active")
+                if sqlite_active_payloads is None and callable(list_source_hashes)
+                else None
             )
         except Exception as e:
             logger.error("读取存储一致性状态失败", error=str(e), exc_info=True)
@@ -152,7 +169,15 @@ class ReconciliationTask(AsyncTask):
         }
         missing_ids = sqlite_active_ids - qdrant_business_ids
         stale_ids: set[str] = set()
-        if sqlite_active_source_hashes is not None:
+        if sqlite_active_payloads is not None:
+            for point in qdrant_points:
+                business_id = point.get("business_id")
+                if not isinstance(business_id, str):
+                    continue
+                expected_payload = sqlite_active_payloads.get(business_id)
+                if expected_payload is not None and self._payload_has_drift(point, expected_payload):
+                    stale_ids.add(business_id)
+        elif sqlite_active_source_hashes is not None:
             for point in qdrant_points:
                 business_id = point.get("business_id")
                 stored_source_hash = point.get("embedding_source_hash")
@@ -174,6 +199,7 @@ class ReconciliationTask(AsyncTask):
 
         normalized_sqlite_ids = self._normalized_sqlite_id_map(sqlite_all_ids)
         current_orphans: dict[str, dict[str, Any]] = {}
+        inactive_index_ids: set[str] = set()
         for point in qdrant_points:
             business_id = point.get("business_id")
             physical_id = point["physical_id"]
@@ -186,7 +212,14 @@ class ReconciliationTask(AsyncTask):
                 continue
             if sqlite_lookup_id not in sqlite_all_ids:
                 current_orphans[self._point_key(physical_id)] = point
+            elif sqlite_lookup_id not in sqlite_active_ids:
+                # 归档/遗忘原子不应留在活跃向量集合中。归档路径的 Qdrant 删除是跨存储写，
+                # 可能在 SQLite 已提交后失败；只按“SQLite 行是否存在”判断孤儿会让这种残留
+                # point 永久存在。已知非活跃行无需等待两轮孤儿确认，但真正删除前仍会再次
+                # 查询 active IDs，避免与并发重新激活发生竞态。
+                inactive_index_ids.add(sqlite_lookup_id)
 
+        self._forced_cleanup_ids.update(inactive_index_ids)
         confirmed_orphans = {key: point for key, point in current_orphans.items() if key in self._orphan_candidates}
         self._orphan_candidates = current_orphans
         sync_ids = missing_ids | self._forced_resync_ids
@@ -203,6 +236,7 @@ class ReconciliationTask(AsyncTask):
             extra={
                 "missing_vectors": len(missing_ids),
                 "stale_vectors": len(stale_ids),
+                "inactive_vectors": len(inactive_index_ids),
                 "orphan_vectors": len(current_orphans),
                 "confirmed_orphans": len(confirmed_orphans),
                 "forced_resync": len(self._forced_resync_ids),
@@ -241,6 +275,23 @@ class ReconciliationTask(AsyncTask):
                 self._mark_drift_failure(retry_key)
 
         return repaired, removed
+
+    @staticmethod
+    def _payload_values_equal(actual: Any, expected: Any) -> bool:
+        if isinstance(expected, float) and isinstance(actual, (int, float)):
+            return math.isclose(float(actual), expected, rel_tol=1e-9, abs_tol=1e-12)
+        return actual == expected
+
+    @classmethod
+    def _payload_has_drift(cls, point: dict[str, Any], expected_payload: dict[str, Any]) -> bool:
+        for key, expected in expected_payload.items():
+            if key not in point:
+                if expected is not None:
+                    return True
+                continue
+            if not cls._payload_values_equal(point.get(key), expected):
+                return True
+        return False
 
     async def _list_qdrant_points(self) -> Optional[list[dict[str, Any]]]:
         """读取 Qdrant point；兼容尚未实现 point 枚举的存储适配器。"""
@@ -307,16 +358,18 @@ class ReconciliationTask(AsyncTask):
             )
             return False
 
-        atom_id = next(iter(common_ids))
-
         # 判断哪一侧成功、哪一侧失败
         # completed_op.target 是成功侧，failed_op.target 是失败侧
         if completed_op.target == "sqlite" and failed_op.target == "qdrant":
             # Case 1: SQLite 有记录，Qdrant 缺向量 → 补充到 Qdrant
-            return await self._sync_sqlite_to_qdrant(atom_id, completed_op)
+            # BATCH_INSERT 等操作会携带多个 atom_id，只补偿其中一个就返回成功，
+            # 会把整对操作误判为已协调，剩余原子要等真实差异扫描才被发现。
+            outcomes = [await self._sync_sqlite_to_qdrant(atom_id, completed_op) for atom_id in sorted(common_ids)]
+            return all(outcomes)
         elif completed_op.target == "qdrant" and failed_op.target == "sqlite":
             # Case 2: Qdrant 有向量，SQLite 缺记录 → 删除孤立向量
-            return await self._remove_orphan_vector(atom_id, failed_op)
+            outcomes = [await self._remove_orphan_vector(atom_id, failed_op) for atom_id in sorted(common_ids)]
+            return all(outcomes)
         else:
             # 同一侧出现 completed/failed 对，或 target 不是 sqlite/qdrant
             # 这不是跨存储不一致，跳过

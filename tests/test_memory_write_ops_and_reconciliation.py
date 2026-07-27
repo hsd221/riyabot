@@ -1,5 +1,7 @@
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -200,6 +202,50 @@ class WriteOpDataModelTest(unittest.TestCase):
 
         self.assertEqual(removed, 2)
         self.assertEqual(remaining, ["old-failed", "new-completed"])
+
+    def test_write_op_logger_concurrent_updates_do_not_lose_each_other(self) -> None:
+        """并发 _update_op 必须串行执行。
+
+        读-改-写若不在同一个临界区内，两个更新会各自读到同一份快照再全量写回，
+        后写者会静默抹掉先写者的状态变更 —— WAL 记录的一致性保证随之失效。
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = WriteOpLogger(str(Path(tmpdir) / "memory.db"))
+            logger._write_all_ops([make_op("op1", created_at=1.0), make_op("op2", created_at=2.0)])
+
+            snapshot_taken = threading.Event()
+            slow_read_done = threading.Event()
+            original_read = logger._read_all_ops
+
+            def slow_read() -> list[WriteOp]:
+                ops = original_read()
+                if not slow_read_done.is_set():
+                    slow_read_done.set()
+                    # 持锁期间给另一个线程充分的插队窗口
+                    snapshot_taken.set()
+                    time.sleep(0.2)
+                return ops
+
+            failures: list[BaseException] = []
+
+            def worker() -> None:
+                try:
+                    logger._update_op("op1", retry_count=1)
+                except BaseException as exc:  # noqa: BLE001 - 转发给主线程断言
+                    failures.append(exc)
+
+            with patch.object(logger, "_read_all_ops", side_effect=slow_read):
+                thread = threading.Thread(target=worker)
+                thread.start()
+                self.assertTrue(snapshot_taken.wait(timeout=5), "worker 未能取得快照")
+                logger._update_op("op2", retry_count=2)
+                thread.join(timeout=5)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(failures, [])
+            retries = {op.op_id: op.retry_count for op in logger._read_all_ops()}
+
+        self.assertEqual(retries, {"op1": 1, "op2": 2})
 
     def test_write_op_logger_lock_fallbacks_and_rotation_branches(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -779,6 +825,78 @@ class WriteOpReplayTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
+    async def test_storage_drift_reembeds_vector_when_payload_is_stale(self) -> None:
+        atom_id = "stale-payload"
+        atom = {
+            "atom_id": atom_id,
+            "atom_type": "factual",
+            "content": "same content",
+            "weight": 0.7,
+            "importance": 0.8,
+            "confidence": 0.9,
+            "status": "active",
+            "source_scene": "private_chat",
+            "source_id": "private-1",
+            "privacy_level": "private",
+        }
+
+        class MetadataQdrant(FakeQdrant):
+            async def list_atom_points(self) -> list[dict]:
+                return [
+                    {
+                        "physical_id": atom_id,
+                        "business_id": atom_id,
+                        **ReconciliationTask._atom_vector_payload(atom_id, atom),
+                        "privacy_level": "context_sensitive",
+                    }
+                ]
+
+        qdrant = MetadataQdrant(atom_ids={atom_id})
+        store = FakeStore(atoms={atom_id: atom}, qdrant=qdrant)
+        store.list_atom_index_payloads = AsyncMock(
+            return_value={atom_id: ReconciliationTask._atom_vector_payload(atom_id, atom)}
+        )
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        with patch.object(reconciliation, "generate_embedding", new=AsyncMock(return_value=[0.6, 0.4])) as embed:
+            repaired, removed = await task._reconcile_storage_drift()
+
+        self.assertEqual((repaired, removed), (1, 0))
+        embed.assert_awaited_once_with("same content")
+        self.assertEqual(qdrant.upserts[0]["payload"]["privacy_level"], "private")
+
+    async def test_storage_drift_does_not_resync_missing_nullable_payload(self) -> None:
+        atom_id = "nullable-source"
+        atom = {
+            "atom_id": atom_id,
+            "atom_type": "factual",
+            "content": "same content",
+            "weight": 0.7,
+            "importance": 0.8,
+            "confidence": 0.9,
+            "status": "active",
+            "source_scene": "chat",
+            "source_id": None,
+            "privacy_level": "public",
+        }
+        expected_payload = ReconciliationTask._atom_vector_payload(atom_id, atom)
+
+        class MetadataQdrant(FakeQdrant):
+            async def list_atom_points(self) -> list[dict]:
+                point = {"physical_id": atom_id, "business_id": atom_id, **expected_payload}
+                point.pop("source_id")
+                return [point]
+
+        qdrant = MetadataQdrant(atom_ids={atom_id})
+        store = FakeStore(atoms={atom_id: atom}, qdrant=qdrant)
+        store.list_atom_index_payloads = AsyncMock(return_value={atom_id: expected_payload})
+        task = ReconciliationTask(store)  # type: ignore[arg-type]
+
+        repaired, removed = await task._reconcile_storage_drift()
+
+        self.assertEqual((repaired, removed), (0, 0))
+        self.assertEqual(qdrant.upserts, [])
+
     async def test_storage_drift_reembeds_vector_when_source_hash_is_stale(self) -> None:
         atom_id = "stale-source-hash"
         atom = {"atom_id": atom_id, "content": "new content", "status": "active"}
@@ -938,7 +1056,7 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_storage_drift_preserves_vector_for_archived_sqlite_atom(self) -> None:
+    async def test_storage_drift_removes_vector_for_archived_sqlite_atom(self) -> None:
         atom_id = "archived-atom"
         qdrant = FakeQdrant(atom_ids={atom_id})
         store = FakeStore(
@@ -947,11 +1065,11 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
         )
         task = ReconciliationTask(store)  # type: ignore[arg-type]
 
-        await task._reconcile_storage_drift()
-        await task._reconcile_storage_drift()
+        repaired, removed = await task._reconcile_storage_drift()
 
-        self.assertEqual(qdrant.deleted, [])
-        self.assertEqual(qdrant.atom_ids, {atom_id})
+        self.assertEqual((repaired, removed), (0, 1))
+        self.assertEqual(qdrant.deleted, [atom_id])
+        self.assertEqual(qdrant.atom_ids, set())
 
     async def test_storage_drift_does_not_upsert_atom_archived_after_scan(self) -> None:
         atom_id = "archived-during-scan"
@@ -987,7 +1105,7 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
         await task._reconcile_storage_drift()
         self.assertEqual(qdrant.deleted, [atom_id])
 
-    async def test_storage_drift_cancels_orphan_deletion_when_sqlite_row_appears_between_scans(self) -> None:
+    async def test_storage_drift_removes_transient_orphan_when_sqlite_row_reappears_archived(self) -> None:
         atom_id = "transient-orphan"
         qdrant = FakeQdrant(atom_ids={atom_id})
         store = FakeStore(qdrant=qdrant)
@@ -995,14 +1113,11 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
 
         await task._reconcile_storage_drift()
         store.atoms[atom_id] = {"atom_id": atom_id, "content": "restored row", "status": "archived"}
-        await task._reconcile_storage_drift()
-        store.atoms.pop(atom_id)
-        await task._reconcile_storage_drift()
+        repaired, removed = await task._reconcile_storage_drift()
 
-        self.assertEqual(qdrant.deleted, [])
-
-        await task._reconcile_storage_drift()
+        self.assertEqual((repaired, removed), (0, 1))
         self.assertEqual(qdrant.deleted, [atom_id])
+        self.assertEqual(qdrant.atom_ids, set())
 
     async def test_storage_drift_advances_past_failed_batch_on_next_run(self) -> None:
         atoms = {
@@ -1237,6 +1352,54 @@ class ReconciliationTaskTest(unittest.IsolatedAsyncioTestCase):
         reconcile_one.assert_awaited_once_with(completed, failed_retry)
         self.assertIn("maxed", task._blacklist)
         self.assertEqual(op_logger.updates, [("retry", {"retry_count": 3})])
+
+    async def test_reconcile_one_compensates_every_shared_atom_id(self) -> None:
+        """批量写操作携带多个 atom_id 时，必须逐个补偿而非只处理其中一个。"""
+        task = ReconciliationTask(FakeStore())  # type: ignore[arg-type]
+        completed = make_op(
+            "batch-sqlite",
+            op_type=OpType.BATCH_INSERT,
+            target="sqlite",
+            atom_ids=["atom-a", "atom-b", "atom-c"],
+            status=OpStatus.COMPLETED,
+        )
+        failed = make_op(
+            "batch-qdrant",
+            op_type=OpType.BATCH_INSERT,
+            target="qdrant",
+            atom_ids=["atom-a", "atom-b", "atom-c"],
+            status=OpStatus.FAILED,
+        )
+
+        with patch.object(task, "_sync_sqlite_to_qdrant", new=AsyncMock(return_value=True)) as sync:
+            self.assertTrue(await task._reconcile_one(completed, failed))
+
+        self.assertEqual([call.args[0] for call in sync.await_args_list], ["atom-a", "atom-b", "atom-c"])
+
+        # 任意一个原子补偿失败，整对操作都不能算已协调。
+        with patch.object(task, "_sync_sqlite_to_qdrant", new=AsyncMock(side_effect=[True, False, True])):
+            self.assertFalse(await task._reconcile_one(completed, failed))
+
+    async def test_run_drops_blacklisted_ops_that_are_no_longer_inconsistent(self) -> None:
+        """黑名单必须随 WAL 收缩，否则会随进程寿命单调增长。"""
+        completed = make_op("ok", target="sqlite", status=OpStatus.COMPLETED)
+        still_failing = make_op("still-bad", target="qdrant", status=OpStatus.FAILED, retry_count=5)
+        op_logger = FakeOpLogger([(completed, still_failing)])
+        task = ReconciliationTask(FakeStore(), op_logger=op_logger)  # type: ignore[arg-type]
+        task._blacklist.update({"resolved-earlier", "still-bad"})
+
+        await task.run()
+
+        self.assertEqual(task._blacklist, {"still-bad"})
+
+        # 读取 WAL 失败时不能把黑名单当成"已全部解决"清空。
+        broken_logger = SimpleNamespace(get_inconsistent_ops=Mock(side_effect=RuntimeError("bad log")))
+        broken_task = ReconciliationTask(FakeStore(), op_logger=broken_logger)  # type: ignore[arg-type]
+        broken_task._blacklist.add("keep-me")
+
+        await broken_task.run()
+
+        self.assertEqual(broken_task._blacklist, {"keep-me"})
 
     async def test_run_returns_quietly_when_logger_is_missing_empty_or_raises(self) -> None:
         await ReconciliationTask(FakeStore()).run()  # type: ignore[arg-type]

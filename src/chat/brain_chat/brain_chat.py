@@ -4,6 +4,7 @@ import random
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 from rich.traceback import install
 
+from src.common.background_tasks import spawn_background_task
 from src.common.logger import get_logger
 from src.common.data_models.message_data_model import ReplyContentType
 from src.chat.chat_tool_registry import ChatToolRegistry, ToolExecutionResult, format_tool_results_for_reply
@@ -315,16 +316,16 @@ class BrainChatting:
             logger.exception(f"{self.log_prefix} ReflectTracker 检查失败")
 
     def _schedule_native_post_turn_tasks(self, recent_messages_list: List["DatabaseMessages"]) -> None:
-        asyncio.create_task(self._check_reflect_tracker())
+        spawn_background_task(self._check_reflect_tracker(), name="reflect-tracker-check")
 
         from src.bw_learner.expression_reflector import expression_reflector_manager
 
         reflector = expression_reflector_manager.get_or_create_reflector(self.stream_id)
-        asyncio.create_task(reflector.check_and_ask())
-        asyncio.create_task(extract_and_distribute_messages(self.stream_id))
+        spawn_background_task(reflector.check_and_ask(), name="expression-reflector")
+        spawn_background_task(extract_and_distribute_messages(self.stream_id), name="message-distribute")
 
         if self.message_archiver is not None and recent_messages_list:
-            asyncio.create_task(self._archive_recent_messages(recent_messages_list))
+            spawn_background_task(self._archive_recent_messages(recent_messages_list), name="archive-messages")
 
     async def _observe_native(self, recent_messages_list: List["DatabaseMessages"]) -> bool:
         async with prompt_manager.async_message_scope(self.chat_stream.context.get_template_name()):

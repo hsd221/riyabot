@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, Optional
+from typing import Annotated, Any, Callable, Coroutine, Literal, Optional
 
 from fastapi import APIRouter, Cookie, File, Header, HTTPException, Query, UploadFile
 
@@ -43,6 +44,7 @@ from src.webui.chat_history_checkpoint import (
     PENDING_RESULT_FILENAME,
     PENDING_RESULT_TEMP_FILENAME,
     HistoryCheckpointUnavailableError,
+    fsync_directory,
     load_pending_learning_result,
     remove_history_resume_artifacts,
     write_pending_learning_result,
@@ -143,6 +145,22 @@ def _cleanup_task_files(import_id: str, *, remove_directory: bool = True) -> Non
 def _active_local_import_count() -> int:
     running_count = sum(not task.done() for task in _running_tasks.values())
     return len(_analyzing_import_ids) + running_count
+
+
+def _register_running_task(import_id: str, coroutine: Coroutine[Any, Any, None], task_name: str) -> asyncio.Task[None]:
+    """登记后台任务，并在结束时只注销自己，避免误删同 ID 的新任务。"""
+
+    background = asyncio.create_task(coroutine, name=task_name)
+    _running_tasks[import_id] = background
+
+    def _discard(finished: asyncio.Task[None]) -> None:
+        # done callback 由事件循环延迟调度，此时同一 import_id 可能已登记新任务；
+        # 必须按对象身份比对，否则会把正在运行的任务从登记表中抹掉。
+        if _running_tasks.get(import_id) is finished:
+            del _running_tasks[import_id]
+
+    background.add_done_callback(_discard)
+    return background
 
 
 def _load_json_object(raw: str | None) -> dict[str, Any]:
@@ -529,9 +547,14 @@ def _write_result(import_id: str, result: dict[str, Any]) -> None:
     task_dir = _task_dir(import_id)
     temporary = task_dir / "result.json.tmp"
     destination = task_dir / "result.json"
-    temporary.write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    temporary.chmod(0o600)
+    payload = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    with temporary.open("wb") as output:
+        temporary.chmod(0o600)
+        output.write(payload)
+        output.flush()
+        os.fsync(output.fileno())
     temporary.replace(destination)
+    fsync_directory(task_dir)
 
 
 def _mark_task_cancelled(import_id: str, normalized_path: Path) -> None:
@@ -543,6 +566,7 @@ def _mark_task_cancelled(import_id: str, normalized_path: Path) -> None:
         checkpoint_window_count=0,
         error_message=None,
         normalized_path="",
+        cancel_requested=False,
         updated_at=now,
         completed_at=now,
     ).where(ChatHistoryImportTask.import_id == import_id).execute()
@@ -835,9 +859,7 @@ async def start_chat_history_import(
     )
     if updated != 1:
         raise HTTPException(status_code=409, detail="任务已被其他请求启动")
-    background = asyncio.create_task(_run_learning(import_id), name=f"chat-history-import-{import_id}")
-    _running_tasks[import_id] = background
-    background.add_done_callback(lambda _task: _running_tasks.pop(import_id, None))
+    _register_running_task(import_id, _run_learning(import_id), f"chat-history-import-{import_id}")
     return _task_to_response(_get_task_or_404(import_id))
 
 
@@ -890,9 +912,7 @@ async def submit_chat_history_profile_decisions(
     )
     if updated != 1:
         raise HTTPException(status_code=409, detail="画像决策已由其他请求提交")
-    background = asyncio.create_task(_run_profile_decisions(import_id), name=f"chat-history-profile-{import_id}")
-    _running_tasks[import_id] = background
-    background.add_done_callback(lambda _task: _running_tasks.pop(import_id, None))
+    _register_running_task(import_id, _run_profile_decisions(import_id), f"chat-history-profile-{import_id}")
     return _task_to_response(_get_task_or_404(import_id))
 
 
@@ -945,10 +965,7 @@ async def resume_chat_history_import(
         raise HTTPException(status_code=409, detail="任务已由其他请求继续")
 
     runner = _run_profile_decisions if task.resume_stage == "profile_commit" else _run_learning
-    task_name = f"chat-history-resume-{import_id}"
-    background = asyncio.create_task(runner(import_id), name=task_name)
-    _running_tasks[import_id] = background
-    background.add_done_callback(lambda _task: _running_tasks.pop(import_id, None))
+    _register_running_task(import_id, runner(import_id), f"chat-history-resume-{import_id}")
     return _task_to_response(_get_task_or_404(import_id))
 
 

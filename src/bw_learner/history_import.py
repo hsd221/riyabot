@@ -697,7 +697,8 @@ def select_history_windows(
         return candidates
 
     priority = frozenset(str(sender_id) for sender_id in priority_sender_ids)
-    selected_indices: list[int] = []
+    # 用集合做已选判定：列表成员检查会让整体退化成 O(budget² × 窗口数)。
+    selected_indices: set[int] = set()
     covered_senders: set[str] = set()
 
     for slot in range(budget):
@@ -712,7 +713,7 @@ def select_history_windows(
                 -index,
             ),
         )
-        selected_indices.append(best_index)
+        selected_indices.add(best_index)
         covered_senders.update(candidates[best_index].sender_ids & priority)
 
     return [candidates[index] for index in sorted(selected_indices)]

@@ -32,6 +32,17 @@ _QDRANT_POINT_NAMESPACE = uuid.UUID("8e9e1f74-2b30-4f33-8e9b-9b2c972a1a67")
 _DATETIME_FIELDS = ("created_at", "last_accessed_at", "last_reinforced_at")
 _LEGACY_EMBEDDING_SIGNATURE = "legacy-unknown"
 _BM25_REBUILD_FIELDS = {"content", "status"}
+ATOM_INDEX_SYNC_PAYLOAD_FIELDS: tuple[str, ...] = (
+    "atom_type",
+    "weight",
+    "importance",
+    "confidence",
+    "status",
+    "source_scene",
+    "source_id",
+    "privacy_level",
+    "embedding_source_hash",
+)
 
 
 def _coerce_datetime(value: Any) -> datetime.datetime:
@@ -1169,6 +1180,7 @@ class QdrantManager:
         collection_name: str,
         business_id_key: str,
         index_label: str,
+        payload_keys: tuple[str, ...] = ("embedding_source_hash",),
         page_size: int = 256,
     ) -> Optional[list[dict[str, Any]]]:
         """Read physical IDs and verified business IDs from one Qdrant collection."""
@@ -1184,12 +1196,7 @@ class QdrantManager:
                     collection_name=collection_name,
                     limit=page_size,
                     offset=offset,
-                    with_payload=[
-                        business_id_key,
-                        "embedding_signature",
-                        "embedding_dimension",
-                        "embedding_source_hash",
-                    ],
+                    with_payload=[business_id_key, "embedding_signature", "embedding_dimension", *payload_keys],
                     with_vectors=False,
                 )
                 for point in points:
@@ -1207,7 +1214,7 @@ class QdrantManager:
                     for metadata_key in (
                         "embedding_signature",
                         "embedding_dimension",
-                        "embedding_source_hash",
+                        *payload_keys,
                     ):
                         if point_payload.get(metadata_key) is not None:
                             point_summary[metadata_key] = point_payload[metadata_key]
@@ -1246,6 +1253,7 @@ class QdrantManager:
             collection_name=collection_name or self.active_atoms_collection,
             business_id_key="atom_id",
             index_label=self.config.collection_name_atoms,
+            payload_keys=ATOM_INDEX_SYNC_PAYLOAD_FIELDS,
             page_size=page_size,
         )
 
@@ -1966,6 +1974,37 @@ class MemoryStore:
             logger.exception(
                 "记忆原子内容哈希列表获取失败",
                 event_code="memory.atom.source_hashes_list_failed",
+                status=status,
+            )
+            return None
+
+    async def list_atom_index_payloads(self, status: Optional[str] = None) -> Optional[dict[str, dict[str, Any]]]:
+        """读取 SQLite 原子的 Qdrant 索引载荷真值，用于识别 payload 漂移。"""
+        from src.llm_models.embedding import embedding_source_hash
+
+        try:
+            with memory_db:
+                query = MemoryAtom.select()
+                if status:
+                    query = query.where(MemoryAtom.status == status)
+                payloads: dict[str, dict[str, Any]] = {}
+                for atom in query:
+                    payloads[str(atom.atom_id)] = {
+                        "atom_type": atom.atom_type,
+                        "weight": atom.weight,
+                        "importance": atom.importance,
+                        "confidence": atom.confidence,
+                        "status": atom.status,
+                        "source_scene": atom.source_scene,
+                        "source_id": atom.source_id,
+                        "privacy_level": atom.privacy_level,
+                        "embedding_source_hash": embedding_source_hash(str(atom.content or "")),
+                    }
+                return payloads
+        except Exception:
+            logger.exception(
+                "记忆原子索引载荷列表获取失败",
+                event_code="memory.atom.index_payloads_list_failed",
                 status=status,
             )
             return None

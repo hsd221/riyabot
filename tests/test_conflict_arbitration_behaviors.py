@@ -28,8 +28,9 @@ class FakeQdrant:
         self.payload_updates: list[tuple[str, dict[str, Any]]] = []
         self.upserts: list[dict[str, Any]] = []
 
-    async def delete_atom_vector(self, atom_id: str) -> None:
+    async def delete_atom_vector(self, atom_id: str) -> bool:
         self.deleted.append(atom_id)
+        return True
 
     async def set_atom_payload(self, atom_id: str, payload: dict[str, Any]) -> bool:
         self.payload_updates.append((atom_id, payload))
@@ -191,10 +192,77 @@ class ConflictArbitrationTest(unittest.IsolatedAsyncioTestCase):
         arbiter = ConflictArbiter(FakeStore())
 
         with (
-            patch.object(arbiter, "_apply_resolution", new=AsyncMock(return_value=None)),
+            patch.object(arbiter, "_apply_resolution", new=AsyncMock(return_value=True)),
             patch.object(ConflictObservation, "update", side_effect=RuntimeError("mark down")),
         ):
             self.assertEqual(await arbiter.check_and_resolve(), 1)
+
+    async def _seed_cross_day_group(self, conflict_type: str = "contradiction") -> None:
+        base = datetime.datetime(2026, 7, 1, 8, 0, 0)
+        for days in (0, 1, 2):
+            ConflictObservation.create(
+                atom_a_id="atom-a",
+                atom_b_id="atom-b",
+                conflict_type=conflict_type,
+                description="跨天观察到同一冲突",
+                status="pending",
+                created_at=base + datetime.timedelta(days=days),
+            )
+
+    async def test_failed_archive_keeps_whole_conflict_group_pending(self) -> None:
+        """写库失败还清空整组观测，会让冲突掉回累积阈值以下、永远不再被仲裁。"""
+        await self._seed_cross_day_group()
+        store = FakeStore()
+        store.update_atom = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        resolved = await ConflictArbiter(store).check_and_resolve()
+
+        self.assertEqual(resolved, 0)
+        self.assertEqual(ConflictObservation.select().where(ConflictObservation.status == "pending").count(), 3)
+        self.assertEqual(store.qdrant.deleted, [])
+
+    async def test_failed_vector_cleanup_keeps_conflict_group_pending(self) -> None:
+        """向量没删掉，检索还会命中被裁掉的原子，而对账不会清理归档行的残留向量。"""
+        await self._seed_cross_day_group()
+        store = FakeStore()
+        store.qdrant.delete_atom_vector = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        resolved = await ConflictArbiter(store).check_and_resolve()
+
+        self.assertEqual(resolved, 0)
+        self.assertEqual(ConflictObservation.select().where(ConflictObservation.status == "pending").count(), 3)
+
+    async def test_failed_merge_write_does_not_archive_the_other_atom(self) -> None:
+        """合并内容没写进去还归档 B，等于两条记忆一起丢。"""
+        await self._seed_cross_day_group(conflict_type="duplicate")
+        store = FakeStore()
+        for atom in store.atoms.values():
+            atom["atom_type"] = "factual"
+        store.update_atom = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        resolved = await ConflictArbiter(store).check_and_resolve()
+
+        self.assertEqual(resolved, 0)
+        self.assertEqual([call.args[0] for call in store.update_atom.await_args_list], ["atom-a"])
+        self.assertEqual(store.qdrant.deleted, [])
+        self.assertEqual(ConflictObservation.select().where(ConflictObservation.status == "pending").count(), 3)
+
+    async def test_both_atoms_empty_falls_through_to_evidence_arbitration(self) -> None:
+        """合并结果为空说明没东西可写，不能返回一个把原子清空的 MERGE 决策。"""
+        store = FakeStore()
+        for atom_id, created_at in (("atom-a", "2026-07-01T00:00:00"), ("atom-b", "2026-07-06T00:00:00")):
+            store.atoms[atom_id].update({"content": "  ", "atom_type": "factual", "created_at": created_at})
+        conflict = SimpleNamespace(atom_a_id="atom-a", atom_b_id="atom-b", conflict_type="duplicate")
+
+        with (
+            patch.object(ConflictArbiter, "_get_evidence_count", return_value=0),
+            patch.object(ConflictArbiter, "_get_trace_reliability_score", return_value=0.5),
+        ):
+            resolution = await ConflictArbiter(store).resolve(conflict)  # type: ignore[arg-type]
+
+        # 落到置信度比较：atom-a 0.9 vs atom-b 0.4
+        self.assertEqual(resolution.decision, ConflictDecision.KEEP_A)
+        self.assertIsNone(resolution.merged_content)
 
     async def test_same_day_repeated_observations_do_not_trigger_arbitration(self) -> None:
         base = datetime.datetime(2026, 7, 1, 8, 0, 0)
@@ -522,8 +590,12 @@ class ConflictArbitrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ConflictArbiter._merge_atoms({"content": ""}, {"content": "补充"}), "补充")
         self.assertEqual(ConflictArbiter._merge_atoms({"content": "主内容"}, {"content": ""}), "主内容")
-        self.assertEqual(ConflictArbiter._merge_atoms({"content": "主内容包含补充"}, {"content": "补充"}), "主内容包含补充")
-        self.assertEqual(ConflictArbiter._merge_atoms({"content": "补充"}, {"content": "主内容包含补充"}), "主内容包含补充")
+        self.assertEqual(
+            ConflictArbiter._merge_atoms({"content": "主内容包含补充"}, {"content": "补充"}), "主内容包含补充"
+        )
+        self.assertEqual(
+            ConflictArbiter._merge_atoms({"content": "补充"}, {"content": "主内容包含补充"}), "主内容包含补充"
+        )
         self.assertEqual(ConflictArbiter._merge_atoms({"content": "较长的内容"}, {"content": "短"}), "较长的内容；短")
 
     async def test_apply_resolution_merge_updates_content_reembeds_and_archives_loser(self) -> None:
@@ -567,6 +639,38 @@ class ConflictArbitrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.qdrant.upserts[0]["point_id"], "atom-a")
         self.assertEqual(store.qdrant.upserts[0]["payload"]["source_id"], "stream-1")
         self.assertEqual(ConflictObservation.get_by_id(conflict.id).status, "resolved")
+
+    async def test_merge_retry_after_loser_vector_failure_does_not_reapply_confidence_bonus(self) -> None:
+        conflict = ConflictObservation.create(
+            atom_a_id="atom-a",
+            atom_b_id="atom-b",
+            conflict_type="duplicate",
+            description="败方向量清理失败后重试",
+            status="pending",
+            created_at=datetime.datetime(2026, 7, 6, 8, 0, 0),
+        )
+        store = FakeStore()
+        for atom in store.atoms.values():
+            atom["atom_type"] = "factual"
+            atom["status"] = "active"
+        resolution = Resolution(
+            ConflictDecision.MERGE,
+            "atom-a",
+            "atom-b",
+            merged_content="已经合并的内容",
+        )
+        arbiter = ConflictArbiter(store)
+        store.qdrant.delete_atom_vector = AsyncMock(side_effect=[False, True])  # type: ignore[method-assign]
+
+        with patch("src.memory.conflict_arbitration.generate_embedding", new=AsyncMock(return_value=[0.1])):
+            self.assertFalse(await arbiter._apply_resolution(resolution, conflict))
+            confidence_after_first_attempt = store.atoms["atom-a"]["confidence"]
+            self.assertTrue(await arbiter._apply_resolution(resolution, conflict))
+
+        merge_updates = [updates for atom_id, updates in store.updates if atom_id == "atom-a"]
+        self.assertEqual(len(merge_updates), 1)
+        self.assertEqual(store.atoms["atom-a"]["confidence"], confidence_after_first_attempt)
+        self.assertEqual(store.qdrant.delete_atom_vector.await_count, 2)
 
     async def test_apply_resolution_both_reduces_confidence_and_handles_update_or_mark_failures(self) -> None:
         conflict = ConflictObservation.create(
@@ -615,7 +719,9 @@ class ConflictArbitrationTest(unittest.IsolatedAsyncioTestCase):
         arbiter = ConflictArbiter(store)
 
         self.assertEqual(await arbiter._get_confidence("missing"), 0.5)
-        with patch("src.memory.conflict_arbitration.generate_embedding", new=AsyncMock(side_effect=RuntimeError("embed down"))):
+        with patch(
+            "src.memory.conflict_arbitration.generate_embedding", new=AsyncMock(side_effect=RuntimeError("embed down"))
+        ):
             await arbiter._apply_resolution(resolution, conflict)
 
         self.assertIn(("atom-b", {"status": "archived"}), store.updates)

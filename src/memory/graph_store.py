@@ -13,6 +13,18 @@ from src.memory.types import EntitySearchResult, NeighborResult
 
 logger = get_logger("memory.graph")
 
+# 单次 BFS 最多访问的节点数。梦境阶段会为同一原子内的实体两两建边（O(n²)），
+# 图很快就会变稠密；不设上限时一次遍历可能拉满整张图，而这些遍历跑在检索的同步路径上。
+_MAX_TRAVERSAL_NODES = 2000
+# IN (...) 的单批参数量。SQLite 对绑定变量数有硬上限（旧版本仅 999），
+# 一次性塞入全部节点会直接抛 "too many SQL variables" 并让整个图扩展静默失效。
+_SQL_IN_CHUNK = 500
+
+
+def _chunked(values: list[Any], size: int) -> list[list[Any]]:
+    """把列表切成不超过 size 的批次，用于分批构造 IN 查询"""
+    return [values[start : start + size] for start in range(0, len(values), size)]
+
 
 class GraphStore:
     """图谱存储 CRUD 封装
@@ -431,16 +443,19 @@ class GraphStore:
 
             # Step 2: 通过 GraphNode BFS 遍历图
             with self.db:
-                start_nodes = GraphNode.select().where(GraphNode.label.in_(list(labels)))
-                start_ids: set[str] = {str(n.id) for n in start_nodes}
+                start_ids: set[str] = set()
+                for label_chunk in _chunked(sorted(labels), _SQL_IN_CHUNK):
+                    start_nodes = GraphNode.select(GraphNode.id).where(GraphNode.label.in_(label_chunk))
+                    start_ids.update(str(n.id) for n in start_nodes)
 
                 if not start_ids:
                     return list(labels)
 
                 visited: set[str] = set(start_ids)
                 node_queue: list[tuple[str, int]] = [(sid, 0) for sid in start_ids]
+                truncated = False
 
-                while node_queue:
+                while node_queue and not truncated:
                     current_id, d = node_queue.pop(0)
                     if d >= max_depth:
                         continue
@@ -450,24 +465,41 @@ class GraphStore:
                     )
                     for edge in edges:
                         neighbor = edge.target_node_id if edge.source_node_id == current_id else edge.source_node_id
-                        if neighbor not in visited:
-                            visited.add(neighbor)
-                            node_queue.append((neighbor, d + 1))
+                        if neighbor in visited:
+                            continue
+                        if len(visited) >= _MAX_TRAVERSAL_NODES:
+                            truncated = True
+                            break
+                        visited.add(neighbor)
+                        node_queue.append((neighbor, d + 1))
+
+                if truncated:
+                    logger.warning(
+                        "图遍历达到节点上限，关联结果已截断",
+                        atom_id=atom_id,
+                        max_nodes=_MAX_TRAVERSAL_NODES,
+                    )
 
                 # Step 3: 收集所有遍历到的节点标签
-                all_node_ids = [int(nid) for nid in visited]
-                nodes = GraphNode.select().where(GraphNode.id.in_(all_node_ids))
-                for n in nodes:
-                    labels.add(n.label)
+                numeric_ids = []
+                for nid in visited:
+                    try:
+                        numeric_ids.append(int(nid))
+                    except (TypeError, ValueError):
+                        continue
+                for id_chunk in _chunked(numeric_ids, _SQL_IN_CHUNK):
+                    for n in GraphNode.select(GraphNode.label).where(GraphNode.id.in_(id_chunk)):
+                        labels.add(n.label)
 
                 # Step 4: 收集关联的 GraphEntry subject/object
                 result: set[str] = {atom_id}
-                entry_list = GraphEntry.select().where(
-                    (GraphEntry.subject.in_(list(labels))) | (GraphEntry.object.in_(list(labels)))
-                )
-                for e in entry_list:
-                    result.add(e.subject)
-                    result.add(e.object)
+                for label_chunk in _chunked(sorted(labels), _SQL_IN_CHUNK):
+                    entry_list = GraphEntry.select(GraphEntry.subject, GraphEntry.object).where(
+                        (GraphEntry.subject.in_(label_chunk)) | (GraphEntry.object.in_(label_chunk))
+                    )
+                    for e in entry_list:
+                        result.add(e.subject)
+                        result.add(e.object)
 
             return list(result)
         except Exception as e:
