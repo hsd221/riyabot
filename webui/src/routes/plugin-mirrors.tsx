@@ -32,6 +32,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
 
 interface MirrorConfig {
   id: string
@@ -72,7 +73,7 @@ export function PluginMirrorsPage() {
       setLoading(true)
       setError(null)
 
-      const response = await fetch('/api/webui/plugins/mirrors', {
+      const response = await fetchWithAuth('/api/webui/plugins/mirrors', {
         credentials: 'include',
       })
 
@@ -118,7 +119,7 @@ export function PluginMirrorsPage() {
   // 添加镜像源
   const handleAddMirror = async () => {
     try {
-      const response = await fetch('/api/webui/plugins/mirrors', {
+      const response = await fetchWithAuth('/api/webui/plugins/mirrors', {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -154,7 +155,7 @@ export function PluginMirrorsPage() {
     if (!editingMirror) return
 
     try {
-      const response = await fetch(`/api/webui/plugins/mirrors/${editingMirror.id}`, {
+      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${editingMirror.id}`, {
         method: 'PUT',
         credentials: 'include',
         headers: {
@@ -195,7 +196,7 @@ export function PluginMirrorsPage() {
     if (!confirm('确定要删除这个镜像源吗？')) return false
 
     try {
-      const response = await fetch(`/api/webui/plugins/mirrors/${id}`, {
+      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${id}`, {
         method: 'DELETE',
         credentials: 'include',
       })
@@ -224,7 +225,7 @@ export function PluginMirrorsPage() {
   // 切换启用状态
   const handleToggleEnabled = async (mirror: MirrorConfig) => {
     try {
-      const response = await fetch(`/api/webui/plugins/mirrors/${mirror.id}`, {
+      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${mirror.id}`, {
         method: 'PUT',
         credentials: 'include',
         headers: {
@@ -290,7 +291,7 @@ export function PluginMirrorsPage() {
     if (newPriority < 1) return
 
     try {
-      const response = await fetch(`/api/webui/plugins/mirrors/${mirror.id}`, {
+      const response = await fetchWithAuth(`/api/webui/plugins/mirrors/${mirror.id}`, {
         method: 'PUT',
         credentials: 'include',
         headers: {

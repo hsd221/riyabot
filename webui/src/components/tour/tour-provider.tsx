@@ -2,22 +2,28 @@ import { useState, useCallback, useRef, type ReactNode } from 'react'
 import type { Step, CallBackProps, Status } from 'react-joyride'
 import { TourContext } from './tour-context'
 import type { TourId, TourState } from './types'
+import { safeGetItem, safeSetItem } from '@/lib/safe-storage'
 
 const COMPLETED_TOURS_KEY = 'riyabot-completed-tours'
 
-// 从 localStorage 读取已完成的 Tours
+// 从安全存储读取已完成的 Tours
 function getCompletedTours(): Set<TourId> {
+  const stored = safeGetItem(COMPLETED_TOURS_KEY)
+  if (!stored) return new Set()
+
   try {
-    const stored = localStorage.getItem(COMPLETED_TOURS_KEY)
-    return stored ? new Set(JSON.parse(stored)) : new Set()
+    const parsed: unknown = JSON.parse(stored)
+    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')
+      ? new Set(parsed as TourId[])
+      : new Set()
   } catch {
     return new Set()
   }
 }
 
-// 保存已完成的 Tours 到 localStorage
+// 保存已完成的 Tours；存储受限时不影响当前会话
 function saveCompletedTours(tours: Set<TourId>) {
-  localStorage.setItem(COMPLETED_TOURS_KEY, JSON.stringify([...tours]))
+  safeSetItem(COMPLETED_TOURS_KEY, JSON.stringify([...tours]))
 }
 
 export function TourProvider({ children }: { children: ReactNode }) {

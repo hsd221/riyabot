@@ -44,6 +44,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/version'
+import { openExternalLink } from '@/lib/external-link'
 import type { ReactNode, ComponentType } from 'react'
 import type { LucideProps } from 'lucide-react'
 
@@ -115,6 +116,28 @@ const menuIconTileClasses: Record<string, string> = {
   '/settings': 'ios-symbol-gray',
 }
 
+const PAGE_TITLE_ROUTES = [
+  ['/', '首页'],
+  ['/statistics', '统计数据'],
+  ['/config/bot', '主程序配置'],
+  ['/config/modelProvider', 'AI模型厂商配置'],
+  ['/config/model', '模型管理与分配'],
+  ['/config/adapter', '平台接入'],
+  ['/resource/emoji', '表情包管理'],
+  ['/resource/expression', '表达方式管理'],
+  ['/resource/behavior', '行为学习管理'],
+  ['/resource/chat-history-import', '聊天记录学习'],
+  ['/resource/jargon', '黑话管理'],
+  ['/resource/person', '人物信息管理'],
+  ['/resource/memory', '记忆系统概览'],
+  ['/plugins', '插件市场'],
+  ['/plugin-config', '插件配置'],
+  ['/model-traces', '模型请求追踪'],
+  ['/logs', '日志查看器'],
+  ['/chat', '本地聊天室'],
+  ['/settings', '系统设置'],
+] as const
+
 export function Layout({ children }: LayoutProps) {
   const { checking } = useAuthGuard() // 检查认证状态
 
@@ -127,6 +150,7 @@ export function Layout({ children }: LayoutProps) {
   )
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const mobileMenuCloseRef = useRef<HTMLButtonElement>(null)
+  const mainContentRef = useRef<HTMLElement>(null)
   const { theme, resolvedTheme, setTheme } = useTheme()
   const matchRoute = useMatchRoute()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
@@ -207,10 +231,25 @@ export function Layout({ children }: LayoutProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  useEffect(() => {
+    const activeRoute =
+      PAGE_TITLE_ROUTES.find(([path]) => path === pathname) ??
+      [...PAGE_TITLE_ROUTES]
+        .filter(([path]) => path !== '/')
+        .sort(([firstPath], [secondPath]) => secondPath.length - firstPath.length)
+        .find(([path]) => pathname.startsWith(`${path}/`))
+
+    document.title = activeRoute ? `${activeRoute[1]} · ${APP_NAME}` : APP_NAME
+    if (checking) return
+
+    const focusFrame = window.requestAnimationFrame(() => mainContentRef.current?.focus())
+    return () => window.cancelAnimationFrame(focusFrame)
+  }, [checking, pathname])
+
   // 认证检查中，显示加载状态
   if (checking) {
     return (
-      <div className="ios-page flex h-screen items-center justify-center overflow-hidden">
+      <div className="ios-page ios-app-height flex items-center justify-center overflow-hidden">
         <div className="ios-status-panel">
           <span className="ios-symbol ios-symbol-md ios-symbol-blue">
             <LoaderCircle className="ios-spin-slow h-5 w-5" strokeWidth={2.5} />
@@ -293,7 +332,13 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="ios-app-shell flex h-screen overflow-hidden">
+      <div className="ios-app-shell ios-app-height flex overflow-hidden">
+        <a
+          href="#main-content"
+          className="fixed left-4 top-3 z-[100] -translate-y-[calc(100%+1rem)] rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        >
+          跳到主内容
+        </a>
         {/* Sidebar */}
         <aside
           id="primary-navigation"
@@ -539,7 +584,7 @@ export function Layout({ children }: LayoutProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => window.open('https://docs.mai-mai.org', '_blank')}
+                onClick={() => openExternalLink('https://docs.mai-mai.org')}
                 className="hidden h-10 w-10 gap-2 px-0 sm:inline-flex sm:h-11 sm:w-auto sm:px-4"
                 title="查看项目文档"
               >
@@ -568,7 +613,7 @@ export function Layout({ children }: LayoutProps) {
                         <button
                           key={option.value}
                           type="button"
-                          className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0"
+                          className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60"
                           onClick={(event) =>
                             toggleThemeWithTransition(option.value, setTheme, event)
                           }
@@ -630,7 +675,7 @@ export function Layout({ children }: LayoutProps) {
                         className="ios-row ios-touch min-h-[58px] w-full text-left focus-visible:bg-accent/60 focus-visible:ring-0"
                         onClick={() => {
                           setMobileActionsOpen(false)
-                          window.open('https://docs.mai-mai.org', '_blank')
+                          openExternalLink('https://docs.mai-mai.org')
                         }}
                       >
                         <span className="flex items-center gap-3">
@@ -699,7 +744,12 @@ export function Layout({ children }: LayoutProps) {
           </header>
 
           {/* Page content */}
-          <main className="flex-1 overflow-hidden bg-background">
+          <main
+            ref={mainContentRef}
+            id="main-content"
+            tabIndex={-1}
+            className="flex-1 overflow-hidden bg-background focus:outline-none"
+          >
             <div key={pathname} className="motion-page h-full min-w-0">
               {children}
             </div>

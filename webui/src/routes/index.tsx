@@ -1,10 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import axios from 'axios'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ModelPieLegend } from '@/components/statistics/model-pie-legend'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Progress } from '@/components/ui/progress'
 import { Switch } from '@/components/ui/switch'
 import {
   ChartContainer,
@@ -55,6 +53,10 @@ import {
 } from '@/components/ui/dialog'
 import { Link } from '@tanstack/react-router'
 import { useToast } from '@/hooks/use-toast'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { getSetting } from '@/lib/settings-manager'
+import { RestartingOverlay } from '@/components/RestartingOverlay'
+import { getRiyaBotStatus, restartRiyaBot } from '@/lib/system-api'
 
 // 机器人状态接口
 interface BotStatus {
@@ -167,141 +169,165 @@ function ChartEmptyState({
 export function IndexPage() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadingProgress, setLoadingProgress] = useState(0)
-  const [timeRange, setTimeRange] = useState(24) // 默认24小时
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [timeRange, setTimeRange] = useState(24)
   const [timeRangeDialogOpen, setTimeRangeDialogOpen] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [refreshInterval, setRefreshInterval] = useState(() => getSetting('dataSyncInterval'))
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null)
   const [restarting, setRestarting] = useState(false)
+  const [showRestartOverlay, setShowRestartOverlay] = useState(false)
   const { toast } = useToast()
 
-  // 获取机器人状态
   const fetchBotStatus = useCallback(async () => {
     try {
-      const response = await axios.get('/api/webui/system/status', {
-        withCredentials: true,
-      })
-      setBotStatus(response.data)
-    } catch (error) {
-      console.error('获取机器人状态失败:', error)
+      setBotStatus(await getRiyaBotStatus())
+    } catch (requestError) {
+      console.error('获取机器人状态失败:', requestError)
       setBotStatus(null)
     }
   }, [])
 
-  // 重启机器人
   const handleRestart = async () => {
     if (restarting) return
 
+    setRestarting(true)
     try {
-      setRestarting(true)
-      await axios.post(
-        '/api/webui/system/restart',
-        {},
-        {
-          withCredentials: true,
-        }
-      )
-      toast({
-        title: '重启中',
-        description: '主程序正在重启，请稍候...',
-      })
-      // 3秒后刷新状态
-      setTimeout(() => {
-        fetchBotStatus()
-        setRestarting(false)
-      }, 3000)
-    } catch (error) {
-      console.error('重启失败:', error)
+      await restartRiyaBot()
+      toast({ title: '重启中', description: '主程序正在重启，请稍候...' })
+      setShowRestartOverlay(true)
+    } catch (requestError) {
+      console.error('重启失败:', requestError)
+      setRestarting(false)
       toast({
         title: '重启失败',
-        description: '无法重启主程序，请检查控制台',
+        description:
+          requestError instanceof Error ? requestError.message : '无法重启主程序，请检查控制台',
         variant: 'destructive',
       })
-      setRestarting(false)
     }
   }
 
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      const response = await axios.get(`/api/webui/statistics/dashboard?hours=${timeRange}`, {
-        withCredentials: true,
-      })
-      setDashboardData(response.data)
-      setLoading(false)
-      setLoadingProgress(100)
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error)
-      setLoading(false)
-      setLoadingProgress(100)
-    }
-  }, [timeRange])
+  const handleRestartComplete = () => {
+    setShowRestartOverlay(false)
+    setRestarting(false)
+    void refreshAll(false)
+    toast({ title: '重启成功', description: '主程序已恢复运行' })
+  }
 
-  // 伪加载进度条效果
+  const handleRestartFailed = () => {
+    setRestarting(false)
+    toast({
+      title: '重启超时',
+      description: '服务未在预期时间内恢复，可在当前页面重试检测或刷新页面',
+      variant: 'destructive',
+    })
+  }
+
+  const fetchDashboardData = useCallback(
+    async ({ background = false }: { background?: boolean } = {}) => {
+      if (background) setRefreshing(true)
+      else setLoading(true)
+      setError(null)
+
+      try {
+        const response = await fetchWithAuth(`/api/webui/statistics/dashboard?hours=${timeRange}`, {
+          cache: 'no-store',
+        })
+        if (!response.ok) {
+          const body = await response.json().catch(() => null)
+          throw new Error(body?.detail || body?.message || `加载统计数据失败 (${response.status})`)
+        }
+        setDashboardData(await response.json())
+      } catch (requestError) {
+        console.error('加载统计数据失败:', requestError)
+        const message = requestError instanceof Error ? requestError.message : '连接服务器失败'
+        setError(message)
+        if (background) {
+          toast({
+            title: '自动刷新失败',
+            description: `仍在显示上次成功获取的数据。${message}`,
+            variant: 'destructive',
+          })
+        }
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [timeRange, toast]
+  )
+
+  const refreshAll = useCallback(
+    async (background = true) => {
+      await Promise.all([fetchDashboardData({ background }), fetchBotStatus()])
+    },
+    [fetchBotStatus, fetchDashboardData]
+  )
+
   useEffect(() => {
-    if (!loading) return
+    void refreshAll(false)
+  }, [refreshAll])
 
-    setLoadingProgress(0)
+  useEffect(() => {
+    const handleSettingsChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; value?: unknown }>).detail
+      if (detail?.key === 'dataSyncInterval' && typeof detail.value === 'number') {
+        setRefreshInterval(detail.value)
+      }
+    }
+    const handleSettingsReset = () => setRefreshInterval(getSetting('dataSyncInterval'))
 
-    // 快速到15%
-    const timer1 = setTimeout(() => setLoadingProgress(15), 200)
-    // 到30%
-    const timer2 = setTimeout(() => setLoadingProgress(30), 800)
-    // 到45%
-    const timer3 = setTimeout(() => setLoadingProgress(45), 2000)
-    // 到60%
-    const timer4 = setTimeout(() => setLoadingProgress(60), 4000)
-    // 到75%
-    const timer5 = setTimeout(() => setLoadingProgress(75), 6500)
-    // 到85%
-    const timer6 = setTimeout(() => setLoadingProgress(85), 9000)
-    // 到92%
-    const timer7 = setTimeout(() => setLoadingProgress(92), 11000)
-
+    window.addEventListener('riyabot-settings-change', handleSettingsChange)
+    window.addEventListener('riyabot-settings-reset', handleSettingsReset)
     return () => {
-      clearTimeout(timer1)
-      clearTimeout(timer2)
-      clearTimeout(timer3)
-      clearTimeout(timer4)
-      clearTimeout(timer5)
-      clearTimeout(timer6)
-      clearTimeout(timer7)
+      window.removeEventListener('riyabot-settings-change', handleSettingsChange)
+      window.removeEventListener('riyabot-settings-reset', handleSettingsReset)
     }
-  }, [loading])
+  }, [])
 
-  useEffect(() => {
-    fetchDashboardData()
-    fetchBotStatus()
-  }, [fetchDashboardData, fetchBotStatus])
-
-  // 自动刷新
   useEffect(() => {
     if (!autoRefresh) return
+    const interval = window.setInterval(() => void refreshAll(true), refreshInterval * 1000)
+    return () => window.clearInterval(interval)
+  }, [autoRefresh, refreshAll, refreshInterval])
 
-    const interval = setInterval(() => {
-      fetchDashboardData()
-      fetchBotStatus()
-    }, 30000) // 30秒刷新一次
-
-    return () => clearInterval(interval)
-  }, [autoRefresh, fetchDashboardData, fetchBotStatus])
-
-  if (loading || !dashboardData) {
+  if (loading) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
-        <div className="ios-card w-full max-w-md space-y-6 px-5 py-6 text-center">
-          <RefreshCw className="ios-spin-slow mx-auto h-12 w-12 text-primary" />
-          <div className="space-y-2">
+      <div className="flex h-full items-center justify-center p-4" role="status">
+        <div className="ios-card w-full max-w-md space-y-4 px-5 py-6 text-center">
+          <RefreshCw className="ios-spin-slow mx-auto h-10 w-10 text-primary" />
+          <div className="space-y-1">
             <p className="text-lg font-medium">加载统计数据中...</p>
-            <p className="text-sm text-muted-foreground">正在获取运行数据</p>
-          </div>
-          <div className="space-y-2">
-            <Progress value={loadingProgress} className="h-2" />
-            <p className="text-xs text-muted-foreground">{loadingProgress}%</p>
+            <p className="text-sm text-muted-foreground">正在获取最新运行数据</p>
           </div>
         </div>
       </div>
     )
   }
+
+  if (error && !dashboardData) {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <div className="ios-card w-full max-w-md space-y-5 px-6 py-7 text-center" role="alert">
+          <span className="ios-symbol ios-symbol-red mx-auto flex h-14 w-14 rounded-[18px]">
+            <Activity className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="text-xl font-semibold">无法加载统计数据</h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{error}</p>
+          </div>
+          <Button onClick={() => void refreshAll(false)} className="w-full sm:w-auto">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            重新加载
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!dashboardData) return null
 
   // 解构数据，提供默认值以防止 undefined 错误
   const {
@@ -477,191 +503,241 @@ export function IndexPage() {
   ]
 
   return (
-    <ScrollArea className="h-full min-w-0 overflow-x-hidden [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
-      <div className="ios-page min-w-0">
-        <div className="mx-auto w-full min-w-0 max-w-6xl space-y-8 sm:space-y-9 lg:space-y-10">
-          {/* 标题和控制栏 */}
-          <div className="flex flex-col justify-between gap-5 sm:gap-6 lg:flex-row lg:items-center">
-            <div className="min-w-0">
-              <h1 className="ios-title">实时监控面板</h1>
-              <p className="ios-subtitle">主程序运行状态和统计数据一览</p>
-            </div>
-            <div className="hidden w-full flex-col gap-3 sm:flex sm:w-auto sm:flex-row sm:items-center">
-              <Tabs
-                value={timeRange.toString()}
-                onValueChange={(v) => setTimeRange(Number(v))}
-                className="w-full sm:w-auto"
-              >
-                <TabsList className="grid w-full grid-cols-3 sm:w-auto">
-                  <TabsTrigger value="24">24小时</TabsTrigger>
-                  <TabsTrigger value="168">7天</TabsTrigger>
-                  <TabsTrigger value="720">30天</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
-                <div className="ios-group flex min-h-11 min-w-0 items-center justify-between gap-4 px-4 sm:min-w-[190px]">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <RefreshCw className="h-4 w-4 shrink-0 text-primary" />
-                    <span className="truncate text-sm font-medium">自动刷新</span>
+    <>
+      <ScrollArea className="h-full min-w-0 overflow-x-hidden [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+        <div className="ios-page min-w-0">
+          <div className="mx-auto w-full min-w-0 max-w-6xl space-y-8 sm:space-y-9 lg:space-y-10">
+            {/* 标题和控制栏 */}
+            <div className="flex flex-col justify-between gap-5 sm:gap-6 lg:flex-row lg:items-center">
+              <div className="min-w-0">
+                <h1 className="ios-title">实时监控面板</h1>
+                <p className="ios-subtitle">主程序运行状态和统计数据一览</p>
+              </div>
+              <div className="hidden w-full flex-col gap-3 sm:flex sm:w-auto sm:flex-row sm:items-center">
+                <Tabs
+                  value={timeRange.toString()}
+                  onValueChange={(v) => setTimeRange(Number(v))}
+                  className="w-full sm:w-auto"
+                >
+                  <TabsList className="grid w-full grid-cols-3 sm:w-auto">
+                    <TabsTrigger value="24">24小时</TabsTrigger>
+                    <TabsTrigger value="168">7天</TabsTrigger>
+                    <TabsTrigger value="720">30天</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
+                  <div className="ios-group flex min-h-11 min-w-0 items-center justify-between gap-4 px-4 sm:min-w-[190px]">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <RefreshCw className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="truncate text-sm font-medium">自动刷新</span>
+                    </div>
+                    <Switch
+                      checked={autoRefresh}
+                      onCheckedChange={setAutoRefresh}
+                      aria-label="自动刷新"
+                    />
                   </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-11 w-11 rounded-full"
+                    onClick={() => void refreshAll(true)}
+                    aria-label="手动刷新"
+                    aria-busy={refreshing}
+                    disabled={refreshing}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'ios-spin-slow' : ''}`} />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {error && dashboardData && (
+              <div
+                className="flex flex-col gap-3 rounded-[18px] border border-[rgb(255_149_0_/_0.22)] bg-[rgb(255_149_0_/_0.08)] px-4 py-3 text-[13px] leading-5 sm:flex-row sm:items-center sm:justify-between"
+                role="status"
+              >
+                <p className="text-foreground/85">
+                  刷新未完成，当前仍显示上次成功获取的数据。{error}
+                </p>
+                <button
+                  type="button"
+                  className="ios-touch shrink-0 self-start rounded-full px-3 font-semibold text-primary hover:bg-primary/10 focus-visible:bg-primary/10 sm:self-auto"
+                  onClick={() => void refreshAll(true)}
+                  disabled={refreshing}
+                >
+                  {refreshing ? '重试中…' : '重新刷新'}
+                </button>
+              </div>
+            )}
+
+            <div className="ios-group overflow-hidden sm:hidden">
+              <Dialog open={timeRangeDialogOpen} onOpenChange={setTimeRangeDialogOpen}>
+                <DialogTrigger asChild>
+                  <button className="ios-row ios-touch min-h-[66px] w-full gap-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                        <Clock className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[16px] font-medium leading-6">首页数据</span>
+                        <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                          {timeRangeLabel} · {autoRefresh ? '自动刷新' : '手动刷新'}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="inline-flex h-9 items-center rounded-full bg-secondary/80 px-3 text-[14px] font-semibold leading-none text-foreground">
+                        {timeRangeLabel}
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="ios-sheet bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
+                  <DialogHeader className="px-5 pt-7">
+                    <DialogTitle>统计范围</DialogTitle>
+                    <DialogDescription>选择首页统计数据的时间窗口</DialogDescription>
+                  </DialogHeader>
+                  <div className="px-5">
+                    <div className="ios-group overflow-hidden">
+                      {timeRangeOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
+                          onClick={() => {
+                            setTimeRange(option.value)
+                            setTimeRangeDialogOpen(false)
+                          }}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-[16px] font-medium leading-6">
+                              {option.label}
+                            </span>
+                            <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                          {timeRange === option.value ? (
+                            <Check className="h-4 w-4 shrink-0 text-primary" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <div className="ios-row min-h-[58px] py-2.5">
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                    <RefreshCw className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[15px] font-medium leading-5">自动刷新</span>
+                    <span className="block truncate text-[13px] leading-5 text-muted-foreground">
+                      每 {refreshInterval} 秒更新一次状态
+                    </span>
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
                   <Switch
                     checked={autoRefresh}
                     onCheckedChange={setAutoRefresh}
                     aria-label="自动刷新"
                   />
-                </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-11 w-11 rounded-full"
-                  onClick={fetchDashboardData}
-                  aria-label="手动刷新"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
+                  <button
+                    type="button"
+                    onClick={() => void refreshAll(true)}
+                    className="ios-touch inline-flex h-11 w-11 items-center justify-center rounded-full bg-secondary/85 text-foreground hover:bg-secondary focus-visible:bg-accent/70 focus-visible:ring-0"
+                    aria-label="立即刷新"
+                    aria-busy={refreshing}
+                    disabled={refreshing}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'ios-spin-slow' : ''}`} />
+                  </button>
+                </span>
               </div>
             </div>
-          </div>
 
-          <div className="ios-group overflow-hidden sm:hidden">
-            <Dialog open={timeRangeDialogOpen} onOpenChange={setTimeRangeDialogOpen}>
-              <DialogTrigger asChild>
-                <button className="ios-row ios-touch min-h-[66px] w-full gap-3 text-left focus-visible:bg-accent/70 focus-visible:ring-0">
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
-                      <Clock className="h-4 w-4" />
+            {/* 移动端概览分组 */}
+            <div className="space-y-4 sm:hidden">
+              <div className="ios-group overflow-hidden">
+                <div className="ios-row min-h-[68px]">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-sm ios-symbol-green">
+                      <Power className="h-4 w-4" />
                     </span>
-                    <span className="min-w-0">
-                      <span className="block text-[16px] font-medium leading-6">首页数据</span>
-                      <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                        {timeRangeLabel} · {autoRefresh ? '自动刷新' : '手动刷新'}
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-medium leading-tight">主程序</p>
+                      <p className="mt-1 text-[13px] leading-tight text-muted-foreground">
+                        {botStatus?.running ? '正在运行' : '已停止'}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={
+                      botStatus?.running
+                        ? 'border-[rgb(52_199_89_/_0.24)] bg-[rgb(52_199_89_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
+                        : 'border-[rgb(255_59_48_/_0.22)] bg-[rgb(255_59_48_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(215_0_21)] dark:text-[rgb(255_69_58)]'
+                    }
+                  >
+                    {botStatus?.running ? '运行中' : '已停止'}
+                  </Badge>
+                </div>
+                {botStatus && (
+                  <>
+                    <div className="ios-row min-h-12 py-3">
+                      <span className="text-[15px] text-muted-foreground">版本</span>
+                      <span className="text-[15px] font-medium">v{botStatus.version}</span>
+                    </div>
+                    <div className="ios-row min-h-12 py-3">
+                      <span className="text-[15px] text-muted-foreground">运行时长</span>
+                      <span className="text-[15px] font-medium">
+                        {formatTime(botStatus.uptime)}
                       </span>
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    <span className="inline-flex h-9 items-center rounded-full bg-secondary/80 px-3 text-[14px] font-semibold leading-none text-foreground">
-                      {timeRangeLabel}
-                    </span>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  </span>
-                </button>
-              </DialogTrigger>
-              <DialogContent className="ios-sheet bottom-0 left-0 top-auto max-h-[82vh] w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[28px] border-x-0 border-b-0 p-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:hidden">
-                <DialogHeader className="px-5 pt-7">
-                  <DialogTitle>统计范围</DialogTitle>
-                  <DialogDescription>选择首页统计数据的时间窗口</DialogDescription>
-                </DialogHeader>
-                <div className="px-5">
-                  <div className="ios-group overflow-hidden">
-                    {timeRangeOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className="ios-row ios-touch w-full text-left focus-visible:bg-accent/70 focus-visible:ring-0"
-                        onClick={() => {
-                          setTimeRange(option.value)
-                          setTimeRangeDialogOpen(false)
-                        }}
-                      >
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="px-1">
+                  <h2 className="text-[13px] font-medium leading-5 text-muted-foreground">
+                    核心指标
+                  </h2>
+                </div>
+                <div className="ios-group overflow-hidden">
+                  {coreMetricRows.map(({ title, value, detail, icon: Icon, iconClassName }) => (
+                    <div key={title} className="ios-row min-h-[64px]">
+                      <span className="flex min-w-0 flex-1 items-center gap-3">
+                        <span className={`ios-symbol ios-symbol-sm ${iconClassName}`}>
+                          <Icon className="h-4 w-4" />
+                        </span>
                         <span className="min-w-0">
-                          <span className="block truncate text-[16px] font-medium leading-6">
-                            {option.label}
+                          <span className="block truncate text-[15px] font-medium leading-5">
+                            {title}
                           </span>
-                          <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                            {option.description}
+                          <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">
+                            {detail}
                           </span>
                         </span>
-                        {timeRange === option.value ? (
-                          <Check className="h-4 w-4 shrink-0 text-primary" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        )}
-                      </button>
-                    ))}
-                  </div>
+                      </span>
+                      <span className="max-w-[45%] truncate text-right text-[17px] font-semibold tabular-nums leading-6">
+                        {value}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              </DialogContent>
-            </Dialog>
-
-            <div className="ios-row min-h-[58px] py-2.5">
-              <span className="flex min-w-0 items-center gap-3">
-                <span className="ios-symbol ios-symbol-sm ios-symbol-green">
-                  <RefreshCw className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[15px] font-medium leading-5">自动刷新</span>
-                  <span className="block truncate text-[13px] leading-5 text-muted-foreground">
-                    每 30 秒更新一次状态
-                  </span>
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2">
-                <Switch
-                  checked={autoRefresh}
-                  onCheckedChange={setAutoRefresh}
-                  aria-label="自动刷新"
-                />
-                <button
-                  type="button"
-                  onClick={fetchDashboardData}
-                  className="ios-touch inline-flex h-11 w-11 items-center justify-center rounded-full bg-secondary/85 text-foreground hover:bg-secondary focus-visible:bg-accent/70 focus-visible:ring-0"
-                  aria-label="立即刷新"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </button>
-              </span>
-            </div>
-          </div>
-
-          {/* 移动端概览分组 */}
-          <div className="space-y-4 sm:hidden">
-            <div className="ios-group overflow-hidden">
-              <div className="ios-row min-h-[68px]">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-green">
-                    <Power className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[15px] font-medium leading-tight">主程序</p>
-                    <p className="mt-1 text-[13px] leading-tight text-muted-foreground">
-                      {botStatus?.running ? '正在运行' : '已停止'}
-                    </p>
-                  </div>
-                </div>
-                <Badge
-                  variant="outline"
-                  className={
-                    botStatus?.running
-                      ? 'border-[rgb(52_199_89_/_0.24)] bg-[rgb(52_199_89_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
-                      : 'border-[rgb(255_59_48_/_0.22)] bg-[rgb(255_59_48_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(215_0_21)] dark:text-[rgb(255_69_58)]'
-                  }
-                >
-                  {botStatus?.running ? '运行中' : '已停止'}
-                </Badge>
               </div>
-              {botStatus && (
-                <>
-                  <div className="ios-row min-h-12 py-3">
-                    <span className="text-[15px] text-muted-foreground">版本</span>
-                    <span className="text-[15px] font-medium">v{botStatus.version}</span>
-                  </div>
-                  <div className="ios-row min-h-12 py-3">
-                    <span className="text-[15px] text-muted-foreground">运行时长</span>
-                    <span className="text-[15px] font-medium">{formatTime(botStatus.uptime)}</span>
-                  </div>
-                </>
-              )}
-            </div>
 
-            <div className="space-y-2">
-              <div className="px-1">
-                <h2 className="text-[13px] font-medium leading-5 text-muted-foreground">
-                  核心指标
-                </h2>
-              </div>
               <div className="ios-group overflow-hidden">
-                {coreMetricRows.map(({ title, value, detail, icon: Icon, iconClassName }) => (
-                  <div key={title} className="ios-row min-h-[64px]">
+                {secondaryMetricRows.map(({ title, value, detail, icon: Icon, iconClassName }) => (
+                  <div key={title} className="ios-row min-h-[62px]">
                     <span className="flex min-w-0 flex-1 items-center gap-3">
                       <span className={`ios-symbol ios-symbol-sm ${iconClassName}`}>
                         <Icon className="h-4 w-4" />
@@ -675,310 +751,234 @@ export function IndexPage() {
                         </span>
                       </span>
                     </span>
-                    <span className="max-w-[45%] truncate text-right text-[17px] font-semibold tabular-nums leading-6">
+                    <span className="max-w-[45%] truncate text-right text-[16px] font-semibold tabular-nums leading-6">
                       {value}
                     </span>
                   </div>
                 ))}
               </div>
+
+              <div className="ios-group overflow-hidden">
+                <button
+                  type="button"
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  className="ios-row ios-touch w-full text-left disabled:opacity-60 disabled:active:scale-100"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
+                      <RotateCcw className={`h-4 w-4 ${restarting ? 'ios-spin-slow' : ''}`} />
+                    </span>
+                    <span className="text-[15px] font-medium">
+                      {restarting ? '重启中...' : '重启主程序'}
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </button>
+                <Link to="/logs" className="ios-row ios-touch">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
+                      <FileText className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-medium">查看日志</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </Link>
+                <Link to="/plugins" className="ios-row ios-touch">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
+                      <Puzzle className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-medium">插件管理</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </Link>
+                <Link to="/settings" className="ios-row ios-touch">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
+                      <Settings className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-medium">系统设置</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </Link>
+              </div>
             </div>
 
-            <div className="ios-group overflow-hidden">
-              {secondaryMetricRows.map(({ title, value, detail, icon: Icon, iconClassName }) => (
-                <div key={title} className="ios-row min-h-[62px]">
-                  <span className="flex min-w-0 flex-1 items-center gap-3">
-                    <span className={`ios-symbol ios-symbol-sm ${iconClassName}`}>
-                      <Icon className="h-4 w-4" />
+            {/* 机器人状态和快捷入口 */}
+            <div className="hidden grid-cols-1 gap-5 sm:grid lg:grid-cols-2 lg:gap-6">
+              <div className="ios-group overflow-hidden">
+                <div className="ios-row min-h-[76px]">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-md ios-symbol-green">
+                      <Power className="h-4 w-4" />
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[15px] font-medium leading-5">
-                        {title}
-                      </span>
-                      <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">
-                        {detail}
+                      <span className="block text-[15px] font-semibold leading-5">主程序状态</span>
+                      <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
+                        {botStatus?.running ? '正在运行' : '已停止'}
                       </span>
                     </span>
                   </span>
-                  <span className="max-w-[45%] truncate text-right text-[16px] font-semibold tabular-nums leading-6">
-                    {value}
+                  <Badge
+                    variant="outline"
+                    className={
+                      botStatus?.running
+                        ? 'border-[rgb(52_199_89_/_0.24)] bg-[rgb(52_199_89_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
+                        : 'border-[rgb(255_59_48_/_0.22)] bg-[rgb(255_59_48_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(215_0_21)] dark:text-[rgb(255_69_58)]'
+                    }
+                  >
+                    {botStatus?.running ? '运行中' : '已停止'}
+                  </Badge>
+                </div>
+                {botStatus && (
+                  <>
+                    <div className="ios-row min-h-12 py-3">
+                      <span className="text-[15px] text-muted-foreground">版本</span>
+                      <span className="max-w-[55%] truncate text-right text-[15px] font-medium">
+                        v{botStatus.version}
+                      </span>
+                    </div>
+                    <div className="ios-row min-h-12 py-3">
+                      <span className="text-[15px] text-muted-foreground">运行时长</span>
+                      <span className="max-w-[55%] truncate text-right text-[15px] font-medium">
+                        {formatTime(botStatus.uptime)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="ios-group overflow-hidden">
+                <button
+                  type="button"
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  className="ios-row ios-touch w-full text-left disabled:opacity-60 disabled:active:scale-100"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-md ios-symbol-blue">
+                      <RotateCcw className={`h-4 w-4 ${restarting ? 'ios-spin-slow' : ''}`} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[15px] font-semibold leading-5">
+                        {restarting ? '重启中...' : '重启主程序'}
+                      </span>
+                      <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
+                        重新加载运行进程
+                      </span>
+                    </span>
                   </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </button>
+                <Link to="/logs" className="ios-row ios-touch">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-md ios-symbol-teal">
+                      <FileText className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-semibold leading-5">查看日志</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </Link>
+                <Link to="/plugins" className="ios-row ios-touch">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-md ios-symbol-purple">
+                      <Puzzle className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-semibold leading-5">插件管理</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </Link>
+                <Link to="/settings" className="ios-row ios-touch">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="ios-symbol ios-symbol-md ios-symbol-gray">
+                      <Settings className="h-4 w-4" />
+                    </span>
+                    <span className="text-[15px] font-semibold leading-5">系统设置</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                </Link>
+              </div>
+            </div>
+
+            {/* 核心指标 */}
+            <div className="hidden gap-5 sm:grid sm:grid-cols-2 lg:grid-cols-4">
+              {coreMetricRows.map(({ title, value, exact, detail, icon: Icon, iconClassName }) => (
+                <div key={title} className="ios-metric-card min-h-[152px] sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                        {title}
+                      </p>
+                      <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                        {detail}
+                      </p>
+                    </div>
+                    <span className={`ios-symbol ios-symbol-md ${iconClassName}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                  </div>
+                  <div className="mt-7 min-w-0">
+                    <p className="truncate text-[32px] font-semibold tabular-nums leading-none tracking-normal">
+                      {value}
+                    </p>
+                    {exact && (
+                      <p className="mt-2 truncate text-[12px] leading-5 text-muted-foreground">
+                        精确值 {exact}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
 
-            <div className="ios-group overflow-hidden">
-              <button
-                type="button"
-                onClick={handleRestart}
-                disabled={restarting}
-                className="ios-row ios-touch w-full text-left disabled:opacity-60 disabled:active:scale-100"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-blue">
-                    <RotateCcw className={`h-4 w-4 ${restarting ? 'ios-spin-slow' : ''}`} />
-                  </span>
-                  <span className="text-[15px] font-medium">
-                    {restarting ? '重启中...' : '重启主程序'}
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </button>
-              <Link to="/logs" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
-                    <FileText className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-medium">查看日志</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-              <Link to="/plugins" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-purple">
-                    <Puzzle className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-medium">插件管理</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-              <Link to="/settings" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-sm ios-symbol-gray">
-                    <Settings className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-medium">系统设置</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-            </div>
-          </div>
-
-          {/* 机器人状态和快捷入口 */}
-          <div className="hidden grid-cols-1 gap-5 sm:grid lg:grid-cols-2 lg:gap-6">
-            <div className="ios-group overflow-hidden">
-              <div className="ios-row min-h-[76px]">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-green">
-                    <Power className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-semibold leading-5">主程序状态</span>
-                    <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
-                      {botStatus?.running ? '正在运行' : '已停止'}
-                    </span>
-                  </span>
-                </span>
-                <Badge
-                  variant="outline"
-                  className={
-                    botStatus?.running
-                      ? 'border-[rgb(52_199_89_/_0.24)] bg-[rgb(52_199_89_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
-                      : 'border-[rgb(255_59_48_/_0.22)] bg-[rgb(255_59_48_/_0.1)] px-3 py-1 text-[13px] font-semibold text-[rgb(215_0_21)] dark:text-[rgb(255_69_58)]'
-                  }
-                >
-                  {botStatus?.running ? '运行中' : '已停止'}
-                </Badge>
-              </div>
-              {botStatus && (
-                <>
-                  <div className="ios-row min-h-12 py-3">
-                    <span className="text-[15px] text-muted-foreground">版本</span>
-                    <span className="max-w-[55%] truncate text-right text-[15px] font-medium">
-                      v{botStatus.version}
+            {/* 次要指标 */}
+            <div className="hidden grid-cols-1 gap-5 sm:grid sm:grid-cols-3">
+              {secondaryMetricRows.map(({ title, value, detail, icon: Icon, iconClassName }) => (
+                <div key={title} className="ios-metric-card min-h-[128px] sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium leading-5 text-muted-foreground">
+                        {title}
+                      </p>
+                      <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
+                        {detail}
+                      </p>
+                    </div>
+                    <span className={`ios-symbol ios-symbol-md ${iconClassName}`}>
+                      <Icon className="h-4 w-4" />
                     </span>
                   </div>
-                  <div className="ios-row min-h-12 py-3">
-                    <span className="text-[15px] text-muted-foreground">运行时长</span>
-                    <span className="max-w-[55%] truncate text-right text-[15px] font-medium">
-                      {formatTime(botStatus.uptime)}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="ios-group overflow-hidden">
-              <button
-                type="button"
-                onClick={handleRestart}
-                disabled={restarting}
-                className="ios-row ios-touch w-full text-left disabled:opacity-60 disabled:active:scale-100"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-blue">
-                    <RotateCcw className={`h-4 w-4 ${restarting ? 'ios-spin-slow' : ''}`} />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-semibold leading-5">
-                      {restarting ? '重启中...' : '重启主程序'}
-                    </span>
-                    <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">
-                      重新加载运行进程
-                    </span>
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </button>
-              <Link to="/logs" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-teal">
-                    <FileText className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-semibold leading-5">查看日志</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-              <Link to="/plugins" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-purple">
-                    <Puzzle className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-semibold leading-5">插件管理</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-              <Link to="/settings" className="ios-row ios-touch">
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="ios-symbol ios-symbol-md ios-symbol-gray">
-                    <Settings className="h-4 w-4" />
-                  </span>
-                  <span className="text-[15px] font-semibold leading-5">系统设置</span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-              </Link>
-            </div>
-          </div>
-
-          {/* 核心指标 */}
-          <div className="hidden gap-5 sm:grid sm:grid-cols-2 lg:grid-cols-4">
-            {coreMetricRows.map(({ title, value, exact, detail, icon: Icon, iconClassName }) => (
-              <div key={title} className="ios-metric-card min-h-[152px] sm:p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-medium leading-5 text-muted-foreground">
-                      {title}
-                    </p>
-                    <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
-                      {detail}
-                    </p>
-                  </div>
-                  <span className={`ios-symbol ios-symbol-md ${iconClassName}`}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                </div>
-                <div className="mt-7 min-w-0">
-                  <p className="truncate text-[32px] font-semibold tabular-nums leading-none tracking-normal">
+                  <p className="mt-6 truncate text-[26px] font-semibold tabular-nums leading-none tracking-normal">
                     {value}
                   </p>
-                  {exact && (
-                    <p className="mt-2 truncate text-[12px] leading-5 text-muted-foreground">
-                      精确值 {exact}
-                    </p>
-                  )}
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
 
-          {/* 次要指标 */}
-          <div className="hidden grid-cols-1 gap-5 sm:grid sm:grid-cols-3">
-            {secondaryMetricRows.map(({ title, value, detail, icon: Icon, iconClassName }) => (
-              <div key={title} className="ios-metric-card min-h-[128px] sm:p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-medium leading-5 text-muted-foreground">
-                      {title}
-                    </p>
-                    <p className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/80">
-                      {detail}
-                    </p>
-                  </div>
-                  <span className={`ios-symbol ios-symbol-md ${iconClassName}`}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                </div>
-                <p className="mt-6 truncate text-[26px] font-semibold tabular-nums leading-none tracking-normal">
-                  {value}
-                </p>
-              </div>
-            ))}
-          </div>
+            {/* 图表区域 */}
+            <Tabs defaultValue="trends" className="min-w-0 space-y-5 sm:space-y-6">
+              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
+                <TabsTrigger value="trends">趋势</TabsTrigger>
+                <TabsTrigger value="models">模型</TabsTrigger>
+                <TabsTrigger value="activity">活动</TabsTrigger>
+                <TabsTrigger value="daily">日统计</TabsTrigger>
+              </TabsList>
 
-          {/* 图表区域 */}
-          <Tabs defaultValue="trends" className="min-w-0 space-y-5 sm:space-y-6">
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
-              <TabsTrigger value="trends">趋势</TabsTrigger>
-              <TabsTrigger value="models">模型</TabsTrigger>
-              <TabsTrigger value="activity">活动</TabsTrigger>
-              <TabsTrigger value="daily">日统计</TabsTrigger>
-            </TabsList>
-
-            {/* 趋势图表 */}
-            <TabsContent value="trends" className="space-y-5 sm:space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>请求趋势</CardTitle>
-                  <CardDescription>最近{timeRange}小时的请求量变化</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {hourly_data.length > 0 ? (
-                    <ChartContainer
-                      config={chartConfig}
-                      className="aspect-auto h-[300px] w-full sm:h-[400px]"
-                    >
-                      <LineChart data={hourly_data}>
-                        <CartesianGrid vertical={false} stroke={chartGridStroke} />
-                        <XAxis
-                          dataKey="timestamp"
-                          tickFormatter={(value) => formatDateTime(value)}
-                          angle={-45}
-                          textAnchor="end"
-                          height={60}
-                          stroke={chartAxisStroke}
-                          tick={chartAxisTick}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <YAxis
-                          stroke={chartAxisStroke}
-                          tick={chartAxisTick}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <ChartTooltip
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(value) => formatDateTime(value as string)}
-                            />
-                          }
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="requests"
-                          stroke="var(--color-requests)"
-                          strokeWidth={2.5}
-                        />
-                      </LineChart>
-                    </ChartContainer>
-                  ) : (
-                    <ChartEmptyState />
-                  )}
-                </CardContent>
-              </Card>
-
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
-                <Card className="min-w-0">
+              {/* 趋势图表 */}
+              <TabsContent value="trends" className="space-y-5 sm:space-y-6">
+                <Card>
                   <CardHeader>
-                    <CardTitle>花费趋势</CardTitle>
-                    <CardDescription>API调用成本变化</CardDescription>
+                    <CardTitle>请求趋势</CardTitle>
+                    <CardDescription>最近{timeRange}小时的请求量变化</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {hourly_data.length > 0 ? (
                       <ChartContainer
                         config={chartConfig}
-                        className="aspect-auto h-[250px] w-full sm:h-[300px]"
+                        className="aspect-auto h-[300px] w-full sm:h-[400px]"
                       >
-                        <BarChart data={hourly_data}>
+                        <LineChart data={hourly_data}>
                           <CartesianGrid vertical={false} stroke={chartGridStroke} />
                           <XAxis
                             dataKey="timestamp"
@@ -1004,155 +1004,264 @@ export function IndexPage() {
                               />
                             }
                           />
-                          <Bar dataKey="cost" fill="var(--color-cost)" radius={[6, 6, 0, 0]} />
-                        </BarChart>
+                          <Line
+                            type="monotone"
+                            dataKey="requests"
+                            stroke="var(--color-requests)"
+                            strokeWidth={2.5}
+                          />
+                        </LineChart>
                       </ChartContainer>
                     ) : (
-                      <ChartEmptyState description="产生 API 调用成本后这里会显示变化趋势" />
+                      <ChartEmptyState />
                     )}
                   </CardContent>
                 </Card>
 
-                <Card className="min-w-0">
-                  <CardHeader>
-                    <CardTitle>Token消耗</CardTitle>
-                    <CardDescription>Token使用量变化</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {hourly_data.length > 0 ? (
-                      <ChartContainer
-                        config={chartConfig}
-                        className="aspect-auto h-[250px] w-full sm:h-[300px]"
-                      >
-                        <BarChart data={hourly_data}>
-                          <CartesianGrid vertical={false} stroke={chartGridStroke} />
-                          <XAxis
-                            dataKey="timestamp"
-                            tickFormatter={(value) => formatDateTime(value)}
-                            angle={-45}
-                            textAnchor="end"
-                            height={60}
-                            stroke={chartAxisStroke}
-                            tick={chartAxisTick}
-                            tickLine={false}
-                            axisLine={false}
-                          />
-                          <YAxis
-                            stroke={chartAxisStroke}
-                            tick={chartAxisTick}
-                            tickLine={false}
-                            axisLine={false}
-                          />
-                          <ChartTooltip
-                            content={
-                              <ChartTooltipContent
-                                labelFormatter={(value) => formatDateTime(value as string)}
-                              />
-                            }
-                          />
-                          <Bar dataKey="tokens" fill="var(--color-tokens)" radius={[6, 6, 0, 0]} />
-                        </BarChart>
-                      </ChartContainer>
-                    ) : (
-                      <ChartEmptyState description="产生 Token 消耗后这里会显示变化趋势" />
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-
-            {/* 模型统计 */}
-            <TabsContent value="models" className="space-y-4">
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
-                <Card className="min-w-0">
-                  <CardHeader>
-                    <CardTitle>模型请求分布</CardTitle>
-                    <CardDescription>
-                      各模型使用占比 (共 {model_stats.length} 个模型)
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {modelPieData.length > 0 ? (
-                      <div>
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
+                  <Card className="min-w-0">
+                    <CardHeader>
+                      <CardTitle>花费趋势</CardTitle>
+                      <CardDescription>API调用成本变化</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {hourly_data.length > 0 ? (
                         <ChartContainer
-                          config={
-                            Object.fromEntries(
-                              model_stats.map((stat, i) => [
-                                stat.model_name,
-                                {
-                                  label: stat.model_name,
-                                  color: pieColors[i],
-                                },
-                              ])
-                            ) as ChartConfig
-                          }
-                          className="aspect-auto h-[240px] w-full sm:h-[400px] [&_.recharts-pie-label-text]:hidden sm:[&_.recharts-pie-label-text]:block"
+                          config={chartConfig}
+                          className="aspect-auto h-[250px] w-full sm:h-[300px]"
                         >
-                          <PieChart>
-                            <ChartTooltip content={<ChartTooltipContent />} />
-                            <Pie
-                              data={modelPieData}
-                              cx="50%"
-                              cy="50%"
-                              labelLine={false}
-                              label={({ name, percent }) => {
-                                // 只显示占比大于5%的标签，避免小块标签重叠
-                                if (percent && percent < 0.05) return ''
-                                return `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`
-                              }}
-                              outerRadius={100}
-                              dataKey="value"
-                            >
-                              {modelPieData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.fill} />
-                              ))}
-                            </Pie>
-                          </PieChart>
+                          <BarChart data={hourly_data}>
+                            <CartesianGrid vertical={false} stroke={chartGridStroke} />
+                            <XAxis
+                              dataKey="timestamp"
+                              tickFormatter={(value) => formatDateTime(value)}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                              stroke={chartAxisStroke}
+                              tick={chartAxisTick}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <YAxis
+                              stroke={chartAxisStroke}
+                              tick={chartAxisTick}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <ChartTooltip
+                              content={
+                                <ChartTooltipContent
+                                  labelFormatter={(value) => formatDateTime(value as string)}
+                                />
+                              }
+                            />
+                            <Bar dataKey="cost" fill="var(--color-cost)" radius={[6, 6, 0, 0]} />
+                          </BarChart>
                         </ChartContainer>
-                        <ModelPieLegend data={modelPieData} />
-                      </div>
-                    ) : (
-                      <ChartEmptyState
-                        title="暂无模型统计"
-                        description="模型产生请求后这里会显示使用占比"
-                      />
-                    )}
-                  </CardContent>
-                </Card>
+                      ) : (
+                        <ChartEmptyState description="产生 API 调用成本后这里会显示变化趋势" />
+                      )}
+                    </CardContent>
+                  </Card>
 
+                  <Card className="min-w-0">
+                    <CardHeader>
+                      <CardTitle>Token消耗</CardTitle>
+                      <CardDescription>Token使用量变化</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {hourly_data.length > 0 ? (
+                        <ChartContainer
+                          config={chartConfig}
+                          className="aspect-auto h-[250px] w-full sm:h-[300px]"
+                        >
+                          <BarChart data={hourly_data}>
+                            <CartesianGrid vertical={false} stroke={chartGridStroke} />
+                            <XAxis
+                              dataKey="timestamp"
+                              tickFormatter={(value) => formatDateTime(value)}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                              stroke={chartAxisStroke}
+                              tick={chartAxisTick}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <YAxis
+                              stroke={chartAxisStroke}
+                              tick={chartAxisTick}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <ChartTooltip
+                              content={
+                                <ChartTooltipContent
+                                  labelFormatter={(value) => formatDateTime(value as string)}
+                                />
+                              }
+                            />
+                            <Bar
+                              dataKey="tokens"
+                              fill="var(--color-tokens)"
+                              radius={[6, 6, 0, 0]}
+                            />
+                          </BarChart>
+                        </ChartContainer>
+                      ) : (
+                        <ChartEmptyState description="产生 Token 消耗后这里会显示变化趋势" />
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              {/* 模型统计 */}
+              <TabsContent value="models" className="space-y-4">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
+                  <Card className="min-w-0">
+                    <CardHeader>
+                      <CardTitle>模型请求分布</CardTitle>
+                      <CardDescription>
+                        各模型使用占比 (共 {model_stats.length} 个模型)
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {modelPieData.length > 0 ? (
+                        <div>
+                          <ChartContainer
+                            config={
+                              Object.fromEntries(
+                                model_stats.map((stat, i) => [
+                                  stat.model_name,
+                                  {
+                                    label: stat.model_name,
+                                    color: pieColors[i],
+                                  },
+                                ])
+                              ) as ChartConfig
+                            }
+                            className="aspect-auto h-[240px] w-full sm:h-[400px] [&_.recharts-pie-label-text]:hidden sm:[&_.recharts-pie-label-text]:block"
+                          >
+                            <PieChart>
+                              <ChartTooltip content={<ChartTooltipContent />} />
+                              <Pie
+                                data={modelPieData}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                label={({ name, percent }) => {
+                                  // 只显示占比大于5%的标签，避免小块标签重叠
+                                  if (percent && percent < 0.05) return ''
+                                  return `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`
+                                }}
+                                outerRadius={100}
+                                dataKey="value"
+                              >
+                                {modelPieData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                                ))}
+                              </Pie>
+                            </PieChart>
+                          </ChartContainer>
+                          <ModelPieLegend data={modelPieData} />
+                        </div>
+                      ) : (
+                        <ChartEmptyState
+                          title="暂无模型统计"
+                          description="模型产生请求后这里会显示使用占比"
+                        />
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="min-w-0">
+                    <CardHeader>
+                      <CardTitle>模型详细统计</CardTitle>
+                      <CardDescription>请求数、花费和性能</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {model_stats.length > 0 ? (
+                        <ScrollArea className="ios-group h-[300px] min-w-0 overflow-hidden sm:h-[400px] [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+                          <div className="w-full min-w-0 max-w-full">
+                            {model_stats.map((stat, index) => (
+                              <div
+                                key={index}
+                                className="ios-row min-h-[86px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                              >
+                                <span className="flex w-full min-w-0 items-start gap-3 sm:flex-1 sm:items-center">
+                                  <span
+                                    className="mt-1 h-3 w-3 shrink-0 rounded-full sm:mt-0"
+                                    style={{ backgroundColor: pieColors[index] }}
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="ios-break-anywhere block text-[15px] font-semibold leading-5 sm:truncate">
+                                      {stat.model_name}
+                                    </span>
+                                    <span className="ios-break-anywhere mt-1 block text-[13px] leading-5 text-muted-foreground sm:truncate">
+                                      {stat.request_count.toLocaleString()} 次 · ¥
+                                      {stat.total_cost.toFixed(2)} ·{' '}
+                                      {(stat.total_tokens / 1000).toFixed(1)}K Tokens
+                                    </span>
+                                  </span>
+                                </span>
+                                <span className="flex w-full shrink-0 items-center justify-between gap-3 pl-6 text-[13px] leading-5 text-muted-foreground sm:block sm:w-auto sm:pl-0 sm:text-right">
+                                  <span className="sm:hidden">平均响应</span>
+                                  <span>{stat.avg_response_time.toFixed(2)}s</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      ) : (
+                        <ChartEmptyState
+                          title="暂无模型明细"
+                          description="模型调用完成后这里会显示请求、成本和性能"
+                        />
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+              <TabsContent value="activity">
                 <Card className="min-w-0">
                   <CardHeader>
-                    <CardTitle>模型详细统计</CardTitle>
-                    <CardDescription>请求数、花费和性能</CardDescription>
+                    <CardTitle>最近活动</CardTitle>
+                    <CardDescription>最新的API调用记录</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {model_stats.length > 0 ? (
-                      <ScrollArea className="ios-group h-[300px] min-w-0 overflow-hidden sm:h-[400px] [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
+                    {recent_activity.length > 0 ? (
+                      <ScrollArea className="ios-group h-[400px] min-w-0 overflow-hidden sm:h-[500px] [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
                         <div className="w-full min-w-0 max-w-full">
-                          {model_stats.map((stat, index) => (
+                          {recent_activity.map((activity, index) => (
                             <div
                               key={index}
-                              className="ios-row min-h-[86px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between"
+                              className="ios-row min-h-[92px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between"
                             >
                               <span className="flex w-full min-w-0 items-start gap-3 sm:flex-1 sm:items-center">
                                 <span
-                                  className="mt-1 h-3 w-3 shrink-0 rounded-full sm:mt-0"
-                                  style={{ backgroundColor: pieColors[index] }}
-                                />
+                                  className={`ios-symbol ios-symbol-md ${
+                                    activity.status === 'success'
+                                      ? 'ios-symbol-green'
+                                      : 'ios-symbol-red'
+                                  }`}
+                                >
+                                  <Activity className="h-4 w-4" />
+                                </span>
                                 <span className="min-w-0 flex-1">
-                                  <span className="ios-break-anywhere block text-[15px] font-semibold leading-5 sm:truncate">
-                                    {stat.model_name}
+                                  <span className="block break-words text-[15px] font-semibold leading-5">
+                                    {activity.model}
                                   </span>
-                                  <span className="ios-break-anywhere mt-1 block text-[13px] leading-5 text-muted-foreground sm:truncate">
-                                    {stat.request_count.toLocaleString()} 次 · ¥
-                                    {stat.total_cost.toFixed(2)} ·{' '}
-                                    {(stat.total_tokens / 1000).toFixed(1)}K Tokens
+                                  <span className="mt-1 block break-words text-[13px] leading-5 text-muted-foreground">
+                                    {activity.request_type} · {activity.tokens} Tokens · ¥
+                                    {activity.cost.toFixed(4)}
                                   </span>
                                 </span>
                               </span>
-                              <span className="flex w-full shrink-0 items-center justify-between gap-3 pl-6 text-[13px] leading-5 text-muted-foreground sm:block sm:w-auto sm:pl-0 sm:text-right">
-                                <span className="sm:hidden">平均响应</span>
-                                <span>{stat.avg_response_time.toFixed(2)}s</span>
+                              <span className="flex w-full shrink-0 items-center justify-between gap-3 text-left text-[13px] leading-5 text-muted-foreground sm:w-auto sm:flex-col sm:items-end sm:text-right">
+                                <span className="block">{formatDateTime(activity.timestamp)}</span>
+                                <span className="block">{activity.time_cost.toFixed(2)}s</span>
                               </span>
                             </div>
                           ))}
@@ -1160,154 +1269,108 @@ export function IndexPage() {
                       </ScrollArea>
                     ) : (
                       <ChartEmptyState
-                        title="暂无模型明细"
-                        description="模型调用完成后这里会显示请求、成本和性能"
+                        title="暂无最近活动"
+                        description="新的 API 调用记录会显示在这里"
                       />
                     )}
                   </CardContent>
                 </Card>
-              </div>
-            </TabsContent>
-            <TabsContent value="activity">
-              <Card className="min-w-0">
-                <CardHeader>
-                  <CardTitle>最近活动</CardTitle>
-                  <CardDescription>最新的API调用记录</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {recent_activity.length > 0 ? (
-                    <ScrollArea className="ios-group h-[400px] min-w-0 overflow-hidden sm:h-[500px] [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full [&>[data-radix-scroll-area-viewport]>div]:!min-w-0">
-                      <div className="w-full min-w-0 max-w-full">
-                        {recent_activity.map((activity, index) => (
-                          <div
-                            key={index}
-                            className="ios-row min-h-[92px] flex-col !items-stretch !justify-start gap-2 py-3 sm:flex-row sm:!items-center sm:!justify-between"
-                          >
-                            <span className="flex w-full min-w-0 items-start gap-3 sm:flex-1 sm:items-center">
-                              <span
-                                className={`ios-symbol ios-symbol-md ${
-                                  activity.status === 'success'
-                                    ? 'ios-symbol-green'
-                                    : 'ios-symbol-red'
-                                }`}
-                              >
-                                <Activity className="h-4 w-4" />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block break-words text-[15px] font-semibold leading-5">
-                                  {activity.model}
-                                </span>
-                                <span className="mt-1 block break-words text-[13px] leading-5 text-muted-foreground">
-                                  {activity.request_type} · {activity.tokens} Tokens · ¥
-                                  {activity.cost.toFixed(4)}
-                                </span>
-                              </span>
-                            </span>
-                            <span className="flex w-full shrink-0 items-center justify-between gap-3 text-left text-[13px] leading-5 text-muted-foreground sm:w-auto sm:flex-col sm:items-end sm:text-right">
-                              <span className="block">{formatDateTime(activity.timestamp)}</span>
-                              <span className="block">{activity.time_cost.toFixed(2)}s</span>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  ) : (
-                    <ChartEmptyState
-                      title="暂无最近活动"
-                      description="新的 API 调用记录会显示在这里"
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+              </TabsContent>
 
-            {/* 日统计 */}
-            <TabsContent value="daily">
-              <Card>
-                <CardHeader>
-                  <CardTitle>每日统计</CardTitle>
-                  <CardDescription>最近7天的数据汇总</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {daily_data.length > 0 ? (
-                    <ChartContainer
-                      config={{
-                        requests: {
-                          label: '请求数',
-                          color: 'hsl(var(--chart-1))',
-                        },
-                        cost: {
-                          label: '花费(¥)',
-                          color: 'hsl(var(--chart-2))',
-                        },
-                      }}
-                      className="aspect-auto h-[400px] w-full sm:h-[500px]"
-                    >
-                      <BarChart data={daily_data}>
-                        <CartesianGrid vertical={false} stroke={chartGridStroke} />
-                        <XAxis
-                          dataKey="timestamp"
-                          tickFormatter={(value) => {
-                            const date = new Date(value)
-                            return `${date.getMonth() + 1}/${date.getDate()}`
-                          }}
-                          stroke={chartAxisStroke}
-                          tick={chartAxisTick}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <YAxis
-                          yAxisId="left"
-                          stroke={chartAxisStroke}
-                          tick={chartAxisTick}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <YAxis
-                          yAxisId="right"
-                          orientation="right"
-                          stroke={chartAxisStroke}
-                          tick={chartAxisTick}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <ChartTooltip
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(value) => {
-                                const date = new Date(value as string)
-                                return date.toLocaleDateString('zh-CN')
-                              }}
-                            />
-                          }
-                        />
-                        <ChartLegend content={<ChartLegendContent />} />
-                        <Bar
-                          yAxisId="left"
-                          dataKey="requests"
-                          fill="var(--color-requests)"
-                          radius={[6, 6, 0, 0]}
-                        />
-                        <Bar
-                          yAxisId="right"
-                          dataKey="cost"
-                          fill="var(--color-cost)"
-                          radius={[6, 6, 0, 0]}
-                        />
-                      </BarChart>
-                    </ChartContainer>
-                  ) : (
-                    <ChartEmptyState
-                      title="暂无每日统计"
-                      description="累积到按天汇总的数据后这里会显示对比"
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+              {/* 日统计 */}
+              <TabsContent value="daily">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>每日统计</CardTitle>
+                    <CardDescription>最近7天的数据汇总</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {daily_data.length > 0 ? (
+                      <ChartContainer
+                        config={{
+                          requests: {
+                            label: '请求数',
+                            color: 'hsl(var(--chart-1))',
+                          },
+                          cost: {
+                            label: '花费(¥)',
+                            color: 'hsl(var(--chart-2))',
+                          },
+                        }}
+                        className="aspect-auto h-[400px] w-full sm:h-[500px]"
+                      >
+                        <BarChart data={daily_data}>
+                          <CartesianGrid vertical={false} stroke={chartGridStroke} />
+                          <XAxis
+                            dataKey="timestamp"
+                            tickFormatter={(value) => {
+                              const date = new Date(value)
+                              return `${date.getMonth() + 1}/${date.getDate()}`
+                            }}
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
+                          />
+                          <YAxis
+                            yAxisId="left"
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
+                          />
+                          <YAxis
+                            yAxisId="right"
+                            orientation="right"
+                            stroke={chartAxisStroke}
+                            tick={chartAxisTick}
+                            tickLine={false}
+                            axisLine={false}
+                          />
+                          <ChartTooltip
+                            content={
+                              <ChartTooltipContent
+                                labelFormatter={(value) => {
+                                  const date = new Date(value as string)
+                                  return date.toLocaleDateString('zh-CN')
+                                }}
+                              />
+                            }
+                          />
+                          <ChartLegend content={<ChartLegendContent />} />
+                          <Bar
+                            yAxisId="left"
+                            dataKey="requests"
+                            fill="var(--color-requests)"
+                            radius={[6, 6, 0, 0]}
+                          />
+                          <Bar
+                            yAxisId="right"
+                            dataKey="cost"
+                            fill="var(--color-cost)"
+                            radius={[6, 6, 0, 0]}
+                          />
+                        </BarChart>
+                      </ChartContainer>
+                    ) : (
+                      <ChartEmptyState
+                        title="暂无每日统计"
+                        description="累积到按天汇总的数据后这里会显示对比"
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </div>
         </div>
-      </div>
-    </ScrollArea>
+      </ScrollArea>
+      {showRestartOverlay && (
+        <RestartingOverlay
+          onRestartComplete={handleRestartComplete}
+          onRestartFailed={handleRestartFailed}
+        />
+      )}
+    </>
   )
 }

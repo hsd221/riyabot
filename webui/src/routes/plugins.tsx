@@ -60,6 +60,7 @@ import { useToast } from '@/hooks/use-toast'
 import { Progress } from '@/components/ui/progress'
 import { PluginStats } from '@/components/plugin-stats'
 import { recordPluginDownload, getPluginStats, type PluginStatsData } from '@/lib/plugin-stats'
+import { openExternalLink } from '@/lib/external-link'
 
 const starActiveClass = 'fill-[rgb(255_204_0)] text-[rgb(255_204_0)]'
 
@@ -1205,7 +1206,7 @@ export function PluginsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="min-w-[4.75rem] rounded-full border-destructive/20 bg-destructive/5 px-4 text-[14px] font-semibold leading-5 text-destructive hover:bg-destructive/10 hover:text-destructive md:min-w-0 md:px-4 md:text-xs"
+                          className="border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10 hover:text-destructive min-w-[4.75rem] rounded-full px-4 text-[14px] font-semibold leading-5 md:min-w-0 md:px-4 md:text-xs"
                           disabled={!gitStatus?.installed}
                           title={!gitStatus?.installed ? 'Git 未安装' : undefined}
                           onClick={() => handleUninstall(plugin)}
@@ -1217,7 +1218,7 @@ export function PluginsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="min-w-[4.75rem] rounded-full bg-primary/12 px-4 text-[14px] font-semibold leading-5 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)_/_0.08)] hover:bg-primary/16 hover:text-primary active:bg-primary/20 dark:bg-primary/18 dark:text-[rgb(100_210_255)] dark:hover:bg-primary/22 md:min-w-0 md:px-4 md:text-xs"
+                        className="bg-primary/12 hover:bg-primary/16 dark:bg-primary/18 dark:hover:bg-primary/22 min-w-[4.75rem] rounded-full px-4 text-[14px] font-semibold leading-5 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)_/_0.08)] hover:text-primary active:bg-primary/20 dark:text-[rgb(100_210_255)] md:min-w-0 md:px-4 md:text-xs"
                         disabled={
                           !gitStatus?.installed ||
                           loadProgress?.operation === 'install' ||
@@ -1375,7 +1376,7 @@ export function PluginsPage() {
                               type="button"
                               className="ios-row ios-touch min-h-[56px] w-full text-left"
                               onClick={() =>
-                                window.open(selectedPlugin.manifest.homepage_url, '_blank')
+                                openExternalLink(selectedPlugin.manifest.homepage_url!)
                               }
                             >
                               <span className="text-[16px] font-medium leading-6">主页</span>
@@ -1390,7 +1391,7 @@ export function PluginsPage() {
                               type="button"
                               className="ios-row ios-touch min-h-[56px] w-full text-left"
                               onClick={() =>
-                                window.open(selectedPlugin.manifest.repository_url, '_blank')
+                                openExternalLink(selectedPlugin.manifest.repository_url!)
                               }
                             >
                               <span className="text-[16px] font-medium leading-6">仓库</span>
@@ -1407,9 +1408,7 @@ export function PluginsPage() {
                     <DialogFooter className="hidden sm:flex">
                       {selectedPlugin.manifest.homepage_url && (
                         <Button
-                          onClick={() =>
-                            window.open(selectedPlugin.manifest.homepage_url, '_blank')
-                          }
+                          onClick={() => openExternalLink(selectedPlugin.manifest.homepage_url!)}
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />
                           访问主页
@@ -1418,9 +1417,7 @@ export function PluginsPage() {
                       {selectedPlugin.manifest.repository_url && (
                         <Button
                           variant="outline"
-                          onClick={() =>
-                            window.open(selectedPlugin.manifest.repository_url, '_blank')
-                          }
+                          onClick={() => openExternalLink(selectedPlugin.manifest.repository_url!)}
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />
                           查看仓库

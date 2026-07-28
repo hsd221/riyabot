@@ -57,6 +57,7 @@ import { getBotConfig, updateBotConfig } from '@/lib/config-api'
 import { restartRiyaBot } from '@/lib/system-api'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { safeRemoveItem } from '@/lib/safe-storage'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
 
 // 导入模块化的类型定义
@@ -610,18 +611,17 @@ export function BotConfigPage() {
 
   // 重启完成回调
   const handleRestartComplete = () => {
-    // 清除token，避免自动登录
-    localStorage.removeItem('access-token')
+    // 清理旧版本遗留的非 HttpOnly token。
+    safeRemoveItem('access-token')
     window.location.href = '/auth'
   }
 
   // 重启失败回调
   const handleRestartFailed = () => {
-    setShowRestartOverlay(false)
     setRestarting(false)
     toast({
-      title: '重启失败',
-      description: '服务器未能在预期时间内恢复，请手动检查',
+      title: '重启超时',
+      description: '服务未在预期时间内恢复，可在当前页面重试检测或刷新页面',
       variant: 'destructive',
     })
   }

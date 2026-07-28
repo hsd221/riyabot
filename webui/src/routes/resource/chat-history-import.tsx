@@ -384,7 +384,7 @@ export function ChatHistoryImportPage() {
     : false
 
   return (
-    <div className="ios-page flex h-[calc(100vh-4rem)] flex-col">
+    <div className="ios-page flex h-full flex-col">
       <div className="mb-5 flex flex-col justify-between gap-4 sm:mb-6 sm:flex-row sm:items-center">
         <div>
           <h1 className="ios-title">聊天记录学习</h1>

@@ -32,7 +32,11 @@ export function PasswordSetupForm({
   const [showPassword, setShowPassword] = useState(false)
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false)
   const validation = validatePassword(password)
-  const passwordsMatch = passwordConfirm.length > 0 && password === passwordConfirm
+  const hasPassword = password.length > 0
+  const hasPasswordConfirm = passwordConfirm.length > 0
+  const passwordsMatch = hasPasswordConfirm && password === passwordConfirm
+  const passwordInvalid = hasPassword && !validation.isValid
+  const passwordConfirmInvalid = hasPasswordConfirm && !passwordsMatch
 
   return (
     <div className="space-y-5">
@@ -60,19 +64,24 @@ export function PasswordSetupForm({
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
-              className="h-11 rounded-[12px] bg-muted/60 pl-10 pr-11 shadow-none"
+              className={cn(
+                'h-11 rounded-[12px] bg-muted/60 pl-10 pr-12 shadow-none',
+                passwordInvalid && 'border-destructive'
+              )}
               placeholder="8-128 位，可使用空格与符号"
               autoComplete="new-password"
               minLength={8}
               maxLength={128}
+              aria-invalid={passwordInvalid}
               aria-describedby="setup-password-rules"
               autoFocus
             />
             <button
               type="button"
-              className="ios-touch absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
+              className="ios-touch absolute right-0 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
               onClick={() => setShowPassword((visible) => !visible)}
               aria-label={showPassword ? '隐藏密码' : '显示密码'}
+              aria-pressed={showPassword}
               title={showPassword ? '隐藏密码' : '显示密码'}
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -93,17 +102,23 @@ export function PasswordSetupForm({
               type={showPasswordConfirm ? 'text' : 'password'}
               value={passwordConfirm}
               onChange={(event) => onPasswordConfirmChange(event.target.value)}
-              className="h-11 rounded-[12px] bg-muted/60 pr-11 shadow-none"
+              className={cn(
+                'h-11 rounded-[12px] bg-muted/60 pr-12 shadow-none',
+                passwordConfirmInvalid && 'border-destructive'
+              )}
               placeholder="再次输入密码"
               autoComplete="new-password"
               minLength={8}
               maxLength={128}
+              aria-invalid={passwordConfirmInvalid}
+              aria-describedby="setup-password-match-status"
             />
             <button
               type="button"
-              className="ios-touch absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
+              className="ios-touch absolute right-0 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
               onClick={() => setShowPasswordConfirm((visible) => !visible)}
               aria-label={showPasswordConfirm ? '隐藏确认密码' : '显示确认密码'}
+              aria-pressed={showPasswordConfirm}
               title={showPasswordConfirm ? '隐藏确认密码' : '显示确认密码'}
             >
               {showPasswordConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -112,7 +127,11 @@ export function PasswordSetupForm({
         </div>
       </div>
 
-      <div id="setup-password-rules" className="ios-group grid gap-3 p-4 sm:grid-cols-2">
+      <div
+        id="setup-password-rules"
+        className="ios-group grid gap-3 p-4 sm:grid-cols-2"
+        aria-live="polite"
+      >
         {validation.rules.map((rule) => (
           <div key={rule.id} className="flex min-w-0 items-center gap-2 text-sm">
             {rule.passed ? (
@@ -131,7 +150,7 @@ export function PasswordSetupForm({
             </span>
           </div>
         ))}
-        <div className="flex min-w-0 items-center gap-2 text-sm">
+        <div id="setup-password-match-status" className="flex min-w-0 items-center gap-2 text-sm">
           {passwordsMatch ? (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(36_138_61)] dark:text-[rgb(99_230_131)]" />
           ) : (

@@ -290,7 +290,7 @@ export function ExpressionManagementPage() {
   const displaySummary = `每页 ${pageSize} 条 · 已选 ${selectedCount}`
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
+    <div className="flex h-full flex-col px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -340,7 +340,7 @@ export function ExpressionManagementPage() {
                     <span className="block truncate text-[12px] font-medium leading-4 text-muted-foreground">
                       {label}
                     </span>
-                    <span className="block truncate text-[18px] font-semibold leading-6 tabular-nums text-foreground">
+                    <span className="block truncate text-[18px] font-semibold tabular-nums leading-6 text-foreground">
                       {value}
                     </span>
                   </span>
@@ -514,10 +514,7 @@ export function ExpressionManagementPage() {
                     setSelectedIds(new Set())
                   }}
                 >
-                  <SelectTrigger
-                    id="page-size"
-                    className={expressionSelectTriggerClass}
-                  >
+                  <SelectTrigger id="page-size" className={expressionSelectTriggerClass}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

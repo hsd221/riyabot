@@ -24,6 +24,8 @@ import {
   MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { safeGetItem, safeSetItem } from '@/lib/safe-storage'
+import { STORAGE_KEYS } from '@/lib/settings-manager'
 import { useToast } from '@/hooks/use-toast'
 import {
   Select,
@@ -47,25 +49,24 @@ function generateUserId(): string {
   return 'webui_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now().toString(36)
 }
 
-// 从 localStorage 获取或生成用户 ID
+// 从安全存储获取或生成用户 ID
 function getOrCreateUserId(): string {
-  const storageKey = 'riyabot_console_user_id'
-  let userId = localStorage.getItem(storageKey)
+  let userId = safeGetItem(STORAGE_KEYS.CHAT_USER_ID)
   if (!userId) {
     userId = generateUserId()
-    localStorage.setItem(storageKey, userId)
+    safeSetItem(STORAGE_KEYS.CHAT_USER_ID, userId)
   }
   return userId
 }
 
-// 从 localStorage 获取用户昵称
+// 从安全存储获取用户昵称
 function getStoredUserName(): string {
-  return localStorage.getItem('riyabot_console_user_name') || 'WebUI用户'
+  return safeGetItem(STORAGE_KEYS.CHAT_USER_NAME) || 'WebUI用户'
 }
 
-// 保存用户昵称到 localStorage
+// 保存用户昵称；存储受限时保留当前会话状态
 function saveUserName(name: string): void {
-  localStorage.setItem('riyabot_console_user_name', name)
+  safeSetItem(STORAGE_KEYS.CHAT_USER_NAME, name)
 }
 
 // 虚拟标签页持久化存储 key
@@ -79,26 +80,44 @@ interface SavedVirtualTab {
   createdAt: number
 }
 
-// 从 localStorage 获取保存的虚拟标签页
+// 从安全存储获取保存的虚拟标签页
 function getSavedVirtualTabs(): SavedVirtualTab[] {
+  const saved = safeGetItem(VIRTUAL_TABS_STORAGE_KEY)
+  if (!saved) return []
+
   try {
-    const saved = localStorage.getItem(VIRTUAL_TABS_STORAGE_KEY)
-    if (saved) {
-      return JSON.parse(saved)
-    }
-  } catch (e) {
-    console.error('[Chat] 加载虚拟标签页失败:', e)
+    const parsed: unknown = JSON.parse(saved)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(isSavedVirtualTab)
+  } catch (error) {
+    console.error('[Chat] 加载虚拟标签页失败:', error)
+    return []
   }
-  return []
 }
 
-// 保存虚拟标签页到 localStorage
+function isSavedVirtualTab(value: unknown): value is SavedVirtualTab {
+  if (!value || typeof value !== 'object') return false
+  const tab = value as Record<string, unknown>
+  const config = tab.virtualConfig
+  if (!config || typeof config !== 'object') return false
+  const identity = config as Record<string, unknown>
+
+  return (
+    typeof tab.id === 'string' &&
+    typeof tab.label === 'string' &&
+    typeof tab.createdAt === 'number' &&
+    typeof identity.platform === 'string' &&
+    typeof identity.personId === 'string' &&
+    typeof identity.userId === 'string' &&
+    typeof identity.userName === 'string' &&
+    typeof identity.groupName === 'string' &&
+    (typeof identity.groupId === 'string' || typeof identity.groupId === 'undefined')
+  )
+}
+
+// 保存虚拟标签页；存储受限时保留当前会话状态
 function saveVirtualTabs(tabs: SavedVirtualTab[]): void {
-  try {
-    localStorage.setItem(VIRTUAL_TABS_STORAGE_KEY, JSON.stringify(tabs))
-  } catch (e) {
-    console.error('[Chat] 保存虚拟标签页失败:', e)
-  }
+  safeSetItem(VIRTUAL_TABS_STORAGE_KEY, JSON.stringify(tabs))
 }
 
 // 平台信息类型
@@ -276,6 +295,7 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const reconnectTimeoutMapRef = useRef<Map<string, number>>(new Map())
+  const tabButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
   const messageIdCounterRef = useRef(0)
   const processedMessagesMapRef = useRef<Map<string, Set<string>>>(new Map())
   const { toast } = useToast()
@@ -932,7 +952,12 @@ export function ChatPage() {
         ) : null
       case 'video':
         return dataText ? (
-          <video key={index} src={dataText} controls className="max-h-64 max-w-full rounded-[16px]" />
+          <video
+            key={index}
+            src={dataText}
+            controls
+            className="max-h-64 max-w-full rounded-[16px]"
+          />
         ) : null
       case 'at':
         return <span key={index}>@{dataText}</span>
@@ -1064,7 +1089,7 @@ export function ChatPage() {
 
     setTabs((prev) => {
       const newTabs = [...prev, newTab]
-      // 保存虚拟标签页到 localStorage
+      // 保存虚拟标签页配置
       const virtualTabsToSave: SavedVirtualTab[] = newTabs
         .filter((t) => t.type === 'virtual' && t.virtualConfig)
         .map((t) => ({
@@ -1102,6 +1127,10 @@ export function ChatPage() {
       return
     }
 
+    const closedTabIndex = tabs.findIndex((tab) => tab.id === tabId)
+    const focusTargetId =
+      tabs[closedTabIndex + 1]?.id ?? tabs[closedTabIndex - 1]?.id ?? 'webui-default'
+
     // 关闭 WebSocket 连接
     const ws = wsMapRef.current.get(tabId)
     if (ws) {
@@ -1122,7 +1151,7 @@ export function ChatPage() {
     // 移除标签页并更新存储
     setTabs((prev) => {
       const newTabs = prev.filter((t) => t.id !== tabId)
-      // 更新 localStorage 中的虚拟标签页
+      // 更新已保存的虚拟标签页
       const virtualTabsToSave: SavedVirtualTab[] = newTabs
         .filter((t) => t.type === 'virtual' && t.virtualConfig)
         .map((t) => ({
@@ -1135,15 +1164,33 @@ export function ChatPage() {
       return newTabs
     })
 
-    // 如果关闭的是当前标签页，切换到默认标签页
+    // 如果关闭的是当前标签页，切换到相邻标签页；关闭控件本身被移除时也把焦点移回相邻会话。
     if (activeTabId === tabId) {
-      setActiveTabId('webui-default')
+      setActiveTabId(focusTargetId)
     }
+    window.requestAnimationFrame(() => tabButtonRefs.current.get(focusTargetId)?.focus())
   }
 
   // 切换标签页
   const switchTab = (tabId: string) => {
     setActiveTabId(tabId)
+  }
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, tabId: string) => {
+    const currentIndex = tabs.findIndex((tab) => tab.id === tabId)
+    if (currentIndex < 0) return
+
+    let targetIndex: number | null = null
+    if (event.key === 'ArrowRight') targetIndex = (currentIndex + 1) % tabs.length
+    if (event.key === 'ArrowLeft') targetIndex = (currentIndex - 1 + tabs.length) % tabs.length
+    if (event.key === 'Home') targetIndex = 0
+    if (event.key === 'End') targetIndex = tabs.length - 1
+
+    if (targetIndex === null) return
+    event.preventDefault()
+    const targetId = tabs[targetIndex].id
+    setActiveTabId(targetId)
+    window.requestAnimationFrame(() => tabButtonRefs.current.get(targetId)?.focus())
   }
 
   // 选择用户
@@ -1331,7 +1378,10 @@ export function ChatPage() {
                 <h1 className="truncate text-base font-semibold sm:text-lg">
                   {activeTab?.sessionInfo.bot_name || '当前 Bot'}
                 </h1>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <div
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  role="status"
+                >
                   {activeTab?.isConnected ? (
                     <>
                       <Wifi className="h-3 w-3 text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]" />
@@ -1367,6 +1417,8 @@ export function ChatPage() {
                 onClick={handleReconnect}
                 disabled={isConnecting}
                 title="重新连接"
+                aria-label="重新连接聊天服务"
+                aria-busy={isConnecting}
               >
                 <RefreshCw className={cn('h-4 w-4', isConnecting && 'animate-spin')} />
               </Button>
@@ -1374,51 +1426,75 @@ export function ChatPage() {
           </div>
 
           <div className="border-t border-border/35 px-3 py-2">
-            <div className="ios-scrollbar-none flex items-center gap-2 overflow-x-auto">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => switchTab(tab.id)}
-                  className={cn(
-                    'ios-touch flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm transition-colors',
-                    activeTabId === tab.id
-                      ? 'bg-muted/80 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]'
-                      : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground'
-                  )}
-                >
-                  {tab.type === 'webui' ? (
-                    <MessageSquare className="h-3.5 w-3.5" />
-                  ) : (
-                    <UserCircle2 className="h-3.5 w-3.5" />
-                  )}
-                  <span className="max-w-[100px] truncate">{tab.label}</span>
-                  <span
+            <div
+              className="ios-scrollbar-none flex items-center gap-2 overflow-x-auto"
+              role="tablist"
+              aria-label="聊天会话"
+            >
+              {tabs.map((tab) => {
+                const selected = activeTabId === tab.id
+                const panelId = `chat-panel-${tab.id}`
+
+                return (
+                  <div
+                    key={tab.id}
                     className={cn(
-                      'h-1.5 w-1.5 rounded-full',
-                      tab.isConnected ? 'bg-[rgb(52_199_89)]' : 'bg-muted-foreground/40'
+                      'flex min-h-11 items-center whitespace-nowrap rounded-full transition-colors',
+                      selected
+                        ? 'bg-muted/80 text-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)]'
+                        : 'text-muted-foreground hover:bg-muted/55 hover:text-foreground'
                     )}
-                  />
-                  {tab.id !== 'webui-default' && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => closeTab(tab.id, e)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          closeTab(tab.id, e)
-                        }
+                  >
+                    <button
+                      ref={(node) => {
+                        if (node) tabButtonRefs.current.set(tab.id, node)
+                        else tabButtonRefs.current.delete(tab.id)
                       }}
-                      className="ios-touch -mr-2 ml-0.5 grid h-11 w-11 place-items-center rounded-full hover:bg-muted-foreground/20"
+                      type="button"
+                      role="tab"
+                      id={`chat-tab-${tab.id}`}
+                      aria-selected={selected}
+                      aria-controls={panelId}
+                      tabIndex={selected ? 0 : -1}
+                      onClick={() => switchTab(tab.id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+                      className="ios-touch flex min-h-11 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm"
                     >
-                      <X className="h-3.5 w-3.5" />
-                    </span>
-                  )}
-                </button>
-              ))}
+                      {tab.type === 'webui' ? (
+                        <MessageSquare className="h-3.5 w-3.5" />
+                      ) : (
+                        <UserCircle2 className="h-3.5 w-3.5" />
+                      )}
+                      <span className="max-w-[100px] truncate">{tab.label}</span>
+                      <span className="sr-only">{tab.isConnected ? '，已连接' : '，未连接'}</span>
+                      <span
+                        className={cn(
+                          'h-1.5 w-1.5 rounded-full',
+                          tab.isConnected ? 'bg-success' : 'bg-muted-foreground/40'
+                        )}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    {tab.id !== 'webui-default' && (
+                      <button
+                        type="button"
+                        onClick={(event) => closeTab(tab.id, event)}
+                        className="ios-touch -ml-1 mr-0.5 grid h-11 w-11 place-items-center rounded-full hover:bg-muted-foreground/20"
+                        aria-label={`关闭会话：${tab.label}`}
+                        title={`关闭会话：${tab.label}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
               <button
+                type="button"
                 onClick={openVirtualConfig}
                 className="ios-touch flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-full px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground"
                 title="新建虚拟身份对话"
+                aria-label="新建虚拟身份对话"
               >
                 <Plus className="h-4 w-4" strokeWidth={2.6} />
               </button>
@@ -1459,11 +1535,7 @@ export function ChatPage() {
                     <Button size="sm" variant="ghost" onClick={saveEditedName}>
                       保存
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={cancelEditingName}
-                    >
+                    <Button size="sm" variant="ghost" onClick={cancelEditingName}>
                       取消
                     </Button>
                   </div>
@@ -1488,17 +1560,20 @@ export function ChatPage() {
       </div>
 
       {/* 消息列表区域 */}
-      <div className="flex-1 overflow-hidden bg-transparent">
+      <div
+        id={activeTab ? `chat-panel-${activeTab.id}` : undefined}
+        role="tabpanel"
+        aria-labelledby={activeTab ? `chat-tab-${activeTab.id}` : undefined}
+        className="flex-1 overflow-hidden bg-transparent"
+      >
         <ScrollArea className="h-full">
           <div className="mx-auto max-w-4xl space-y-3 px-5 pb-28 pt-4 sm:space-y-4 sm:px-5 sm:pb-32 sm:pt-5">
             {activeTab?.messages.length === 0 && !isLoadingHistory && (
               <div className="mx-auto flex max-w-[18rem] flex-col items-center justify-center py-16 text-center text-muted-foreground sm:py-20">
-                <span className="mb-4 grid h-14 w-14 place-items-center rounded-[18px] bg-primary/10 text-primary shadow-[0_1px_0_rgba(255,255,255,0.58)_inset] dark:bg-primary/16 dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset]">
+                <span className="dark:bg-primary/16 mb-4 grid h-14 w-14 place-items-center rounded-[18px] bg-primary/10 text-primary shadow-[0_1px_0_rgba(255,255,255,0.58)_inset] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset]">
                   <Bot className="h-7 w-7" strokeWidth={2.4} />
                 </span>
-                <p className="text-[15px] font-medium leading-6 text-foreground">
-                  可以开始对话了
-                </p>
+                <p className="text-[15px] font-medium leading-6 text-foreground">可以开始对话了</p>
                 <p className="mt-1 text-[13px] leading-5">
                   消息会像 iOS 对话一样按时间顺序显示在这里
                 </p>
@@ -1639,7 +1714,7 @@ export function ChatPage() {
               }
               disabled={!activeTab?.isConnected || isWaitingResponse}
               rows={1}
-              className="max-h-28 min-h-10 flex-1 resize-none overflow-y-auto rounded-[22px] border-0 bg-transparent px-4 py-2.5 text-[16px] leading-5 shadow-none outline-none placeholder:text-muted-foreground/78 hover:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:hover:bg-transparent dark:focus-visible:bg-transparent"
+              className="placeholder:text-muted-foreground/78 max-h-28 min-h-10 flex-1 resize-none overflow-y-auto rounded-[22px] border-0 bg-transparent px-4 py-2.5 text-[16px] leading-5 shadow-none outline-none hover:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:hover:bg-transparent dark:focus-visible:bg-transparent"
             />
             <Button
               onClick={sendMessage}

@@ -1,3 +1,5 @@
+import { applyAccentColor, sanitizeAccentColor } from './lib/accent-color'
+
 try {
   const storedTheme = localStorage.getItem('ui-theme') || localStorage.getItem('riyabot-ui-theme')
   const theme =
@@ -11,9 +13,11 @@ try {
         : 'light'
       : theme
   const root = document.documentElement
+
   root.classList.remove('light', 'dark')
   root.classList.add(resolvedTheme)
   root.style.colorScheme = resolvedTheme
+  applyAccentColor(sanitizeAccentColor(localStorage.getItem('accent-color')), root)
 } catch {
   // localStorage 可能被浏览器隐私策略禁用，保留系统默认外观即可。
 }

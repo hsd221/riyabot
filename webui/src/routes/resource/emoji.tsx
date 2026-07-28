@@ -17,6 +17,7 @@ import {
   Check,
   X,
   ImageIcon,
+  ImageOff,
   SlidersHorizontal,
   MoreHorizontal,
 } from 'lucide-react'
@@ -403,7 +404,7 @@ export function EmojiManagementPage() {
     : []
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-w-0 flex-col overflow-hidden px-5 py-5 sm:p-6">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -962,11 +963,17 @@ export function EmojiManagementPage() {
                       <div
                         key={emoji.id}
                         className={cn(
-                          'ios-touch group relative min-w-0 cursor-pointer overflow-hidden rounded-[18px] border border-black/[0.035] bg-card shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_10px_26px_rgba(31,41,55,0.055),0_2px_6px_rgba(0,0,0,0.024)] hover:ring-2 hover:ring-primary/60 active:scale-[0.98] active:shadow-[0_1px_0_rgba(255,255,255,0.5)_inset,0_4px_14px_rgba(31,41,55,0.06)] dark:border-white/10 dark:bg-card',
+                          'ios-touch group relative min-w-0 overflow-hidden rounded-[18px] border border-black/[0.035] bg-card shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_8px_22px_rgba(31,41,55,0.045)] transition-[box-shadow,transform,background-color] focus-within:ring-2 focus-within:ring-ring hover:ring-2 hover:ring-primary/60 dark:border-white/10 dark:bg-card',
                           selectedIds.has(emoji.id) && 'bg-primary/5 ring-2 ring-primary'
                         )}
-                        onClick={() => toggleSelect(emoji.id)}
                       >
+                        <button
+                          type="button"
+                          className="absolute inset-0 z-[1] rounded-[18px] focus:outline-none"
+                          onClick={() => toggleSelect(emoji.id)}
+                          aria-pressed={selectedIds.has(emoji.id)}
+                          aria-label={`${selectedIds.has(emoji.id) ? '取消选择' : '选择'}表情包 ${emoji.description || emoji.id}`}
+                        />
                         {/* 选中指示器 */}
                         <div
                           className={`absolute left-1 top-1 z-10 transition-opacity ${
@@ -1034,9 +1041,9 @@ export function EmojiManagementPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-11 w-11 shrink-0 rounded-[14px]"
-                                  onClick={(e) => e.stopPropagation()}
+                                  className="relative z-[2] h-11 w-11 shrink-0 rounded-[14px]"
                                   title="更多操作"
+                                  aria-label={`更多操作：${emoji.description || emoji.id}`}
                                 >
                                   <MoreHorizontal className="h-5 w-5" />
                                 </Button>
@@ -1289,6 +1296,12 @@ function EmojiDetailDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const [imageFailed, setImageFailed] = useState(false)
+
+  useEffect(() => {
+    setImageFailed(false)
+  }, [emoji?.id, open])
+
   if (!emoji) return null
 
   const formatTime = (timestamp: number | null) => {
@@ -1306,21 +1319,24 @@ function EmojiDetailDialog({
           <div className="space-y-4">
             {/* 表情包预览图 - 使用原图 */}
             <div className="flex justify-center">
-              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-[24px] bg-muted/80 shadow-[0_1px_0_rgba(255,255,255,0.64)_inset,0_10px_24px_rgba(31,41,55,0.055)]">
-                <img
-                  src={getEmojiOriginalUrl(emoji.id)}
-                  alt={emoji.description || '表情包'}
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement
-                    target.style.display = 'none'
-                    const parent = target.parentElement
-                    if (parent) {
-                      parent.innerHTML =
-                        '<svg class="h-16 w-16 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>'
-                    }
-                  }}
-                />
+              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-[24px] bg-muted/80 shadow-[0_1px_0_rgba(255,255,255,0.64)_inset,0_8px_20px_rgba(31,41,55,0.045)]">
+                {imageFailed ? (
+                  <div
+                    className="flex h-full w-full flex-col items-center justify-center gap-2 p-3 text-center text-muted-foreground"
+                    role="img"
+                    aria-label={`${emoji.description || '表情包'}图片加载失败`}
+                  >
+                    <ImageOff className="h-10 w-10" aria-hidden="true" />
+                    <span className="text-xs">图片不可用</span>
+                  </div>
+                ) : (
+                  <img
+                    src={getEmojiOriginalUrl(emoji.id)}
+                    alt={emoji.description || '表情包'}
+                    className="h-full w-full object-cover"
+                    onError={() => setImageFailed(true)}
+                  />
+                )}
               </div>
             </div>
 
@@ -1915,8 +1931,18 @@ function EmojiUploadDialog({
                 onChange={(e) => updateFileInfo(file.id, { emotion: e.target.value })}
                 placeholder="多个标签用逗号分隔，如：开心,高兴"
                 className={!file.emotion.trim() ? 'border-destructive' : ''}
+                aria-required="true"
+                aria-invalid={!file.emotion.trim()}
+                aria-describedby="single-emotion-help single-emotion-error"
               />
-              <p className="text-xs text-muted-foreground">用于情感匹配，多个标签用逗号分隔</p>
+              <p id="single-emotion-help" className="text-xs text-muted-foreground">
+                用于情感匹配，多个标签用逗号分隔
+              </p>
+              {!file.emotion.trim() && (
+                <p id="single-emotion-error" className="text-destructive text-xs" role="alert">
+                  请填写至少一个情感标签
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1996,15 +2022,16 @@ function EmojiUploadDialog({
                 const complete = isFileComplete(file)
                 const isSelected = selectedFileId === file.id
                 return (
-                  <div
+                  <button
                     key={file.id}
+                    type="button"
                     onClick={() => setSelectedFileId(file.id)}
+                    aria-pressed={isSelected}
+                    aria-label={`编辑文件 ${file.name}${complete ? '，信息已完成' : '，信息未完成'}`}
                     className={cn(
-                      'ios-touch flex min-h-[72px] cursor-pointer items-center gap-3 rounded-[17px] border border-black/[0.035] bg-card p-3 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_6px_18px_rgba(31,41,55,0.04)] transition-all dark:border-white/10 dark:bg-card',
+                      'ios-touch flex min-h-[72px] w-full items-center gap-3 rounded-[17px] border border-black/[0.035] bg-card p-3 text-left shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_6px_18px_rgba(31,41,55,0.04)] transition-[background-color,box-shadow] dark:border-white/10 dark:bg-card',
                       isSelected && 'ring-2 ring-primary/70',
-                      complete
-                        ? 'border-[rgb(52_199_89_/_0.22)] bg-[rgb(52_199_89_/_0.08)] dark:bg-[rgb(48_209_88_/_0.1)]'
-                        : 'hover:bg-muted/35'
+                      complete ? 'border-success/25 bg-success/10' : 'hover:bg-muted/35'
                     )}
                   >
                     <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-[15px] border border-black/[0.035] bg-secondary/55 dark:border-white/10">
@@ -2025,7 +2052,7 @@ function EmojiUploadDialog({
                     ) : (
                       <div className="h-5 w-5 flex-shrink-0 rounded-full border-2 border-muted-foreground/30" />
                     )}
-                  </div>
+                  </button>
                 )
               })}
             </div>
@@ -2064,7 +2091,15 @@ function EmojiUploadDialog({
                     onChange={(e) => updateFileInfo(selectedFile.id, { emotion: e.target.value })}
                     placeholder="多个标签用逗号分隔，如：开心,高兴"
                     className={!selectedFile.emotion.trim() ? 'border-destructive' : ''}
+                    aria-required="true"
+                    aria-invalid={!selectedFile.emotion.trim()}
+                    aria-describedby="multi-emotion-error"
                   />
+                  {!selectedFile.emotion.trim() && (
+                    <p id="multi-emotion-error" className="text-destructive text-xs" role="alert">
+                      请填写至少一个情感标签
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">

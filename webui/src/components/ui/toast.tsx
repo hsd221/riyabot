@@ -59,7 +59,7 @@ const ToastAction = React.forwardRef<
   <ToastPrimitives.Action
     ref={ref}
     className={cn(
-      'ios-touch group-[.destructive]:border-destructive/30 group-[.destructive]:hover:bg-destructive/20 inline-flex h-9 shrink-0 items-center justify-center rounded-full border border-black/5 bg-card px-3 text-sm font-medium shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:bg-accent focus:outline-none disabled:pointer-events-none disabled:opacity-50',
+      'ios-touch group-[.destructive]:border-destructive/30 group-[.destructive]:hover:bg-destructive/20 inline-flex h-11 shrink-0 items-center justify-center rounded-full border border-black/5 bg-card px-4 text-sm font-medium shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50',
       className
     )}
     {...props}
@@ -74,13 +74,14 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      'ios-touch group-[.destructive]:hover:bg-destructive/20 absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none',
+      'ios-touch group-[.destructive]:hover:bg-destructive/20 absolute right-1.5 top-1.5 flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
       className
     )}
     toast-close=""
     {...props}
   >
     <X className="h-4 w-4" />
+    <span className="sr-only">关闭通知</span>
   </ToastPrimitives.Close>
 ))
 ToastClose.displayName = ToastPrimitives.Close.displayName

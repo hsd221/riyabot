@@ -503,7 +503,7 @@ export function SetupPage() {
 
       {/* 加载状态 */}
       {isLoading ? (
-        <div className="flex min-h-[calc(100vh-2rem)] items-center justify-center">
+        <div className="ios-app-min-height flex items-center justify-center">
           <div className="ios-card w-full max-w-sm p-6 text-center">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[rgb(0_122_255_/_0.11)] shadow-[0_1px_0_rgba(255,255,255,0.64)_inset]">
               <Loader2 className="h-7 w-7 animate-spin text-primary" />

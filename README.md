@@ -65,11 +65,9 @@ bun run build
 
 ## Docker
 
-构建 Docker 镜像前请先构建 WebUI 静态资源：
+Dockerfile 会在独立 Bun 构建阶段生成 WebUI 静态资源，无需提前在宿主机执行前端构建：
 
 ```bash
-cd webui && bun install && bun run build
-cd ..
 docker build -t riyabot .
 ```
 

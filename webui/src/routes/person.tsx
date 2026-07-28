@@ -292,7 +292,7 @@ export function PersonManagementPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-w-0 flex-col overflow-x-hidden px-5 py-5 sm:p-6">
+    <div className="flex h-full min-w-0 flex-col overflow-x-hidden px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">

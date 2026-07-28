@@ -365,9 +365,13 @@ export function JargonManagementPage() {
       : (chatList.find((chat) => chat.chat_id === filterChatId)?.chat_name ?? filterChatId)
   const currentStatusFilterLabel =
     JARGON_STATUS_OPTIONS.find((option) => option.value === filterIsJargon)?.label ?? '全部状态'
-  const activeFilterCount = [filterChatId !== 'all', filterIsJargon !== 'all'].filter(Boolean).length
+  const activeFilterCount = [filterChatId !== 'all', filterIsJargon !== 'all'].filter(
+    Boolean
+  ).length
   const filterSummary =
-    activeFilterCount > 0 ? `${activeFilterCount} 个筛选 · 每页 ${pageSize} 条` : `全部词条 · 每页 ${pageSize} 条`
+    activeFilterCount > 0
+      ? `${activeFilterCount} 个筛选 · 每页 ${pageSize} 条`
+      : `全部词条 · 每页 ${pageSize} 条`
 
   // 渲染黑话状态徽章
   const renderJargonStatus = (isJargon: boolean | null) => {
@@ -396,7 +400,7 @@ export function JargonManagementPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
+    <div className="flex h-full flex-col px-5 py-5 sm:p-6">
       {/* 页面标题 */}
       <div className="mb-4 sm:mb-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -446,7 +450,7 @@ export function JargonManagementPage() {
                     <span className="block truncate text-[12px] font-medium leading-4 text-muted-foreground">
                       {label}
                     </span>
-                    <span className="block truncate text-[18px] font-semibold leading-6 tabular-nums text-foreground">
+                    <span className="block truncate text-[18px] font-semibold tabular-nums leading-6 text-foreground">
                       {value}
                     </span>
                   </span>
@@ -540,7 +544,9 @@ export function JargonManagementPage() {
                         setPage(1)
                       }}
                     >
-                      <SelectTrigger className={cn(jargonSheetSelectTriggerClass, 'max-w-[8.75rem]')}>
+                      <SelectTrigger
+                        className={cn(jargonSheetSelectTriggerClass, 'max-w-[8.75rem]')}
+                      >
                         <SelectValue placeholder="全部聊天" />
                       </SelectTrigger>
                       <SelectContent>
@@ -606,7 +612,9 @@ export function JargonManagementPage() {
                         setSelectedIds(new Set())
                       }}
                     >
-                      <SelectTrigger className={cn(jargonSheetSelectTriggerClass, 'max-w-[6.5rem]')}>
+                      <SelectTrigger
+                        className={cn(jargonSheetSelectTriggerClass, 'max-w-[6.5rem]')}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

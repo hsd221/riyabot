@@ -1,25 +1,18 @@
-import { Component } from 'react'
+import { Component, useState } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 import {
   AlertTriangle,
-  RefreshCw,
-  Home,
+  Bug,
+  Check,
   ChevronDown,
   ChevronUp,
   Copy,
-  Check,
-  Bug,
+  Home,
+  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { useState } from 'react'
-
-const softRedTextClass = 'text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)]'
-const softGreenTextClass = 'text-[rgb(36_138_61)] dark:text-[rgb(48_209_88)]'
-const softOrangeTextClass = 'text-[rgb(178_93_0)] dark:text-[rgb(255_159_10)]'
 
 interface Props {
   children: ReactNode
@@ -32,7 +25,6 @@ interface State {
   errorInfo: ErrorInfo | null
 }
 
-// 解析堆栈信息为结构化数据
 interface StackFrame {
   functionName: string
   fileName: string
@@ -41,15 +33,16 @@ interface StackFrame {
   raw: string
 }
 
+const isDevelopment = import.meta.env.DEV
+
 function parseStackTrace(stack: string): StackFrame[] {
-  const lines = stack.split('\n').slice(1) // 跳过第一行（错误消息）
+  const lines = stack.split('\n').slice(1)
   const frames: StackFrame[] = []
 
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('at ')) continue
 
-    // 匹配格式: at functionName (fileName:line:column) 或 at fileName:line:column
     const match = trimmed.match(/at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?$/)
     if (match) {
       frames.push({
@@ -73,12 +66,10 @@ function parseStackTrace(stack: string): StackFrame[] {
   return frames
 }
 
-// 错误详情展示组件（函数组件，用于使用 hooks）
 function ErrorDetails({ error, errorInfo }: { error: Error; errorInfo: ErrorInfo | null }) {
-  const [isStackOpen, setIsStackOpen] = useState(true)
+  const [isStackOpen, setIsStackOpen] = useState(false)
   const [isComponentStackOpen, setIsComponentStackOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-
   const stackFrames = error.stack ? parseStackTrace(error.stack) : []
 
   const copyErrorInfo = async () => {
@@ -91,42 +82,33 @@ ${error.stack || 'No stack trace available'}
 
 Component Stack:
 ${errorInfo?.componentStack || 'No component stack available'}
-
-URL: ${window.location.href}
-User Agent: ${navigator.userAgent}
-Time: ${new Date().toISOString()}
     `.trim()
 
     try {
       await navigator.clipboard.writeText(errorText)
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch (copyError) {
+      console.error('复制错误详情失败:', copyError)
     }
   }
 
   return (
-    <div className="space-y-4">
-      {/* 错误消息 */}
-      <Alert
-        variant="destructive"
-        className="border-[rgb(255_59_48_/_0.22)] bg-[rgb(255_59_48_/_0.08)]"
-      >
-        <AlertTriangle className="h-4 w-4" />
-        <AlertDescription className={`font-mono text-sm ${softRedTextClass}`}>
-          <span className="font-semibold">{error.name}:</span> {error.message}
-        </AlertDescription>
-      </Alert>
+    <div className="space-y-3 rounded-[18px] border border-border/60 bg-muted/30 p-3 text-left">
+      <div className="text-destructive flex items-start gap-3 text-sm">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <p className="min-w-0 break-words font-mono">
+          <span className="font-semibold">{error.name}：</span> {error.message}
+        </p>
+      </div>
 
-      {/* 堆栈跟踪 */}
       {stackFrames.length > 0 && (
         <Collapsible open={isStackOpen} onOpenChange={setIsStackOpen}>
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="h-auto w-full justify-between p-3">
+            <Button variant="ghost" className="h-11 w-full justify-between px-3">
               <span className="flex items-center gap-2 text-sm font-semibold">
                 <Bug className="h-4 w-4" />
-                Stack Trace ({stackFrames.length} frames)
+                Stack Trace（{stackFrames.length}）
               </span>
               {isStackOpen ? (
                 <ChevronUp className="h-4 w-4" />
@@ -136,48 +118,33 @@ Time: ${new Date().toISOString()}
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ScrollArea className="h-[280px] rounded-[16px] border border-black/[0.035] bg-muted/30 dark:border-white/10">
-              <div className="space-y-1 p-3">
+            <ScrollArea className="h-[280px] rounded-[14px] border border-border/60 bg-background/70">
+              <ol className="space-y-1 p-3">
                 {stackFrames.map((frame, index) => (
-                  <div
-                    key={index}
-                    className="rounded-[12px] p-2 font-mono text-xs transition-colors hover:bg-muted/50"
+                  <li
+                    key={`${frame.raw}-${index}`}
+                    className="rounded-[10px] p-2 font-mono text-xs"
                   >
-                    <div className="flex items-start gap-2">
-                      <span className="w-6 flex-shrink-0 text-right text-muted-foreground">
-                        {index + 1}.
+                    <span className="font-medium text-primary">{frame.functionName}</span>
+                    {frame.fileName && (
+                      <span className="mt-0.5 block break-all text-muted-foreground">
+                        {frame.fileName}
+                        {frame.lineNumber && `:${frame.lineNumber}:${frame.columnNumber}`}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <span className="font-medium text-primary">{frame.functionName}</span>
-                        {frame.fileName && (
-                          <div className="mt-0.5 break-all text-muted-foreground">
-                            {frame.fileName}
-                            {frame.lineNumber && (
-                              <span className={softOrangeTextClass}>
-                                :{frame.lineNumber}:{frame.columnNumber}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                    )}
+                  </li>
                 ))}
-              </div>
+              </ol>
             </ScrollArea>
           </CollapsibleContent>
         </Collapsible>
       )}
 
-      {/* 组件堆栈 */}
       {errorInfo?.componentStack && (
         <Collapsible open={isComponentStackOpen} onOpenChange={setIsComponentStackOpen}>
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="h-auto w-full justify-between p-3">
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                <AlertTriangle className="h-4 w-4" />
-                Component Stack
-              </span>
+            <Button variant="ghost" className="h-11 w-full justify-between px-3">
+              <span className="text-sm font-semibold">Component Stack</span>
               {isComponentStackOpen ? (
                 <ChevronUp className="h-4 w-4" />
               ) : (
@@ -186,7 +153,7 @@ Time: ${new Date().toISOString()}
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ScrollArea className="h-[200px] rounded-[16px] border border-black/[0.035] bg-muted/30 dark:border-white/10">
+            <ScrollArea className="h-[200px] rounded-[14px] border border-border/60 bg-background/70">
               <pre className="whitespace-pre-wrap p-3 font-mono text-xs text-muted-foreground">
                 {errorInfo.componentStack}
               </pre>
@@ -195,73 +162,67 @@ Time: ${new Date().toISOString()}
         </Collapsible>
       )}
 
-      {/* 复制按钮 */}
-      <Button variant="outline" size="sm" onClick={copyErrorInfo} className="w-full">
+      <Button variant="outline" onClick={copyErrorInfo} className="h-11 w-full">
         {copied ? (
-          <>
-            <Check className={`mr-2 h-4 w-4 ${softGreenTextClass}`} />
-            已复制到剪贴板
-          </>
+          <Check className="text-success mr-2 h-4 w-4" />
         ) : (
-          <>
-            <Copy className="mr-2 h-4 w-4" />
-            复制错误信息
-          </>
+          <Copy className="mr-2 h-4 w-4" />
         )}
+        {copied ? '已复制错误详情' : '复制错误详情'}
       </Button>
     </div>
   )
 }
 
-// 错误回退 UI
 function ErrorFallback({ error, errorInfo }: { error: Error; errorInfo: ErrorInfo | null }) {
-  const handleGoHome = () => {
-    window.location.href = '/'
-  }
-
-  const handleRefresh = () => {
-    window.location.reload()
-  }
-
   return (
-    <div className="ios-page flex min-h-screen items-center justify-center">
-      <Card className="ios-card w-full max-w-2xl">
-        <CardHeader className="pb-2 text-center">
-          <div className="ios-symbol ios-symbol-red mx-auto mb-4 h-16 w-16 rounded-[20px]">
-            <AlertTriangle className="h-8 w-8" />
-          </div>
-          <CardTitle className="text-2xl font-semibold">页面出现了问题</CardTitle>
-          <CardDescription className="mt-2 text-base">
-            应用程序遇到了意外错误。您可以尝试刷新页面或返回首页。
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <ErrorDetails error={error} errorInfo={errorInfo} />
-
-          {/* 操作按钮 */}
-          <div className="flex flex-col gap-2 pt-2 sm:flex-row">
-            <Button onClick={handleRefresh} className="flex-1">
-              <RefreshCw className="mr-2 h-4 w-4" />
-              刷新页面
-            </Button>
-            <Button onClick={handleGoHome} variant="outline" className="flex-1">
-              <Home className="mr-2 h-4 w-4" />
-              返回首页
-            </Button>
-          </div>
-
-          {/* 提示信息 */}
-          <p className="pt-2 text-center text-xs text-muted-foreground">
-            如果问题持续存在，请将错误信息复制并反馈给开发者
+    <div className="ios-page ios-app-min-height flex items-center justify-center">
+      <main
+        className="ios-card w-full max-w-xl space-y-6 p-6 text-center sm:p-8"
+        role="alert"
+        aria-labelledby="application-error-title"
+      >
+        <span className="ios-symbol ios-symbol-red mx-auto flex h-16 w-16 rounded-[20px]">
+          <AlertTriangle className="h-8 w-8" />
+        </span>
+        <div className="space-y-2">
+          <h1 id="application-error-title" className="text-2xl font-semibold text-foreground">
+            页面出现了问题
+          </h1>
+          <p className="text-[15px] leading-6 text-muted-foreground">
+            当前页面未能正常显示。可以先刷新页面；如果问题持续存在，请返回首页后重试。
           </p>
-        </CardContent>
-      </Card>
+        </div>
+
+        {isDevelopment && <ErrorDetails error={error} errorInfo={errorInfo} />}
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button onClick={() => window.location.reload()} className="h-11 flex-1">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            刷新页面
+          </Button>
+          <Button
+            onClick={() => {
+              window.location.href = '/'
+            }}
+            variant="outline"
+            className="h-11 flex-1"
+          >
+            <Home className="mr-2 h-4 w-4" />
+            返回首页
+          </Button>
+        </div>
+
+        {!isDevelopment && (
+          <p className="text-xs leading-5 text-muted-foreground">
+            诊断详情已记录在浏览器控制台，不会在生产页面中显示。
+          </p>
+        )}
+      </main>
     </div>
   )
 }
 
-// 错误边界类组件
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
@@ -291,10 +252,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError && this.state.error) {
-      if (this.props.fallback) {
-        return this.props.fallback
-      }
-
+      if (this.props.fallback) return this.props.fallback
       return <ErrorFallback error={this.state.error} errorInfo={this.state.errorInfo} />
     }
 
@@ -302,7 +260,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 }
 
-// 路由级别的错误边界组件（用于 TanStack Router）
 export function RouteErrorBoundary({ error }: { error: Error }) {
   return <ErrorFallback error={error} errorInfo={null} />
 }

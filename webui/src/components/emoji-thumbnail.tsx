@@ -1,16 +1,7 @@
-/**
- * 表情包缩略图组件
- * 
- * 特性：
- * - 自动处理 202 响应（缩略图生成中）
- * - 显示 Skeleton 占位符
- * - 自动重试加载
- * - 加载失败显示占位图标
- */
-
-import { useState, useEffect, useCallback } from 'react'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ImageIcon } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { cn } from '@/lib/utils'
 
 interface EmojiThumbnailProps {
@@ -33,91 +24,113 @@ export function EmojiThumbnail({
   retryInterval = 1500,
 }: EmojiThumbnailProps) {
   const [state, setState] = useState<LoadingState>('loading')
-  const [retryCount, setRetryCount] = useState(0)
   const [imageSrc, setImageSrc] = useState<string | null>(null)
+  const retryTimerRef = useRef<number | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const objectUrlRef = useRef<string | null>(null)
+  const requestIdRef = useRef(0)
 
-  const loadImage = useCallback(async () => {
-    try {
-      const response = await fetch(src, {
-        credentials: 'include', // 携带 Cookie
-      })
+  const clearResources = useCallback(() => {
+    requestIdRef.current += 1
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
 
-      if (response.status === 202) {
-        // 缩略图正在生成中
-        setState('generating')
-        
-        if (retryCount < maxRetries) {
-          // 延迟后重试
-          setTimeout(() => {
-            setRetryCount(prev => prev + 1)
-          }, retryInterval)
-        } else {
-          // 超过最大重试次数，显示错误
-          setState('error')
-        }
-        return
-      }
-
-      if (!response.ok) {
-        setState('error')
-        return
-      }
-
-      // 成功获取图片
-      const blob = await response.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      setImageSrc(objectUrl)
-      setState('loaded')
-    } catch (error) {
-      console.error('加载缩略图失败:', error)
-      setState('error')
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
     }
-  }, [src, retryCount, maxRetries, retryInterval])
+
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
+    clearResources()
+    const requestId = requestIdRef.current
     setState('loading')
-    setRetryCount(0)
     setImageSrc(null)
-  }, [src])
 
-  useEffect(() => {
-    loadImage()
-  }, [loadImage])
+    const loadImage = async (attempt: number): Promise<void> => {
+      if (requestIdRef.current !== requestId) return
 
-  // 清理 Object URL
-  useEffect(() => {
-    return () => {
-      if (imageSrc) {
-        URL.revokeObjectURL(imageSrc)
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      try {
+        const response = await fetchWithAuth(src, {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+
+        if (requestIdRef.current !== requestId) return
+
+        if (response.status === 202) {
+          if (attempt >= maxRetries) {
+            setState('error')
+            return
+          }
+
+          setState('generating')
+          retryTimerRef.current = window.setTimeout(
+            () => void loadImage(attempt + 1),
+            retryInterval
+          )
+          return
+        }
+
+        if (!response.ok) {
+          setState('error')
+          return
+        }
+
+        const blob = await response.blob()
+        if (requestIdRef.current !== requestId) return
+
+        const objectUrl = URL.createObjectURL(blob)
+        objectUrlRef.current = objectUrl
+        setImageSrc(objectUrl)
+        setState('loaded')
+      } catch (error) {
+        if (requestIdRef.current !== requestId || controller.signal.aborted) return
+        console.error('加载缩略图失败:', error)
+        setState('error')
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null
+        }
       }
     }
-  }, [imageSrc])
 
-  // 加载中或生成中显示 Skeleton
+    void loadImage(0)
+    return clearResources
+  }, [clearResources, maxRetries, retryInterval, src])
+
   if (state === 'loading' || state === 'generating') {
-    return <Skeleton className={cn('h-full w-full rounded-[14px]', className)} />
+    return (
+      <Skeleton
+        className={cn('h-full w-full rounded-[14px]', className)}
+        aria-label={state === 'generating' ? '正在生成表情包缩略图' : '正在加载表情包缩略图'}
+      />
+    )
   }
 
-  // 加载失败显示占位图标
   if (state === 'error' || !imageSrc) {
     return (
       <div
         className={cn(
-          'flex h-full w-full items-center justify-center rounded-[14px] bg-secondary/70 text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.7)_inset]',
+          'flex h-full w-full flex-col items-center justify-center gap-2 rounded-[14px] bg-secondary/70 p-2 text-center text-muted-foreground shadow-[0_1px_0_rgba(255,255,255,0.7)_inset]',
           className
         )}
+        role="img"
+        aria-label={`${alt}加载失败`}
       >
-        <ImageIcon className="h-8 w-8" strokeWidth={2.35} />
+        <ImageIcon className="h-8 w-8" strokeWidth={2.35} aria-hidden="true" />
+        <span className="text-[11px] leading-4">图片不可用</span>
       </div>
     )
   }
 
-  // 加载成功显示图片
-  return (
-    <img
-      src={imageSrc}
-      alt={alt}
-      className={cn('h-full w-full object-contain', className)}
-    />
-  )
+  return <img src={imageSrc} alt={alt} className={cn('h-full w-full object-contain', className)} />
 }

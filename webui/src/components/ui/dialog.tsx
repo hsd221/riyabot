@@ -26,8 +26,9 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
-interface DialogContentProps
-  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+interface DialogContentProps extends React.ComponentPropsWithoutRef<
+  typeof DialogPrimitive.Content
+> {
   /** 阻止点击外部关闭（用于 Tour 运行时） */
   preventOutsideClose?: boolean
 }
@@ -49,9 +50,9 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="ios-dialog-close ios-touch absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted disabled:pointer-events-none">
+      <DialogPrimitive.Close className="ios-dialog-close ios-touch absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted disabled:pointer-events-none">
         <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
+        <span className="sr-only">关闭</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </DialogPortal>

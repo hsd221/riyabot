@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
   AlertCircle,
@@ -20,7 +20,7 @@ import { getAuthStatus } from '@/lib/fetch-with-auth'
 import { checkFirstSetup } from '@/hooks/use-auth'
 import { cn } from '@/lib/utils'
 import { APP_FULL_NAME, APP_NAME } from '@/lib/version'
-import type { ComponentType } from 'react'
+import type { ComponentType, FormEvent } from 'react'
 import type { LucideProps } from 'lucide-react'
 
 type ThemeMode = 'light' | 'dark' | 'system'
@@ -61,6 +61,7 @@ export function AuthPage() {
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState('')
   const [checkingAuth, setCheckingAuth] = useState(true)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const { theme, resolvedTheme, setTheme } = useTheme()
 
@@ -98,12 +99,17 @@ export function AuthPage() {
   const themeLabel =
     theme === 'system' ? '跟随系统' : resolvedTheme === 'dark' ? '深色模式' : '浅色模式'
 
-  const handleSubmit = async (event: React.FormEvent) => {
+  const reportError = (message: string) => {
+    setError(message)
+    window.requestAnimationFrame(() => passwordInputRef.current?.focus())
+  }
+
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
 
     if (!password) {
-      setError('请输入 WebUI 密码')
+      reportError('请输入 WebUI 密码')
       return
     }
 
@@ -125,10 +131,10 @@ export function AuthPage() {
         return
       }
 
-      setError(data?.detail || data?.message || '密码验证失败，请检查后重试')
+      reportError(data?.detail || data?.message || '密码验证失败，请检查后重试')
     } catch (requestError) {
       console.error('WebUI 登录失败:', requestError)
-      setError('连接服务器失败，请检查网络连接')
+      reportError('连接服务器失败，请检查网络连接')
     } finally {
       setIsValidating(false)
     }
@@ -136,8 +142,8 @@ export function AuthPage() {
 
   if (checkingAuth) {
     return (
-      <div className="ios-page flex min-h-screen items-center justify-center overflow-hidden">
-        <div className="ios-status-panel">
+      <div className="ios-page ios-app-min-height flex items-center justify-center overflow-hidden">
+        <div className="ios-status-panel" role="status" aria-live="polite">
           <span className="ios-symbol ios-symbol-md ios-symbol-blue">
             <LoaderCircle className="ios-spin-slow h-5 w-5" strokeWidth={2.5} />
           </span>
@@ -153,7 +159,7 @@ export function AuthPage() {
   }
 
   return (
-    <div className="ios-page flex min-h-screen flex-col overflow-x-hidden">
+    <div className="ios-page ios-app-min-height flex flex-col overflow-x-hidden">
       <Popover>
         <PopoverTrigger asChild>
           <button
@@ -174,8 +180,9 @@ export function AuthPage() {
                 <button
                   key={option.value}
                   type="button"
-                  className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-0"
+                  className="ios-touch flex min-h-[54px] w-full items-center gap-3 border-b border-border/45 px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   onClick={(event) => toggleThemeWithTransition(option.value, setTheme, event)}
+                  aria-pressed={selected}
                 >
                   <span className={cn('ios-symbol ios-symbol-sm', option.symbolClass)}>
                     <OptionIcon className="h-[18px] w-[18px]" />
@@ -211,41 +218,64 @@ export function AuthPage() {
           </div>
         </header>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" aria-busy={isValidating}>
+          <input
+            type="text"
+            name="username"
+            autoComplete="username"
+            value="RiyaBot Console"
+            readOnly
+            tabIndex={-1}
+            aria-hidden="true"
+            className="sr-only"
+          />
           <div className="ios-group overflow-hidden">
-            <label htmlFor="password" className="ios-row min-h-[64px] gap-3 px-4 py-2">
+            <div className="ios-row min-h-[64px] gap-3 px-4 py-2">
               <KeyRound className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2} />
-              <span className="shrink-0 text-[17px] font-medium leading-snug text-foreground">
+              <label
+                htmlFor="password"
+                className="shrink-0 text-[17px] font-medium leading-snug text-foreground"
+              >
                 密码
-              </span>
+              </label>
               <Input
+                ref={passwordInputRef}
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="请输入密码"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => {
+                  setPassword(event.target.value)
+                  if (error) setError('')
+                }}
                 className={cn(
                   'h-10 min-w-0 flex-1 border-0 bg-transparent px-0 text-right text-[17px] shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:ring-offset-0',
-                  error &&
-                    'text-[rgb(174_37_31)] placeholder:text-[rgb(215_0_21_/_0.62)] dark:text-[rgb(255_105_97)]'
+                  error && 'text-destructive placeholder:text-destructive/60'
                 )}
                 disabled={isValidating}
                 autoComplete="current-password"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? 'auth-password-error' : undefined}
                 autoFocus
               />
               <button
                 type="button"
-                className="ios-touch grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted/70"
+                className="ios-touch grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted/70"
                 onClick={() => setShowPassword((visible) => !visible)}
                 aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                aria-pressed={showPassword}
                 title={showPassword ? '隐藏密码' : '显示密码'}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
-            </label>
+            </div>
 
             {error && (
-              <div className="ios-row flex items-start gap-3 bg-[rgb(255_59_48_/_0.06)] px-4 py-3 text-sm leading-relaxed text-[rgb(174_37_31)] dark:text-[rgb(255_105_97)]">
+              <div
+                id="auth-password-error"
+                className="ios-row bg-destructive/5 text-destructive flex items-start gap-3 px-4 py-3 text-sm leading-relaxed"
+                role="alert"
+              >
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={2} />
                 <span className="min-w-0">{error}</span>
               </div>

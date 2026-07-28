@@ -258,8 +258,7 @@ export function BehaviorManagementPage() {
         page_size: pageSize,
         search: search || undefined,
         chat_id: chatFilter === 'all' ? undefined : chatFilter,
-        enabled:
-          enabledFilter === 'all' ? undefined : enabledFilter === 'enabled',
+        enabled: enabledFilter === 'all' ? undefined : enabledFilter === 'enabled',
         actor_type: actorFilter === 'all' ? undefined : actorFilter,
         learning_type: learningFilter === 'all' ? undefined : learningFilter,
       })
@@ -529,7 +528,7 @@ export function BehaviorManagementPage() {
     activeFilterCount > 0 ? `${activeFilterCount} 个筛选已启用` : `全部行为 · 每页 ${pageSize} 条`
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col px-5 py-5 sm:p-6">
+    <div className="flex h-full flex-col px-5 py-5 sm:p-6">
       <div className="mb-4 sm:mb-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
@@ -581,7 +580,7 @@ export function BehaviorManagementPage() {
                     <span className="block truncate text-[12px] font-medium leading-4 text-muted-foreground">
                       {label}
                     </span>
-                    <span className="block truncate text-[18px] font-semibold leading-6 tabular-nums text-foreground">
+                    <span className="block truncate text-[18px] font-semibold tabular-nums leading-6 text-foreground">
                       {value}
                     </span>
                   </span>
@@ -1064,7 +1063,8 @@ export function BehaviorManagementPage() {
               ) : (
                 behaviors.map((behavior) => {
                   const ActorIcon =
-                    ACTOR_OPTIONS.find((option) => option.value === behavior.actor_type)?.icon ?? Users
+                    ACTOR_OPTIONS.find((option) => option.value === behavior.actor_type)?.icon ??
+                    Users
                   const chatName = getChatName(behavior.chat_id)
 
                   return (
@@ -1126,7 +1126,9 @@ export function BehaviorManagementPage() {
                             </span>
                             <span className="inline-flex min-w-0 items-center gap-1 rounded-full bg-muted px-2.5 py-1">
                               <Clock className="h-3 w-3 shrink-0" />
-                              <span className="truncate">{formatTime(behavior.last_active_time)}</span>
+                              <span className="truncate">
+                                {formatTime(behavior.last_active_time)}
+                              </span>
                             </span>
                           </div>
                         </div>
@@ -1287,7 +1289,9 @@ export function BehaviorManagementPage() {
                   {formChatOptions.length > 0 ? (
                     <Select
                       value={form.chat_id}
-                      onValueChange={(value) => setForm((current) => ({ ...current, chat_id: value }))}
+                      onValueChange={(value) =>
+                        setForm((current) => ({ ...current, chat_id: value }))
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="选择聊天" />
@@ -1459,7 +1463,10 @@ export function BehaviorManagementPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailBehavior !== null} onOpenChange={(open) => !open && setDetailBehavior(null)}>
+      <Dialog
+        open={detailBehavior !== null}
+        onOpenChange={(open) => !open && setDetailBehavior(null)}
+      >
         <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="px-6 pb-3 pt-6">
             <DialogTitle>行为模式详情</DialogTitle>
@@ -1485,8 +1492,14 @@ export function BehaviorManagementPage() {
                   <DetailItem label="计数" value={String(detailBehavior.count)} />
                   <DetailItem label="评分" value={detailBehavior.score.toFixed(2)} />
                   <DetailItem label="命中次数" value={String(detailBehavior.selected_count)} />
-                  <DetailItem label="最后命中" value={formatTime(detailBehavior.last_selected_time)} />
-                  <DetailItem label="最后活跃" value={formatTime(detailBehavior.last_active_time)} />
+                  <DetailItem
+                    label="最后命中"
+                    value={formatTime(detailBehavior.last_selected_time)}
+                  />
+                  <DetailItem
+                    label="最后活跃"
+                    value={formatTime(detailBehavior.last_active_time)}
+                  />
                   <DetailItem label="创建时间" value={formatTime(detailBehavior.create_date)} />
                 </div>
 
@@ -1495,7 +1508,11 @@ export function BehaviorManagementPage() {
                 <DetailBlock label="来源片段" value={detailBehavior.source_text || '暂无'} />
                 <DetailBlock
                   label="来源消息 ID"
-                  value={detailBehavior.source_ids.length > 0 ? detailBehavior.source_ids.join('\n') : '暂无'}
+                  value={
+                    detailBehavior.source_ids.length > 0
+                      ? detailBehavior.source_ids.join('\n')
+                      : '暂无'
+                  }
                   mono
                 />
               </div>
@@ -1540,7 +1557,15 @@ export function BehaviorManagementPage() {
   )
 }
 
-function DetailItem({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function DetailItem({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
   return (
     <div className="rounded-[16px] bg-muted/35 p-3">
       <div className="mb-1 text-xs font-medium text-muted-foreground">{label}</div>
@@ -1549,11 +1574,24 @@ function DetailItem({ label, value, mono = false }: { label: string; value: stri
   )
 }
 
-function DetailBlock({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function DetailBlock({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
   return (
     <div className="rounded-[16px] bg-muted/35 p-3">
       <div className="mb-1 text-xs font-medium text-muted-foreground">{label}</div>
-      <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed', mono && 'font-mono')}>
+      <div
+        className={cn(
+          'whitespace-pre-wrap break-words text-sm leading-relaxed',
+          mono && 'font-mono'
+        )}
+      >
         {value}
       </div>
     </div>

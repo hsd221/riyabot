@@ -591,7 +591,7 @@ export function MemoryPage() {
   )
 
   return (
-    <div className={cn('ios-page flex h-[calc(100vh-4rem)] flex-col')}>
+    <div className={cn('ios-page flex h-full flex-col')}>
       {/* 页面标题 */}
       <div className="mb-5 sm:mb-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">

@@ -1,61 +1,44 @@
 import { useNavigate } from '@tanstack/react-router'
-import { Home, Search, ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Home, SearchX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function NotFoundPage() {
   const navigate = useNavigate()
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-2xl text-center">
-        {/* 404 大标题 */}
-        <div className="relative mb-8">
-          <h1 className="text-[150px] font-black leading-none text-primary/10 select-none sm:text-[200px]">
-            404
-          </h1>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Search className="h-20 w-20 text-primary/30 sm:h-24 sm:w-24" />
-          </div>
-        </div>
+    <div className="ios-page ios-app-min-height flex items-center justify-center">
+      <main
+        className="ios-card w-full max-w-lg space-y-6 p-6 text-center sm:p-8"
+        aria-labelledby="not-found-title"
+      >
+        <span className="ios-symbol ios-symbol-blue mx-auto flex h-16 w-16 rounded-[20px]">
+          <SearchX className="h-8 w-8" />
+        </span>
 
-        {/* 错误信息 */}
-        <div className="space-y-4 mb-8">
-          <h2 className="text-2xl font-bold text-foreground sm:text-3xl">
+        <div className="space-y-2">
+          <p className="text-[13px] font-semibold uppercase tracking-[0.12em] text-primary">404</p>
+          <h1
+            id="not-found-title"
+            className="text-[28px] font-semibold leading-tight text-foreground"
+          >
             页面未找到
-          </h2>
-          <p className="text-base text-muted-foreground sm:text-lg max-w-md mx-auto">
-            抱歉，您访问的页面不存在或已被移除。请检查 URL 是否正确，或返回首页继续浏览。
+          </h1>
+          <p className="mx-auto max-w-sm text-[15px] leading-6 text-muted-foreground">
+            这个地址可能已更改、被移除，或输入有误。可以返回首页继续浏览。
           </p>
         </div>
 
-        {/* 操作按钮 */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Button
-            size="lg"
-            onClick={() => navigate({ to: '/' })}
-            className="gap-2 w-full sm:w-auto"
-          >
-            <Home className="h-4 w-4" />
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button onClick={() => navigate({ to: '/' })} className="h-11 flex-1">
+            <Home className="mr-2 h-4 w-4" />
             返回首页
           </Button>
-          <Button
-            size="lg"
-            variant="outline"
-            onClick={() => window.history.back()}
-            className="gap-2 w-full sm:w-auto"
-          >
-            <ArrowLeft className="h-4 w-4" />
+          <Button variant="outline" onClick={() => window.history.back()} className="h-11 flex-1">
+            <ArrowLeft className="mr-2 h-4 w-4" />
             返回上一页
           </Button>
         </div>
-
-        {/* 提示信息 */}
-        <div className="mt-12 pt-8 border-t border-border">
-          <p className="text-sm text-muted-foreground">
-            如果您认为这是一个错误，请联系系统管理员
-          </p>
-        </div>
-      </div>
+      </main>
     </div>
   )
 }

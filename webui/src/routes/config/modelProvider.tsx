@@ -82,6 +82,7 @@ import {
 } from '@/components/tour/tours/model-assignment-tour'
 import { useNavigate } from '@tanstack/react-router'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
+import { safeRemoveItem } from '@/lib/safe-storage'
 import { PROVIDER_TEMPLATES } from './providerTemplates'
 
 interface APIProvider {
@@ -281,17 +282,16 @@ export function ModelProviderConfigPage() {
   // 重启完成回调
   const handleRestartComplete = () => {
     // 清除token，避免自动登录
-    localStorage.removeItem('access-token')
+    safeRemoveItem('access-token')
     window.location.href = '/auth'
   }
 
   // 重启失败回调
   const handleRestartFailed = () => {
-    setShowRestartOverlay(false)
     setRestarting(false)
     toast({
       title: '重启超时',
-      description: '服务未能在预期时间内恢复，请手动检查或刷新页面',
+      description: '服务未在预期时间内恢复，可在当前页面重试检测或刷新页面',
       variant: 'destructive',
     })
   }
@@ -771,7 +771,7 @@ export function ModelProviderConfigPage() {
   )
 
   return (
-    <div className="ios-page space-y-6 sm:space-y-8">
+    <div className="ios-page flex h-full min-h-0 flex-col gap-6 sm:gap-8">
       {/* 页面标题 */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -926,9 +926,7 @@ export function ModelProviderConfigPage() {
           </span>
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" />
         </button>
-        <div
-          className="ios-row min-h-[58px] w-full text-left"
-        >
+        <div className="ios-row min-h-[58px] w-full text-left">
           <span className="flex min-w-0 items-center gap-3">
             <span className="ios-symbol ios-symbol-sm ios-symbol-teal">
               <Save className="h-4 w-4" strokeWidth={2} fill="none" />
@@ -945,7 +943,7 @@ export function ModelProviderConfigPage() {
               <button
                 type="button"
                 disabled={saving || autoSaving || restarting}
-                className="ios-touch ml-3 inline-flex h-11 min-w-[4.75rem] shrink-0 items-center justify-center rounded-full bg-[rgb(120_120_128_/_0.12)] px-4 text-[14px] font-semibold leading-5 text-foreground/82 shadow-[inset_0_0_0_1px_rgba(60,60,67,0.08)] hover:bg-[rgb(120_120_128_/_0.16)] active:bg-[rgb(120_120_128_/_0.2)] disabled:opacity-60 dark:bg-white/[0.12] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] dark:hover:bg-white/[0.16]"
+                className="ios-touch text-foreground/82 ml-3 inline-flex h-11 min-w-[4.75rem] shrink-0 items-center justify-center rounded-full bg-[rgb(120_120_128_/_0.12)] px-4 text-[14px] font-semibold leading-5 shadow-[inset_0_0_0_1px_rgba(60,60,67,0.08)] hover:bg-[rgb(120_120_128_/_0.16)] active:bg-[rgb(120_120_128_/_0.2)] disabled:opacity-60 dark:bg-white/[0.12] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] dark:hover:bg-white/[0.16]"
               >
                 {hasUnsavedChanges ? '保存并重启' : '重启'}
               </button>
@@ -992,7 +990,7 @@ export function ModelProviderConfigPage() {
           </button>
         )}
       </div>
-      <ScrollArea className="ios-scrollbar-none h-[calc(100vh-252px)]">
+      <ScrollArea className="ios-scrollbar-none min-h-0 flex-1">
         <div className="space-y-5 pr-1">
           {/* 搜索框 */}
           <div className="ios-group overflow-hidden px-4 py-3 sm:hidden">

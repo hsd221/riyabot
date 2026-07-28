@@ -5,7 +5,7 @@ import {
   Outlet,
   redirect,
 } from '@tanstack/react-router'
-import { TanStackRouterDevtools } from '@tanstack/router-devtools'
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { IndexPage } from './routes/index'
 import { StatisticsPage } from './routes/statistics'
 import { SettingsPage } from './routes/settings'

@@ -23,7 +23,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { toggleThemeWithTransition, useTheme } from '@/components/use-theme'
 import { useAnimation } from '@/hooks/use-animation'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
@@ -49,6 +49,15 @@ import {
 } from '@/lib/settings-manager'
 import { Slider } from '@/components/ui/slider'
 import { logWebSocket } from '@/lib/log-websocket'
+import {
+  ACCENT_PRESETS,
+  DEFAULT_ACCENT_COLOR,
+  GRADIENT_ACCENT_KEYS,
+  SOLID_ACCENT_KEYS,
+  applyAccentColor,
+  getAccentSwatch,
+  normalizeHexColor,
+} from '@/lib/accent-color'
 import {
   Dialog,
   DialogContent,
@@ -232,7 +241,7 @@ export function SettingsPage() {
               </TabsTrigger>
             </TabsList>
 
-            <ScrollArea className="mt-4 h-auto sm:mt-6 sm:h-[calc(100vh-280px)]">
+            <ScrollArea className="mt-4 h-auto sm:mt-6">
               <TabsContent value="appearance" className="mt-0">
                 <AppearanceTab />
               </TabsContent>
@@ -256,154 +265,34 @@ export function SettingsPage() {
   )
 }
 
-// 应用主题色的辅助函数
-function applyAccentColor(color: string) {
-  const root = document.documentElement
-
-  // 预设颜色配置
-  const colors = {
-    // 单色
-    blue: {
-      hsl: '211.29 100% 50%',
-      darkHsl: '210.12 100% 51.96%',
-      gradient: null,
-    },
-    purple: {
-      hsl: '240.94 60.95% 58.82%',
-      darkHsl: '240.87 73.4% 63.14%',
-      gradient: null,
-    },
-    green: {
-      hsl: '135.1 58.57% 49.22%',
-      darkHsl: '134.91 63.64% 50.39%',
-      gradient: null,
-    },
-    orange: {
-      hsl: '35.06 100% 50%',
-      darkHsl: '36.49 100% 51.96%',
-      gradient: null,
-    },
-    pink: {
-      hsl: '348.57 100% 58.82%',
-      darkHsl: '348 100% 60.78%',
-      gradient: null,
-    },
-    red: {
-      hsl: '3.19 100% 59.41%',
-      darkHsl: '3.35 100% 61.37%',
-      gradient: null,
-    },
-
-    // 渐变色
-    'gradient-sunset': {
-      hsl: '35.06 100% 50%',
-      darkHsl: '36.49 100% 51.96%',
-      gradient: 'linear-gradient(135deg, #FF9500 0%, #FF2D55 100%)',
-    },
-    'gradient-ocean': {
-      hsl: '211.29 100% 50%',
-      darkHsl: '210.12 100% 51.96%',
-      gradient: 'linear-gradient(135deg, #007AFF 0%, #5AC8FA 100%)',
-    },
-    'gradient-forest': {
-      hsl: '135.1 58.57% 49.22%',
-      darkHsl: '134.91 63.64% 50.39%',
-      gradient: 'linear-gradient(135deg, #34C759 0%, #00C7BE 100%)',
-    },
-    'gradient-aurora': {
-      hsl: '240.94 60.95% 58.82%',
-      darkHsl: '240.87 73.4% 63.14%',
-      gradient: 'linear-gradient(135deg, #5856D6 0%, #FF2D55 100%)',
-    },
-    'gradient-fire': {
-      hsl: '3.19 100% 59.41%',
-      darkHsl: '3.35 100% 61.37%',
-      gradient: 'linear-gradient(135deg, #FF3B30 0%, #FF9500 100%)',
-    },
-    'gradient-twilight': {
-      hsl: '240.94 60.95% 58.82%',
-      darkHsl: '240.87 73.4% 63.14%',
-      gradient: 'linear-gradient(135deg, #5856D6 0%, #AF52DE 100%)',
-    },
-  }
-
-  const selectedColor = colors[color as keyof typeof colors]
-  if (selectedColor) {
-    const isDark = root.classList.contains('dark')
-    // 设置主色
-    root.style.setProperty('--primary', isDark ? selectedColor.darkHsl : selectedColor.hsl)
-
-    // 设置渐变（如果有）
-    if (selectedColor.gradient) {
-      root.style.setProperty('--primary-gradient', selectedColor.gradient)
-      root.classList.add('has-gradient')
-    } else {
-      root.style.removeProperty('--primary-gradient')
-      root.classList.remove('has-gradient')
-    }
-  } else if (color.startsWith('#')) {
-    // 自定义颜色 - 将 HEX 转换为 HSL
-    const hexToHsl = (hex: string) => {
-      // 移除 # 号
-      hex = hex.replace('#', '')
-
-      // 转换为 RGB
-      const r = parseInt(hex.substring(0, 2), 16) / 255
-      const g = parseInt(hex.substring(2, 4), 16) / 255
-      const b = parseInt(hex.substring(4, 6), 16) / 255
-
-      const max = Math.max(r, g, b)
-      const min = Math.min(r, g, b)
-      let h = 0
-      let s = 0
-      const l = (max + min) / 2
-
-      if (max !== min) {
-        const d = max - min
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
-
-        switch (max) {
-          case r:
-            h = ((g - b) / d + (g < b ? 6 : 0)) / 6
-            break
-          case g:
-            h = ((b - r) / d + 2) / 6
-            break
-          case b:
-            h = ((r - g) / d + 4) / 6
-            break
-        }
-      }
-
-      return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`
-    }
-
-    root.style.setProperty('--primary', hexToHsl(color))
-    root.style.removeProperty('--primary-gradient')
-    root.classList.remove('has-gradient')
-  }
-}
-
 // 外观设置标签页
 function AppearanceTab() {
   const { theme, setTheme } = useTheme()
-  const { enableAnimations, setEnableAnimations, enableWavesBackground, setEnableWavesBackground } =
-    useAnimation()
-  const [accentColor, setAccentColor] = useState(() => {
-    return localStorage.getItem('accent-color') || 'blue'
+  const { enableAnimations, setEnableAnimations } = useAnimation()
+  const [accentColor, setAccentColor] = useState(() => getSetting('accentColor'))
+  const [accentDraft, setAccentDraft] = useState(() => {
+    const stored = getSetting('accentColor')
+    return normalizeHexColor(stored) ?? ACCENT_PRESETS[DEFAULT_ACCENT_COLOR].swatch
   })
+  const [accentError, setAccentError] = useState<string | null>(null)
   const [accentDialogOpen, setAccentDialogOpen] = useState(false)
-
-  // 页面加载时应用保存的主题色
-  useEffect(() => {
-    const savedColor = localStorage.getItem('accent-color') || 'blue'
-    applyAccentColor(savedColor)
-  }, [])
 
   const handleAccentColorChange = (color: string) => {
     setAccentColor(color)
-    localStorage.setItem('accent-color', color)
+    setAccentDraft(normalizeHexColor(color) ?? ACCENT_PRESETS[DEFAULT_ACCENT_COLOR].swatch)
+    setAccentError(null)
+    setSetting('accentColor', color)
     applyAccentColor(color)
+  }
+
+  const handleAccentDraftChange = (value: string) => {
+    setAccentDraft(value)
+    const normalized = normalizeHexColor(value)
+    if (!normalized) {
+      setAccentError('请输入 #RGB 或 #RRGGBB 格式的颜色值')
+      return
+    }
+    handleAccentColorChange(normalized)
   }
 
   const themeOptions: ThemeOptionProps[] = [
@@ -436,109 +325,17 @@ function AppearanceTab() {
     },
   ]
 
-  const solidColorOptions: ColorPresetOptionProps[] = [
-    {
-      value: 'blue',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '蓝色',
-      colorClass: '',
-      swatchStyle: { background: 'hsl(211.29 100% 50%)' },
-    },
-    {
-      value: 'purple',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '紫色',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(180deg, #706EF0 0%, #5856D6 100%)' },
-    },
-    {
-      value: 'green',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '绿色',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(180deg, #4ADE6C 0%, #34C759 100%)' },
-    },
-    {
-      value: 'orange',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '橙色',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(180deg, #FFAD32 0%, #FF9500 100%)' },
-    },
-    {
-      value: 'pink',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '粉色',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(180deg, #FF5D86 0%, #FF2D55 100%)' },
-    },
-    {
-      value: 'red',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '红色',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(180deg, #FF5A4F 0%, #FF3B30 100%)' },
-    },
-  ]
+  const createColorOption = (value: keyof typeof ACCENT_PRESETS): ColorPresetOptionProps => ({
+    value,
+    current: accentColor,
+    onChange: handleAccentColorChange,
+    label: ACCENT_PRESETS[value].label,
+    colorClass: '',
+    swatchStyle: { background: ACCENT_PRESETS[value].swatch },
+  })
 
-  const gradientColorOptions: ColorPresetOptionProps[] = [
-    {
-      value: 'gradient-sunset',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '日落',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(135deg, #FF9500 0%, #FF2D55 100%)' },
-    },
-    {
-      value: 'gradient-ocean',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '海洋',
-      colorClass: '',
-      swatchStyle: {
-        background: 'linear-gradient(135deg, #007AFF 0%, #5AC8FA 100%)',
-      },
-    },
-    {
-      value: 'gradient-forest',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '森林',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(135deg, #34C759 0%, #00C7BE 100%)' },
-    },
-    {
-      value: 'gradient-aurora',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '极光',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(135deg, #5856D6 0%, #FF2D55 100%)' },
-    },
-    {
-      value: 'gradient-fire',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '烈焰',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(135deg, #FF3B30 0%, #FF9500 100%)' },
-    },
-    {
-      value: 'gradient-twilight',
-      current: accentColor,
-      onChange: handleAccentColorChange,
-      label: '暮光',
-      colorClass: '',
-      swatchStyle: { background: 'linear-gradient(135deg, #5856D6 0%, #AF52DE 100%)' },
-    },
-  ]
+  const solidColorOptions = SOLID_ACCENT_KEYS.map(createColorOption)
+  const gradientColorOptions = GRADIENT_ACCENT_KEYS.map(createColorOption)
 
   const allColorOptions = [...solidColorOptions, ...gradientColorOptions]
   const selectedAccentOption = allColorOptions.find((option) => option.value === accentColor)
@@ -647,21 +444,22 @@ function AppearanceTab() {
                     <span className="min-w-0">
                       <span className="block text-[15px] font-medium leading-5">颜色</span>
                       <span className="block truncate font-mono text-[13px] leading-5 text-muted-foreground">
-                        {accentColor.startsWith('#') ? accentColor.toUpperCase() : '#007AFF'}
+                        {accentDraft.toUpperCase()}
                       </span>
                     </span>
                     <label className="ios-touch relative h-11 w-11 shrink-0 overflow-hidden rounded-[13px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
                       <span
                         className="absolute inset-0 rounded-[13px]"
                         style={{
-                          background: accentColor.startsWith('#')
-                            ? accentColor
-                            : 'hsl(211.29 100% 50%)',
+                          background: getAccentSwatch(accentColor),
                         }}
                       />
                       <input
                         type="color"
-                        value={accentColor.startsWith('#') ? accentColor : '#007AFF'}
+                        value={
+                          normalizeHexColor(accentColor) ??
+                          ACCENT_PRESETS[DEFAULT_ACCENT_COLOR].swatch
+                        }
                         onChange={(e) => handleAccentColorChange(e.target.value)}
                         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                         aria-label="选择自定义颜色"
@@ -672,12 +470,23 @@ function AppearanceTab() {
                     <span className="text-[15px] font-medium leading-5">HEX</span>
                     <Input
                       type="text"
-                      value={accentColor}
-                      onChange={(e) => handleAccentColorChange(e.target.value)}
+                      value={accentDraft}
+                      onChange={(e) => handleAccentDraftChange(e.target.value)}
+                      aria-invalid={Boolean(accentError)}
+                      aria-describedby={accentError ? 'accent-color-error-mobile' : undefined}
                       placeholder="#007AFF"
-                      className="h-11 max-w-[9.5rem] rounded-[13px] border-0 px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
+                      className="h-11 max-w-[9.5rem] rounded-[13px] border-0 px-3 text-right font-mono text-[15px] shadow-none"
                     />
                   </div>
+                  {accentError && (
+                    <p
+                      id="accent-color-error-mobile"
+                      role="alert"
+                      className="text-destructive px-4 pb-3 text-[13px]"
+                    >
+                      {accentError}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -717,21 +526,21 @@ function AppearanceTab() {
                 <span className="min-w-0">
                   <span className="block text-[15px] font-medium leading-5">颜色</span>
                   <span className="block truncate font-mono text-[13px] leading-5 text-muted-foreground">
-                    {accentColor.startsWith('#') ? accentColor.toUpperCase() : '#007AFF'}
+                    {accentDraft.toUpperCase()}
                   </span>
                 </span>
                 <label className="ios-touch relative h-11 w-11 shrink-0 overflow-hidden rounded-[13px] ring-1 ring-black/10 ring-offset-2 ring-offset-background dark:ring-white/15">
                   <span
                     className="absolute inset-0 rounded-[13px]"
                     style={{
-                      background: accentColor.startsWith('#')
-                        ? accentColor
-                        : 'hsl(211.29 100% 50%)',
+                      background: getAccentSwatch(accentColor),
                     }}
                   />
                   <input
                     type="color"
-                    value={accentColor.startsWith('#') ? accentColor : '#007AFF'}
+                    value={
+                      normalizeHexColor(accentColor) ?? ACCENT_PRESETS[DEFAULT_ACCENT_COLOR].swatch
+                    }
                     onChange={(e) => handleAccentColorChange(e.target.value)}
                     className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                     aria-label="选择自定义颜色"
@@ -742,12 +551,23 @@ function AppearanceTab() {
                 <span className="text-[15px] font-medium leading-5">HEX</span>
                 <Input
                   type="text"
-                  value={accentColor}
-                  onChange={(e) => handleAccentColorChange(e.target.value)}
+                  value={accentDraft}
+                  onChange={(e) => handleAccentDraftChange(e.target.value)}
+                  aria-invalid={Boolean(accentError)}
+                  aria-describedby={accentError ? 'accent-color-error-desktop' : undefined}
                   placeholder="#007AFF"
-                  className="h-11 max-w-[11rem] rounded-[13px] border-0 px-3 text-right font-mono text-[15px] shadow-none focus-visible:ring-0"
+                  className="h-11 max-w-[11rem] rounded-[13px] border-0 px-3 text-right font-mono text-[15px] shadow-none"
                 />
               </div>
+              {accentError && (
+                <p
+                  id="accent-color-error-desktop"
+                  role="alert"
+                  className="text-destructive px-4 pb-3 text-[13px]"
+                >
+                  {accentError}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -764,28 +584,13 @@ function AppearanceTab() {
             <div className="min-w-0 flex-1 space-y-0.5">
               <span className="block text-base font-medium">启用动画效果</span>
               <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
-                关闭后将禁用所有过渡动画和特效，提升性能
+                关闭后停用位移、缩放和循环动效，保留清晰的静态反馈
               </p>
             </div>
             <Switch
               id="animations"
               checked={enableAnimations}
               onCheckedChange={setEnableAnimations}
-            />
-          </label>
-
-          {/* 波浪背景开关 */}
-          <label htmlFor="waves-background" className="ios-row ios-touch cursor-pointer">
-            <div className="min-w-0 flex-1 space-y-0.5">
-              <span className="block text-base font-medium">登录页波浪背景</span>
-              <p className="hidden text-sm leading-relaxed text-muted-foreground sm:block">
-                关闭后登录页将使用纯色背景，适合低性能设备
-              </p>
-            </div>
-            <Switch
-              id="waves-background"
-              checked={enableWavesBackground}
-              onCheckedChange={setEnableWavesBackground}
             />
           </label>
         </div>
@@ -829,16 +634,17 @@ function PasswordField({
           type={visible ? 'text' : 'password'}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="h-11 rounded-[12px] bg-muted/60 pr-11 shadow-none"
+          className="h-11 rounded-[12px] bg-muted/60 pr-12 shadow-none"
           placeholder={placeholder}
           autoComplete={autoComplete}
           maxLength={maxLength}
         />
         <button
           type="button"
-          className="ios-touch absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
+          className="ios-touch absolute right-0 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent"
           onClick={onToggleVisibility}
           aria-label={(visible ? '隐藏' : '显示') + label}
+          aria-pressed={visible}
           title={(visible ? '隐藏' : '显示') + label}
         >
           {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -1690,10 +1496,10 @@ function AboutTab() {
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">前端框架</p>
             <ul className="list-inside list-disc space-y-0.5">
-              <li>React 19.2.0</li>
-              <li>TypeScript 5.7.2</li>
-              <li>Vite 6.0.7</li>
-              <li>TanStack Router 1.94.2</li>
+              <li>React 19.2.7</li>
+              <li>TypeScript 5.9.3</li>
+              <li>Vite 7.3.6</li>
+              <li>TanStack Router 1.170.18</li>
             </ul>
           </div>
           <div className="space-y-1.5">
@@ -1701,14 +1507,14 @@ function AboutTab() {
             <ul className="list-inside list-disc space-y-0.5">
               <li>shadcn/ui</li>
               <li>Radix UI</li>
-              <li>Tailwind CSS 3.4.17</li>
+              <li>Tailwind CSS 3.4.19</li>
               <li>Lucide Icons</li>
             </ul>
           </div>
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">后端</p>
             <ul className="list-inside list-disc space-y-0.5">
-              <li>Python 3.12+</li>
+              <li>Python 3.10+</li>
               <li>FastAPI</li>
               <li>Uvicorn</li>
               <li>WebSocket</li>
@@ -1717,8 +1523,8 @@ function AboutTab() {
           <div className="space-y-1.5">
             <p className="font-medium text-foreground">构建工具</p>
             <ul className="list-inside list-disc space-y-0.5">
-              <li>Bun / npm</li>
-              <li>ESLint 9.17.0</li>
+              <li>Bun 1.3.14</li>
+              <li>ESLint 9.39.5</li>
               <li>PostCSS</li>
             </ul>
           </div>
@@ -1752,16 +1558,7 @@ function AboutTab() {
               <p className="text-sm font-medium text-foreground">路由与状态管理</p>
               <div className="grid gap-2 text-xs sm:text-sm">
                 <LibraryItem name="TanStack Router" description="类型安全的路由库" license="MIT" />
-                <LibraryItem name="Zustand" description="轻量级状态管理" license="MIT" />
-              </div>
-            </div>
-
-            {/* 表单与验证 */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">表单处理</p>
-              <div className="grid gap-2 text-xs sm:text-sm">
-                <LibraryItem name="React Hook Form" description="高性能表单库" license="MIT" />
-                <LibraryItem name="Zod" description="TypeScript 优先的 schema 验证" license="MIT" />
+                <LibraryItem name="Jotai" description="原子化状态管理" license="MIT" />
               </div>
             </div>
 
@@ -1784,12 +1581,12 @@ function AboutTab() {
               </div>
             </div>
 
-            {/* 动画 */}
+            {/* 图表与编辑器 */}
             <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">动画效果</p>
+              <p className="text-sm font-medium text-foreground">图表与编辑器</p>
               <div className="grid gap-2 text-xs sm:text-sm">
-                <LibraryItem name="Framer Motion" description="React 动画库" license="MIT" />
-                <LibraryItem name="vaul" description="抽屉组件动画" license="MIT" />
+                <LibraryItem name="Recharts" description="数据可视化组件库" license="MIT" />
+                <LibraryItem name="CodeMirror" description="代码编辑器组件" license="MIT" />
               </div>
             </div>
 

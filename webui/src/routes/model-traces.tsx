@@ -1,12 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useState } from 'react'
-import {
-  AlertCircle,
-  ChevronLeft,
-  ChevronRight,
-  ScanSearch,
-  Search,
-  X,
-} from 'lucide-react'
+import { AlertCircle, ChevronLeft, ChevronRight, ScanSearch, Search, X } from 'lucide-react'
 import { ModelTraceDetailPanel } from '@/components/model-traces/model-trace-detail'
 import { resolveModelTraceDetailView } from '@/components/model-traces/model-trace-detail-state'
 import { ModelTraceList } from '@/components/model-traces/model-trace-list'
@@ -317,7 +310,7 @@ export function ModelTracesPage() {
           </div>
         )}
 
-        <div className="ios-card grid min-h-[44rem] overflow-hidden lg:h-[calc(100vh-18rem)] lg:min-h-[36rem] lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
+        <div className="ios-card grid min-h-[44rem] overflow-hidden lg:min-h-[36rem] lg:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)]">
           <section
             className="min-w-0 border-b border-border/60 lg:border-b-0 lg:border-r"
             aria-label="请求记录"
