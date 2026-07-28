@@ -1108,6 +1108,8 @@ export function MemoryPage() {
                           <button
                             type="button"
                             className="ios-row ios-touch min-h-[104px] w-full flex-col !items-stretch !justify-start gap-3 py-3 text-left sm:flex-row sm:!items-center sm:!justify-between"
+                            aria-expanded={expandedAtomId === atom.atom_id}
+                            aria-controls={`memory-atom-detail-${atom.atom_id}`}
                             onClick={() => handleAtomRowClick(atom)}
                           >
                             <span className="flex min-w-0 items-start gap-3">
@@ -1160,62 +1162,79 @@ export function MemoryPage() {
                             </span>
                           </button>
                           {expandedAtomId === atom.atom_id && (
-                            <div className="ios-row ios-row-plain min-h-[132px] !items-stretch !justify-start border-t border-border/60 bg-accent/25 py-4">
-                              {detailLoading ? (
-                                <div className="w-full space-y-2">
-                                  <Skeleton className="h-4 w-full" />
-                                  <Skeleton className="h-4 w-3/4" />
-                                  <Skeleton className="h-4 w-1/2" />
-                                </div>
-                              ) : expandedAtomDetail ? (
-                                <div className="w-full space-y-3">
-                                  <div>
-                                    <span className="text-xs text-muted-foreground">完整内容</span>
-                                    <p className="mt-1 text-sm leading-6">
-                                      {expandedAtomDetail.content}
-                                    </p>
+                            <div
+                              id={`memory-atom-detail-${atom.atom_id}`}
+                              className="border-t border-border/60 px-4 py-4 sm:px-5"
+                            >
+                              <div className="rounded-[16px] border border-black/[0.035] bg-muted/35 p-4 text-foreground shadow-[0_1px_0_rgba(255,255,255,0.58)_inset] dark:border-white/10 dark:bg-white/[0.055]">
+                                {detailLoading ? (
+                                  <div
+                                    className="w-full space-y-2"
+                                    role="status"
+                                    aria-label="正在加载原子详情"
+                                  >
+                                    <Skeleton className="h-4 w-full" />
+                                    <Skeleton className="h-4 w-3/4" />
+                                    <Skeleton className="h-4 w-1/2" />
                                   </div>
-                                  <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
-                                    <div>
-                                      <span className="text-xs text-muted-foreground">置信度</span>
-                                      <p>{(expandedAtomDetail.confidence * 100).toFixed(1)}%</p>
-                                    </div>
+                                ) : expandedAtomDetail ? (
+                                  <div className="w-full space-y-3">
                                     <div>
                                       <span className="text-xs text-muted-foreground">
-                                        来源场景
+                                        完整内容
                                       </span>
-                                      <p>{expandedAtomDetail.source_scene || '-'}</p>
-                                    </div>
-                                    <div>
-                                      <span className="text-xs text-muted-foreground">状态</span>
-                                      <p>
-                                        <Badge
-                                          variant={getStatusBadgeVariant(expandedAtomDetail.status)}
-                                        >
-                                          {ATOM_STATUSES.find(
-                                            (status) => status.value === expandedAtomDetail.status
-                                          )?.label ?? expandedAtomDetail.status}
-                                        </Badge>
+                                      <p className="mt-1 break-words text-sm leading-6">
+                                        {expandedAtomDetail.content}
                                       </p>
                                     </div>
-                                  </div>
-                                  {expandedAtomDetail.entities &&
-                                    expandedAtomDetail.entities.length > 0 && (
+                                    <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
                                       <div>
                                         <span className="text-xs text-muted-foreground">
-                                          关联实体
+                                          置信度
                                         </span>
-                                        <div className="mt-1 flex flex-wrap gap-2">
-                                          {expandedAtomDetail.entities.map((entity, index) => (
-                                            <Badge key={index} variant="outline">
-                                              {entity}
-                                            </Badge>
-                                          ))}
-                                        </div>
+                                        <p>{(expandedAtomDetail.confidence * 100).toFixed(1)}%</p>
                                       </div>
-                                    )}
-                                </div>
-                              ) : null}
+                                      <div>
+                                        <span className="text-xs text-muted-foreground">
+                                          来源场景
+                                        </span>
+                                        <p className="break-words">
+                                          {expandedAtomDetail.source_scene || '-'}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <span className="text-xs text-muted-foreground">状态</span>
+                                        <p>
+                                          <Badge
+                                            variant={getStatusBadgeVariant(
+                                              expandedAtomDetail.status
+                                            )}
+                                          >
+                                            {ATOM_STATUSES.find(
+                                              (status) => status.value === expandedAtomDetail.status
+                                            )?.label ?? expandedAtomDetail.status}
+                                          </Badge>
+                                        </p>
+                                      </div>
+                                    </div>
+                                    {expandedAtomDetail.entities &&
+                                      expandedAtomDetail.entities.length > 0 && (
+                                        <div>
+                                          <span className="text-xs text-muted-foreground">
+                                            关联实体
+                                          </span>
+                                          <div className="mt-1 flex flex-wrap gap-2">
+                                            {expandedAtomDetail.entities.map((entity, index) => (
+                                              <Badge key={index} variant="outline">
+                                                {entity}
+                                              </Badge>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                           )}
                         </Fragment>

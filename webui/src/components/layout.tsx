@@ -509,7 +509,7 @@ export function Layout({ children }: LayoutProps) {
           aria-label="关闭导航菜单"
           aria-hidden={!mobileMenuOpen}
           className={cn(
-            'motion-overlay fixed inset-0 z-40 bg-black/20 lg:hidden',
+            'motion-overlay fixed inset-0 z-40 h-[100dvh] w-screen bg-black/[0.18] lg:hidden',
             mobileMenuOpen
               ? 'opacity-100 backdrop-blur-[6px]'
               : 'pointer-events-none opacity-0 backdrop-blur-0'
