@@ -264,12 +264,22 @@ class WriteOpLogger:
             self._rotate_log()
 
     def _rotate_log(self) -> None:
-        """执行日志轮转：重命名当前文件 → 新建空文件
+        """执行日志轮转，并保留可恢复操作在活动 WAL 中。
 
         将当前 memory_write_ops.jsonl 重命名为 .jsonl.1 / .jsonl.2 / ...，
-        然后创建空的新文件继续写入。超过 50 个轮转文件时发出告警并裁剪最旧文件。
+        然后将未终态记录写入新的活动文件，确保启动恢复不依赖轮转归档。
+        超过 50 个轮转文件时发出告警并裁剪最旧文件。
         """
         base = self.log_file
+        try:
+            recoverable_ops = [op for op in self._read_all_ops() if not op.is_terminal]
+        except OSError as e:
+            logger.warning(
+                "write_ops 日志轮转前读取失败（保留原文件继续写入）",
+                extra={"error": str(e), "path": self.log_file},
+            )
+            return
+
         # 寻找下一个可用序号
         n = 1
         while os.path.exists(f"{base}.{n}"):
@@ -285,18 +295,28 @@ class WriteOpLogger:
             )
             # 轮转失败时不中断，继续写入原文件
             return
-        # 创建新空文件
+        # 新活动 WAL 必须先耐久写入可恢复记录；失败时还原归档，避免恢复记录丢失。
         try:
             with open(self.log_file, "w", encoding="utf-8") as f:
+                for op in recoverable_ops:
+                    f.write(json.dumps(op.to_dict(), ensure_ascii=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
         except OSError as e:
             logger.warning(
-                "write_ops 日志轮转后创建新文件失败",
+                "write_ops 日志轮转后重建活动文件失败，尝试还原归档",
                 extra={"error": str(e), "path": self.log_file},
             )
-            # 如果新文件创建失败但重命名已成功，日志已写入 .{n} 文件
-            # 下次调用 _check_rotate 时会再次尝试
+            try:
+                if os.path.exists(self.log_file):
+                    os.remove(self.log_file)
+                os.rename(new_path, self.log_file)
+            except OSError:
+                logger.exception(
+                    "write_ops 日志轮转回滚失败，恢复记录保留在归档文件中",
+                    extra={"archive": new_path, "path": self.log_file},
+                )
+            return
 
         logger.info(
             "write_ops 日志轮转",

@@ -275,7 +275,8 @@ class WriteOpDataModelTest(unittest.TestCase):
 
             with patch("builtins.open", side_effect=OSError("create fail")):
                 logger._rotate_log()
-            self.assertTrue(Path(f"{logger.log_file}.1").exists())
+            self.assertTrue(Path(logger.log_file).exists())
+            self.assertFalse(Path(f"{logger.log_file}.1").exists())
 
     def test_write_op_logger_rotation_removes_oldest_backup_when_many_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -288,6 +289,24 @@ class WriteOpDataModelTest(unittest.TestCase):
 
             self.assertFalse(Path(f"{logger.log_file}.1").exists())
             self.assertTrue(Path(f"{logger.log_file}.51").exists())
+
+    def test_write_op_logger_rotation_keeps_recoverable_operations_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = WriteOpLogger(str(Path(tmpdir) / "memory.db"))
+            logger._write_all_ops(
+                [
+                    make_op("completed", status=OpStatus.COMPLETED),
+                    make_op("pending", status=OpStatus.PENDING),
+                ]
+            )
+
+            logger._rotate_log()
+
+            recoverable = logger.get_recoverable_ops()
+            archived = Path(f"{logger.log_file}.1").read_text(encoding="utf-8")
+
+        self.assertEqual([op.op_id for op in recoverable], ["pending"])
+        self.assertIn('"op_id": "completed"', archived)
 
     def test_write_op_logger_rotation_tolerates_oldest_backup_delete_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
