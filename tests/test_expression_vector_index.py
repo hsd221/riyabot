@@ -110,6 +110,37 @@ class ExpressionVectorIndexTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(results[0]["id"], 1)
             self.assertTrue((Path(temp_dir) / "expression_vector_index.json").exists())
 
+    async def test_select_candidates_uses_in_memory_vectors_when_cache_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index = ExpressionVectorIndex(Path(temp_dir) / "expression_vector_index.json")
+            candidates = [
+                {
+                    "id": item_id,
+                    "source_id": "chat-a",
+                    "situation": f"情景 {item_id}",
+                    "style": f"风格 {item_id}",
+                    "count": 1,
+                }
+                for item_id in range(1, 11)
+            ]
+
+            with (
+                patch("src.bw_learner.expression_vector_index._has_embedding_model_configured", return_value=True),
+                patch(
+                    "src.bw_learner.expression_vector_index._get_embedding_with_model",
+                    new=AsyncMock(return_value=([1.0, 0.0], "profile-current")),
+                ),
+                patch(
+                    "src.bw_learner.expression_vector_index.is_active_embedding_signature",
+                    return_value=True,
+                ),
+                patch.object(index, "_write_entries", side_effect=OSError("disk full")),
+            ):
+                results = await index.select_candidates(candidates=candidates, query_text="测试", limit=5)
+
+            self.assertIsNotNone(results)
+            self.assertEqual(len(results), 5)
+
     async def test_rebuilds_cached_vectors_after_profile_and_dimension_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             index_path = Path(temp_dir) / "expression_vector_index.json"

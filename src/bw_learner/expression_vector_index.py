@@ -438,7 +438,13 @@ class ExpressionVectorIndex:
                     if self._entry_matches_query(entry, query_model, query_dimension):
                         usable_count += 1
                 if embedded_entries:
-                    self._write_entries(entries)
+                    try:
+                        self._write_entries(entries)
+                    except OSError:
+                        logger.exception(
+                            "表达向量缓存写入失败，本轮继续使用内存索引",
+                            event_code="embedding.index.expression.cache_write_failed",
+                        )
 
             if usable_count < MIN_VECTOR_CANDIDATES:
                 logger.info(f"表达向量选择不可用：可用索引不足 {usable_count}/{MIN_VECTOR_CANDIDATES}")
