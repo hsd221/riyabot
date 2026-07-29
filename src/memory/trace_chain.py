@@ -169,7 +169,7 @@ class TraceChainRecorder:
             return count
         except Exception as e:
             self._logger.error("批量记录追溯步骤失败", error=str(e))
-            return count
+            return 0
 
     # ── 工具查询 ─────────────────────────────────────────────────────
 

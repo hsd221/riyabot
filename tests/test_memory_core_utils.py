@@ -15,7 +15,13 @@ from src.memory.layer3_retrieval import RetrievedAtom
 from src.memory.store import MemoryStore, MemoryStoreConfig
 from src.memory.trace_chain import TraceChainRecorder, TraceStep
 from src.memory.schema import MemoryAtom as MemoryAtomModel
-from src.memory.schema import RawMessageArchive, configure_memory_database, initialize_database, memory_db
+from src.memory.schema import (
+    MemoryTraceChain,
+    RawMessageArchive,
+    configure_memory_database,
+    initialize_database,
+    memory_db,
+)
 
 
 def make_atom(**overrides) -> memory_atom.MemoryAtom:
@@ -600,6 +606,29 @@ class TraceChainRecorderTest(MemoryDatabaseFixtureMixin, unittest.TestCase):
         with patch("src.memory.trace_chain.MemoryTraceChain.select", side_effect=RuntimeError("boom")):
             self.assertEqual(recorder.get_lineage("atom-1"), [])
             self.assertEqual(recorder.get_atoms_with_traces(), [])
+
+    def test_batch_record_returns_zero_when_atomic_write_rolls_back(self) -> None:
+        recorder = TraceChainRecorder()
+        original_create = MemoryTraceChain.create
+        create_calls = 0
+
+        def fail_second_create(**kwargs):
+            nonlocal create_calls
+            create_calls += 1
+            if create_calls == 2:
+                raise RuntimeError("write failed")
+            return original_create(**kwargs)
+
+        with patch("src.memory.trace_chain.MemoryTraceChain.create", side_effect=fail_second_create):
+            count = recorder.batch_record(
+                [
+                    TraceStep("atom-1", 1, "Layer2Encoder", "extract"),
+                    TraceStep("atom-1", 2, "MemoryWriter", "write"),
+                ]
+            )
+
+        self.assertEqual(count, 0)
+        self.assertEqual(MemoryTraceChain.select().count(), 0)
 
 
 if __name__ == "__main__":
