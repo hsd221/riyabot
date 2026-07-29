@@ -686,7 +686,7 @@ export function MemoryPage() {
                       <button
                         key={item.value}
                         type="button"
-                        className="ios-touch flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-accent/55"
+                        className="ios-touch-row flex min-h-[62px] w-full items-center justify-between gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0"
                         aria-current={selected ? 'page' : undefined}
                         onClick={() => {
                           setActiveTab(item.value)
@@ -1107,7 +1107,7 @@ export function MemoryPage() {
                         <Fragment key={atom.atom_id}>
                           <button
                             type="button"
-                            className="ios-row ios-touch min-h-[104px] w-full flex-col !items-stretch !justify-start gap-3 py-3 text-left sm:flex-row sm:!items-center sm:!justify-between"
+                            className="ios-row ios-touch-row min-h-[104px] w-full flex-col !items-stretch !justify-start gap-3 py-3 text-left sm:flex-row sm:!items-center sm:!justify-between"
                             aria-expanded={expandedAtomId === atom.atom_id}
                             aria-controls={`memory-atom-detail-${atom.atom_id}`}
                             onClick={() => handleAtomRowClick(atom)}

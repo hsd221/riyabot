@@ -470,11 +470,10 @@ export function Layout({ children }: LayoutProps) {
                                   to={item.path}
                                   data-tour={item.tourId}
                                   className={cn(
-                                    'group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 transition-[background-color,color,box-shadow,transform] duration-[var(--motion-duration-control)] ease-[var(--motion-ease-standard)] last:border-b-0 active:scale-[0.99] lg:min-h-12 lg:rounded-[14px] lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
-                                    'hover:bg-accent/45 hover:text-accent-foreground dark:hover:bg-white/[0.08] lg:hover:bg-white/55 lg:hover:shadow-[0_4px_14px_rgba(31,41,55,0.045)]',
+                                    'ios-touch-row ios-nav-row group relative flex min-h-[58px] items-center overflow-hidden border-b border-border/50 py-3 last:border-b-0 lg:min-h-12 lg:rounded-[14px] lg:border-b-0 lg:py-2 lg:active:scale-[0.98]',
                                     isActive
                                       ? 'bg-[rgb(120_120_128_/_0.12)] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.58)] dark:bg-white/[0.08] lg:bg-[rgb(120_120_128_/_0.11)] lg:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025),0_6px_18px_rgba(31,41,55,0.055)]'
-                                      : 'text-muted-foreground hover:text-foreground',
+                                      : 'text-muted-foreground',
                                     sidebarOpen
                                       ? 'px-4 lg:px-3'
                                       : 'px-4 lg:mx-auto lg:w-12 lg:justify-center lg:px-0'
@@ -509,10 +508,8 @@ export function Layout({ children }: LayoutProps) {
           aria-label="关闭导航菜单"
           aria-hidden={!mobileMenuOpen}
           className={cn(
-            'motion-overlay fixed inset-0 z-40 h-[100dvh] w-screen bg-black/[0.18] lg:hidden',
-            mobileMenuOpen
-              ? 'opacity-100 backdrop-blur-[6px]'
-              : 'pointer-events-none opacity-0 backdrop-blur-0'
+            'motion-overlay fixed inset-0 z-40 h-[100dvh] w-screen bg-[rgb(15_23_42_/_0.14)] dark:bg-[rgb(0_0_0_/_0.2)] lg:hidden',
+            mobileMenuOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           )}
           onClick={() => setMobileMenuOpen(false)}
         />

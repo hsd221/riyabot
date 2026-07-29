@@ -381,7 +381,14 @@
     touch-action: manipulation;
     transition-duration: var(--motion-duration-control);
     transition-timing-function: var(--motion-ease-standard);
-    will-change: transform;
+  }
+
+  .ios-touch-row {
+    @apply transition-[background-color,color,box-shadow,filter] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/35;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition-duration: var(--motion-duration-control);
+    transition-timing-function: var(--motion-ease-standard);
   }
 
   @media (hover: hover) and (pointer: fine) {
@@ -389,10 +396,34 @@
       background-color: rgb(120 120 128 / 0.075);
       translate: 0 -0.5px;
     }
+
+    .ios-touch-row:hover {
+      background-color: rgb(120 120 128 / 0.075);
+    }
+
+    .ios-nav-row:hover {
+      color: hsl(var(--foreground));
+    }
+  }
+
+  @media (hover: hover) and (pointer: fine) and (min-width: 1024px) {
+    .ios-nav-row:hover {
+      background-color: rgb(255 255 255 / 0.55);
+      box-shadow: 0 4px 14px rgb(31 41 55 / 0.045);
+    }
+
+    .dark .ios-nav-row:hover {
+      background-color: rgb(255 255 255 / 0.08);
+    }
   }
 
   .ios-touch:active {
     background-color: rgb(120 120 128 / 0.13);
+    filter: saturate(0.98);
+  }
+
+  .ios-touch-row:active {
+    background-color: rgb(120 120 128 / 0.12);
     filter: saturate(0.98);
   }
 
@@ -512,7 +543,8 @@
       border-bottom-color: rgb(60 60 67 / 0.13);
     }
 
-    .ios-touch:active {
+    .ios-touch:active,
+    .ios-touch-row:active {
       background-color: rgb(120 120 128 / 0.12);
     }
   }
@@ -726,9 +758,7 @@
 }
 
 .motion-overlay {
-  transition:
-    opacity var(--motion-duration-fast) var(--motion-ease-standard),
-    backdrop-filter var(--motion-duration-control) var(--motion-ease-standard);
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .motion-overlay[data-state='open'] {
