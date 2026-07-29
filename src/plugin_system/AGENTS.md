@@ -23,7 +23,7 @@ Every plugin directory needs `_manifest.json` and a module containing a `BasePlu
 - `BaseCommand` for regex-matched direct commands.
 - `BaseEventHandler` for lifecycle and message events.
 
-Declare configuration through `ConfigField`-based `config_schema`; runtime values belong in the file named by `config_file_name`, not the manifest. Use the API facades for sending, querying messages, accessing models, and managing components. See `plugins/qq_emoji_sync/`, `plugins/onebot_adapter/`, and `docs-src/plugins/` for current examples and documentation.
+Declare configuration through `ConfigField`-based `config_schema`; runtime values belong in the file named by `config_file_name`, not the manifest. Use the API facades for sending, querying messages, accessing models, and managing components. For model calls specifically reuse `apis/llm_api.py`; do not add provider HTTP clients inside a plugin. See `plugins/qq_emoji_sync/`, `plugins/onebot_adapter/`, and `docs-src/plugins/` for current examples and documentation.
 
 ## Compatibility and Safety
 - Plugin and component names must not contain `.`; the registry adds namespaces such as `tool.search` itself.
