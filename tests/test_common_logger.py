@@ -445,7 +445,9 @@ class LoggerHandlerTest(unittest.TestCase):
 
         fake_logger = FakeLogger()
         with (
-            patch.object(app_logger, "LOG_DIR", types.SimpleNamespace(glob=Mock(side_effect=RuntimeError("glob failed")))),
+            patch.object(
+                app_logger, "LOG_DIR", types.SimpleNamespace(glob=Mock(side_effect=RuntimeError("glob failed")))
+            ),
             patch.object(app_logger, "get_logger", return_value=fake_logger),
         ):
             app_logger.cleanup_old_logs()
@@ -562,7 +564,7 @@ class LoggerConfigurationTest(unittest.TestCase):
             config_dir = root / "config"
             config_dir.mkdir()
             (config_dir / "bot_config.toml").write_text(
-                "[log]\nconsole_log_level = \"ERROR\"\nfile_log_level = \"WARNING\"\n",
+                '[log]\nconsole_log_level = "ERROR"\nfile_log_level = "WARNING"\n',
                 encoding="utf-8",
             )
 
@@ -664,7 +666,9 @@ class LoggerConfigurationTest(unittest.TestCase):
         try:
             app_logger._logging_initialized = False
             with (
-                patch.object(app_logger, "load_log_config", return_value={"console_log_level": "ERROR", "file_log_level": "INFO"}),
+                patch.object(
+                    app_logger, "load_log_config", return_value={"console_log_level": "ERROR", "file_log_level": "INFO"}
+                ),
                 patch.object(app_logger, "configure_third_party_loggers") as configure_third_party,
                 patch.object(app_logger, "reconfigure_existing_loggers") as reconfigure_existing,
                 patch.object(app_logger, "start_log_cleanup_task") as start_cleanup,

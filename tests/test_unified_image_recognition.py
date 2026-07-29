@@ -67,6 +67,7 @@ class VisionPromptContractTest(unittest.TestCase):
         self.assertIn("独立理解", prompt)
         self.assertNotIn("表情包", prompt)
 
+
 class UnifiedImageRecognitionTest(unittest.IsolatedAsyncioTestCase):
     def test_animation_detection_is_based_on_frames_instead_of_gif_file_type(self) -> None:
         self.assertTrue(utils_image.is_animated_image_base64_data(animated_png_base64()))
