@@ -287,9 +287,10 @@ class ChatManagerGetOrCreateTest(unittest.IsolatedAsyncioTestCase):
         manager = make_manager()
         original_user = make_user(nickname="Old")
         updated_user = make_user(nickname="New")
-        group_info = make_group()
-        stream_id = ChatManager._generate_stream_id("qq", original_user, group_info)
-        cached_stream = make_stream(stream_id, user_info=original_user, group_info=group_info)
+        original_group = make_group(name="Old Group")
+        updated_group = make_group(name="New Group")
+        stream_id = ChatManager._generate_stream_id("qq", original_user, original_group)
+        cached_stream = make_stream(stream_id, user_info=original_user, group_info=original_group)
         cached_stream.saved = True
         manager.streams[stream_id] = cached_stream
 
@@ -303,19 +304,21 @@ class ChatManagerGetOrCreateTest(unittest.IsolatedAsyncioTestCase):
             patch.object(chat_stream_module.time, "time", return_value=20.0),
             patch("src.chat.message_receive.message.MessageRecv", FakeMessageRecv),
         ):
-            returned_stream = await manager.get_or_create_stream("qq", updated_user, group_info)
+            returned_stream = await manager.get_or_create_stream("qq", updated_user, updated_group)
 
         self.assertIsNot(returned_stream, cached_stream)
         self.assertEqual(returned_stream.user_info.user_nickname, "New")
-        self.assertEqual(returned_stream.group_info.group_name, "Group")
+        self.assertEqual(returned_stream.group_info.group_name, "New Group")
         self.assertIs(returned_stream.context.get_last_message(), last_message)
         self.assertEqual(cached_stream.last_active_time, 20.0)
         self.assertFalse(cached_stream.saved)
+        self.assertEqual(cached_stream.user_info.user_nickname, "New")
+        self.assertEqual(cached_stream.group_info.group_name, "New Group")
 
         cached_stream.context = None
         manager.last_messages[stream_id] = SimpleNamespace(message_id="not-a-message-recv")
         with patch.object(chat_stream_module.time, "time", return_value=21.0):
-            returned_without_context = await manager.get_or_create_stream("qq", updated_user, group_info)
+            returned_without_context = await manager.get_or_create_stream("qq", updated_user, updated_group)
         self.assertIsNone(returned_without_context.context)
 
     async def test_get_or_create_stream_restores_database_stream_or_creates_new_stream(self) -> None:
