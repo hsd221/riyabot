@@ -586,7 +586,6 @@ class GeminiClient(BaseClient):
             enable_google_search = True
             # 去掉后缀并更新模型ID
             model_identifier = model_identifier.removesuffix("-search")
-            model_info.model_identifier = model_identifier
             logger.info(
                 "Gemini GoogleSearch 功能已启用",
                 event_code="llm.gemini.google_search.enabled",
@@ -632,7 +631,7 @@ class GeminiClient(BaseClient):
             if model_info.force_stream_mode:
                 req_task = asyncio.create_task(
                     self.client.aio.models.generate_content_stream(
-                        model=model_info.model_identifier,
+                        model=model_identifier,
                         contents=messages[0],
                         config=generation_config,
                     )
@@ -647,7 +646,7 @@ class GeminiClient(BaseClient):
             else:
                 req_task = asyncio.create_task(
                     self.client.aio.models.generate_content(
-                        model=model_info.model_identifier,
+                        model=model_identifier,
                         contents=messages[0],
                         config=generation_config,
                     )

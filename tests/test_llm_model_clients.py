@@ -286,6 +286,25 @@ class GeminiClientAdapterTest(unittest.TestCase):
 
 
 class GeminiClientRequestTest(unittest.IsolatedAsyncioTestCase):
+    async def test_get_response_keeps_search_model_identifier_for_later_requests(self) -> None:
+        generate_content = AsyncMock(return_value=SimpleNamespace())
+        client = gemini_client.GeminiClient.__new__(gemini_client.GeminiClient)
+        client.client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
+        model_info = ModelInfo(
+            model_identifier="gemini-2.5-flash-search",
+            name="gemini-test",
+            api_provider="gemini-provider",
+        )
+
+        await client.get_response(
+            model_info=model_info,
+            message_list=[MessageBuilder().set_role(RoleType.User).add_text_content("current context").build()],
+            async_response_parser=lambda _: (gemini_client.APIResponse(content="ok"), None),
+        )
+
+        self.assertEqual(generate_content.await_args.kwargs["model"], "gemini-2.5-flash")
+        self.assertEqual(model_info.model_identifier, "gemini-2.5-flash-search")
+
     async def test_get_response_passes_system_messages_through_the_sdk_system_instruction_field(self) -> None:
         generate_content = AsyncMock(return_value=SimpleNamespace())
         client = gemini_client.GeminiClient.__new__(gemini_client.GeminiClient)
