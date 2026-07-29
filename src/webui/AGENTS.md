@@ -19,6 +19,8 @@ Password authentication issues an HttpOnly `maibot_session`; do not store passwo
 
 All state-changing HTTP requests pass global same-site protection. Preserve request-size, connection-count, path-confinement, SSRF, and response-size limits. Sanitize server failures with `error_utils.py`; never return exception text, filesystem paths, tokens, or upstream response bodies. Provider `401/403` responses must remain translated to `502`, since frontend `401` means the WebUI session expired.
 
+Reuse `resolve_path_within()` for user-influenced paths, `RequestBodyLimitMiddleware`/`WEBUI_PATH_BODY_LIMITS` for body limits, and `internal_server_error()`/`log_exception_type()` for failures. Do not recreate route-local path checks, request-size checks, authentication guards, or error serializers.
+
 ## Deprecated or Placeholder Paths
 `knowledge_routes.py` is a disabled LPMM compatibility surface that returns empty data; new memory features belong in `memory_routes.py`. Legacy `/auth/verify`, `/auth/update`, and `/auth/regenerate` routes are deprecated. `/api/webui/system/reload-config` is a placeholder, not a supported reload mechanism. Do not build new clients on these paths.
 
