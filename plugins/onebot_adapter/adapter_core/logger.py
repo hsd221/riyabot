@@ -21,7 +21,9 @@ LEVEL_COLORS = {
     "ERROR": "<red>",
     "CRITICAL": "<magenta>",
 }
-CONSOLE_FORMAT = "{time:MM-DD HH:mm:ss} | <level>[{extra[level_abbr]}]</level> | <cyan>[{extra[module_name]}]</cyan> | {message}"
+CONSOLE_FORMAT = (
+    "{time:MM-DD HH:mm:ss} | <level>[{extra[level_abbr]}]</level> | <cyan>[{extra[module_name]}]</cyan> | {message}"
+)
 FILE_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | [{extra[level_abbr]}] | [{extra[module_name]}] | {message}"
 
 
