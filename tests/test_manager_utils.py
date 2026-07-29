@@ -130,6 +130,16 @@ class AsyncTaskManagerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manager.tasks, {})
 
+    def test_stale_completion_callback_keeps_new_task_with_reused_name(self) -> None:
+        manager = AsyncTaskManager()
+        old_task = Mock(get_name=Mock(return_value="same"))
+        new_task = Mock(get_name=Mock(return_value="same"))
+        manager.tasks["same"] = new_task
+
+        manager._remove_task_call_back(old_task)
+
+        self.assertIs(manager.tasks["same"], new_task)
+
     async def test_stop_and_wait_all_tasks_cancels_running_tasks_and_clears_abort_flag(self) -> None:
         manager = AsyncTaskManager()
         task = BlockingTask("blocking")

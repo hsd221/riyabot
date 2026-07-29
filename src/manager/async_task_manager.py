@@ -60,7 +60,7 @@ class AsyncTaskManager:
         call_back: 任务完成后移除任务
         """
         task_name = task.get_name()
-        if task_name in self.tasks:
+        if self.tasks.get(task_name) is task:
             # 任务完成后移除任务
             del self.tasks[task_name]
             logger.debug(f"已移除任务 '{task_name}'")
