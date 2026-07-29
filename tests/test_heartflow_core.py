@@ -343,6 +343,36 @@ class HeartFChattingActionTest(unittest.IsolatedAsyncioTestCase):
         store_action.assert_not_awaited()
         chat.action_planner.add_plan_excute_log.assert_called_once_with(result="")
 
+    async def test_observe_isolates_action_execution_exceptions(self) -> None:
+        chat = make_hfc()
+        action = SimpleNamespace(action_type="plugin")
+        chat.action_modifier = SimpleNamespace(modify_actions=AsyncMock())
+        chat.action_manager = SimpleNamespace(get_using_actions=Mock(return_value={}))
+        chat.action_planner = SimpleNamespace(
+            plan=AsyncMock(return_value=[action]),
+            add_plan_excute_log=Mock(),
+        )
+        chat.chat_stream.context = SimpleNamespace(get_template_name=Mock(return_value=None))
+        chat.start_cycle = Mock(return_value=({}, "tid"))
+        chat.end_cycle = Mock()
+        chat.print_cycle_info = Mock()
+        chat._execute_action = AsyncMock(side_effect=RuntimeError("plugin down"))
+        reflector = SimpleNamespace(check_and_ask=AsyncMock())
+
+        with (
+            patch.object(
+                heartFC_chat.expression_reflector_manager,
+                "get_or_create_reflector",
+                return_value=reflector,
+            ),
+            patch.object(heartFC_chat.reflect_tracker_manager, "get_tracker", return_value=None),
+            patch.object(heartFC_chat, "extract_and_distribute_messages", new=AsyncMock()),
+            patch.object(heartFC_chat.asyncio, "sleep", new=AsyncMock()),
+        ):
+            self.assertTrue(await chat._observe())
+
+        chat.action_planner.add_plan_excute_log.assert_called_once_with(result="")
+
     async def test_handle_action_uses_manager_and_reports_factory_or_execute_errors(self) -> None:
         chat = make_hfc()
         handler = SimpleNamespace(execute=AsyncMock(return_value=(True, "done")))

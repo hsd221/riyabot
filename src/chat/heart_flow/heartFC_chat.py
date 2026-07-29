@@ -386,11 +386,11 @@ class HeartFChatting:
 
             excute_result_str = ""
             for result in results:
-                excute_result_str += f"{result['action_type']} 执行结果:{result['result']}\n"
-
                 if isinstance(result, BaseException):
                     logger.error(f"{self.log_prefix} 动作执行异常: {result}")
                     continue
+
+                excute_result_str += f"{result['action_type']} 执行结果:{result['result']}\n"
 
                 if result["action_type"] != "reply":
                     action_success = result["success"]
