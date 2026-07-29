@@ -146,6 +146,15 @@ class ConfigBaseTest(unittest.TestCase):
         with patch("src.config.config_base.get_origin", return_value=type(None)):
             self.assertIsNone(ConfigBase._convert_field(None, object))
 
+    def test_from_dict_converts_variadic_tuple_fields(self) -> None:
+        @dataclass
+        class VariadicTupleConfig(ConfigBase):
+            names: tuple[str, ...]
+
+        config = VariadicTupleConfig.from_dict({"names": ["alpha", "beta", "gamma"]})
+
+        self.assertEqual(config.names, ("alpha", "beta", "gamma"))
+
     def test_string_representation_includes_dataclass_fields(self) -> None:
         config = NestedConfig(name="inner", count=2)
 

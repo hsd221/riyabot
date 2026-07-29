@@ -90,6 +90,8 @@ class ConfigBase:
             elif field_origin_type is set:
                 return {cls._convert_field(item, field_type_args[0]) for item in value}
             elif field_origin_type is tuple:
+                if len(field_type_args) == 2 and field_type_args[1] is Ellipsis:
+                    return tuple(cls._convert_field(item, field_type_args[0]) for item in value)
                 # 检查提供的value长度是否与类型参数一致
                 if len(value) != len(field_type_args):
                     raise TypeError(
