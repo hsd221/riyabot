@@ -53,6 +53,7 @@ class _MessageMediaRef:
 # 必须设上界，否则长期运行的进程会把每条历史消息的媒体状态永久留在内存里。
 _MAX_TRACKED_MEDIA_TASKS = 2048
 _MAX_TRACKED_MESSAGES = 2048
+_MAX_MEDIA_REFS_PER_MESSAGE = 256
 
 _media_task_states: "OrderedDict[str, _MediaTaskState]" = OrderedDict()
 _message_media_refs: "OrderedDict[str, list[_MessageMediaRef]]" = OrderedDict()
@@ -74,7 +75,16 @@ def _trim_media_task_states() -> None:
 
 def _trim_message_media_refs() -> None:
     while len(_message_media_refs) > _MAX_TRACKED_MESSAGES:
-        _message_media_refs.popitem(last=False)
+        message_id, refs = _message_media_refs.popitem(last=False)
+        for ref in refs:
+            _remove_state_message_ref(message_id, ref)
+
+
+def _remove_state_message_ref(message_id: str, ref: _MessageMediaRef) -> None:
+    state = _media_task_states.get(ref.task_key)
+    if state is not None:
+        with contextlib.suppress(ValueError):
+            state.message_refs.remove((message_id, ref.occurrence_index, ref.chat_id))
 
 
 def _hash_media_data(media_data: str) -> str:
@@ -193,7 +203,13 @@ def _remember_message_ref(
     refs = _message_media_refs.setdefault(message_id, [])
     _message_media_refs.move_to_end(message_id)
     _trim_message_media_refs()
-    occurrence_index = sum(1 for ref in refs if ref.kind == state.kind and ref.chat_id == normalized_chat_id)
+    occurrence_index = (
+        max(
+            (ref.occurrence_index for ref in refs if ref.kind == state.kind and ref.chat_id == normalized_chat_id),
+            default=-1,
+        )
+        + 1
+    )
     refs.append(
         _MessageMediaRef(
             kind=state.kind,
@@ -203,6 +219,9 @@ def _remember_message_ref(
         )
     )
     state.message_refs.append((message_id, occurrence_index, normalized_chat_id))
+    while len(refs) > _MAX_MEDIA_REFS_PER_MESSAGE:
+        removed_ref = refs.pop(0)
+        _remove_state_message_ref(message_id, removed_ref)
 
 
 def _schedule_placeholder_backfill(kind: str, message_id: str, result_text: str, occurrence_index: int) -> None:

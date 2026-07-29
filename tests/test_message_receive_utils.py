@@ -311,6 +311,36 @@ class MediaBackgroundHelpersTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(len(media_background._media_task_states), 7)
 
+    def test_message_media_refs_are_bounded_and_keep_latest_occurrences(self) -> None:
+        state = media_background._MediaTaskState(kind="image", media_hash="same-image")
+        task_key = "image:same-image"
+        media_background._media_task_states[task_key] = state
+
+        with patch.object(media_background, "_MAX_MEDIA_REFS_PER_MESSAGE", 3):
+            for _ in range(10):
+                media_background._remember_message_ref("msg-repeated", task_key, state)
+
+        refs = media_background._message_media_refs["msg-repeated"]
+        self.assertEqual([ref.occurrence_index for ref in refs], [7, 8, 9])
+        self.assertEqual(
+            state.message_refs, [("msg-repeated", 7, None), ("msg-repeated", 8, None), ("msg-repeated", 9, None)]
+        )
+
+    def test_message_cache_eviction_removes_task_state_refs(self) -> None:
+        state = media_background._MediaTaskState(kind="image", media_hash="shared-image")
+        task_key = "image:shared-image"
+        media_background._media_task_states[task_key] = state
+
+        with patch.object(media_background, "_MAX_TRACKED_MESSAGES", 3):
+            for index in range(10):
+                media_background._remember_message_ref(f"msg-{index}", task_key, state)
+
+        self.assertEqual(list(media_background._message_media_refs), ["msg-7", "msg-8", "msg-9"])
+        self.assertEqual(
+            state.message_refs,
+            [("msg-7", 0, None), ("msg-8", 0, None), ("msg-9", 0, None)],
+        )
+
     def test_hash_format_and_placeholder_replacement_helpers_are_stable(self) -> None:
         encoded = base64.b64encode(b"image-bytes").decode()
 
