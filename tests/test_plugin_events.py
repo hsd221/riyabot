@@ -272,6 +272,8 @@ class PluginEventsTest(unittest.IsolatedAsyncioTestCase):
         manager = EventsManager()
 
         self.assertFalse(manager.register_event_subscriber(MissingEventHandler.get_handler_info(), MissingEventHandler))
+        self.assertFalse(manager.register_event_subscriber(UnknownEventHandler.get_handler_info(), UnknownEventHandler))
+        self.assertNotIn("unknown_event", manager._handler_mapping)
         self.assertTrue(manager._insert_event_handler(MissingEventHandler, MissingEventHandler.get_handler_info()))
         self.assertEqual(manager._events_subscribers["custom_missing_event"][0].handler_name, "missing_event")
         self.assertFalse(

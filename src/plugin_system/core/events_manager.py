@@ -87,8 +87,10 @@ class EventsManager:
             )
             return False
 
+        if not self._insert_event_handler(handler_class, handler_info):
+            return False
         self._handler_mapping[handler_name] = handler_class
-        return self._insert_event_handler(handler_class, handler_info)
+        return True
 
     async def handle_mai_events(
         self,
