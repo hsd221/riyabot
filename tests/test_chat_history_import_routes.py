@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from peewee import SqliteDatabase
+from pydantic import ValidationError
 
 
 class FakeUploadFile:
@@ -389,6 +390,7 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
                     participant_ids=["20001", "20002"],
                     extract_memories=True,
                     update_profiles=True,
+                    extraction_concurrency=4,
                 ),
                 None,
                 None,
@@ -405,8 +407,10 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.result["candidate_catalog"]["total"], 0)
         self.assertTrue(detail.options["extract_memories"])
         self.assertTrue(detail.options["update_profiles"])
+        self.assertEqual(detail.options["extraction_concurrency"], 4)
         self.assertTrue(captured_options["extract_memories"])
         self.assertTrue(captured_options["update_profiles"])
+        self.assertEqual(captured_options["extraction_concurrency"], 4)
         self.assertEqual(detail.result["enrichment_store_result"]["memories_created"], 1)
         enrichment.assert_awaited_once()
         enrichment_options = enrichment.await_args.kwargs
@@ -458,8 +462,10 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(started.options["extract_memories"])
         self.assertFalse(started.options["update_profiles"])
+        self.assertEqual(started.options["extraction_concurrency"], 1)
         self.assertFalse(captured_options["extract_memories"])
         self.assertFalse(captured_options["update_profiles"])
+        self.assertEqual(captured_options["extraction_concurrency"], 1)
         enrichment.assert_not_awaited()
         detail = await self.routes.get_chat_history_import(response.import_id, None, None)
         self.assertIsNone(detail.result["enrichment_store_result"])
@@ -627,6 +633,11 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unknown.exception.status_code, 422)
         self.assertEqual(self.model.get().status, "ready")
 
+    def test_start_request_rejects_out_of_range_extraction_concurrency(self) -> None:
+        for value in (0, 17, True):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                self.routes.ChatHistoryImportStartRequest(extraction_concurrency=value)
+
     async def test_get_marks_a_running_task_interrupted_after_process_restart(self) -> None:
         response = await self._upload()
         task = self.model.get()
@@ -711,7 +722,7 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.routes, "ChatHistoryLearner", return_value=CheckpointingFailure()):
             await self.routes.start_chat_history_import(
                 response.import_id,
-                self.routes.ChatHistoryImportStartRequest(depth="full"),
+                self.routes.ChatHistoryImportStartRequest(depth="full", extraction_concurrency=3),
                 None,
                 None,
             )
@@ -724,10 +735,12 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((self.root / response.import_id / "extraction_checkpoints.jsonl").exists())
 
         captured_resume = {}
+        captured_concurrency: list[int] = []
 
         class ResumingLearner:
             async def learn(self, _path, **kwargs):
                 captured_resume.update(kwargs["resume_checkpoints"])
+                captured_concurrency.append(kwargs["extraction_concurrency"])
                 return HistoryLearningResult(
                     candidates=HistoryCandidates(),
                     total_window_count=1,
@@ -744,6 +757,7 @@ class ChatHistoryImportRoutesTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(resumed.status, "running")
         self.assertEqual(list(captured_resume), ["window-000001"])
+        self.assertEqual(captured_concurrency, [3])
         completed = await self.routes.get_chat_history_import(response.import_id, None, None)
         self.assertEqual(completed.status, "completed")
         self.assertEqual(completed.resume.attempt_count, 2)
