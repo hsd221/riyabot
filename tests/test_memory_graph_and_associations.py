@@ -79,6 +79,19 @@ class AtomAssociationStoreTest(MemoryGraphDatabaseFixtureMixin, unittest.TestCas
         self.assertEqual(store.prune_weak(threshold=0.5), 1)
         self.assertEqual(store.count(), 2)
 
+    def test_build_from_batch_does_not_count_failed_association_writes(self) -> None:
+        store = AtomAssociationStore()
+        atoms = [
+            SimpleNamespace(atom_id="atom-a", entities=["小明", "爵士乐"], created_at=100.0),
+            SimpleNamespace(atom_id="atom-b", entities=["小明", "爵士乐"], created_at=130.0),
+        ]
+
+        with patch.object(AtomAssociationModel, "create", side_effect=RuntimeError("write failed")):
+            created = store.build_from_batch(atoms)
+
+        self.assertEqual(created, 0)
+        self.assertEqual(store.count(), 0)
+
     def test_store_failures_return_safe_defaults(self) -> None:
         store = AtomAssociationStore()
 

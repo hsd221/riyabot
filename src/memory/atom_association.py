@@ -75,7 +75,7 @@ class AtomAssociationStore:
         atom_b_id: str,
         assoc_type: AssociationType,
         weight: float,
-    ) -> None:
+    ) -> bool:
         """Upsert：创建或增加 evidence_count 并提升权重。
 
         原子 ID 通过字典序归一化，确保 (a, b) 和 (b, a) 映射到同一行。
@@ -102,8 +102,10 @@ class AtomAssociationStore:
                         weight=min(1.0, weight),
                         evidence_count=1,
                     )
+            return True
         except Exception as e:
             logger.error("添加关联失败: %s <-> %s: %s", atom_a_id, atom_b_id, e)
+            return False
 
     def get_associations(self, atom_id: str) -> list[dict[str, Any]]:
         """返回指定原子的所有关联（双向）。"""
@@ -236,32 +238,32 @@ class AtomAssociationStore:
                     if len(common) >= 2:
                         union = set_a | set_b
                         jaccard = len(common) / len(union) if union else 0
-                        self.add_association(
+                        if self.add_association(
                             a.atom_id,
                             b.atom_id,
                             AssociationType.CO_OCCURRENCE,
                             jaccard * 0.7,
-                        )
-                        count += 1
+                        ):
+                            count += 1
 
                 # -- 因果（CAUSAL）：实体包含 --
                 if set_a and set_b and set_a != set_b:
                     if set_a.issubset(set_b):
-                        self.add_association(
+                        if self.add_association(
                             a.atom_id,
                             b.atom_id,
                             AssociationType.CAUSAL,
                             0.6,
-                        )
-                        count += 1
+                        ):
+                            count += 1
                     elif set_b.issubset(set_a):
-                        self.add_association(
+                        if self.add_association(
                             b.atom_id,
                             a.atom_id,
                             AssociationType.CAUSAL,
                             0.6,
-                        )
-                        count += 1
+                        ):
+                            count += 1
 
                 # -- 顺序（SEQUENTIAL）：60s 内同一流 --
                 if stream_map:
@@ -274,13 +276,13 @@ class AtomAssociationStore:
                             time_gap = abs(a_ts - b_ts)
                             if time_gap <= 60:
                                 weight = 1.0 - (time_gap / 60.0)
-                                self.add_association(
+                                if self.add_association(
                                     a.atom_id,
                                     b.atom_id,
                                     AssociationType.SEQUENTIAL,
                                     weight,
-                                )
-                                count += 1
+                                ):
+                                    count += 1
 
         if count > 0:
             logger.info("批量关联构建完成: 新增 %d 条关联 (atoms=%d)", count, n)
