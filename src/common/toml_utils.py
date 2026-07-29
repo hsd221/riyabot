@@ -4,10 +4,14 @@ TOML 工具函数
 提供 TOML 文件的格式化保存功能，确保数组等元素以美观的多行格式输出。
 """
 
+import os
 import re
+import stat
+import tempfile
 from typing import Any
+
 import tomlkit
-from tomlkit.items import AoT, Table, Array
+from tomlkit.items import AoT, Array, Table
 
 
 def _format_toml_value(obj: Any, threshold: int, depth: int = 0) -> Any:
@@ -99,7 +103,6 @@ def save_toml_with_format(
         preserve_comments: 是否保留原文件的注释和格式（默认 True）
             若为 True 且文件已存在且 data 不是 tomlkit 文档，会先读取原文件，再将 data 合并进去
     """
-    import os
     from tomlkit import TOMLDocument
 
     # 如果需要保留注释、文件存在、且 data 不是已有的 tomlkit 文档，先读取原文件再合并
@@ -113,8 +116,25 @@ def save_toml_with_format(
     output = tomlkit.dumps(formatted)
     # 规范化：将 3+ 连续空行压缩为 1 个空行，防止空行累积
     output = re.sub(r"\n{3,}", "\n\n", output)
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(output)
+    target_path = os.path.abspath(file_path)
+    target_directory = os.path.dirname(target_path)
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        dir=target_directory,
+        prefix=f".{os.path.basename(target_path)}.",
+        suffix=".tmp",
+    )
+    os.close(file_descriptor)
+    try:
+        if os.path.exists(target_path):
+            os.chmod(temporary_path, stat.S_IMODE(os.stat(target_path).st_mode))
+        with open(temporary_path, "w", encoding="utf-8") as f:
+            f.write(output)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, target_path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 def format_toml_string(data: Any, multiline_threshold: int = 1) -> str:

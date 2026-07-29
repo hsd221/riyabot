@@ -153,6 +153,41 @@ class TomlUtilsTest(unittest.TestCase):
             self.assertNotIn("# old", output)
             self.assertEqual(tomlkit.parse(output)["name"], "new")
 
+    def test_save_toml_with_format_keeps_existing_file_when_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            original_content = 'name = "old"\n'
+            config_path.write_text(original_content, encoding="utf-8")
+            real_open = open
+
+            class FailingWriter:
+                def __init__(self, path: str, encoding: str) -> None:
+                    self._stream = real_open(path, "w", encoding=encoding)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc_value, traceback) -> None:
+                    self._stream.close()
+
+                def write(self, content: str) -> None:
+                    self._stream.write(content[:5])
+                    self._stream.flush()
+                    raise OSError("disk full")
+
+            def fail_writes(path, mode="r", encoding=None, **kwargs):
+                if mode == "w":
+                    return FailingWriter(path, encoding or "utf-8")
+                return real_open(path, mode, encoding=encoding, **kwargs)
+
+            with (
+                patch("builtins.open", side_effect=fail_writes),
+                self.assertRaisesRegex(OSError, "disk full"),
+            ):
+                save_toml_with_format({"name": "new"}, str(config_path), preserve_comments=False)
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original_content)
+
 
 class TcpConnectorTest(unittest.IsolatedAsyncioTestCase):
     async def test_get_tcp_connector_uses_shared_ssl_context_and_can_be_closed(self) -> None:
