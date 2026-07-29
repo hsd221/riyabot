@@ -77,7 +77,9 @@ class Message(MessageBase):
         self.chat_stream = chat_stream
         # 文本处理相关属性
         self.processed_plain_text = processed_plain_text
-        self.message_components = from_seg_to_components(message_segment) if message_segment else MessageComponentSequence()
+        self.message_components = (
+            from_seg_to_components(message_segment) if message_segment else MessageComponentSequence()
+        )
 
         # 回复消息
         self.reply = reply

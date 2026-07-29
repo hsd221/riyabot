@@ -78,7 +78,9 @@ def parse_message_segments(segment) -> list:
             segment = Seg.from_dict(segment)
         except Exception:
             if segment.get("data") is not None:
-                return [{"type": "unknown", "original_type": segment.get("type", "unknown"), "data": str(segment["data"])}]
+                return [
+                    {"type": "unknown", "original_type": segment.get("type", "unknown"), "data": str(segment["data"])}
+                ]
             return result
 
     if segment.type == "seglist":
@@ -135,7 +137,9 @@ def parse_message_segments(segment) -> list:
         forward_items = []
         if segment.data:
             for item in segment.data:
-                node_segment = item.get("message_segment") if isinstance(item, dict) else getattr(item, "message_segment", None)
+                node_segment = (
+                    item.get("message_segment") if isinstance(item, dict) else getattr(item, "message_segment", None)
+                )
                 forward_items.append(
                     {
                         "content": parse_message_segments(node_segment),
@@ -211,9 +215,7 @@ def parse_message_components(components: MessageComponentSequence | None) -> lis
             result.extend(parse_message_components(component.sequence))
         elif isinstance(component, UnknownComponent):
             if component.data is not None:
-                result.append(
-                    {"type": "unknown", "original_type": component.segment_type, "data": str(component.data)}
-                )
+                result.append({"type": "unknown", "original_type": component.segment_type, "data": str(component.data)})
 
     return result
 
