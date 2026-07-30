@@ -1,8 +1,12 @@
 name: Ruff PR Check
 on: [ pull_request ]
+
+permissions:
+  contents: read
+
 jobs:
   ruff:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -14,8 +18,5 @@ jobs:
           version: "latest"
       - name: Run Ruff Check (No Fix)
         run: ruff check --output-format=github
-        shell: pwsh
       - name: Run Ruff Format Check
         run: ruff format --check --diff
-        shell: pwsh
-
