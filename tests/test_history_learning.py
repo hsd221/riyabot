@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import tempfile
@@ -329,6 +330,241 @@ class HistoryLearningPromptTest(unittest.IsolatedAsyncioTestCase):
         # 每个窗口各一次抽取；全部窗口都没抽到候选时不再空跑一次聚合调用。
         self.assertEqual(result.model_call_count, 10)
         self.assertEqual(llm.generate_response_async.await_count, 10)
+
+    async def test_window_extraction_honors_concurrency_without_reordering_checkpoints(self) -> None:
+        from src.bw_learner.history_learning import (
+            ChatHistoryLearner,
+            ExpressionCandidate,
+            HistoryCandidates,
+            HistoryWindowCheckpoint,
+            HistoryWindowResult,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(
+                normalized,
+                [
+                    make_message("m1", "第一个窗口的有效表达", timestamp=1_750_000_000.0),
+                    make_message("m2", "第二个窗口的有效表达", timestamp=1_750_000_120.0),
+                    make_message("m3", "第三个窗口的有效表达", timestamp=1_750_000_240.0),
+                ],
+            )
+            checkpoints: list[HistoryWindowCheckpoint] = []
+            started_windows: list[str] = []
+            extracting_progress: list[tuple[int, int]] = []
+            second_window_finished = asyncio.Event()
+            active_count = 0
+            max_active_count = 0
+
+            async def record_progress(stage: str, current: int, total: int) -> None:
+                if stage == "extracting":
+                    extracting_progress.append((current, total))
+
+            class OutOfOrderLearner(ChatHistoryLearner):
+                async def extract_window_result(self, window, **kwargs):
+                    nonlocal active_count, max_active_count
+                    active_count += 1
+                    max_active_count = max(max_active_count, active_count)
+                    started_windows.append(window.window_id)
+                    try:
+                        await kwargs["page_progress"](1)
+                        if window.window_id == "window-000001":
+                            await second_window_finished.wait()
+                        elif window.window_id == "window-000002":
+                            second_window_finished.set()
+                        return HistoryWindowResult(
+                            candidates=HistoryCandidates(
+                                expressions=(
+                                    ExpressionCandidate(
+                                        f"{window.window_id} 场景",
+                                        f"{window.window_id} 表达",
+                                        (window.messages[0].message_id,),
+                                        0.8,
+                                    ),
+                                )
+                            )
+                        )
+                    finally:
+                        active_count -= 1
+
+                async def consolidate_hierarchically(self, candidates, _evidence, **_kwargs):
+                    return candidates, 0
+
+            result = await asyncio.wait_for(
+                OutOfOrderLearner(llm=SimpleNamespace()).learn(
+                    normalized,
+                    chat_id="chat-1",
+                    chat_name="测试群",
+                    depth="full",
+                    store=False,
+                    window_options={"max_gap_seconds": 60},
+                    extraction_concurrency=2,
+                    progress=record_progress,
+                    checkpoint_callback=checkpoints.append,
+                ),
+                timeout=1,
+            )
+
+        self.assertEqual(started_windows[:2], ["window-000001", "window-000002"])
+        self.assertEqual(max_active_count, 2)
+        self.assertEqual(
+            [checkpoint.window_id for checkpoint in checkpoints],
+            ["window-000001", "window-000002", "window-000003"],
+        )
+        self.assertEqual(
+            [candidate.style for candidate in result.candidate_catalog.expressions],
+            ["window-000001 表达", "window-000002 表达", "window-000003 表达"],
+        )
+        extracting_ratios = [current / max(1, total) for current, total in extracting_progress]
+        self.assertEqual(extracting_ratios, sorted(extracting_ratios))
+
+    async def test_window_failure_cancels_later_work_and_keeps_checkpoint_prefix(self) -> None:
+        from src.bw_learner.history_learning import (
+            ChatHistoryLearner,
+            HistoryCandidates,
+            HistoryWindowCheckpoint,
+            HistoryWindowResult,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(
+                normalized,
+                [
+                    make_message("m1", "第一个窗口的有效表达", timestamp=1_750_000_000.0),
+                    make_message("m2", "第二个窗口的有效表达", timestamp=1_750_000_120.0),
+                    make_message("m3", "第三个窗口的有效表达", timestamp=1_750_000_240.0),
+                ],
+            )
+            checkpoints: list[HistoryWindowCheckpoint] = []
+            third_window_started = asyncio.Event()
+            third_window_cancelled = asyncio.Event()
+
+            class FailingConcurrentLearner(ChatHistoryLearner):
+                async def extract_window_result(self, window, **kwargs):
+                    await kwargs["page_progress"](1)
+                    if window.window_id == "window-000001":
+                        await third_window_started.wait()
+                        return HistoryWindowResult(candidates=HistoryCandidates())
+                    if window.window_id == "window-000002":
+                        await third_window_started.wait()
+                        raise RuntimeError("model unavailable")
+                    third_window_started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        third_window_cancelled.set()
+                        raise
+
+                async def consolidate_hierarchically(self, *_args, **_kwargs):
+                    raise AssertionError("提取中断后不应进入合并")
+
+            with self.assertRaisesRegex(RuntimeError, "model unavailable"):
+                await asyncio.wait_for(
+                    FailingConcurrentLearner(llm=SimpleNamespace()).learn(
+                        normalized,
+                        chat_id="chat-1",
+                        chat_name="测试群",
+                        depth="full",
+                        store=False,
+                        window_options={"max_gap_seconds": 60},
+                        extraction_concurrency=3,
+                        checkpoint_callback=checkpoints.append,
+                    ),
+                    timeout=1,
+                )
+
+        self.assertTrue(third_window_cancelled.is_set())
+        self.assertEqual([checkpoint.window_id for checkpoint in checkpoints], ["window-000001"])
+
+    async def test_concurrent_follow_ups_keep_extraction_progress_monotonic(self) -> None:
+        from src.bw_learner.history_learning import (
+            ChatHistoryLearner,
+            HistoryCandidates,
+            HistoryWindowResult,
+            WindowContinuation,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(
+                normalized,
+                [
+                    make_message("m1", "第一个窗口等待后续", timestamp=1_750_000_000.0),
+                    make_message("m2", "第二个窗口等待后续", timestamp=1_750_000_120.0),
+                    make_message("m3", "第三个窗口给出后续", timestamp=1_750_000_240.0),
+                ],
+            )
+            extracting_progress: list[tuple[int, int]] = []
+            initial_ready = 0
+            follow_up_ready = 0
+            all_initial_ready = asyncio.Event()
+            all_follow_ups_ready = asyncio.Event()
+
+            async def record_progress(stage: str, current: int, total: int) -> None:
+                if stage == "extracting":
+                    extracting_progress.append((current, total))
+
+            class ConcurrentContinuationLearner(ChatHistoryLearner):
+                async def extract_window_result(self, window, **kwargs):
+                    nonlocal initial_ready, follow_up_ready
+                    if window.window_id.endswith(":continuation"):
+                        follow_up_ready += 1
+                        if follow_up_ready == 2:
+                            all_follow_ups_ready.set()
+                        await all_follow_ups_ready.wait()
+                        await kwargs["page_progress"](1)
+                        return HistoryWindowResult(candidates=HistoryCandidates())
+
+                    await kwargs["page_progress"](1)
+                    initial_ready += 1
+                    if initial_ready == 3:
+                        all_initial_ready.set()
+                    await all_initial_ready.wait()
+                    return HistoryWindowResult(
+                        candidates=HistoryCandidates(),
+                        continuation=WindowContinuation(
+                            needs_follow_up=True,
+                            tail_evidence_ids=(window.messages[-1].message_id,),
+                        ),
+                    )
+
+                async def consolidate_hierarchically(self, candidates, _evidence, **_kwargs):
+                    return candidates, 0
+
+            await asyncio.wait_for(
+                ConcurrentContinuationLearner(llm=SimpleNamespace()).learn(
+                    normalized,
+                    chat_id="chat-1",
+                    chat_name="测试群",
+                    depth="full",
+                    store=False,
+                    window_options={"max_gap_seconds": 60},
+                    extraction_concurrency=3,
+                    progress=record_progress,
+                ),
+                timeout=1,
+            )
+
+        extracting_ratios = [current / max(1, total) for current, total in extracting_progress]
+        self.assertEqual(extracting_ratios, sorted(extracting_ratios))
+
+    async def test_learning_rejects_out_of_range_extraction_concurrency(self) -> None:
+        from src.bw_learner.history_learning import ChatHistoryLearner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / "normalized.jsonl"
+            write_normalized_messages(normalized, [make_message("m1", "一条有效表达")])
+
+            with self.assertRaisesRegex(ValueError, "extraction concurrency"):
+                await ChatHistoryLearner(llm=SimpleNamespace()).learn(
+                    normalized,
+                    chat_id="chat-1",
+                    chat_name="测试群",
+                    store=False,
+                    extraction_concurrency=0,
+                )
 
     async def test_learning_resumes_after_the_last_completed_window_checkpoint(self) -> None:
         from src.bw_learner.history_learning import (

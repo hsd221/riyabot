@@ -22,6 +22,7 @@ from src.bw_learner.history_enrichment import (
 )
 from src.bw_learner.history_import import ChatHistoryFormatError, analyze_qq_chat_export, index_history_windows
 from src.bw_learner.history_learning import (
+    DEFAULT_HISTORY_EXTRACTION_CONCURRENCY,
     DEPTH_WINDOW_BUDGETS,
     ChatHistoryLearner,
     HistoryCandidates,
@@ -683,6 +684,10 @@ async def _run_learning(import_id: str) -> None:
                 should_cancel=should_cancel,
                 extract_memories=extract_memories,
                 update_profiles=update_profiles,
+                extraction_concurrency=options.get(
+                    "extraction_concurrency",
+                    DEFAULT_HISTORY_EXTRACTION_CONCURRENCY,
+                ),
                 resume_checkpoints=checkpoint_session.checkpoints,
                 checkpoint_callback=checkpoint_session.persist,
             )
@@ -833,6 +838,7 @@ async def start_chat_history_import(
         "participant_scope": participant_scope,
         "extract_memories": request_body.extract_memories,
         "update_profiles": request_body.update_profiles,
+        "extraction_concurrency": request_body.extraction_concurrency,
     }
     remove_history_resume_artifacts(_task_dir(import_id))
     updated = (

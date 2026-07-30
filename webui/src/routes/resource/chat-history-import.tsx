@@ -138,6 +138,7 @@ export function ChatHistoryImportPage() {
   })
   const [extractMemories, setExtractMemories] = useState(false)
   const [updateProfiles, setUpdateProfiles] = useState(false)
+  const [extractionConcurrency, setExtractionConcurrency] = useState(1)
   const activeTaskId = activeTask?.import_id
   const activeTaskStatus = activeTask?.status
 
@@ -204,6 +205,7 @@ export function ChatHistoryImportPage() {
       setParticipantScope({ mode: 'all', excluded_ids: [] })
       setExtractMemories(false)
       setUpdateProfiles(false)
+      setExtractionConcurrency(1)
       return
     }
     const configuredScope = activeTask.options.participant_scope
@@ -217,11 +219,15 @@ export function ChatHistoryImportPage() {
     setDepth(activeTask.options.depth ?? 'balanced')
     setExtractMemories(activeTask.options.extract_memories ?? false)
     setUpdateProfiles(activeTask.options.update_profiles ?? false)
+    setExtractionConcurrency(
+      Math.min(16, Math.max(1, Math.trunc(activeTask.options.extraction_concurrency ?? 1)))
+    )
   }, [
     activeTask?.analysis,
     activeTask?.import_id,
     activeTask?.options.depth,
     activeTask?.options.extract_memories,
+    activeTask?.options.extraction_concurrency,
     activeTask?.options.participant_ids,
     activeTask?.options.participant_scope,
     activeTask?.options.update_profiles,
@@ -280,6 +286,7 @@ export function ChatHistoryImportPage() {
         participant_scope: participantScope,
         extract_memories: extractMemories,
         update_profiles: updateProfiles,
+        extraction_concurrency: extractionConcurrency,
       })
       setActiveTask(updated)
       setTasks((current) =>
@@ -608,12 +615,14 @@ export function ChatHistoryImportPage() {
                   participantScope={participantScope}
                   extractMemories={extractMemories}
                   updateProfiles={updateProfiles}
+                  extractionConcurrency={extractionConcurrency}
                   starting={starting}
                   deleting={deleting}
                   onDepthChange={setDepth}
                   onParticipantScopeChange={setParticipantScope}
                   onExtractMemoriesChange={setExtractMemories}
                   onUpdateProfilesChange={setUpdateProfiles}
+                  onExtractionConcurrencyChange={setExtractionConcurrency}
                   onStart={handleStart}
                   onDelete={handleDelete}
                 />

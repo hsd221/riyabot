@@ -214,6 +214,7 @@ export interface ChatHistoryImportTask {
     participant_scope?: ChatHistoryParticipantScope
     extract_memories?: boolean
     update_profiles?: boolean
+    extraction_concurrency?: number
   }
   result: ChatHistoryLearningResult | null
   error_message: string | null
@@ -234,6 +235,7 @@ export interface ChatHistoryImportStartRequest {
   participant_scope: ChatHistoryParticipantScope
   extract_memories: boolean
   update_profiles: boolean
+  extraction_concurrency?: number
 }
 
 export interface ChatHistoryParticipantListResponse {
