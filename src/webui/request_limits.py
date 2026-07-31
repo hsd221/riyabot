@@ -13,6 +13,7 @@ _RAW_CONFIG_REQUEST_BYTES = 2 * 1024 * 1024 + 64 * 1024
 _SINGLE_EMOJI_REQUEST_BYTES = 11 * 1024 * 1024
 _BATCH_EMOJI_REQUEST_BYTES = 201 * 1024 * 1024
 _CHAT_HISTORY_IMPORT_REQUEST_BYTES = 101 * 1024 * 1024
+_UPDATE_REQUEST_BYTES = 8 * 1024
 
 WEBUI_PATH_BODY_LIMITS = {
     "/api/webui/auth/setup": _AUTH_REQUEST_BYTES,
@@ -24,6 +25,8 @@ WEBUI_PATH_BODY_LIMITS = {
     "/api/webui/emoji/upload": _SINGLE_EMOJI_REQUEST_BYTES,
     "/api/webui/emoji/batch/upload": _BATCH_EMOJI_REQUEST_BYTES,
     "/api/webui/chat-history-imports": _CHAT_HISTORY_IMPORT_REQUEST_BYTES,
+    "/api/webui/updates/preferences": _UPDATE_REQUEST_BYTES,
+    "/api/webui/update-tasks": _UPDATE_REQUEST_BYTES,
 }
 
 

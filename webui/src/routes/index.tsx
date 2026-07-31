@@ -56,6 +56,8 @@ import { useToast } from '@/hooks/use-toast'
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { getSetting } from '@/lib/settings-manager'
 import { RestartingOverlay } from '@/components/RestartingOverlay'
+import { DashboardVersionLink } from '@/components/dashboard-version-link'
+import { useDashboardUpdateCheck } from '@/hooks/use-dashboard-update-check'
 import { getRiyaBotStatus, restartRiyaBot } from '@/lib/system-api'
 
 // 机器人状态接口
@@ -179,6 +181,7 @@ export function IndexPage() {
   const [restarting, setRestarting] = useState(false)
   const [showRestartOverlay, setShowRestartOverlay] = useState(false)
   const { toast } = useToast()
+  const updateStatus = useDashboardUpdateCheck()
 
   const fetchBotStatus = useCallback(async () => {
     try {
@@ -691,10 +694,11 @@ export function IndexPage() {
                 </div>
                 {botStatus && (
                   <>
-                    <div className="ios-row min-h-12 py-3">
-                      <span className="text-[15px] text-muted-foreground">版本</span>
-                      <span className="text-[15px] font-medium">v{botStatus.version}</span>
-                    </div>
+                    <DashboardVersionLink
+                      version={botStatus.version}
+                      updateAvailable={updateStatus?.update_available ?? false}
+                      channel={updateStatus?.channel}
+                    />
                     <div className="ios-row min-h-12 py-3">
                       <span className="text-[15px] text-muted-foreground">运行时长</span>
                       <span className="text-[15px] font-medium">
@@ -833,12 +837,11 @@ export function IndexPage() {
                 </div>
                 {botStatus && (
                   <>
-                    <div className="ios-row min-h-12 py-3">
-                      <span className="text-[15px] text-muted-foreground">版本</span>
-                      <span className="max-w-[55%] truncate text-right text-[15px] font-medium">
-                        v{botStatus.version}
-                      </span>
-                    </div>
+                    <DashboardVersionLink
+                      version={botStatus.version}
+                      updateAvailable={updateStatus?.update_available ?? false}
+                      channel={updateStatus?.channel}
+                    />
                     <div className="ios-row min-h-12 py-3">
                       <span className="text-[15px] text-muted-foreground">运行时长</span>
                       <span className="max-w-[55%] truncate text-right text-[15px] font-medium">

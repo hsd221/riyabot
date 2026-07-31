@@ -5,6 +5,8 @@ import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import { pollRestartHealth } from '@/lib/restart-health-polling'
 
 interface RestartingOverlayProps {
+  mode?: 'restart' | 'update'
+  verifyRestartComplete?: () => Promise<boolean>
   onRestartComplete?: () => void
   onRestartFailed?: () => void
 }
@@ -13,18 +15,28 @@ const INITIAL_DELAY_MS = 3000
 const RETRY_DELAY_MS = 2000
 const REQUEST_TIMEOUT_MS = 3000
 const MAX_ATTEMPTS = 60
+const UPDATE_MAX_ATTEMPTS = 180
 
-export function RestartingOverlay({ onRestartComplete, onRestartFailed }: RestartingOverlayProps) {
+export function RestartingOverlay({
+  mode = 'restart',
+  verifyRestartComplete,
+  onRestartComplete,
+  onRestartFailed,
+}: RestartingOverlayProps) {
   const [status, setStatus] = useState<'restarting' | 'checking' | 'success' | 'failed'>(
     'restarting'
   )
   const [elapsedTime, setElapsedTime] = useState(0)
   const [checkAttempts, setCheckAttempts] = useState(0)
+  const [failureKind, setFailureKind] = useState<'timeout' | 'verification' | null>(null)
   const runIdRef = useRef(0)
   const successTimerRef = useRef<number | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const verifyRestartCompleteRef = useRef(verifyRestartComplete)
   const onRestartCompleteRef = useRef(onRestartComplete)
   const onRestartFailedRef = useRef(onRestartFailed)
+  const maxAttemptsRef = useRef(mode === 'update' ? UPDATE_MAX_ATTEMPTS : MAX_ATTEMPTS)
+  verifyRestartCompleteRef.current = verifyRestartComplete
   onRestartCompleteRef.current = onRestartComplete
   onRestartFailedRef.current = onRestartFailed
 
@@ -42,6 +54,7 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
     const controller = new AbortController()
     abortControllerRef.current = controller
     setStatus('checking')
+    setFailureKind(null)
     setCheckAttempts(0)
 
     const checkHealth = async (signal: AbortSignal): Promise<boolean> => {
@@ -66,14 +79,31 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
     void pollRestartHealth({
       check: checkHealth,
       signal: controller.signal,
-      maxAttempts: MAX_ATTEMPTS,
+      maxAttempts: maxAttemptsRef.current,
       retryDelayMs: RETRY_DELAY_MS,
       onAttempt: setCheckAttempts,
-    }).then((result) => {
+    }).then(async (result) => {
       if (runIdRef.current !== runId || result === 'cancelled') return
       if (abortControllerRef.current === controller) abortControllerRef.current = null
 
       if (result === 'success') {
+        try {
+          const verify = verifyRestartCompleteRef.current
+          if (verify && !(await verify())) {
+            if (runIdRef.current !== runId) return
+            setFailureKind('verification')
+            setStatus('failed')
+            onRestartFailedRef.current?.()
+            return
+          }
+        } catch {
+          if (runIdRef.current !== runId) return
+          setFailureKind('verification')
+          setStatus('failed')
+          onRestartFailedRef.current?.()
+          return
+        }
+        if (runIdRef.current !== runId) return
         setStatus('success')
         successTimerRef.current = window.setTimeout(() => {
           if (runIdRef.current === runId) onRestartCompleteRef.current?.()
@@ -81,6 +111,7 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
         return
       }
 
+      setFailureKind('timeout')
       setStatus('failed')
       onRestartFailedRef.current?.()
     })
@@ -104,10 +135,18 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
   }
 
   const statusHint = {
-    restarting: '配置已保存，正在等待主程序退出并重新启动。',
+    restarting:
+      mode === 'update'
+        ? 'Runner 正在验证并安装所选版本。'
+        : '配置已保存，正在等待主程序退出并重新启动。',
     checking: '正在探测服务是否恢复，请勿关闭页面。',
-    success: '配置已生效，服务运行正常。',
-    failed: '服务未在约两分钟内恢复，请检查控制台或手动重启。',
+    success: mode === 'update' ? '新版本已启动，服务运行正常。' : '配置已生效，服务运行正常。',
+    failed:
+      mode === 'update' && failureKind === 'verification'
+        ? '服务已经恢复，但 Runner 未确认本次更新成功。请检查更新结果与 Runner 日志。'
+        : mode === 'update'
+          ? '服务未在约六分钟内恢复，请检查 Runner 日志。'
+          : '服务未在约两分钟内恢复，请检查控制台或手动重启。',
   }[status]
   const liveRole = status === 'failed' ? 'alert' : 'status'
 
@@ -138,14 +177,19 @@ export function RestartingOverlay({ onRestartComplete, onRestartFailed }: Restar
 
           <div className="text-center">
             <h2 className="text-2xl font-semibold">
-              {status === 'restarting' && '正在重启主程序'}
+              {status === 'restarting' && (mode === 'update' ? '正在安装更新' : '正在重启主程序')}
               {status === 'checking' && '检查服务状态'}
-              {status === 'success' && '重启成功'}
-              {status === 'failed' && '重启超时'}
+              {status === 'success' && (mode === 'update' ? '更新成功' : '重启成功')}
+              {status === 'failed' &&
+                (mode === 'update'
+                  ? failureKind === 'verification'
+                    ? '更新未完成'
+                    : '更新超时'
+                  : '重启超时')}
             </h2>
             <p className="mt-2 text-muted-foreground">
               {status === 'checking'
-                ? `第 ${checkAttempts}/${MAX_ATTEMPTS} 次检测 · 已用时 ${formatTime(elapsedTime)}`
+                ? `第 ${checkAttempts}/${maxAttemptsRef.current} 次检测 · 已用时 ${formatTime(elapsedTime)}`
                 : statusHint}
             </p>
           </div>

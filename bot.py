@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from rich.traceback import install
 from src.common.logger import initialize_logging, get_logger, shutdown_logging
+from src.update_system.runner import UPDATE_EXIT_CODE, PendingUpdateStore, apply_pending_update
 
 # 设置工作目录为脚本所在目录
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -76,6 +77,38 @@ def run_runner_process():
             if return_code == RESTART_EXIT_CODE:
                 logger.info("Worker 请求重启", event_code="runner.worker.restart_requested", exit_code=return_code)
                 time.sleep(1)  # 稍作等待
+                continue
+            elif return_code == UPDATE_EXIT_CODE:
+                logger.info("Worker 请求执行更新", event_code="runner.worker.update_requested", exit_code=return_code)
+                try:
+                    update_result = apply_pending_update(
+                        project_root=Path(script_dir),
+                        store=PendingUpdateStore(Path(script_dir) / "data" / "update"),
+                    )
+                except Exception:
+                    logger.exception("Runner 更新执行异常，将尝试启动当前工作区", event_code="runner.update.crashed")
+                    time.sleep(1)
+                    continue
+                if update_result.success:
+                    logger.info(
+                        "Runner 更新执行成功，重新载入主程序",
+                        event_code="runner.update.completed",
+                        target_revision=update_result.target_revision,
+                    )
+                    try:
+                        shutdown_logging()
+                        os.execv(python_executable, cmd)
+                    except OSError:
+                        logger.exception(
+                            "Runner 重新执行失败，将直接启动 Worker", event_code="runner.update.reexec_failed"
+                        )
+                else:
+                    logger.error(
+                        "Runner 更新执行失败，将尝试启动当前工作区",
+                        event_code="runner.update.failed",
+                        result_code=update_result.code,
+                    )
+                time.sleep(1)
                 continue
             else:
                 logger.info("Worker 进程退出", event_code="runner.worker.exited", exit_code=return_code)
@@ -312,8 +345,9 @@ if __name__ == "__main__":
             exit_code = e.code
         else:
             exit_code = 1 if e.code else 0
-        if exit_code == RESTART_EXIT_CODE:
-            logger.info("收到重启退出码", event_code="app.restart_exit_requested", exit_code=exit_code)
+        if exit_code in {RESTART_EXIT_CODE, UPDATE_EXIT_CODE}:
+            event_code = "app.update_exit_requested" if exit_code == UPDATE_EXIT_CODE else "app.restart_exit_requested"
+            logger.info("收到受控退出码", event_code=event_code, exit_code=exit_code)
 
     except Exception:
         logger.exception("主程序异常退出", event_code="app.main_failed")

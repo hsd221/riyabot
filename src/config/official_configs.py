@@ -953,6 +953,14 @@ class ExperimentalConfig(ConfigBase):
 
 
 @dataclass
+class UpdateConfig(ConfigBase):
+    """程序更新配置。"""
+
+    channel: Literal["stable", "dev"] = "stable"
+    """跟踪频道：stable 检查正式版本标签，dev 检查开发分支提交。"""
+
+
+@dataclass
 class MaimMessageConfig(ConfigBase):
     """maim_message配置类"""
 

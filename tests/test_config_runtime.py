@@ -37,6 +37,7 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
         self.assertEqual(bot_document["bot"]["platform"], "qq")
         self.assertEqual(bot_document["bot"]["nickname"], "璃夜")
         self.assertEqual(bot_document["chat"]["max_context_size"], 30)
+        self.assertEqual(bot_document["update"]["channel"], "stable")
         self.assertNotIn("dream", bot_document)
         self.assertEqual(model_document["api_providers"], [])
         self.assertEqual(model_document["models"], [])
@@ -85,6 +86,7 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
             ("debug", "show_replyer_prompt"): False,
             ("debug", "show_replyer_reasoning"): False,
             ("webui", "anti_crawler_mode"): "loose",
+            ("update", "channel"): "stable",
         }
         for path, expected in expected_bot_values.items():
             with self.subTest(path=path):

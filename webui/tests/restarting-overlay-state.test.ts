@@ -27,6 +27,8 @@ describe('RestartingOverlay state contracts', () => {
 
     expect(source).toContain('onRestartCompleteRef.current = onRestartComplete')
     expect(source).toContain('onRestartFailedRef.current = onRestartFailed')
+    expect(source).toContain('verifyRestartCompleteRef.current = verifyRestartComplete')
+    expect(source).toContain('if (verify && !(await verify()))')
     expect(source).toContain('}, [cancelPolling])')
     expect(source).not.toContain('[cancelPolling, onRestartComplete, onRestartFailed]')
   })
