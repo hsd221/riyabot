@@ -59,11 +59,12 @@ class EmojiAction(BaseAction):
             candidate_count = max(1, min(int(getattr(global_config.emoji, "selection_candidate_count", 8)), 30))
             scene_weight = max(0.0, min(float(getattr(global_config.emoji, "usage_scene_weight", 0.6)), 1.0))
             usage_scene_enabled = bool(getattr(global_config.emoji, "usage_scene_enabled", True))
+            vector_selection_enabled = bool(getattr(global_config.emoji, "vector_selection_enabled", True))
 
             # 2. 对情感与真人场景分别做向量召回，再按配置加权；不可用时保持随机回退。
             emotion_query = " ".join(str(self.action_data.get("emotion") or "").split()).strip()[:64]
             sampled_emojis = None
-            if emotion_query:
+            if vector_selection_enabled and emotion_query:
                 try:
                     sampled_emojis = await emoji_api.get_ranked_candidates(
                         emotion_query,

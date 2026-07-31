@@ -135,6 +135,46 @@ class EmbeddingProfileMonitorTaskTest(unittest.IsolatedAsyncioTestCase):
         activate.assert_not_called()
         self.assertIsNone(task._last_processed_fingerprint)
 
+    async def test_same_profile_config_change_rechecks_optional_json_indexes(self) -> None:
+        active_runtime = _runtime("same")
+        candidate_runtime = _runtime("same")
+        qdrant = SimpleNamespace(
+            atom_migration_pending=False,
+            graph_migration_pending=False,
+            reconfigure_embedding=AsyncMock(return_value=True),
+        )
+        task = monitor_module.EmbeddingProfileMonitorTask(
+            SimpleNamespace(qdrant=qdrant, config=SimpleNamespace(vector_batch_size=16)),
+            config_dir=Path("/unused"),
+            task_manager=SimpleNamespace(tasks={}, add_task=AsyncMock()),
+        )
+        task._first_run = False
+        task._last_processed_fingerprint = ((5, 5, 5, 5, 5),) * 2
+
+        with (
+            patch.object(monitor_module, "_config_fingerprint", return_value=((6, 6, 6, 6, 6),) * 2),
+            patch.object(monitor_module, "_load_candidate_runtime", return_value=candidate_runtime),
+            patch.object(monitor_module, "get_active_embedding_runtime", return_value=active_runtime),
+            patch.object(monitor_module, "activate_embedding_runtime", return_value=active_runtime),
+            patch.object(task, "_probe", new=AsyncMock()),
+            patch.object(monitor_module, "register_pending_vector_migrations", new=AsyncMock()),
+            patch.object(
+                monitor_module,
+                "json_vector_indexes_match_profile",
+                return_value=False,
+            ) as indexes_match,
+            patch.object(
+                monitor_module,
+                "rebuild_json_vector_indexes",
+                new=AsyncMock(return_value=True),
+            ) as rebuild,
+        ):
+            await task.run()
+
+        indexes_match.assert_called_once_with(active_runtime.profile)
+        rebuild.assert_awaited_once_with(active_runtime.profile)
+        self.assertIsNone(task._pending_json_signature)
+
     async def test_invalid_candidate_does_not_block_existing_startup_migration(self) -> None:
         active_runtime = _runtime("active")
         qdrant = SimpleNamespace(
@@ -258,6 +298,55 @@ class EmbeddingRebuildRegistrationTest(unittest.IsolatedAsyncioTestCase):
         expression_rebuild.assert_awaited_once_with([{"id": 1}], expected_profile=profile)
         emoji_rebuild.assert_awaited_once_with(["emoji"], expected_profile=profile)
         scene_rebuild.assert_awaited_once_with(["scene"], expected_profile=profile)
+
+    async def test_json_rebuild_ignores_disabled_optional_indexes(self) -> None:
+        profile = _profile("current")
+        disabled_config = SimpleNamespace(
+            expression=SimpleNamespace(vector_selection_enabled=False),
+            emoji=SimpleNamespace(vector_selection_enabled=False, usage_scene_enabled=False),
+        )
+        with (
+            patch.object(monitor_module, "global_config", disabled_config),
+            patch.object(monitor_module, "_load_expression_candidates", return_value=[]) as load_expressions,
+            patch.object(monitor_module, "_load_emoji_candidates", return_value=([], [])) as load_emojis,
+            patch.object(
+                monitor_module.expression_vector_index,
+                "rebuild",
+                new=AsyncMock(return_value=True),
+            ) as expression_rebuild,
+            patch.object(
+                monitor_module.emoji_vector_index,
+                "rebuild",
+                new=AsyncMock(return_value=True),
+            ) as emoji_rebuild,
+            patch.object(
+                monitor_module.emoji_usage_scene_vector_index,
+                "rebuild",
+                new=AsyncMock(return_value=True),
+            ) as scene_rebuild,
+            patch.object(
+                monitor_module.expression_vector_index, "profile_matches", return_value=False
+            ) as expression_match,
+            patch.object(monitor_module.emoji_vector_index, "profile_matches", return_value=False) as emoji_match,
+            patch.object(
+                monitor_module.emoji_usage_scene_vector_index,
+                "profile_matches",
+                return_value=False,
+            ) as scene_match,
+        ):
+            rebuilt = await monitor_module.rebuild_json_vector_indexes(profile)
+            indexes_match = monitor_module.json_vector_indexes_match_profile(profile)
+
+        self.assertTrue(rebuilt)
+        self.assertTrue(indexes_match)
+        load_expressions.assert_not_called()
+        load_emojis.assert_not_called()
+        expression_rebuild.assert_not_awaited()
+        emoji_rebuild.assert_not_awaited()
+        scene_rebuild.assert_not_awaited()
+        expression_match.assert_not_called()
+        emoji_match.assert_not_called()
+        scene_match.assert_not_called()
 
     async def test_json_rebuild_skips_indexes_that_already_match_the_profile(self) -> None:
         profile = _profile("current")

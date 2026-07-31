@@ -280,6 +280,7 @@ export function BotConfigPage() {
     setExpressionConfig({
       learning_list: expression.learning_list ?? [],
       expression_groups: expression.expression_groups ?? [],
+      vector_selection_enabled: expression.vector_selection_enabled ?? true,
       expression_self_reflect: expression.expression_self_reflect ?? false,
       expression_manual_reflect:
         expression.expression_manual_reflect ?? expression.reflect ?? false,
@@ -301,7 +302,11 @@ export function BotConfigPage() {
       behavior_groups: behavior.behavior_groups ?? [],
     })
 
-    setEmojiConfig(config.emoji as EmojiConfig)
+    const emoji = config.emoji as EmojiConfig
+    setEmojiConfig({
+      ...emoji,
+      vector_selection_enabled: emoji.vector_selection_enabled ?? true,
+    })
 
     const memory = (config.memory ?? {}) as Partial<MemoryConfig>
     setMemoryConfig({

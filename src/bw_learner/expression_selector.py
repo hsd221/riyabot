@@ -399,19 +399,22 @@ class ExpressionSelector:
             logger.debug(f"聊天流 {chat_id} 不允许使用表达，返回空列表")
             return [], []
 
-        vector_result = await self._select_expressions_vector(
-            chat_id,
-            chat_info,
-            max_num,
-            target_message,
-            reply_reason,
-            think_level,
-        )
-        if vector_result is not None:
-            logger.debug(f"使用向量模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
-            return vector_result
+        if global_config.expression.vector_selection_enabled:
+            vector_result = await self._select_expressions_vector(
+                chat_id,
+                chat_info,
+                max_num,
+                target_message,
+                reply_reason,
+                think_level,
+            )
+            if vector_result is not None:
+                logger.debug(f"使用向量模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
+                return vector_result
+            logger.debug(f"表达向量不可用，使用classic模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
+        else:
+            logger.debug(f"表达向量选择已关闭，使用classic模式为聊天流 {chat_id} 选择表达方式")
 
-        logger.debug(f"表达向量不可用，使用classic模式为聊天流 {chat_id} 选择表达方式，think_level={think_level}")
         return await self._select_expressions_classic(
             chat_id, chat_info, max_num, target_message, reply_reason, think_level
         )

@@ -151,6 +151,43 @@ class EmojiActionSelectionTest(unittest.IsolatedAsyncioTestCase):
         get_random.assert_awaited_once_with(8)
         action.send_emoji.assert_awaited_once_with("base64-random")
 
+    async def test_disabled_vector_selection_uses_random_candidates_without_vector_call(self) -> None:
+        action = make_action({"emotion": "温柔安慰"})
+        random_candidates = [make_candidate("hash-random", "base64-random", "温柔递纸安慰", "温柔")]
+
+        with (
+            patch.object(
+                emoji_action_module.global_config.emoji,
+                "vector_selection_enabled",
+                False,
+                create=True,
+            ),
+            patch.object(
+                emoji_action_module.emoji_api,
+                "get_ranked_candidates",
+                new=AsyncMock(return_value=None),
+            ) as get_ranked_candidates,
+            patch.object(
+                emoji_action_module.emoji_api,
+                "get_random_candidates",
+                new=AsyncMock(return_value=random_candidates),
+            ) as get_random,
+            patch.object(emoji_action_module.emoji_api, "record_usage"),
+            patch.object(emoji_action_module.message_api, "get_recent_messages", return_value=[]),
+            patch.object(emoji_action_module.llm_api, "get_available_models", return_value={"utils": object()}),
+            patch.object(
+                emoji_action_module.llm_api,
+                "generate_with_model",
+                new=AsyncMock(return_value=(True, "emoji_001", "", "model")),
+            ),
+        ):
+            success, _ = await action.execute()
+
+        self.assertTrue(success)
+        get_ranked_candidates.assert_not_awaited()
+        get_random.assert_awaited_once_with(8)
+        action.send_emoji.assert_awaited_once_with("base64-random")
+
     async def test_vector_search_with_no_threshold_match_does_not_use_random_candidates(self) -> None:
         action = make_action({"emotion": "愤怒反驳"})
 

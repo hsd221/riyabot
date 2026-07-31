@@ -5,6 +5,7 @@ import { normalizeEmojiConfig } from '../src/routes/setup/emoji-config'
 describe('emoji setup configuration', () => {
   it('preserves customized usage-scene settings when setup reloads the emoji section', () => {
     const config = normalizeEmojiConfig({
+      vector_selection_enabled: false,
       usage_scene_enabled: false,
       usage_scene_context_messages: 12,
       usage_scene_max_scenes: 6,
@@ -12,6 +13,7 @@ describe('emoji setup configuration', () => {
       selection_candidate_count: 15,
     })
 
+    expect(config.vector_selection_enabled).toBe(false)
     expect(config.usage_scene_enabled).toBe(false)
     expect(config.usage_scene_context_messages).toBe(12)
     expect(config.usage_scene_max_scenes).toBe(6)
@@ -22,6 +24,7 @@ describe('emoji setup configuration', () => {
   it('fills usage-scene defaults when setup reads an older emoji section', () => {
     const config = normalizeEmojiConfig({})
 
+    expect(config.vector_selection_enabled).toBe(true)
     expect(config.usage_scene_enabled).toBe(true)
     expect(config.usage_scene_context_messages).toBe(8)
     expect(config.usage_scene_max_scenes).toBe(8)

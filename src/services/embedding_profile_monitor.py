@@ -113,11 +113,25 @@ def _load_emoji_candidates() -> tuple[list[EmojiVectorCandidate], list[EmojiUsag
     return list(candidates_by_hash.values()), scene_candidates
 
 
+def _json_vector_index_flags() -> tuple[bool, bool, bool]:
+    expression_enabled = bool(global_config.expression.vector_selection_enabled)
+    emoji_enabled = bool(global_config.emoji.vector_selection_enabled)
+    scene_enabled = emoji_enabled and bool(global_config.emoji.usage_scene_enabled)
+    return expression_enabled, emoji_enabled, scene_enabled
+
+
 async def rebuild_json_vector_indexes(profile: EmbeddingProfile) -> bool:
-    """Rebuild all file-backed vector caches under their existing concurrency limits."""
+    """Rebuild enabled file-backed vector caches under their existing concurrency limits."""
+    expression_enabled, emoji_enabled, scene_enabled = _json_vector_index_flags()
+    rebuilds: list[tuple[str, Any, list[Any]]] = []
     try:
-        expression_candidates = _load_expression_candidates()
-        emoji_candidates, scene_candidates = _load_emoji_candidates()
+        if expression_enabled:
+            rebuilds.append(("expressions", expression_vector_index, _load_expression_candidates()))
+        if emoji_enabled:
+            emoji_candidates, scene_candidates = _load_emoji_candidates()
+            rebuilds.append(("emoji_emotions", emoji_vector_index, emoji_candidates))
+            if scene_enabled:
+                rebuilds.append(("emoji_usage_scenes", emoji_usage_scene_vector_index, scene_candidates))
     except Exception:
         logger.exception(
             "向量 JSON 索引源数据读取失败",
@@ -125,11 +139,6 @@ async def rebuild_json_vector_indexes(profile: EmbeddingProfile) -> bool:
         )
         return False
 
-    rebuilds = (
-        ("expressions", expression_vector_index, expression_candidates),
-        ("emoji_emotions", emoji_vector_index, emoji_candidates),
-        ("emoji_usage_scenes", emoji_usage_scene_vector_index, scene_candidates),
-    )
     completed = True
     for index_name, index, candidates in rebuilds:
         if index.profile_matches(profile):
@@ -147,11 +156,16 @@ async def rebuild_json_vector_indexes(profile: EmbeddingProfile) -> bool:
 
 
 def json_vector_indexes_match_profile(profile: EmbeddingProfile) -> bool:
-    """Return whether every file-backed index completed this profile."""
-    return all(
-        index.profile_matches(profile)
-        for index in (expression_vector_index, emoji_vector_index, emoji_usage_scene_vector_index)
-    )
+    """Return whether every enabled file-backed index completed this profile."""
+    expression_enabled, emoji_enabled, scene_enabled = _json_vector_index_flags()
+    enabled_indexes = []
+    if expression_enabled:
+        enabled_indexes.append(expression_vector_index)
+    if emoji_enabled:
+        enabled_indexes.append(emoji_vector_index)
+    if scene_enabled:
+        enabled_indexes.append(emoji_usage_scene_vector_index)
+    return all(index.profile_matches(profile) for index in enabled_indexes)
 
 
 async def register_pending_vector_migrations(
@@ -264,6 +278,7 @@ class EmbeddingProfileMonitorTask(AsyncTask):
         fingerprint = _config_fingerprint(self._config_dir)
         active_runtime = get_active_embedding_runtime()
         profile_changed = False
+        config_accepted = False
 
         if fingerprint != self._last_processed_fingerprint and fingerprint != self._last_rejected_fingerprint:
             try:
@@ -290,6 +305,7 @@ class EmbeddingProfileMonitorTask(AsyncTask):
                 if candidate_accepted:
                     self._last_processed_fingerprint = fingerprint
                     self._last_rejected_fingerprint = None
+                    config_accepted = True
 
         if active_runtime is None:
             return
@@ -297,7 +313,7 @@ class EmbeddingProfileMonitorTask(AsyncTask):
         migration_pending = bool(
             self._store.qdrant.atom_migration_pending or self._store.qdrant.graph_migration_pending
         )
-        if self._first_run:
+        if self._first_run or config_accepted:
             if migration_pending or not json_vector_indexes_match_profile(active_runtime.profile):
                 self._pending_json_signature = active_runtime.profile.signature
             self._first_run = False

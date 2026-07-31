@@ -36,6 +36,7 @@ export interface ChatConfig {
 export interface ExpressionConfig {
   learning_list: Array<[string, string, string, string]>
   expression_groups: Array<string[]>
+  vector_selection_enabled: boolean
   expression_self_reflect: boolean
   expression_manual_reflect: boolean
   manual_reflect_operator_id: string
@@ -62,6 +63,7 @@ export interface EmojiConfig {
   steal_emoji: boolean
   content_filtration: boolean
   filtration_prompt: string
+  vector_selection_enabled: boolean
   usage_scene_enabled: boolean
   usage_scene_context_messages: number
   usage_scene_max_scenes: number

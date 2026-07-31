@@ -449,7 +449,27 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
 
       <div className="ios-group">
         <div className="ios-row">
-          <Label htmlFor="usage_scene_enabled">学习真人使用场景</Label>
+          <div className="space-y-1">
+            <Label htmlFor="emoji_vector_selection_enabled">向量筛选表情候选</Label>
+            <p className="text-xs text-muted-foreground">
+              开启时使用 embedding 召回；关闭后改用随机候选
+            </p>
+          </div>
+          <Switch
+            id="emoji_vector_selection_enabled"
+            checked={config.vector_selection_enabled}
+            onCheckedChange={(checked) =>
+              onChange({ ...config, vector_selection_enabled: checked })
+            }
+          />
+        </div>
+        <div className="ios-row">
+          <div className="space-y-1">
+            <Label htmlFor="usage_scene_enabled">学习真人使用场景</Label>
+            <p className="text-xs text-muted-foreground">
+              会调用模型学习真人发图语境；关闭后不再学习或参与选择
+            </p>
+          </div>
           <Switch
             id="usage_scene_enabled"
             checked={config.usage_scene_enabled}
@@ -501,26 +521,28 @@ export function EmojiForm({ config, onChange }: EmojiFormProps) {
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-4">
-                <Label htmlFor="usage_scene_weight">初筛场景权重</Label>
-                <span className="text-sm tabular-nums text-muted-foreground">
-                  {Math.round(config.usage_scene_weight * 100)}%
-                </span>
+            {config.vector_selection_enabled && (
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-4">
+                  <Label htmlFor="usage_scene_weight">初筛场景权重</Label>
+                  <span className="text-sm tabular-nums text-muted-foreground">
+                    {Math.round(config.usage_scene_weight * 100)}%
+                  </span>
+                </div>
+                <Slider
+                  id="usage_scene_weight"
+                  value={[config.usage_scene_weight]}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onValueChange={(values) => onChange({ ...config, usage_scene_weight: values[0] })}
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>仅情感</span>
+                  <span>仅场景</span>
+                </div>
               </div>
-              <Slider
-                id="usage_scene_weight"
-                value={[config.usage_scene_weight]}
-                min={0}
-                max={1}
-                step={0.05}
-                onValueChange={(values) => onChange({ ...config, usage_scene_weight: values[0] })}
-              />
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>仅情感</span>
-                <span>仅场景</span>
-              </div>
-            </div>
+            )}
           </div>
         )}
       </div>

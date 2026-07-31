@@ -279,6 +279,22 @@ export const ExpressionSection = React.memo(function ExpressionSection({
             </Button>
           </div>
 
+          <div className="mb-5 flex items-center justify-between gap-4 border-b border-border/45 pb-5">
+            <div>
+              <Label htmlFor="expression_vector_selection_enabled">向量筛选表达候选</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                开启时使用 embedding 召回；关闭后使用传统候选选择
+              </p>
+            </div>
+            <Switch
+              id="expression_vector_selection_enabled"
+              checked={config.vector_selection_enabled}
+              onCheckedChange={(checked) =>
+                onChange({ ...config, vector_selection_enabled: checked })
+              }
+            />
+          </div>
+
           <div className="space-y-4">
             {learningList.map((rule, index) => {
               // 检查是否已有全局配置（rule[0] === ''）
