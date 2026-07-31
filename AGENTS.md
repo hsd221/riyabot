@@ -70,6 +70,12 @@ Search the owning package before creating any new utility. Use the public facade
 - Core TOML definitions live in `src/config/`; generated TOML in `config/` is runtime state, not hand-maintained source.
 - Use Conventional Commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`.
 
+## BRANCH AND SUBMISSION WORKFLOW
+- Treat `dev` as the integration branch and `main` as the stable release branch.
+- Land all normal changes in `dev` first, through a pull request or an explicitly authorized direct commit to `dev`.
+- Promote validated changes from `dev` to `main` only through a pull request. Do not commit or merge normal work directly into `main`.
+- Direct updates to `main` are reserved for emergencies such as critical fixes and hot patches. After an emergency update, immediately synchronize the same change back into `dev` so the branches do not diverge.
+
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not commit `.env`, credentials, tokens, private databases, `config/`, `data/`, `logs/`, or `tests/artifacts/`.
 - Do not edit `webui/dist/`, `webui/node_modules/`, caches, or `.claude/worktrees/` as source; those worktrees are separate copies.
