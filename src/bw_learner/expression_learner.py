@@ -66,7 +66,7 @@ class ExpressionLearner:
         random_msg = messages
 
         # 学习用（开启行编号，便于溯源）
-        random_msg_str: str = await build_anonymous_messages(random_msg, show_ids=True)
+        random_msg_str: str = await build_anonymous_messages(random_msg, show_ids=True, show_timestamps=True)
 
         prompt: str = prompt_manager.format_prompt(
             "learning.expression.learn_style",

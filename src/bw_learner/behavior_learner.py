@@ -139,7 +139,7 @@ class BehaviorLearner:
             return await self._learn_and_store_locked(messages)
 
     async def _learn_and_store_locked(self, messages: list[Any]) -> list[BehaviorCandidate]:
-        chat_str = await build_anonymous_messages(messages, show_ids=True)
+        chat_str = await build_anonymous_messages(messages, show_ids=True, show_timestamps=True)
         if not chat_str.strip():
             return []
 

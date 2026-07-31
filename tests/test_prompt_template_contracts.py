@@ -404,6 +404,20 @@ class PromptTemplateContractTest(unittest.TestCase):
                 template = load_prompt_template(name)
                 self.assertLess(template.index(boundary), template.index(field))
 
+    def test_learning_templates_preserve_temporal_boundaries(self) -> None:
+        emoji_learning = load_prompt_template("media.emoji.usage_scene_learning")
+        self.assertIn("{emoji_sent_at}", emoji_learning)
+
+        for name in (
+            "learning.behavior.learn",
+            "learning.expression.learn_style",
+            "media.emoji.usage_scene_learning",
+        ):
+            with self.subTest(prompt=name):
+                template = load_prompt_template(name)
+                self.assertIn("时间间隔", template)
+                self.assertIn("8 小时", template)
+
     def test_prompt_wording_matches_runtime_contracts_without_known_ambiguities(self) -> None:
         group_reply = parse_prompt_sections(load_prompt_template("chat.group.reply"))["standard"]
         expressor = load_prompt_template("chat.shared.expressor")

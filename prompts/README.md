@@ -122,7 +122,7 @@ variants: light, standard
 | `chat_history` | 供工具或记忆判断使用的最近聊天历史；是否预先做边界转义由调用方决定，模板始终把它视为不可信数据。 |
 | `chat_history_text` | 旧 PFC 组件使用的可读聊天历史，可能附带“新消息”分隔说明。 |
 | `chat_info` | Expressor 重写时使用的较短聊天上下文。 |
-| `chat_str` | 学习器使用的带行号聊天文本，行号可被输出字段引用。 |
+| `chat_str` | 学习器使用的带行号和绝对时间的聊天文本，行号可被输出字段引用。 |
 | `dialogue_prompt` | 回复生成器使用的 XML + JSONL 完整对话记录。 |
 | `message_block` | 记忆 L1 话题切分器使用的、带 `message_id` 的连续消息块。 |
 | `messages_text` | 表情情感标签选择器使用的最近聊天文本。 |
@@ -212,7 +212,8 @@ variants: light, standard
 | `description` | 视觉模型生成的原始表情包描述，供多维语义压缩器整理。 |
 | `emoji_description` | 真人场景学习时用于理解表情画面内容的参考描述，不作为真实用法证据。 |
 | `emoji_sender` | 本次发送表情的真人昵称或用户标识，用于判断对话中的回应关系。 |
-| `chat_context` | 真人发送表情之前、同一聊天流内的有界聊天上下文。 |
+| `emoji_sent_at` | 本次真人发送表情的本地绝对时间，用作聊天记录时间间隔的参照。 |
+| `chat_context` | 真人发送表情之前、同一聊天流内带绝对时间的有界 JSONL 聊天上下文。 |
 | `existing_usage_scenes` | 同一表情已归纳的真人使用场景 JSONL，包含稳定 ID、总结和样本数。 |
 | `max_scenes` | 单张表情建议保留的真人使用场景软上限；不得据此强行合并不同用法。 |
 | `frame_count` | 动态图像的总帧数。 |

@@ -190,6 +190,33 @@ class ExpressionLearnerFilteringTest(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(learner._check_cached_jargons_in_messages(messages), [("GPU", "1"), ("赛博夜宵", "3")])
 
+    async def test_expression_learning_requests_timestamped_anonymous_chat(self) -> None:
+        learner = self.make_learner()
+        learner.chat_name = "Test Chat"
+        learner.express_learn_model = SimpleNamespace(
+            generate_response_async=AsyncMock(return_value=("[]", None)),
+        )
+        messages = [SimpleNamespace(processed_plain_text="这也太离谱了", marker="human")]
+        miner = SimpleNamespace(get_cached_jargons=Mock(return_value=[]))
+        fake_config = SimpleNamespace(bot=SimpleNamespace(nickname="Mai", alias_names=[]))
+
+        with (
+            patch.object(expression_learner, "global_config", fake_config),
+            patch.object(expression_learner.miner_manager, "get_miner", return_value=miner),
+            patch.object(
+                expression_learner,
+                "build_anonymous_messages",
+                new=AsyncMock(return_value="[1] [2026-07-31 12:00:00] A说 这也太离谱了"),
+            ) as build_chat,
+        ):
+            result = await learner.learn_and_store(messages)
+
+        self.assertEqual(result, [])
+        build_chat.assert_awaited_once_with(messages, show_ids=True, show_timestamps=True)
+        prompt = learner.express_learn_model.generate_response_async.await_args.args[0]
+        self.assertIn("[2026-07-31 12:00:00]", prompt)
+        self.assertIn("时间间隔", prompt)
+
     async def test_process_jargon_entries_filters_invalid_entries_and_delegates_to_miner(self) -> None:
         learner = self.make_learner()
         miner = SimpleNamespace(process_extracted_entries=AsyncMock())

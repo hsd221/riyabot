@@ -125,6 +125,7 @@ class EmojiUsageSceneLearnerTest(unittest.IsolatedAsyncioTestCase):
             chat_context="Alice：我又把代码写崩了\nBob：确实很有你的",
             emoji_description="熊猫捂嘴笑，文字为又写崩了",
             emoji_sender="Bob",
+            emoji_sent_at="2026-07-31 12:30:00",
             max_scenes=8,
         )
 
@@ -137,6 +138,9 @@ class EmojiUsageSceneLearnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("我又把代码写崩了", prompt)
         self.assertIn("熊猫捂嘴笑", prompt)
         self.assertIn("【本次表情发送者】\nBob", prompt)
+        self.assertIn("【本次表情发送时间】\n2026-07-31 12:30:00", prompt)
+        self.assertIn("时间间隔", prompt)
+        self.assertIn("8 小时", prompt)
 
     async def test_learn_scene_creates_skips_and_ignores_invalid_model_output(self) -> None:
         model = SimpleNamespace(
@@ -159,6 +163,42 @@ class EmojiUsageSceneLearnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(skipped)
         self.assertIsNone(invalid)
         self.assertEqual(EmojiUsageScene.select().count(), 1)
+
+    async def test_learn_scene_truncates_context_at_complete_jsonl_rows(self) -> None:
+        model = SimpleNamespace(
+            generate_response_async=AsyncMock(
+                return_value=('{"action":"skip","scene_id":null,"scene":""}', None),
+            )
+        )
+        learner = EmojiUsageSceneLearner(model=model)
+        chat_context = "\n".join(
+            json.dumps(
+                {
+                    "time": f"2026-07-31 0{index}:00:00",
+                    "sender": "A",
+                    "content": f"row-{index}-" + ("x" * 1900),
+                },
+                ensure_ascii=False,
+            )
+            for index in range(4)
+        )
+
+        await learner.learn_scene(
+            "hash-a",
+            chat_context,
+            "角色叹气",
+            emoji_sent_at="2026-07-31 04:00:00",
+            max_scenes=8,
+        )
+
+        prompt = model.generate_response_async.await_args.args[0]
+        rendered_context = prompt.split("time 与本次表情发送时间使用同一时区：\n", maxsplit=1)[1].split(
+            "\n\n【该表情已有的真人使用场景】",
+            maxsplit=1,
+        )[0]
+        rows = [json.loads(line) for line in rendered_context.splitlines()]
+        self.assertLessEqual(len(rendered_context), 6000)
+        self.assertEqual([row["content"].split("-", maxsplit=2)[1] for row in rows], ["1", "2", "3"])
 
     async def test_compact_scenes_merges_only_llm_confirmed_groups_and_preserves_counts(self) -> None:
         first = EmojiUsageScene.create(
