@@ -38,6 +38,9 @@ queue_update.txt
 .env
 .env.*
 .cursor
+.claude/
+.playwright-mcp/
+.opencode/oh-my-openagent.json
 config/bot_config_dev.toml
 config/bot_config.toml
 config/bot_config.toml.bak
