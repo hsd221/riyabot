@@ -54,9 +54,10 @@ VersionComparator = manifest_utils.VersionComparator
 
 
 class VersionComparatorTest(unittest.TestCase):
-    def test_normalize_version_removes_snapshot_suffix_and_pads_missing_parts(self) -> None:
+    def test_normalize_version_removes_prerelease_suffix_and_pads_missing_parts(self) -> None:
         self.assertEqual(VersionComparator.normalize_version(""), "0.0.0")
         self.assertEqual(VersionComparator.normalize_version("1.2-snapshot.4"), "1.2.0")
+        self.assertEqual(VersionComparator.normalize_version("0.14.0-dev.1"), "0.14.0")
         self.assertEqual(VersionComparator.normalize_version(" 2 "), "2.0.0")
         self.assertEqual(VersionComparator.normalize_version("not-a-version"), "0.0.0")
 
