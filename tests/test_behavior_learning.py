@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from playhouse.sqlite_ext import SqliteExtDatabase
 
-from src.bw_learner import learner_utils, message_recorder
-from src.bw_learner.behavior_learner import parse_behavior_response
+from src.bw_learner import behavior_learner, learner_utils, message_recorder
+from src.bw_learner.behavior_learner import BehaviorLearner, parse_behavior_response
 from src.bw_learner.behavior_selector import BehaviorSelector
 from src.bw_learner.behavior_store import BehaviorPatternStore
 from src.common.database.database_model import BehaviorPattern
@@ -226,6 +226,34 @@ class BehaviorLearningTest(unittest.TestCase):
         self.assertIn("确认关键配置", block)
         self.assertNotIn("顺着玩笑接梗", block)
         self.assertEqual(len(selected_ids), 1)
+
+
+class BehaviorLearnerPromptTest(unittest.IsolatedAsyncioTestCase):
+    async def test_behavior_learning_requests_timestamped_anonymous_chat(self) -> None:
+        learner = object.__new__(BehaviorLearner)
+        learner.chat_id = "chat-a"
+        learner.chat_name = "Test Chat"
+        learner.behavior_model = SimpleNamespace(
+            generate_response_async=AsyncMock(return_value=("[]", None)),
+        )
+        messages = [SimpleNamespace(processed_plain_text="先确认一下配置")]
+        fake_config = SimpleNamespace(bot=SimpleNamespace(nickname="Mai"))
+
+        with (
+            patch.object(behavior_learner, "global_config", fake_config),
+            patch.object(
+                behavior_learner,
+                "build_anonymous_messages",
+                new=AsyncMock(return_value="[1] [2026-07-31 12:00:00] A说 先确认一下配置"),
+            ) as build_chat,
+        ):
+            result = await learner._learn_and_store_locked(messages)
+
+        self.assertEqual(result, [])
+        build_chat.assert_awaited_once_with(messages, show_ids=True, show_timestamps=True)
+        prompt = learner.behavior_model.generate_response_async.await_args.args[0]
+        self.assertIn("[2026-07-31 12:00:00]", prompt)
+        self.assertIn("时间间隔", prompt)
 
 
 class MessageRecorderTest(unittest.IsolatedAsyncioTestCase):

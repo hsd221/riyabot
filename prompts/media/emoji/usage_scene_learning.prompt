@@ -14,7 +14,11 @@ output: strict_json
 【本次表情发送者】
 {emoji_sender}
 
+【本次表情发送时间】
+{emoji_sent_at}
+
 【发送前的真实聊天】
+每行是一个只包含 time、sender 和 content 的 JSON 对象，time 与本次表情发送时间使用同一时区：
 {chat_context}
 
 【该表情已有的真人使用场景】
@@ -22,12 +26,13 @@ output: strict_json
 {existing_usage_scenes}
 
 请结合发送者在聊天中的身份，判断这次真人发送表情的实际触发条件和交流意图：
-1. 上下文不足、只有刷图、无法判断用法时，action 为 skip。
-2. 与某个已有场景的触发条件和交流意图都相同时，action 为 attach，并逐字复制其 id。
-3. 触发条件或交流意图明显不同，且能可靠概括时，action 为 create。
-4. scene 必须概括真人这次为什么会发送该表情，不能直接采用图片描述中推测的适用场景。
-5. attach 时 scene 应将已有总结与本次用法归纳成更稳定的一句话；create 时 scene 描述新的独立用法。
-6. scene 不超过 80 个汉字，不包含人名、群名、ID、原句照抄或临时事件细节。
+1. 先核对每条消息与本次表情发送时间的时间间隔。跨天或间隔超过 8 小时的消息，除非文字明确延续同一话题，否则不得作为本次表情的触发上下文。
+2. 排除时间上不连续的消息后，上下文不足、只有刷图、无法判断用法时，action 为 skip。
+3. 与某个已有场景的触发条件和交流意图都相同时，action 为 attach，并逐字复制其 id。
+4. 触发条件或交流意图明显不同，且能可靠概括时，action 为 create。
+5. scene 必须概括真人这次为什么会发送该表情，不能直接采用图片描述中推测的适用场景。
+6. attach 时 scene 应将已有总结与本次用法归纳成更稳定的一句话；create 时 scene 描述新的独立用法。
+7. scene 不超过 80 个汉字，不包含人名、群名、ID、原句照抄或临时事件细节。
 
 只输出一个合法 JSON 对象，不要输出解释、Markdown 或额外字段：
 {{"action":"skip|attach|create","scene_id":null,"scene":""}}

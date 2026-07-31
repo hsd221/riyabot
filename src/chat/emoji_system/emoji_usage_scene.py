@@ -16,12 +16,29 @@ logger = get_logger("emoji_usage_scene")
 
 MAX_SCENE_LENGTH = 240
 MAX_CONTEXT_LENGTH = 6000
+MAX_CONTEXT_MESSAGE_LENGTH = 2000
 MAX_DESCRIPTION_LENGTH = 2000
 MAX_SCENES_IN_PROMPT = 32
 MAX_MERGE_GROUPS = 16
 MAX_CONTEXT_MESSAGES = 32
 
 _learning_tasks: set[asyncio.Task] = set()
+
+
+def _format_message_time(timestamp: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+
+
+def _bound_chat_context(chat_context: str) -> str:
+    context = str(chat_context or "").strip()
+    if len(context) <= MAX_CONTEXT_LENGTH:
+        return context
+
+    bounded = context[-MAX_CONTEXT_LENGTH:]
+    first_line_end = bounded.find("\n")
+    if first_line_end >= 0:
+        return bounded[first_line_end + 1 :]
+    return bounded
 
 
 def is_bot_self(platform: str, user_id: str) -> bool:
@@ -188,6 +205,7 @@ class EmojiUsageSceneLearner:
         chat_context: str,
         emoji_description: str,
         emoji_sender: str = "用户",
+        emoji_sent_at: str = "",
         *,
         max_scenes: int,
     ) -> EmojiUsageScene | None:
@@ -202,7 +220,8 @@ class EmojiUsageSceneLearner:
                 "media.emoji.usage_scene_learning",
                 emoji_description=str(emoji_description or "")[:MAX_DESCRIPTION_LENGTH],
                 emoji_sender=str(emoji_sender or "用户")[:200],
-                chat_context=str(chat_context or "")[-MAX_CONTEXT_LENGTH:],
+                emoji_sent_at=str(emoji_sent_at or "未知时间")[:32],
+                chat_context=_bound_chat_context(chat_context),
                 existing_usage_scenes=self._render_scenes(scenes),
             )
             response = await self._generate(prompt, max_tokens=400)
@@ -322,11 +341,21 @@ def _get_prior_chat_context(message: Messages, message_count: int) -> str:
     )
     lines: list[str] = []
     for prior_message in reversed(prior_messages):
-        content = str(prior_message.processed_plain_text or "").strip()
+        content = str(prior_message.processed_plain_text or "").strip()[:MAX_CONTEXT_MESSAGE_LENGTH]
         if not content:
             continue
         sender = str(prior_message.user_nickname or prior_message.user_id or "用户").strip()
-        lines.append(f"{sender}: {content}")
+        lines.append(
+            json.dumps(
+                {
+                    "time": _format_message_time(prior_message.time),
+                    "sender": sender,
+                    "content": content,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
     return "\n".join(lines)
 
 
@@ -380,6 +409,7 @@ async def learn_emoji_usage_event(
             chat_context=chat_context,
             emoji_description=emoji_description,
             emoji_sender=str(message.user_nickname or message.user_id or "用户").strip(),
+            emoji_sent_at=_format_message_time(message.time),
             max_scenes=max_scenes,
         )
     except Exception as error:

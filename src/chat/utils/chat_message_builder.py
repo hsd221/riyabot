@@ -1036,10 +1036,16 @@ def build_readable_messages(
         return "".join(result_parts)
 
 
-async def build_anonymous_messages(messages: List[DatabaseMessages], show_ids: bool = False) -> str:
+async def build_anonymous_messages(
+    messages: List[DatabaseMessages],
+    show_ids: bool = False,
+    show_timestamps: bool = False,
+) -> str:
     """
     构建匿名可读消息，将不同人的名称转为唯一占位符（A、B、C...），bot自己用SELF。
     处理 回复<aaa:bbb> 和 @<aaa:bbb> 字段，将bbb映射为匿名占位符。
+
+    show_timestamps 为 True 时，为每行附加完整本地时间，供学习器判断消息是否连续。
     """
     if not messages:
         logger.warning("没有消息，无法构建匿名消息")
@@ -1115,11 +1121,13 @@ async def build_anonymous_messages(messages: List[DatabaseMessages], show_ids: b
 
             content = replace_user_references(content, platform, anon_name_resolver, replace_bot_name=False)
 
-            # 构建消息头，如果启用show_ids则添加序号
-            if show_ids:
-                header = f"[{i + 1}] {anon_name}说 "
-            else:
-                header = f"{anon_name}说 "
+            # 构建消息头，学习场景可同时启用行号和绝对时间。
+            id_prefix = f"[{i + 1}] " if show_ids else ""
+            timestamp_prefix = ""
+            if show_timestamps:
+                timestamp = translate_timestamp_to_human_readable(float(msg.time), mode="normal")
+                timestamp_prefix = f"[{timestamp}] "
+            header = f"{id_prefix}{timestamp_prefix}{anon_name}说 "
 
             output_lines.append(header)
             stripped_line = content.strip()

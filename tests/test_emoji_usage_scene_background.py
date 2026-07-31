@@ -1,5 +1,7 @@
 import base64
 import asyncio
+import json
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -83,10 +85,26 @@ class EmojiUsageSceneEventLearningTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.scene_id, 9)
         learn_scene.assert_awaited_once()
         context = learn_scene.await_args.kwargs["chat_context"]
-        self.assertLess(context.index("第一条上下文"), context.index("第二条上下文"))
-        self.assertNotIn("其他群消息", context)
-        self.assertNotIn("未来消息", context)
-        self.assertNotIn("角色叹气", context)
+        context_rows = [json.loads(line) for line in context.splitlines()]
+        self.assertEqual(
+            context_rows,
+            [
+                {
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(1.0)),
+                    "sender": "user-a",
+                    "content": "第一条上下文",
+                },
+                {
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(3.0)),
+                    "sender": "user-a",
+                    "content": "第二条上下文",
+                },
+            ],
+        )
+        self.assertEqual(
+            learn_scene.await_args.kwargs["emoji_sent_at"],
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current.time)),
+        )
         self.assertEqual(learn_scene.await_args.kwargs["emoji_sender"], current.user_nickname)
 
     async def test_event_is_idempotent_and_skips_bot_or_contextless_messages(self) -> None:
