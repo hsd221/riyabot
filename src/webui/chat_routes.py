@@ -133,10 +133,12 @@ class ChatHistoryManager:
         """
         target_group_id = group_id if group_id else WEBUI_CHAT_GROUP_ID
         try:
-            # 查询指定群的消息，按时间排序
+            # 查询指定群的消息，按时间排序，排除已撤回消息
             messages = (
                 Messages.select()
-                .where(Messages.chat_info_group_id == target_group_id)
+                .where(
+                    (Messages.chat_info_group_id == target_group_id) & (Messages.is_recalled == False)
+                )
                 .order_by(Messages.time.desc())
                 .limit(limit)
             )

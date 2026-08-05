@@ -10,6 +10,7 @@ from src.common.logger import get_logger
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.common.data_models.message_data_model import ReplyContentType
 from src.chat.message_receive.chat_stream import ChatStream, get_chat_manager
+from src.chat.message_receive.recall_registry import recall_registry
 from src.common.prompt_manager import prompt_manager
 from src.chat.utils.timer_calculator import Timer
 from src.chat.planner_actions.planner import ActionPlanner
@@ -302,6 +303,16 @@ class HeartFChatting:
             recent_messages_list = []
         _reply_text = ""  # 初始化reply_text变量，避免UnboundLocalError
 
+        # 提前检查：若强制回复的消息已被撤回，跳过本轮观察。
+        # 这是最早的中断点，避免为已撤回消息启动归档、规划、LLM 调用等整个流程。
+        if force_reply_message and recall_registry.is_recalled(getattr(force_reply_message, "message_id", None)):
+            logger.info(
+                f"{self.log_prefix} 强制回复的消息已被撤回，跳过本轮观察",
+                event_code="chat.recall.observe_skipped",
+                message_id=getattr(force_reply_message, "message_id", None),
+            )
+            return False
+
         # ── 未闭合话题恢复（跨轮衔接）──
         _restored_topics: list[dict] = []
         try:
@@ -454,6 +465,16 @@ class HeartFChatting:
 
         for msg in messages:
             try:
+                # 归档是 fire-and-forget 任务，撤回可能在循环执行期间抵达，
+                # 因此逐条检查而非只在入口检查一次。
+                if recall_registry.is_recalled(getattr(msg, "message_id", None)):
+                    logger.debug(
+                        f"{self.log_prefix} 消息已被撤回，跳过归档",
+                        event_code="chat.recall.archive_skipped",
+                        message_id=getattr(msg, "message_id", None),
+                    )
+                    continue
+
                 # 适配 DatabaseMessages → archiver 期望的 duck-typing 接口
                 adapted = copy.copy(msg)
                 adapted.stream_id = msg.chat_id  # chat_id → stream_id
@@ -466,8 +487,10 @@ class HeartFChatting:
                 logger.warning(f"消息归档失败: {e}")
                 continue
 
-        # 同时更新话题摘要
+        # 同时更新话题摘要。摘要是多条消息融合的自然语言，一旦吸收就无法按
+        # message_id 反查删除，因此必须在进入摘要前就把撤回消息滤掉。
         if self.topic_summarizer is not None:
+            summarizable = [msg for msg in messages if not recall_registry.is_recalled(getattr(msg, "message_id", None))]
             try:
                 if hasattr(self.topic_summarizer, "add_messages"):
                     await self.topic_summarizer.add_messages(
@@ -480,11 +503,11 @@ class HeartFChatting:
                                 "speaker": msg.user_nickname or msg.user_id,
                                 "timestamp": msg.time,
                             }
-                            for msg in messages
+                            for msg in summarizable
                         ],
                     )
                 else:
-                    for msg in messages:
+                    for msg in summarizable:
                         self.topic_summarizer.add_message(
                             stream_id=self.stream_id,
                             message_text=msg.processed_plain_text or "",
@@ -501,6 +524,9 @@ class HeartFChatting:
             pipeline = get_encoding_pipeline()
             if pipeline is not None:
                 for msg in messages:
+                    # 编码管线是通往 Layer 2 的入口，进入后同样无法按 ID 反查
+                    if recall_registry.is_recalled(getattr(msg, "message_id", None)):
+                        continue
                     try:
                         await pipeline.ingest(
                             stream_id=self.stream_id,
@@ -634,6 +660,16 @@ class HeartFChatting:
         selected_expressions: Optional[List[int]] = None,
         quote_message: Optional[bool] = None,
     ) -> str:
+        # 发送前最后一道检查：若被回复的消息在生成期间已被撤回，则中止发送。
+        # 这里挡住的是最尴尬的情况——回复一条已经不存在的消息。
+        if recall_registry.is_recalled(getattr(message_data, "message_id", None)):
+            logger.info(
+                f"{self.log_prefix} 目标消息已被撤回，中止回复发送",
+                event_code="chat.recall.reply_aborted",
+                message_id=getattr(message_data, "message_id", None),
+            )
+            return ""
+
         # 根据 llm_quote 配置决定是否使用 quote_message 参数
         if global_config.chat.llm_quote:
             # 如果配置为 true，使用 llm_quote 参数决定是否引用回复

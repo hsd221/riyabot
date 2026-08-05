@@ -9,6 +9,7 @@ from src.common.logger import get_logger
 from src.common.data_models.message_data_model import ReplyContentType
 from src.chat.chat_tool_registry import ChatToolRegistry, ToolExecutionResult, format_tool_results_for_reply
 from src.chat.message_receive.chat_stream import ChatStream, get_chat_manager
+from src.chat.message_receive.recall_registry import recall_registry
 from src.common.prompt_manager import prompt_manager
 from src.chat.utils.timer_calculator import Timer
 from src.chat.brain_chat.private_tool_pipeline import (
@@ -380,7 +381,20 @@ class BrainChatting:
         self,
         recent_messages_list: Optional[List["DatabaseMessages"]] = None,
     ) -> bool:
-        return await self._observe_native(recent_messages_list or [])
+        messages = recent_messages_list or []
+
+        # 提前检查：若本批待处理消息已全部被撤回，则跳过本轮观察。
+        # 这是最早的中断点，避免为已撤回消息启动规划与 LLM 调用。
+        # 仅在批次非空时判定——空批次属于正常的续轮场景，不应被拦截。
+        if messages and all(recall_registry.is_recalled(getattr(msg, "message_id", None)) for msg in messages):
+            logger.info(
+                f"{self.log_prefix} 待处理消息已全部被撤回，跳过本轮观察",
+                event_code="chat.recall.observe_skipped",
+                message_count=len(messages),
+            )
+            return False
+
+        return await self._observe_native(messages)
 
     async def _archive_recent_messages(self, messages: list["DatabaseMessages"]) -> None:
         """将最近消息归档到第0层原始消息表
@@ -395,6 +409,16 @@ class BrainChatting:
 
         for msg in messages:
             try:
+                # 归档是 fire-and-forget 任务，撤回可能在循环执行期间抵达，
+                # 因此逐条检查而非只在入口检查一次。
+                if recall_registry.is_recalled(getattr(msg, "message_id", None)):
+                    logger.debug(
+                        f"{self.log_prefix} 消息已被撤回，跳过归档",
+                        event_code="chat.recall.archive_skipped",
+                        message_id=getattr(msg, "message_id", None),
+                    )
+                    continue
+
                 # 适配 DatabaseMessages → archiver 期望的 duck-typing 接口
                 adapted = copy.copy(msg)
                 adapted.stream_id = msg.chat_id  # chat_id → stream_id
@@ -405,9 +429,12 @@ class BrainChatting:
                 logger.warning(f"消息归档失败: {e}")
                 continue
 
-        # 同时更新话题摘要
+        # 同时更新话题摘要。摘要一旦吸收就无法按 message_id 反查删除，
+        # 因此必须在进入摘要前把撤回消息滤掉。
         if self.topic_summarizer is not None:
             for msg in messages:
+                if recall_registry.is_recalled(getattr(msg, "message_id", None)):
+                    continue
                 try:
                     self.topic_summarizer.add_message(
                         stream_id=self.stream_id,
@@ -425,6 +452,9 @@ class BrainChatting:
             pipeline = get_encoding_pipeline()
             if pipeline is not None:
                 for msg in messages:
+                    # 编码管线是通往 Layer 2 的入口，进入后同样无法按 ID 反查
+                    if recall_registry.is_recalled(getattr(msg, "message_id", None)):
+                        continue
                     try:
                         await pipeline.ingest(
                             stream_id=self.stream_id,
@@ -564,6 +594,15 @@ class BrainChatting:
         message_data: "DatabaseMessages",
         selected_expressions: Optional[List[int]] = None,
     ) -> str:
+        # 发送前最后一道检查：若被回复的消息在生成期间已被撤回，则中止发送。
+        if recall_registry.is_recalled(getattr(message_data, "message_id", None)):
+            logger.info(
+                f"{self.log_prefix} 目标消息已被撤回，中止回复发送",
+                event_code="chat.recall.reply_aborted",
+                message_id=getattr(message_data, "message_id", None),
+            )
+            return ""
+
         new_message_count = message_api.count_new_messages(
             chat_id=self.chat_stream.stream_id, start_time=self.last_read_time, end_time=time.time()
         )

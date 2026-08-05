@@ -7,6 +7,7 @@ from src.common.database.database_model import Messages, Images
 from src.common.logger import get_logger
 from .chat_stream import ChatStream
 from .message import MessageSending, MessageRecv
+from .recall_registry import recall_registry
 
 logger = get_logger("message_storage")
 
@@ -54,6 +55,18 @@ class MessageStorage:
             # 通知消息不存储
             if isinstance(message, MessageRecv) and message.is_notify:
                 logger.debug("通知消息，跳过存储")
+                return
+
+            # 撤回事件可能先于消息落库抵达，此时数据库无行可标记。
+            # 在写入前拦截，避免已撤回的消息被补写进库。
+            incoming_msg_id = getattr(message.message_info, "message_id", None)
+            if recall_registry.is_recalled(incoming_msg_id):
+                recall_registry.resolve_pending(incoming_msg_id)
+                logger.info(
+                    "消息已被撤回，跳过存储",
+                    event_code="chat.recall.store_skipped",
+                    message_id=incoming_msg_id,
+                )
                 return
 
             pattern = r"<MainRule>.*?</MainRule>|<schedule>.*?</schedule>|<UserMessage>.*?</UserMessage>"
@@ -190,6 +203,43 @@ class MessageStorage:
 
         except Exception as e:
             logger.error(f"更新消息ID失败: {e}")
+            return False
+
+    @staticmethod
+    def mark_message_recalled(message_id: str | None) -> bool:
+        """将指定消息标记为已撤回。
+
+        返回是否在数据库中匹配到了对应行。未匹配通常意味着消息尚未落库，
+        调用方应保留内存登记，等待 store_message 阶段拦截。
+        """
+        if not message_id:
+            return False
+        try:
+            updated = (
+                Messages.update(is_recalled=True)
+                .where((Messages.message_id == str(message_id)) & (Messages.message_id != "notice"))
+                .execute()
+            )
+            if updated:
+                logger.info(
+                    "消息已标记为撤回",
+                    event_code="chat.recall.marked",
+                    message_id=message_id,
+                    rows=updated,
+                )
+                return True
+            logger.debug(
+                "撤回消息尚未落库，等待写入时拦截",
+                event_code="chat.recall.mark_deferred",
+                message_id=message_id,
+            )
+            return False
+        except Exception:
+            logger.exception(
+                "标记消息撤回失败",
+                event_code="chat.recall.mark_failed",
+                message_id=message_id,
+            )
             return False
 
     @staticmethod

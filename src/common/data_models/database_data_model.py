@@ -79,6 +79,7 @@ class DatabaseMessages(BaseDataModel):
         is_command: bool = False,
         intercept_message_level: int = 0,
         is_notify: bool = False,
+        is_recalled: bool = False,
         selected_expressions: Optional[str] = None,
         user_id: str = "",
         user_nickname: str = "",
@@ -122,6 +123,7 @@ class DatabaseMessages(BaseDataModel):
         self.is_command = is_command
         self.intercept_message_level = intercept_message_level
         self.is_notify = is_notify
+        self.is_recalled = is_recalled
 
         self.selected_expressions = selected_expressions
 
@@ -226,6 +228,7 @@ class DatabaseMessages(BaseDataModel):
             "is_command": self.is_command,
             "intercept_message_level": self.intercept_message_level,
             "is_notify": self.is_notify,
+            "is_recalled": self.is_recalled,
             "selected_expressions": self.selected_expressions,
             "user_id": self.user_info.user_id,
             "user_nickname": self.user_info.user_nickname,
