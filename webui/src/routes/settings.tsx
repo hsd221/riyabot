@@ -1474,19 +1474,40 @@ function AboutTab() {
         <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-sm font-medium">RiyaBot Core</p>
-            <p className="text-xs text-muted-foreground sm:text-sm">独立维护的 RiyaBot 核心</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">WebUI</p>
             <p className="text-xs text-muted-foreground sm:text-sm">
-              Based on the upstream WebUI by Mai-with-u and{' '}
               <a
-                href="https://github.com/DrSmoothl"
+                href="https://github.com/hsd221"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary underline"
               >
-                @MotricSeven
+                @hsd221
+              </a>
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium">WebUI</p>
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              <a
+                href="https://github.com/hsd221"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                @hsd221
+              </a>
+            </p>
+          </div>
+          <div className="border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              Core 与 WebUI 均源于{' '}
+              <a
+                href="https://github.com/Mai-with-u/MaiBot"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                MaiBot
               </a>
             </p>
           </div>
