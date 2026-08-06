@@ -137,7 +137,7 @@ class ChatHistoryManager:
             messages = (
                 Messages.select()
                 .where(
-                    (Messages.chat_info_group_id == target_group_id) & (Messages.is_recalled == False)
+                    (Messages.chat_info_group_id == target_group_id) & (Messages.is_recalled == False)  # noqa: E712
                 )
                 .order_by(Messages.time.desc())
                 .limit(limit)
