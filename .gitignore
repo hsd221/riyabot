@@ -370,8 +370,14 @@ MaiBot.code-workspace
 *.lock
 !uv.lock
 !webui/bun.lock
+!docs-src/bun.lock
 actionlint
 adapter/
 :memory:_write_ops.jsonl
 .omo/
 stress_results.json
+
+# VitePress 文档站
+docs-src/node_modules/
+docs-src/.vitepress/dist/
+docs-src/.vitepress/cache/
