@@ -18,8 +18,10 @@ async def text_to_stream(
     text: str,
     stream_id: str,
     typing: bool = False,
-    reply_to: str = "",
+    set_reply: bool = False,
+    reply_message: Optional["DatabaseMessages"] = None,
     storage_message: bool = True,
+    selected_expressions: Optional[List[int]] = None,
 ) -> bool:
 ```
 发送文本消息到指定的流
@@ -28,15 +30,23 @@ async def text_to_stream(
 - `text` (str): 要发送的文本内容
 - `stream_id` (str): 聊天流ID
 - `typing` (bool): 是否显示正在输入
-- `reply_to` (str): 回复消息，格式为"发送者:消息内容"
+- `set_reply` (bool): 是否将本条消息标记为对 `reply_message` 的引用回复
+- `reply_message` (Optional[DatabaseMessages]): 被引用回复的消息对象
 - `storage_message` (bool): 是否存储消息到数据库
+- `selected_expressions` (Optional[List[int]]): 选用的表达方式 ID 列表
 
 **Returns:**
 - `bool` - 是否发送成功
 
 ### 2. 发送表情包
 ```python
-async def emoji_to_stream(emoji_base64: str, stream_id: str, storage_message: bool = True) -> bool:
+async def emoji_to_stream(
+    emoji_base64: str,
+    stream_id: str,
+    storage_message: bool = True,
+    set_reply: bool = False,
+    reply_message: Optional["DatabaseMessages"] = None,
+) -> bool:
 ```
 向指定流发送表情包。
 
@@ -44,13 +54,21 @@ async def emoji_to_stream(emoji_base64: str, stream_id: str, storage_message: bo
 - `emoji_base64` (str): 表情包的base64编码
 - `stream_id` (str): 聊天流ID
 - `storage_message` (bool): 是否存储消息到数据库
+- `set_reply` (bool): 是否标记为引用回复
+- `reply_message` (Optional[DatabaseMessages]): 被引用回复的消息对象
 
 **Returns:**
 - `bool` - 是否发送成功
 
 ### 3. 发送图片
 ```python
-async def image_to_stream(image_base64: str, stream_id: str, storage_message: bool = True) -> bool:
+async def image_to_stream(
+    image_base64: str,
+    stream_id: str,
+    storage_message: bool = True,
+    set_reply: bool = False,
+    reply_message: Optional["DatabaseMessages"] = None,
+) -> bool:
 ```
 向指定流发送图片。
 
@@ -58,6 +76,8 @@ async def image_to_stream(image_base64: str, stream_id: str, storage_message: bo
 - `image_base64` (str): 图片的base64编码
 - `stream_id` (str): 聊天流ID
 - `storage_message` (bool): 是否存储消息到数据库
+- `set_reply` (bool): 是否标记为引用回复
+- `reply_message` (Optional[DatabaseMessages]): 被引用回复的消息对象
 
 **Returns:**
 - `bool` - 是否发送成功
@@ -81,11 +101,12 @@ async def command_to_stream(command: Union[str, dict], stream_id: str, storage_m
 ```python
 async def custom_to_stream(
     message_type: str,
-    content: str,
+    content: str | Dict,
     stream_id: str,
     display_message: str = "",
     typing: bool = False,
-    reply_to: str = "",
+    reply_message: Optional["DatabaseMessages"] = None,
+    set_reply: bool = False,
     storage_message: bool = True,
     show_log: bool = True,
 ) -> bool:
@@ -94,11 +115,12 @@ async def custom_to_stream(
 
 **Args:**
 - `message_type` (str): 消息类型，如"text"、"image"、"emoji"、"video"、"file"等
-- `content` (str): 消息内容（通常是base64编码或文本）
+- `content` (str | Dict): 消息内容（通常是base64编码或文本，部分类型可为字典）
 - `stream_id` (str): 聊天流ID
 - `display_message` (str): 显示消息
 - `typing` (bool): 是否显示正在输入
-- `reply_to` (str): 回复消息，格式为"发送者:消息内容"
+- `reply_message` (Optional[DatabaseMessages]): 被引用回复的消息对象
+- `set_reply` (bool): 是否标记为引用回复
 - `storage_message` (bool): 是否存储消息到数据库
 - `show_log` (bool): 是否显示日志
 
@@ -112,17 +134,18 @@ async def custom_to_stream(
 ```python
 from src.plugin_system.apis import send_api
 
-async def send_hello(chat_stream):
-    """发送问候消息"""
-    
+async def send_hello(chat_stream, source_message):
+    """发送问候消息，并引用回复某条消息"""
+
     success = await send_api.text_to_stream(
         text="Hello, world!",
         stream_id=chat_stream.stream_id,
         typing=True,
-        reply_to="User:How are you?",
+        set_reply=True,
+        reply_message=source_message,  # DatabaseMessages 对象
         storage_message=True
     )
-    
+
     return success
 ```
 
@@ -159,10 +182,8 @@ async def send_emoji_reaction(chat_stream, emotion):
 - `"video"`：视频消息（如果支持）
 - `"audio"`：音频消息（如果支持）
 
-### 回复格式
-回复消息使用格式：`"发送者:消息内容"` 或 `"发送者：消息内容"`
-
-系统会自动查找匹配的原始消息并进行回复。
+### 引用回复
+需要引用回复某条消息时，将 `set_reply=True` 并把要回复的 `DatabaseMessages` 对象传给 `reply_message`。
 
 ## 注意事项
 

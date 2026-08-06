@@ -158,7 +158,7 @@ class GreetingAction(BaseAction):
         return True, "发送了问候"
 ```
 
-一个完整的使用`ActionActivationType.KEYWORD`的例子请参考`plugins/hello_world_plugin`中的`ByeAction`。
+一个使用 `ActionActivationType.KEYWORD` 的实际例子请参考 `src/plugins/built_in/tts_plugin`。
 
 #### 第二层：使用决策
 
@@ -216,32 +216,31 @@ class BaseAction:
         self.is_group: bool           # 是否群聊
 
         # 消息体
-        self.action_message: dict     # 消息数据
+        self.action_message: DatabaseMessages  # 触发本轮的消息对象
 
         # Action相关属性
-        self.action_data: dict        # Action执行时的数据
+        self.action_data: dict        # Action执行时的数据（LLM返回的参数）
         self.thinking_id: str         # 思考ID
 ```
-action_message为一个字典，包含的键值对如下（省略了不必要的键值对）
+`action_message` 是 `DatabaseMessages` 对象（定义见 `src.common.data_models.database_data_model.DatabaseMessages`），常用属性包括：
 
 ```python
-{
-    "message_id": "1234567890",  # 消息id，str
-    "time": 1627545600.0,  # 时间戳，float
-    "chat_id": "abcdef123456",  # 聊天ID，str
-    "reply_to": None,  # 回复消息id，str或None
-    "interest_value": 0.85,  # 兴趣值，float
-    "is_mentioned": True,  # 是否被提及，bool
-    "chat_info_last_active_time": 1627548600.0,  # 最后活跃时间，float
-    "processed_plain_text": None,  # 处理后的文本，str或None
-    "additional_config": None,  # Adapter传来的additional_config，dict或None
-    "is_emoji": False,  # 是否为表情，bool
-    "is_picid": False,  # 是否为图片ID，bool
-    "is_command": False  # 是否为命令，bool
-}
+message_id: str                      # 消息id
+time: float                          # 时间戳
+chat_id: str                         # 聊天ID
+reply_to: str | None                 # 回复的消息id
+interest_value: float | None         # 兴趣值
+is_mentioned: bool | None            # 是否被提及
+processed_plain_text: str | None     # 处理后的文本
+additional_config: str | None        # Adapter 传来的附加配置
+is_emoji: bool                       # 是否为表情
+is_picid: bool                       # 是否为图片ID
+is_command: bool                     # 是否为命令
+user_id: str                         # 发送者用户ID
+user_nickname: str                   # 发送者昵称
 ```
 
-部分值的格式请自行查询数据库。
+完整字段请查阅 `DatabaseMessages` 类定义。
 
 ---
 
@@ -254,22 +253,22 @@ class BaseAction:
     async def wait_for_new_message(self, timeout: int = 1200) -> Tuple[bool, str]:
         """等待新消息或超时"""
 
-    async def send_text(self, content: str, reply_to: str = "", reply_to_platform_id: str = "", typing: bool = False) -> bool:
+    async def send_text(self, content: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, typing: bool = False, storage_message: bool = True) -> bool:
         """发送文本消息"""
 
-    async def send_emoji(self, emoji_base64: str) -> bool:
+    async def send_emoji(self, emoji_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送表情包"""
 
-    async def send_image(self, image_base64: str) -> bool:
+    async def send_image(self, image_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送图片"""
 
-    async def send_custom(self, message_type: str, content: str, typing: bool = False, reply_to: str = "") -> bool:
-        """发送自定义类型消息"""
-
-    async def store_action_info(self, action_build_into_prompt: bool = False, action_prompt_display: str = "", action_done: bool = True) -> None:
-        """存储动作信息到数据库"""
+    async def send_custom(self, message_type: str, content: str | Dict, typing: bool = False, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
+        """发送自定义类型消息，如 video、file、audio 等"""
 
     async def send_command(self, command_name: str, args: Optional[dict] = None, display_message: str = "", storage_message: bool = True) -> bool:
         """发送命令消息"""
+
+    async def store_action_info(self, action_build_into_prompt: bool = False, action_prompt_display: str = "", action_done: bool = True) -> None:
+        """存储动作信息到数据库"""
 ```
 具体参数与用法参见`BaseAction`基类的定义。

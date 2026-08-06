@@ -209,7 +209,7 @@ class TimeCommand(BaseCommand):
     # === 命令设置（必须填写）===
     command_pattern = r"^/time$"  # 精确匹配 "/time" 命令
 
-    async def execute(self) -> Tuple[bool, Optional[str], bool]:
+    async def execute(self) -> Tuple[bool, Optional[str], int]:
         """执行时间查询"""
         # 获取当前时间
         time_format: str = "%Y-%m-%d %H:%M:%S"
@@ -220,7 +220,7 @@ class TimeCommand(BaseCommand):
         message = f"⏰ 当前时间：{time_str}"
         await self.send_text(message)
 
-        return True, f"显示了当前时间: {time_str}", True
+        return True, f"显示了当前时间: {time_str}", 0
 
 @register_plugin
 class HelloWorldPlugin(BasePlugin):
@@ -388,7 +388,7 @@ class TimeCommand(BaseCommand):
     # === 命令设置（必须填写）===
     command_pattern = r"^/time$"  # 精确匹配 "/time" 命令
 
-    async def execute(self) -> Tuple[bool, str, bool]:
+    async def execute(self) -> Tuple[bool, Optional[str], int]:
         """执行时间查询"""
         import datetime
 
@@ -401,7 +401,7 @@ class TimeCommand(BaseCommand):
         message = f"⏰ 当前时间：{time_str}"
         await self.send_text(message)
 
-        return True, f"显示了当前时间: {time_str}", True
+        return True, f"显示了当前时间: {time_str}", 0
 ```
 
 **配置系统工作流程：**
@@ -417,13 +417,7 @@ class TimeCommand(BaseCommand):
 
 ### 2. 创建说明文档
 
-你可以创建一个 `README.md` 文件，描述插件的功能和使用方法。
-
-### 3. 发布到插件市场
-
-如果你想让更多人使用你的插件，可以将它发布到RiyaBot的插件市场。
-
-这部分请参考 [plugin-repo](https://github.com/Maim-with-u/plugin-repo) 的文档。
+你可以创建一个 `README.md` 文件，描述插件的功能和使用方法，方便自己和他人理解、复用你的插件。
 
 ---
 

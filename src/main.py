@@ -107,8 +107,8 @@ class MainSystem:
             "系统初始化完成",
             event_code="system.initialize.completed",
             bot_name=global_config.bot.nickname,
-            docs_url="https://docs.mai-mai.org/",
-            plugin_docs_url="https://docs.mai-mai.org/develop/",
+            docs_url="https://github.com/hsd221/riyabot/tree/main/docs-src",
+            plugin_docs_url="https://github.com/hsd221/riyabot/tree/main/docs-src/plugins",
             statistics_database="data/RiyaBot.db",
             statistics_page="/statistics",
         )

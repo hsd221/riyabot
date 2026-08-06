@@ -73,76 +73,42 @@ RiyaBot插件系统现在强制要求每个插件都必须包含一个 `_manifes
 }
 ```
 
-## 🛠️ 管理工具
+## 🛠️ 校验机制
 
-### 使用manifest_tool.py
+插件加载时，系统会通过 `ManifestValidator`（位于 `src/plugin_system/utils/manifest_utils.py`）自动读取并校验插件目录下的 `_manifest.json`。校验只有在**错误**（缺少必需字段、字段为空、不支持的 manifest 版本、作者信息缺失等）时才会导致插件加载失败；**警告**（如未填写 `license`、`keywords`）不会阻止加载。
 
-我们提供了一个命令行工具来帮助管理manifest文件：
+无需手动运行任何命令行工具——只要把正确的 `_manifest.json` 放在插件目录下，加载时就会自动校验。
 
-```bash
-# 扫描缺少manifest的插件
-python scripts/manifest_tool.py scan src/plugins
+### 常见校验结果
 
-# 为插件创建最小化manifest文件
-python scripts/manifest_tool.py create-minimal src/plugins/my_plugin --name "我的插件" --author "作者"
-
-# 为插件创建完整manifest模板
-python scripts/manifest_tool.py create-complete src/plugins/my_plugin --name "我的插件"
-
-# 验证manifest文件
-python scripts/manifest_tool.py validate src/plugins/my_plugin
+必需字段缺失会产生类似下面的错误，导致插件无法加载：
+```
+- 缺少必需字段: name
+- 作者信息缺少name字段或为空
 ```
 
-### 验证示例
-
-验证通过的示例：
+建议填写但非必需的字段只会产生警告：
 ```
-✅ Manifest文件验证通过
-```
-
-验证失败的示例：
-```
-❌ 验证错误:
-  - 缺少必需字段: name
-  - 作者信息缺少name字段或为空
-⚠️ 验证警告:
-  - 建议填写字段: license
-  - 建议填写字段: keywords
+- 建议填写字段: license
+- 建议填写字段: keywords
 ```
 
-## 🔄 迁移指南
+## 🔄 迁移与新建
 
 ### 对于现有插件
 
-1. **检查缺少manifest的插件**：
-   ```bash
-   python scripts/manifest_tool.py scan src/plugins
-   ```
-
-2. **为每个插件创建manifest**：
-   ```bash
-   python scripts/manifest_tool.py create-minimal src/plugins/your_plugin
-   ```
-
-3. **编辑manifest文件**，填写正确的信息。
-
-4. **验证manifest**：
-   ```bash
-   python scripts/manifest_tool.py validate src/plugins/your_plugin
-   ```
+1. 在插件目录下创建 `_manifest.json`；
+2. 至少填写必需字段（`manifest_version`、`name`、`version`、`description`、`author.name`）；
+3. 重新加载插件，若校验失败按错误提示修正。
 
 ### 对于新插件
 
 创建新插件时，建议的步骤：
 
-1. **创建插件目录和基本文件**
-2. **创建完整manifest模板**：
-   ```bash
-   python scripts/manifest_tool.py create-complete src/plugins/new_plugin
-   ```
-3. **根据实际情况修改manifest文件**
-4. **编写插件代码**
-5. **验证manifest文件**
+1. **创建插件目录和基本文件**（放在项目根目录的 `plugins/` 下）；
+2. **手写 `_manifest.json`**，可参考下方的必需/可选字段；
+3. **编写插件代码**；
+4. **启动 RiyaBot**，在日志中确认插件加载成功、manifest 校验通过。
 
 ## 📋 字段说明
 
@@ -200,6 +166,6 @@ A: 根据验证器的错误提示修复相应问题。错误会导致插件加�
 ## 📚 参考示例
 
 查看内置插件的manifest文件作为参考：
-- `src/plugins/built_in/core_actions/_manifest.json`
 - `src/plugins/built_in/tts_plugin/_manifest.json`
-- `src/plugins/hello_world_plugin/_manifest.json`
+- `src/plugins/built_in/emoji_plugin/_manifest.json`
+- `src/plugins/built_in/plugin_management/_manifest.json`

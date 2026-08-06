@@ -173,30 +173,29 @@ min_duration = 120
 
 ### `ConfigField`：配置项的基石
 
-每个配置项都通过一个 `ConfigField` 对象来定义。
+每个配置项都通过一个 `ConfigField` 对象来定义。`ConfigField` 是一个 dataclass（定义见 `src/plugin_system/base/config_types.py`），常用字段如下：
 
 ```python
-from dataclasses import dataclass
-from src.plugin_system.base.config_types import ConfigField
+from src.plugin_system import ConfigField
 
 @dataclass
 class ConfigField:
-    """配置字段定义"""
-    type: type          # 字段类型 (例如 str, int, float, bool, list)
-    default: Any        # 默认值
-    description: str    # 字段描述 (将作为注释生成到配置文件中)
-    example: Optional[str] = None       # 示例值 (可选)
-    required: bool = False              # 是否必需 (可选, 主要用于文档提示)
-    choices: Optional[List[Any]] = None # 可选值列表 (可选)
+    """配置字段定义（此处仅列出常用字段）"""
+    type: type                              # 字段类型 (例如 str, int, float, bool, list, dict)
+    default: Any                            # 默认值
+    description: str                        # 字段描述（将作为注释生成到配置文件中，也用作默认标签）
+    example: Optional[str] = None           # 示例值（用于生成配置文件注释）
+    required: bool = False                  # 是否必需
+    choices: Optional[List[Any]] = None     # 可选值列表（用于下拉选择）
 ```
+
+> `ConfigField` 还支持 `min`/`max`/`step`、`placeholder`、`hint`、`input_type`、`order` 等用于 WebUI 渲染和校验的字段，完整定义请查阅源码。
 
 ### 配置示例
 
-让我们以一个功能丰富的 `MutePlugin` 为例，看看如何定义它的配置。
+让我们以一个功能丰富的禁言插件 `MutePlugin` 为例（这里仅作演示，插件本身不一定存在于仓库中），看看如何定义它的配置。
 
 ```python
-# src/plugins/built_in/mute_plugin/plugin.py
-
 from src.plugin_system import BasePlugin, register_plugin, ConfigField
 from typing import List, Tuple, Type
 

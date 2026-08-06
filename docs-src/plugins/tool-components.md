@@ -94,7 +94,7 @@ definition: Dict[str, Any] = {"name": cls.name, "description": cls.description, 
 完成一个天气查询工具
 
 ```python
-from src.plugin_system import BaseTool
+from src.plugin_system import BaseTool, ToolParamType
 import aiohttp
 import json
 

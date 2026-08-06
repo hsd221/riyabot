@@ -1,6 +1,6 @@
 # 个人信息API
 
-个人信息API模块提供用户信息查询和管理功能，让插件能够获取和使用用户的相关信息。
+个人信息API模块提供用户信息查询功能，让插件能够获取用户的相关信息。
 
 ## 导入方式
 
@@ -14,13 +14,13 @@ from src.plugin_system import person_api
 
 ### 1. Person ID 获取
 ```python
-def get_person_id(platform: str, user_id: int) -> str:
+def get_person_id(platform: str, user_id: int | str) -> str:
 ```
 根据平台和用户ID获取person_id
 
 **Args:**
 - `platform`：平台名称，如 "qq", "telegram" 等
-- `user_id`：用户ID
+- `user_id`：用户ID，可以是 int 或 str
 
 **Returns:**
 - `str`：唯一的person_id（MD5哈希值）
@@ -47,46 +47,10 @@ async def get_person_value(person_id: str, field_name: str, default: Any = None)
 #### 示例
 ```python
 nickname = await person_api.get_person_value(person_id, "nickname", "未知用户")
-impression = await person_api.get_person_value(person_id, "impression")
+person_name = await person_api.get_person_value(person_id, "person_name")
 ```
 
-### 3. 批量用户信息查询
-```python
-async def get_person_values(person_id: str, field_names: list, default_dict: Optional[dict] = None) -> dict:
-```
-批量获取用户信息字段值
-
-**Args:**
-- `person_id`：用户的唯一标识ID
-- `field_names`：要获取的字段名列表
-- `default_dict`：默认值字典，键为字段名，值为默认值
-
-**Returns:**
-- `dict`：字段名到值的映射字典
-
-#### 示例
-```python
-values = await person_api.get_person_values(
-    person_id,
-    ["nickname", "impression", "know_times"],
-    {"nickname": "未知用户", "know_times": 0}
-)
-```
-
-### 4. 判断用户是否已知
-```python
-async def is_person_known(platform: str, user_id: int) -> bool:
-```
-判断是否认识某个用户
-
-**Args:**
-- `platform`：平台名称
-- `user_id`：用户ID
-
-**Returns:**
-- `bool`：是否认识该用户
-
-### 5. 根据用户名获取Person ID
+### 3. 根据用户名获取Person ID
 ```python
 def get_person_id_by_name(person_name: str) -> str:
 ```
@@ -100,20 +64,21 @@ def get_person_id_by_name(person_name: str) -> str:
 
 ## 常用字段说明
 
-### 基础信息字段
-- `nickname`：用户昵称
-- `platform`：平台信息
+`get_person_value` 的 `field_name` 对应 `Person` 对象（`src.common.person_stub.Person`）的属性，当前可用字段：
+
+- `platform`：平台标识
 - `user_id`：用户ID
+- `person_id`：用户唯一标识
+- `person_name`：用户名
+- `nickname`：用户昵称
+- `is_known`：是否已知用户
+- `know_times`：认识次数
+- `memory_points`：记忆点列表
 
-### 关系信息字段
-- `impression`：对用户的印象
-- `points`: 用户特征点
-
-其他字段可以参考`PersonInfo`类的属性（位于`src.common.database.database_model`）
+> 提示：`Person` 目前是过渡期的桩实现（`src/common/person_stub.py`），后续会替换为完整的用户画像系统。字段以源码中 `Person` 类的属性为准。
 
 ## 注意事项
 
-1. **异步操作**：部分查询函数都是异步的，需要使用`await`
-2. **性能考虑**：批量查询优于单个查询
+1. **异步操作**：`get_person_value` 是异步函数，需要使用 `await`
+2. **数据一致性**：person_id 是用户的唯一标识，应妥善保存和使用
 3. **隐私保护**：确保用户信息的使用符合隐私政策
-4. **数据一致性**：person_id是用户的唯一标识，应妥善保存和使用
