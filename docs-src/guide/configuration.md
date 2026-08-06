@@ -5,6 +5,8 @@ RiyaBot 的配置分为两个文件，均由程序在首次启动时自动生成
 - `bot_config.toml` — bot 身份、人格、聊天行为、记忆、表达学习等；
 - `model_config.toml` — 模型供应商、模型定义与任务分配。
 
+> **不必手动编辑配置文件。** 绝大多数配置项都能在 WebUI 管理面板中可视化修改并即时保存，首次配置也由 WebUI 的配置向导引导完成。本文用于说明各配置项的含义，方便你在面板中理解每个字段，或在需要时直接编辑 TOML。
+
 配置类定义在 `src/config/official_configs.py`（bot 配置）和 `src/config/api_ada_configs.py`（模型配置）。以下按配置段（TOML 中的 `[section]`）说明常用字段，字段默认值以源码为准。
 
 ## bot_config.toml

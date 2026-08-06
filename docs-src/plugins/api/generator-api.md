@@ -1,6 +1,14 @@
 # 回复生成器API
 
-回复生成器API模块提供智能回复生成功能，让插件能够使用系统的回复生成器来产生自然的聊天回复。
+回复生成器 API 让插件调用系统的 Replyer，生成符合当前聊天上下文的回复内容。它负责生成和处理回复，不负责注册插件组件。
+
+## 先确认 Tool 与 Action 的边界
+
+新插件需要让模型按结构化参数调用能力时，应继承 `BaseTool` 并通过插件组件注册。Tool 的定义和执行由聊天层的统一 Tool Call 管线处理，详见 [Tool 组件](../tool-components.md) 和 [工具 API](tool-api.md)。
+
+`BaseAction` 仍作为兼容组件保留。聊天层会把满足激活条件的 Action 转换为 Tool schema，再交给 `ActionManager` 创建并执行；这不等于 `BaseAction` 已经变成 `BaseTool`。Action 的迁移说明见 [Action 组件（兼容层）](../action-components.md)。
+
+本页的 `generate_reply()` 是 Replyer 调用接口。它不是注册 Tool 或执行 Action 的入口；`enable_tool` 只控制本次 Replyer 生成中的工具处理开关。
 
 ## 导入方式
 
@@ -71,15 +79,15 @@ async def generate_reply(
 **Args:**
 - `chat_stream`: 聊天流对象
 - `chat_id`: 聊天ID（实际上就是`stream_id`）
-- `action_data`: 动作数据（向下兼容，可包含 `extra_info`、`reason`、`unknown_words`）
+- `action_data`: 旧回复流程的兼容上下文。若对应参数没有显式传入，会从中读取 `extra_info`、`reason` 和 `unknown_words`；它不会注册或执行 Tool/Action
 - `reply_message`: 被回复的消息对象（`DatabaseMessages`）
 - `think_level`: 思考等级
 - `extra_info`: 附加信息，用于补充上下文
 - `reply_reason`: 回复原因
-- `available_actions`: 可用动作字典，格式为 `{"action_name": ActionInfo}`
-- `chosen_actions`: 已选动作列表
+- `available_actions`: 旧回复流程使用的可用 Action 信息，格式为 `{"action_name": ActionInfo}`；不是 `BaseTool` 的注册入口
+- `chosen_actions`: 旧 Planner 传给 Replyer 的已选 Action 记录
 - `unknown_words`: 未知词语列表，用于黑话检索
-- `enable_tool`: 是否启用工具
+- `enable_tool`: 是否启用本次 Replyer 生成中的工具处理；不会注册插件 Tool
 - `enable_splitter`: 是否启用消息分割器
 - `enable_chinese_typo`: 是否启用中文错别字
 - `request_type`: 请求类型（可选，记录LLM使用）
@@ -95,10 +103,9 @@ async def generate_reply(
 ```python
 success, llm_response = await generator_api.generate_reply(
     chat_stream=chat_stream,
-    action_data=action_data,
     reply_message=source_message,
-    available_actions=action_info,
-    enable_tool=True,
+    extra_info="补充给 Replyer 的上下文",
+    reply_reason="需要回应当前消息",
 )
 if success and llm_response:
     print(f"生成内容: {llm_response.content}")

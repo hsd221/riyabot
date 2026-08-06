@@ -1,6 +1,11 @@
 # 部署指南
 
-本文介绍 RiyaBot 的生产部署方式，包括 Docker Compose 部署、跨主机/跨容器连接的令牌配置，以及运行时目录与端口说明。源码安装与首次配置见[安装与启动](installation.md)。
+本文说明源码安装和 Docker 安装共用的网络边界、适配器连接方式与运行时目录。选择安装方式前，先看[源码安装](installation.md)或[Docker 安装](docker-installation.md)。
+
+## 选择部署方式
+
+- [源码安装](installation.md) — 在宿主机安装 Python 与 Bun，适合开发和调试。
+- [Docker 安装](docker-installation.md) — 使用 Compose 运行核心、适配器和 NapCat，适合长期运行。
 
 ## 组件构成
 
@@ -10,82 +15,69 @@
 - **适配器（adapters）**：把 QQ 等平台的消息协议转换成 RiyaBot 使用的旧版消息协议；
 - **协议端（如 NapCat）**：真正登录 QQ 账号、收发底层消息的客户端。
 
-核心与适配器之间通过**旧版消息 WebSocket**通信，默认端口 `8000`（由 `.env` 的 `HOST` / `PORT` 控制）。
+核心与适配器之间通过**旧版消息 WebSocket**通信。它默认只监听回环地址，跨主机连接时需要显式配置监听地址和共享令牌。
+
+## 跨主机和跨容器连接
+
+核心与适配器不在同一台主机或同一网络命名空间时，先生成一个强随机令牌，再把同一个值配置给双方：
+
+```bash
+export MAIBOT_LEGACY_SERVER_TOKEN="$(openssl rand -hex 32)"
+```
+
+旧版适配器镜像如果不支持令牌变量，可以暂时开启匿名兼容模式：
+
+```bash
+export MAIBOT_LEGACY_SERVER_TOKEN=
+export MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER=1
+```
+
+这个兼容开关只适用于受信的私有网络。不要把核心的旧版消息端口发布到公网；适配器升级后，应改回共享令牌并关闭兼容开关。
 
 ## 端口与环境变量
 
-`.env` 由首次启动时依据 `template/template.env` 自动生成，常用项：
+源码安装首次启动时会根据 `template/template.env` 自动生成 `.env`。Docker 安装通过 Compose 环境变量覆盖宿主机端口映射。常用配置如下：
 
-| 变量 | 默认 | 说明 |
+| 变量 | 默认值 | 用途 |
 |---|---|---|
-| `HOST` | 127.0.0.1 | 旧版消息服务器监听地址 |
-| `PORT` | 8000 | 旧版消息服务器端口（核心 ↔ 适配器） |
-| `WEBUI_HOST` | 127.0.0.1 | WebUI 监听地址 |
-| `WEBUI_PORT` | 8001 | WebUI 端口 |
-| `MAIBOT_LEGACY_SERVER_TOKEN` | 空 | 跨主机/跨容器连接时，核心与适配器共享的强随机令牌 |
-| `MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER` | 0 | 是否允许旧版消息服务器远程匿名监听（仅迁移用途，不推荐） |
+| `HOST` | `127.0.0.1` | 旧版消息服务器监听地址 |
+| `PORT` | `8000` | 核心与适配器使用的旧版消息端口 |
+| `WEBUI_HOST` | `127.0.0.1` | WebUI 服务监听地址 |
+| `WEBUI_PORT` | `8001` | WebUI 服务端口 |
+| `MAIBOT_LEGACY_SERVER_TOKEN` | 空 | 核心与适配器共享的连接令牌 |
+| `MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER` | `0` | 是否允许旧版消息服务器远程匿名监听 |
 
-> 更多可选安全开关（模型 URL、插件仓库、媒体 URL 等）见 `template/template.env` 中的注释，默认值均为安全侧，通常无需改动。
+上表中的 `HOST`、`WEBUI_HOST` 默认值适用于源码安装的回环监听。Docker 安装需要按[Docker 安装](docker-installation.md)中的首次准备步骤，把挂载到容器内的 `.env` 设置为 `HOST=0.0.0.0`、`WEBUI_HOST=0.0.0.0`，并写入核心与适配器共用的令牌。Docker 宿主机是否对外监听，则由下面的 `RIYABOT_WEBUI_BIND_ADDRESS` 等映射变量单独决定。
 
-### 跨主机/跨容器连接的令牌
+Docker Compose 另外提供以下宿主机映射变量：
 
-旧版消息 WebSocket 默认拒绝远程匿名监听。当核心与适配器不在同一进程/回环网络时，必须为二者配置**同一个**强随机令牌：
+| 变量 | 默认值 | 用途 |
+|---|---|---|
+| `RIYABOT_WEBUI_BIND_ADDRESS` | `127.0.0.1` | Docker WebUI 端口的宿主机监听地址 |
+| `RIYABOT_WEBUI_PORT` | `18001` | Docker WebUI 的宿主机端口 |
+| `NAPCAT_BIND_ADDRESS` | `127.0.0.1` | NapCat 管理端口的宿主机监听地址 |
+| `NAPCAT_PORT` | `6099` | NapCat 管理端口的宿主机端口 |
 
-```bash
-export MAIBOT_LEGACY_SERVER_TOKEN="$(openssl rand -hex 32)"
-```
-
-若适配器镜像尚不支持该变量，可临时保持令牌为空并设置 `MAIBOT_ALLOW_UNAUTHENTICATED_LEGACY_SERVER=1`。这仅适用于受信的私有网络，且**绝不能对外发布核心的 `8000` 端口**；适配器升级后应立即改用共享令牌并关闭该兼容开关。
-
-## Docker 部署
-
-### 构建镜像
-
-Dockerfile 内置独立的 Bun 构建阶段来生成 WebUI 静态资源，无需在宿主机预先构建前端：
-
-```bash
-docker build -t riyabot .
-```
-
-### 使用 Compose
-
-仓库根目录的 `docker-compose.yml` 提供了包含核心、适配器、NapCat 与可选 `sqlite-web` 调试面板的示例编排。核心服务的关键约定：
-
-- **端口映射**：默认把容器内 `8001`（WebUI）映射到宿主机 `127.0.0.1:18001`，仅本机可访问。可用环境变量 `RIYABOT_WEBUI_BIND_ADDRESS` / `RIYABOT_WEBUI_PORT` 调整。
-- **不发布 `8000`**：核心的旧版消息端口默认不对外发布；启用远程匿名兼容模式时更绝不能发布。
-- **数据卷**：配置持久化在 `./docker-config/`，运行数据在 `./data/RiyaBot/`（含 `plugins/`、`logs/`）。
-- **最小权限**：核心容器启用了 `no-new-privileges` 且 `cap_drop: ALL`。
-
-配置共享令牌后启动：
-
-```bash
-export MAIBOT_LEGACY_SERVER_TOKEN="$(openssl rand -hex 32)"
-docker compose up -d
-```
-
-调试用的 `sqlite-web`（只读挂载数据库）位于 `debug` profile，需要时显式启用：
-
-```bash
-docker compose --profile debug up -d
-```
-
-> 注意：Compose 使用容器内 `/RiyaBot` 与宿主机 `./data/RiyaBot` 作为默认路径。从旧部署迁移时，需要手动把旧数据目录复制到新路径。
+需要公网访问 WebUI 时，只开放 WebUI 端口并放在受控的 HTTPS 入口后面。不要同时发布 `8000`，也不要为了调试把旧版消息服务改成匿名公网监听。
 
 ## 运行时目录
 
-以下目录属于运行时数据，不应提交到仓库：
+源码安装使用项目根目录的 `config/`、`data/` 和 `logs/` 保存运行时状态。Docker 安装把对应内容持久化到宿主机的 `docker-config/` 和 `data/RiyaBot/`，具体映射见[Docker 安装](docker-installation.md)。
 
-- `config/` — 自动生成的 `bot_config.toml` / `model_config.toml`；
-- `data/` — 数据库、记忆、表情等持久化数据；
-- `logs/` — 日志文件。
+这些目录不是源码，不应提交到仓库。升级或迁移前，请先备份配置、数据库、插件和日志中需要保留的内容。
 
 ## 程序更新
 
-WebUI 的「系统设置 > 关于」可检查并切换更新频道：
+WebUI 的“系统设置 > 关于”可以检查并切换更新频道：
 
-- **正式版**：跟踪 `main` 分支可达的最新正式 SemVer 标签（不含预发布）；
+- **正式版**：跟踪 `main` 分支可达的最新正式 SemVer 标签，不含预发布版本；
 - **开发版**：跟踪远端 `dev` 分支的完整提交 SHA。
 
-切换频道只保存偏好，不会立即更新。源码安装在当前提交可识别、受跟踪文件无修改、目标为快进提交且 `git`、`uv`、`bun` 均可用时，可由 Runner 执行一键更新并重启；目标落后、分支分叉或检查变化时更新会被拒绝，不会强制重置或降级。
+源码安装在当前提交可识别、受跟踪文件无修改、目标为快进提交且 `git`、`uv`、`bun` 均可用时，可由 Runner 执行一键更新并重启。目标落后、分支分叉或检查结果变化时，更新会被拒绝，不会强制重置或降级。
 
-Docker 与压缩包安装支持在线检查，但不会在运行中的容器或安装目录内替换自身。Docker 部署发现新版本后，请拉取对应的 GHCR 镜像并重建容器。
+Docker 不会在运行中的容器内替换自身。更新 Docker 部署时，请按照[Docker 安装](docker-installation.md)中的流程拉取新源码、备份持久化目录并重新构建容器。
+
+## 相关文档
+
+- [配置说明](configuration.md) — 了解 WebUI 配置向导和生成的 TOML 文件。
+- [架构概览](architecture.md) — 了解 Runner、Worker、核心服务与适配器的关系。

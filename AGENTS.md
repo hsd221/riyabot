@@ -10,6 +10,7 @@ RiyaBot is a Python 3.10+ QQ-chat bot with a React 19/TypeScript dashboard. `bot
 ├── webui/               # Bun/Vite dashboard; builds static assets for src/webui/
 ├── tests/               # stdlib unittest, simulator, and configured E2E tooling
 ├── prompts/             # external prompt templates and section contracts
+├── docs-src/             # VitePress documentation source and site configuration
 ├── plugins/             # externally loaded plugins; each has _manifest.json
 ├── scripts/             # maintenance, migration, evaluation, and load tools
 ├── config/, data/, logs/ # generated/runtime state; not source
@@ -30,6 +31,7 @@ RiyaBot is a Python 3.10+ QQ-chat bot with a React 19/TypeScript dashboard. `bot
 | Model requests and embeddings | `src/llm_models/` | Provider clients, payloads, request traces, embedding profile. |
 | Plugin SDK and runtime | `src/plugin_system/`, `plugins/` | Public facades versus external plugin implementations. |
 | Dashboard frontend/backend | `webui/`, `src/webui/` | Build frontend before relying on `webui/dist/` in backend serving. |
+| Documentation site and guides | `docs-src/` | VitePress source; build with `cd docs-src && bun run docs:build`. |
 | Prompts | `prompts/`, `src/common/prompt_manager.py` | Keep dotted IDs, metadata, and `###SECTION:` variants stable. |
 
 ## CODE MAP
@@ -78,7 +80,7 @@ Search the owning package before creating any new utility. Use the public facade
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not commit `.env`, credentials, tokens, private databases, `config/`, `data/`, `logs/`, or `tests/artifacts/`.
-- Do not edit `webui/dist/`, `webui/node_modules/`, caches, or `.claude/worktrees/` as source; those worktrees are separate copies.
+- Do not edit `webui/dist/`, `webui/node_modules/`, `docs-src/.vitepress/dist/`, `docs-src/node_modules/`, caches, or `.claude/worktrees/` as source; those are generated or separate copies.
 - Do not bypass prompt loading with ad hoc file reads or rename dotted prompt IDs/`###SECTION:` headings during unrelated work.
 - Do not expose plugin input, model output, uploads, remote responses, or adapter traffic as trusted data.
 - Do not alter configuration, plugin, database, Docker-path, or authentication schemas without a compatibility/migration note.
@@ -92,6 +94,7 @@ ruff check . && ruff format --check .
 uv run python -m unittest discover -s tests -p 'test_*.py'
 cd webui && bun install && bun run dev
 cd webui && bun run lint && bun run build
+cd docs-src && bun install --frozen-lockfile && bun run docs:build
 docker build -t riyabot .
 docker compose up -d
 ```

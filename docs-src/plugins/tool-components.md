@@ -1,29 +1,36 @@
-# 🔧 工具组件详解
+# 🔧 Tool 组件详解
 
-## 📖 什么是工具
+## Tool 在当前架构中的定位
 
-工具是RiyaBot的信息获取能力扩展组件。如果说Action组件功能五花八门，可以拓展璃夜能做的事情，那么Tool就是在某个过程中拓宽了璃夜能够获得的信息量。
+Tool 是 RiyaBot 的原生 LLM 工具组件。插件通过 `BaseTool` 注册结构化参数和执行函数，工具启用后会直接进入原生工具目录，模型按需发起 Tool Call。
 
-### 🎯 工具的特点
+聊天层还会把内置 `reply` 和兼容 `BaseAction` 放进同一个目录。因此，Tool 是原生组件契约；Action 是仍然可用的旧组件契约，二者共享 Tool Call 的执行协议，但不是同一个基类。
 
-- 🔍 **信息获取增强**：扩展璃夜获取外部信息的能力
-- 📊 **数据丰富**：帮助璃夜获得更多背景信息和实时数据
+### Tool 的特点
+
+- 🔍 **结构化调用**：使用参数定义约束模型传入的数据
+- 📊 **原生目录**：启用后直接注册到 LLM 可用工具列表
 - 🔌 **插件式架构**：支持独立开发和注册新工具
-- ⚡ **自动发现**：工具会被系统自动识别和注册
+- ⚡ **结果可追踪**：执行结果作为 Tool Result 返回聊天流程
 
-### 🆚 Tool vs Action vs Command 区别
+### Tool、Action 与 Command 的区别
 
 | 特征 | Action | Command | Tool |
 |-----|-------|---------|------|
-| **主要用途** | 扩展璃夜行为能力 | 响应用户指令 | 扩展璃夜信息获取 |
-| **触发方式** | 璃夜智能决策 | 用户主动触发 | LLM根据需要调用 |
-| **目标** | 让璃夜做更多事情 | 提供具体功能 | 让璃夜知道更多信息 |
-| **使用场景** | 增强交互体验 | 功能服务 | 信息查询和分析 |
+| **组件基类** | `BaseAction` | `BaseCommand` | `BaseTool` |
+| **主要用途** | 兼容现有的自主聊天动作 | 响应用户明确指令 | 提供原生结构化能力 |
+| **触发方式** | 激活筛选后由模型通过 Tool Call 选择 | 正则表达式匹配用户输入 | 模型按工具定义发起 Tool Call |
+| **执行入口** | `ActionManager` 创建 Action 实例 | Command 运行时 | `ToolExecutor` 创建 Tool 实例 |
+| **适合场景** | 表情、语音等已有 Action 行为 | 管理、查询和确定性命令 | 信息查询或其他需要结构化参数的能力 |
+
+新插件需要被模型直接调用时，优先从 `BaseTool` 开始。只有需要 Action 的激活机制，或需要延续已有 Action 插件时，才选择 `BaseAction`。
 
 ## 🏗️ Tool组件的基本结构
 
 每个工具必须继承 `BaseTool` 基类并实现以下属性和方法：
 ```python
+from typing import Any
+
 from src.plugin_system import BaseTool, ToolParamType
 
 class MyTool(BaseTool):
@@ -57,7 +64,7 @@ class MyTool(BaseTool):
 
     available_for_llm = True  # 是否对LLM可用
     
-    async def execute(self, function_args: Dict[str, Any]):
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
         """执行工具逻辑"""
         # 实现工具功能
         result = f"查询结果: {function_args.get('query')}"
@@ -78,7 +85,7 @@ class MyTool(BaseTool):
 
 其构造而成的工具定义为:
 ```python
-definition: Dict[str, Any] = {"name": cls.name, "description": cls.description, "parameters": cls.parameters}
+definition: dict[str, Any] = {"name": cls.name, "description": cls.description, "parameters": cls.parameters}
 ```
 
 ### 方法说明
@@ -94,9 +101,10 @@ definition: Dict[str, Any] = {"name": cls.name, "description": cls.description, 
 完成一个天气查询工具
 
 ```python
+from typing import Any
+
 from src.plugin_system import BaseTool, ToolParamType
 import aiohttp
-import json
 
 class WeatherTool(BaseTool):
     """天气查询工具 - 获取指定城市的实时天气信息"""
@@ -109,7 +117,7 @@ class WeatherTool(BaseTool):
         ("country", ToolParamType.STRING, "国家代码，如：CN、US，可选参数", False, None)
     ]
     
-    async def execute(self, function_args: dict):
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
         """执行天气查询"""
         try:
             city = function_args.get("city")
@@ -129,19 +137,20 @@ class WeatherTool(BaseTool):
                 "content": result
             }
             
-        except Exception as e:
+        except Exception:
             return {
                 "name": self.name,
-                "content": f"天气查询失败: {str(e)}"
+                "content": "天气查询失败，请稍后重试。"
             }
     
     async def _fetch_weather(self, location: str) -> dict:
         """获取天气数据"""
         # 这里是示例，实际需要接入真实的天气API
-        api_url = f"http://api.weather.com/v1/current?q={location}"
-        
+        api_url = "https://api.weather.com/v1/current"
+
         async with aiohttp.ClientSession() as session:
-            async with session.get(api_url) as response:
+            async with session.get(api_url, params={"q": location}, timeout=10) as response:
+                response.raise_for_status()
                 return await response.json()
     
     def _format_weather_data(self, data: dict) -> str:
@@ -170,10 +179,11 @@ class WeatherTool(BaseTool):
 
 ## 🚨 注意事项和限制
 
-### 当前限制
+### 使用边界
 
-1. **适用范围**：主要适用于信息获取场景
-2. **配置要求**：必须开启工具处理器
+1. **启用要求**：只有 `available_for_llm = True` 的 Tool 会进入 LLM 工具目录。
+2. **参数校验**：`parameters` 描述模型输入格式，执行函数仍需校验外部数据，不能把模型返回值当作可信输入。
+3. **聊天上下文**：`BaseTool` 提供 `chat_stream` 和配置访问能力；发送消息、读取消息等操作应通过 `src.plugin_system.apis` 门面完成。
 
 ### 开发建议
 
@@ -244,3 +254,14 @@ def _format_result(self, data):
 def _format_result(self, data):
     return str(data)  # 直接返回原始数据
 ```
+
+## Action 兼容说明
+
+`BaseAction` 不再作为新插件的独立主组件介绍。它仍然由聊天层转换为 Tool Call，并通过原有的 `ActionManager` 执行，主要用于维护已有插件或需要激活机制的组件。
+
+需要维护或迁移现有 Action 时，再阅读 [Action 组件（兼容层）](./action-components.md)。新插件请从本页的 `BaseTool` 开始。
+
+## 相关文档
+
+- [Command 组件](./command-components.md) — 响应用户明确输入的命令。
+- [插件快速开始](./quick-start.md) — 从插件骨架开始了解组件注册方式。

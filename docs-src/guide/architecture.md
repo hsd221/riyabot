@@ -13,6 +13,16 @@ Worker 以退出码 `42`（`RESTART_EXIT_CODE`）退出时，Runner 会重启它
 
 主系统的初始化与调度集中在 `src/main.py` 的 `MainSystem`：首次配置未完成时只启动 WebUI 向导，配置就绪后再初始化聊天、记忆、插件等组件。
 
+```mermaid
+flowchart TD
+    runner[bot.py Runner] --> worker[Worker 进程]
+    worker --> main[src/main.py MainSystem]
+    main --> setup{首次配置完成?}
+    setup -->|否| webui[WebUI 配置向导]
+    setup -->|是| services[聊天、记忆、插件与后台服务]
+    services --> adapter[消息适配器]
+```
+
 ## 后端目录结构
 
 ```text

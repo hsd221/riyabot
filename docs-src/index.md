@@ -7,7 +7,7 @@ hero:
   tagline: 一个面向 QQ 群聊的拟生命体聊天机器人，基于大语言模型、长期记忆、行为规划和插件系统构建。
   actions:
     - theme: brand
-      text: 快速开始
+      text: 源码安装
       link: /guide/installation
     - theme: alt
       text: 插件开发
@@ -37,11 +37,12 @@ RiyaBot 不是只等命令的工具型 bot，而更像一个长期停留在群�
 
 ## 快速导航
 
-### 部署与使用
+### 安装与使用
 
-- [安装与启动](/guide/installation) — 从源码安装、准备配置、启动后端与 WebUI
+- [源码安装](/guide/installation) — 在本机安装依赖、构建 WebUI、启动后端并完成首次配置
+- [Docker 安装](/guide/docker-installation) — 用 Compose 启动核心、适配器和 NapCat
 - [配置说明](/guide/configuration) — `bot_config.toml` / `model_config.toml` 字段与首次配置向导
-- [部署指南](/guide/deployment) — Docker Compose、跨主机令牌、端口与运行时目录
+- [部署指南](/guide/deployment) — 跨主机令牌、端口安全与运行时目录
 - [架构概览](/guide/architecture) — 进程模型、目录结构与各核心模块职责
 
 ### 插件开发

@@ -8,6 +8,8 @@
     <img src="https://img.shields.io/badge/FastAPI-WebUI-009688?logo=fastapi&logoColor=white" alt="FastAPI WebUI">
     <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="GPL-3.0">
   </p>
+
+  <p><a href="https://hsd221.github.io/riyabot/">在线文档</a></p>
 </div>
 
 ## 介绍

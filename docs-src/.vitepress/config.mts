@@ -14,6 +14,7 @@ export default withMermaid(
       nav: [
         { text: '指南', link: '/guide/installation' },
         { text: '插件开发', link: '/plugins/index' },
+        { text: '贡献指南', link: '/CONTRIBUTE' },
         {
           text: '仓库',
           link: 'https://github.com/hsd221/riyabot',
@@ -23,9 +24,10 @@ export default withMermaid(
       sidebar: {
         '/guide/': [
           {
-            text: '部署与使用',
+            text: '安装与使用',
             items: [
-              { text: '安装与启动', link: '/guide/installation' },
+              { text: '源码安装', link: '/guide/installation' },
+              { text: 'Docker 安装', link: '/guide/docker-installation' },
               { text: '配置说明', link: '/guide/configuration' },
               { text: '部署指南', link: '/guide/deployment' },
               { text: '架构概览', link: '/guide/architecture' },
@@ -43,9 +45,8 @@ export default withMermaid(
           {
             text: '组件详解',
             items: [
-              { text: 'Action 组件', link: '/plugins/action-components' },
-              { text: 'Command 组件', link: '/plugins/command-components' },
               { text: 'Tool 组件', link: '/plugins/tool-components' },
+              { text: 'Command 组件', link: '/plugins/command-components' },
               { text: '配置文件系统', link: '/plugins/configuration-guide' },
               { text: 'Manifest 系统', link: '/plugins/manifest-guide' },
               { text: '依赖管理', link: '/plugins/dependency-management' },
@@ -81,6 +82,24 @@ export default withMermaid(
         next: '下一页',
       },
 
+      editLink: {
+        pattern: 'https://github.com/hsd221/riyabot/edit/dev/docs-src/:path',
+        text: '在 GitHub 上编辑此页',
+      },
+
+      search: {
+        provider: 'local',
+      },
+
+      externalLinkIcon: true,
+
+      notFound: {
+        title: '页面不存在',
+        quote: '你访问的页面可能已经移动，或者链接仍指向旧地址。',
+        linkLabel: '返回首页',
+        linkText: '回到文档首页',
+      },
+
       outline: {
         label: '本页目录',
       },
@@ -89,13 +108,15 @@ export default withMermaid(
 
       returnToTopLabel: '返回顶部',
       sidebarMenuLabel: '菜单',
+      langMenuLabel: '切换语言',
+      skipToContentLabel: '跳转到正文',
       darkModeSwitchLabel: '外观',
       lightModeSwitchTitle: '切换到浅色模式',
       darkModeSwitchTitle: '切换到深色模式',
 
       footer: {
         message: '基于 GPL-3.0 许可发布，fork 自 MaiBot/MaiCore',
-        copyright: 'Copyright © 2025 @hsd221',
+        copyright: `Copyright © ${new Date().getFullYear()} @hsd221`,
       },
     },
   }),

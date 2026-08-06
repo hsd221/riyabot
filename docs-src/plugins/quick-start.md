@@ -1,12 +1,12 @@
 # 🚀 快速开始指南
 
-本指南将带你从零开始创建一个功能完整的RiyaBot插件。
+本指南将带你从零开始创建一个功能完整的 RiyaBot 插件。
 
 ## 📖 概述
 
-这个指南将带你快速创建你的第一个RiyaBot插件。我们将创建一个简单的问候插件，展示插件系统的基本概念。
+这个指南将带你快速创建你的第一个 RiyaBot 插件。我们将创建一个简单的问候插件，展示插件系统的基本概念。
 
-以下代码都在我们的`plugins/hello_world_plugin/`目录下。
+以下代码都在项目根目录的 `plugins/hello_world_plugin/` 目录下。
 
 ### 一个方便的小设计
 
@@ -53,7 +53,7 @@
 让我们从最基础的开始！创建 `plugin.py` 文件：
 
 ```python
-from typing import List, Tuple, Type
+from typing import List, Optional, Tuple, Type
 from src.plugin_system import BasePlugin, register_plugin, ComponentInfo
 
 @register_plugin # 注册插件
@@ -73,47 +73,106 @@ class HelloWorldPlugin(BasePlugin):
         return []
 ```
 
-🎉 恭喜！你刚刚创建了一个最简单但完整的RiyaBot插件！
+🎉 恭喜！你刚刚创建了一个最简单但完整的 RiyaBot 插件！
 
 **解释一下这些代码：**
 
-- 首先，我们在`plugin.py`中定义了一个HelloWorldPlugin插件类，继承自 `BasePlugin` ，提供基本功能。
-- 通过给类加上，`@register_plugin` 装饰器，我们告诉系统"这是一个插件"
+- 首先，我们在 `plugin.py` 中定义了一个 `HelloWorldPlugin` 插件类。它继承自 `BasePlugin`，提供插件的基本功能。
+- 通过给类加上 `@register_plugin` 装饰器，我们告诉系统这是一个插件。
 - `plugin_name` 等是插件的基本信息，必须填写
-- `get_plugin_components()` 返回插件的功能组件，现在我们没有定义任何 Action, Command 或者 EventHandler，所以返回空列表。
+- `get_plugin_components()` 返回插件的功能组件。当前示例没有定义 Tool、Action、Command 或 EventHandler，因此返回空列表。
 
 ### 4. 测试基础插件
 
-现在就可以测试这个插件了！启动RiyaBot：
+现在就可以测试这个插件了！启动 RiyaBot：
 
-直接通过启动器运行RiyaBot或者 `python bot.py`
+直接通过启动器运行 RiyaBot，或者执行 `python bot.py`。
 
-在日志中你应该能看到插件被加载的信息。虽然插件还没有任何功能，但它已经成功运行了！
+在日志中应该能看到插件加载信息。虽然插件还没有任何功能，但它已经成功运行了！
 
 ![1750326700269](image/quick-start/1750326700269.png)
 
-### 5. 添加第一个功能：问候Action
+### 5. 添加第一个功能：原生 Tool
 
-现在我们要给插件加入一个有用的功能，我们从最好玩的Action做起
+新插件需要被模型按结构化参数调用时，优先使用 `BaseTool`。Tool 会直接进入当前聊天流程的原生工具目录，模型通过 Tool Call 传入参数，工具再返回结构化结果。工具本身不负责生成最终聊天文本，也不应把模型传入的参数当作可信指令。
 
-Action是一类可以让RiyaBot根据聊天情境自主选择的兼容“动作”组件。Planner 会把 legacy `BaseAction` 转换为原生 Tool schema 提供给模型，再由 Action 执行器调用现有插件实现。
+下面添加一个简单的问候 Tool。它只返回问候结果，由后续聊天流程决定是否生成最终回复：
 
-回复不属于 Action：`reply` 是聊天系统内置 Tool；不回复也不是 `no_reply` Action，模型不发起任何 Tool Call 就表示本轮静默结束。Action 更适合扩展发送表情、禁言、发送语音或操作外部能力等行为。
+```python
+from typing import Any, List, Tuple, Type
 
-你可以通过编写动作，来拓展RiyaBot的能力，包括发送语音，截图，甚至操作文件，编写代码......
+from src.plugin_system import BasePlugin, BaseTool, ComponentInfo, ToolParamType, register_plugin
 
-现在让我们给插件添加第一个简单的功能。这个Action可以对用户发送一句问候语。
 
-在 `plugin.py` 文件中添加Action组件，完整代码如下：
+class GreetingTool(BaseTool):
+    """返回一条问候结果。"""
+
+    name = "hello_greeting_tool"
+    description = "根据给定内容生成一条简短、友好的问候结果"
+    available_for_llm = True
+    parameters = [
+        ("greeting_message", ToolParamType.STRING, "要包含在问候中的内容", True, None),
+    ]
+
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
+        greeting_message = str(function_args.get("greeting_message", "")).strip()
+        if not greeting_message:
+            return {"name": self.name, "content": "没有提供问候内容。"}
+
+        return {"name": self.name, "content": f"问候内容：{greeting_message}"}
+
+
+@register_plugin
+class HelloWorldPlugin(BasePlugin):
+    """Hello World 插件。"""
+
+    plugin_name = "hello_world_plugin"
+    enable_plugin = True
+    dependencies = []
+    python_dependencies = []
+    config_file_name = "config.toml"
+    config_schema = {}
+
+    def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
+        return [(GreetingTool.get_tool_info(), GreetingTool)]
+```
+
+注册 Tool 时要调用 `get_tool_info()`，而不是 `get_action_info()`。只有 `available_for_llm = True` 的 Tool 会进入模型可用目录。有关参数定义、返回值和错误处理边界，详见 [Tool 组件详解](./tool-components.md)。
+
+### 6. 测试原生 Tool
+
+重启 RiyaBot，在聊天中提出明确需要该能力的请求，例如：
+
+```
+请使用问候工具，生成“欢迎新成员”的问候内容。
+```
+
+模型可能会调用 `GreetingTool`。Tool 的返回值会作为当前轮次的不可信工具结果继续交给聊天流程；如果模型随后调用内置 `reply`，Replyer 才会生成发给用户的最终文本。没有 Tool Call 并不代表 Tool 注册失败，是否调用仍由模型根据工具描述和当前上下文决定。
+
+🎉 现在你已经完成了一个原生 Tool 插件。
+
+### 7. 添加兼容 Action
+
+如果你需要维护已有的自主聊天动作，本节沿用 `BaseAction`，演示如何维护带有激活机制的兼容组件。
+
+> 新插件若需要被模型按结构化参数直接调用，请先阅读 [Tool 组件详解](./tool-components.md) 并使用 `BaseTool`。Action 已接入统一的 Tool Call 执行边界，但 `BaseAction` 仍是兼容组件。
+
+Action 适合扩展发送表情、禁言、发送语音或操作外部能力等已有聊天动作。
+
+> Action 的激活机制、与内置 `reply` 的关系等更深入的说明，见 [Action 组件详解](./action-components.md)。这里先专注把功能跑起来。
+
+现在让我们给插件添加一个兼容 Action。这个 Action 可以对用户发送一句问候语。下面的代码是只注册该 Action 的最小片段；如果同时保留前面的 Tool，请在最终的 `get_plugin_components()` 返回列表中同时保留两者。
+
+在 `plugin.py` 文件中添加兼容 Action 组件：
 
 ```python
 from typing import List, Tuple, Type
 from src.plugin_system import (
-    BasePlugin, register_plugin, BaseAction, 
-    ComponentInfo, ActionActivationType, ChatMode
+    BasePlugin, register_plugin, BaseAction,
+    ComponentInfo, ActionActivationType
 )
 
-# ===== Action组件 =====
+# ===== 兼容 Action 组件 =====
 
 class HelloAction(BaseAction):
     """问候Action - 简单的问候动作"""
@@ -166,17 +225,17 @@ class HelloWorldPlugin(BasePlugin):
 - `execute()` 函数是Action的核心，定义了当Action被RiyaBot选择后，具体要做什么
 - `self.send_text()` 是发送文本消息的便捷方法
 
-Action 组件中有关`activation_type`、`action_parameters`、`action_require`、`associated_types` 等的详细说明请参考 [Action组件指南](./action-components.md)。
+Action 组件中有关 `activation_type`、`action_parameters`、`action_require`、`associated_types` 等的详细说明请参考 [Action 组件指南](./action-components.md)。需要新增原生模型工具时，请参考 [Tool 组件详解](./tool-components.md)。
 
-### 6. 测试问候Action
+### 8. 测试兼容 Action
 
-重启RiyaBot，然后在聊天中发送任意消息，比如：
+重启 RiyaBot，然后在聊天中发送任意消息，比如：
 
 ```
 你好
 ```
 
-RiyaBot可能会选择使用你的问候Action，发送回复：
+RiyaBot 可能会选择使用你的问候 Action，发送回复：
 
 ```
 嗨！很开心见到你！😊
@@ -188,11 +247,11 @@ RiyaBot可能会选择使用你的问候Action，发送回复：
 
 🎉 太棒了！你的插件已经有实际功能了！
 
-### 7. 添加第二个功能：时间查询Command
+### 9. 添加第二个功能：时间查询 Command
 
-现在让我们添加一个Command组件。Command和Action不同，它是直接响应用户命令的：
+现在让我们添加一个 Command 组件。Command 和 Action 不同，它直接响应用户命令：
 
-Command是最简单，最直接的响应，不由LLM判断选择使用
+Command 是确定性的直接响应，不由 LLM 判断是否调用。
 
 ```python
 # 在现有代码基础上，添加Command组件
@@ -236,12 +295,14 @@ class HelloWorldPlugin(BasePlugin):
 
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         return [
+            # 保留前面的原生 Tool
+            (GreetingTool.get_tool_info(), GreetingTool),
             (HelloAction.get_action_info(), HelloAction),
             (TimeCommand.get_command_info(), TimeCommand),
         ]
 ```
 
-同样的，我们通过 `get_plugin_components()` 方法，通过调用`get_action_info()`这个内置方法将 `TimeCommand` 注册为插件的一个组件。
+同样的，我们通过 `get_plugin_components()` 方法，调用 `get_command_info()` 将 `TimeCommand` 注册为插件组件。
 
 **Command组件解释：**
 
@@ -250,7 +311,7 @@ class HelloWorldPlugin(BasePlugin):
 
 有关 Command 组件的更多信息，请参考 [Command组件指南](./command-components.md)。
 
-### 8. 测试时间查询Command
+### 10. 测试时间查询 Command
 
 重启RiyaBot，发送命令：
 
@@ -264,7 +325,7 @@ class HelloWorldPlugin(BasePlugin):
 ⏰ 当前时间：2024-01-01 12:00:00
 ```
 
-🎉 太棒了！现在你已经了解了基本的 Action 和 Command 组件的使用方法。你可以根据自己的需求，继续扩展插件的功能，添加更多的 Action 和 Command 组件，让你的插件更加丰富和强大！
+🎉 现在你已经了解了原生 Tool、兼容 Action 和 Command 的基本用法。新增功能优先从 Tool 或 Command 的适用边界开始判断；只有需要 Action 的激活机制或既有 Action 行为时，才继续使用 `BaseAction`。
 
 ---
 
@@ -299,9 +360,8 @@ class HelloWorldPlugin(BasePlugin):
     # 配置Schema定义
     config_schema: dict = {
         "plugin": {
-            "name": ConfigField(type=str, default="hello_world_plugin", description="插件名称"),
-            "version": ConfigField(type=str, default="1.0.0", description="插件版本"),
-            "enabled": ConfigField(type=bool, default=False, description="是否启用插件"),
+            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
+            "config_version": ConfigField(type=str, default="1.0.0", description="配置文件版本"),
         },
         "greeting": {
             "message": ConfigField(type=str, default="嗨！很开心见到你！😊", description="默认问候消息"),
@@ -312,6 +372,7 @@ class HelloWorldPlugin(BasePlugin):
 
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         return [
+            (GreetingTool.get_tool_info(), GreetingTool),
             (HelloAction.get_action_info(), HelloAction),
             (TimeCommand.get_command_info(), TimeCommand),
         ]
@@ -326,14 +387,11 @@ class HelloWorldPlugin(BasePlugin):
 # 插件基本信息
 [plugin]
 
-# 插件名称
-name = "hello_world_plugin"
-
-# 插件版本
-version = "1.0.0"
-
 # 是否启用插件
-enabled = false
+enabled = true
+
+# 配置文件版本
+config_version = "1.0.0"
 
 
 # 问候功能配置

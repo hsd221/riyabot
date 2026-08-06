@@ -71,19 +71,19 @@ class BaseCommand:
     def get_config(self, key: str, default=None):
         """获取插件配置值，使用嵌套键访问"""
 
-    async def send_text(self, content: str, reply_to: str = "") -> bool:
+    async def send_text(self, content: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送回复消息"""
 
-    async def send_custom(self, message_type: str, content: str | Dict, display_message: str = "", typing: bool = False, set_reply: bool = False, storage_message: bool = True) -> bool:
+    async def send_custom(self, message_type: str, content: str | Dict, display_message: str = "", typing: bool = False, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送指定类型的回复消息到当前聊天环境"""
 
     async def send_command(self, command_name: str, args: Optional[dict] = None, display_message: str = "", storage_message: bool = True) -> bool:
         """发送命令消息"""
 
-    async def send_emoji(self, emoji_base64: str) -> bool:
+    async def send_emoji(self, emoji_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送表情包"""
 
-    async def send_image(self, image_base64: str) -> bool:
+    async def send_image(self, image_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送图片"""
 ```
 具体参数与用法参见`BaseCommand`基类的定义。

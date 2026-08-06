@@ -1,6 +1,6 @@
-# RiyaBot插件开发文档
+# RiyaBot 插件开发文档
 
-> 欢迎来到RiyaBot插件系统开发文档！这里是你开始插件开发旅程的最佳起点。
+> 聊天层已经统一使用 Tool Call。新插件优先使用原生 `BaseTool`；`BaseAction` 仍作为兼容组件保留。
 
 ## 新手入门
 
@@ -8,29 +8,34 @@
 
 ## 组件功能详解
 
-- [🧱 Action组件详解](action-components.md) - 掌握最核心的Action组件
-- [💻 Command组件详解](command-components.md) - 学习直接响应命令的组件
-- [🔧 Tool组件详解](tool-components.md) - 了解如何扩展信息获取能力
+- [🔧 Tool 组件详解](tool-components.md) - 使用原生结构化 Tool Call 扩展模型能力
+- [💻 Command 组件详解](command-components.md) - 学习直接响应命令的组件
 - [⚙️ 配置文件系统指南](configuration-guide.md) - 学会使用自动生成的插件配置文件
 - [📄 Manifest系统指南](manifest-guide.md) - 了解插件元数据管理和配置架构
+- [📦 依赖管理](dependency-management.md) - 声明插件和 Python 包依赖
 
-Command vs Action 选择指南
+组件选择指南
 
-1. 使用Command的场景
+1. 使用 `BaseTool` 的场景
 
-- ✅ 用户需要明确调用特定功能
-- ✅ 需要精确的参数控制
-- ✅ 管理和配置操作
-- ✅ 查询和信息显示
-- ✅ 系统维护命令
+- ✅ 需要模型按结构化参数调用能力
+- ✅ 需要把执行结果作为 Tool Result 返回聊天流程
+- ✅ 查询信息或执行明确的外部操作
 
-2. 使用Action的场景
+2. 使用 `BaseAction` 的场景
 
-- ✅ 增强璃夜的智能行为
-- ✅ 根据上下文自动触发
-- ✅ 情绪和表情表达
-- ✅ 智能建议和帮助
-- ✅ 随机化的互动
+- ✅ 维护已有 Action 插件
+- ✅ 需要 `ALWAYS`、`RANDOM`、`KEYWORD` 等激活机制
+- ✅ 需要 `associated_types` 等聊天上下文筛选
+- ✅ 扩展表情、语音等已有聊天动作
+
+3. 使用 `BaseCommand` 的场景
+
+- ✅ 用户需要明确输入命令
+- ✅ 需要确定性匹配和执行
+- ✅ 管理、查询或系统维护命令
+
+`BaseAction` 和 `BaseTool` 都会在聊天层以 Tool Call 运行，但它们的插件基类、注册信息和执行器不同。不要因为两者都出现在模型工具列表中，就把 `BaseAction` 的代码直接改写成 `BaseTool`。
 
 
 ## API浏览
@@ -62,6 +67,11 @@ Command vs Action 选择指南
 - [📜 日志API](api/logging-api.md) - logger实例获取接口
 ### 工具API
 - [🔧 工具API](api/tool-api.md) - tool获取接口
+
+## 继续阅读
+
+- [贡献指南](../CONTRIBUTE.md) - 提交插件或文档改动前的检查项
+- [架构概览](../guide/architecture.md) - 了解插件系统在聊天运行时中的位置
 
 
 

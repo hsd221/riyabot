@@ -1,6 +1,8 @@
-# 安装与启动
+# 源码安装
 
-本文介绍从源码安装并启动 RiyaBot。RiyaBot 需要 **Python 3.10+**，前端管理面板需要 **Bun**。
+源码安装适合需要修改 RiyaBot、开发插件或参与 WebUI 开发的场景。你会在本机安装 Python 依赖，构建一次 WebUI 静态资源，然后由 `python bot.py` 同时启动后端和管理面板。
+
+如果你不想在宿主机安装 Python 与 Bun，请改看 [Docker 安装](docker-installation.md)。
 
 ## 1. 获取源码
 
@@ -17,7 +19,18 @@ cd riyabot
 uv sync
 ```
 
-## 3. 启动后端
+## 3. 构建 WebUI 静态资源
+
+源码安装时，后端会从 `webui/dist/` 托管前端静态文件。这个目录不提交到仓库，因此首次启动前需要在本机生成：
+
+```bash
+cd webui
+bun install
+bun run build
+cd ..
+```
+
+## 4. 启动 RiyaBot
 
 ```bash
 python bot.py
@@ -31,28 +44,9 @@ python bot.py
 
 `config/`、`data/`、`logs/` 是运行时目录，不应提交到仓库。
 
-## 4. 启动 WebUI
+## 5. 完成首次配置
 
-WebUI 后端随主程序一起启动，默认监听 `127.0.0.1:8001`（可通过环境变量 `WEBUI_HOST` / `WEBUI_PORT` 修改）。
-
-生产部署使用预构建的静态资源即可，无需单独运行前端开发服务器。若要参与前端开发：
-
-```bash
-cd webui
-bun install
-bun run dev
-```
-
-构建生产静态资源：
-
-```bash
-cd webui
-bun run build
-```
-
-## 5. 首次配置
-
-打开 WebUI（默认 http://127.0.0.1:8001 ），按配置向导：
+WebUI 后端随主程序一起启动，默认监听 `127.0.0.1:8001`（可通过环境变量 `WEBUI_HOST` / `WEBUI_PORT` 修改）。打开 http://127.0.0.1:8001，按配置向导完成：
 
 1. 确认 EULA 和隐私协议；
 2. 填写 bot 身份信息（平台、QQ 账号、昵称）；
@@ -64,4 +58,26 @@ bun run build
 
 ## 6. 连接聊天平台
 
-RiyaBot 通过**适配器（Adapter）**连接 QQ 等消息平台。适配器与核心之间使用旧版消息 WebSocket 通信，默认在 `127.0.0.1:8000`（由 `.env` 的 `HOST` / `PORT` 控制）。跨主机或跨容器连接时需要为核心与适配器配置同一个令牌，详见[部署指南](deployment.md)。
+RiyaBot 通过**适配器（Adapter）**连接 QQ 等消息平台。适配器与核心之间使用旧版消息 WebSocket 通信，默认在 `127.0.0.1:8000`（由 `.env` 的 `HOST` / `PORT` 控制）。跨主机连接时需要为核心与适配器配置同一个令牌，详见[部署指南](deployment.md)。
+
+## 7. 参与 WebUI 开发
+
+日常使用不需要单独运行前端开发服务器。需要修改 React 管理面板时，在 RiyaBot 运行后另开终端：
+
+```bash
+cd webui
+bun install
+bun run dev
+```
+
+修改完成后重新构建生产静态资源：
+
+```bash
+bun run build
+```
+
+## 下一步
+
+- [Docker 安装](docker-installation.md) — 使用 Compose 运行核心、适配器和 NapCat。
+- [配置说明](configuration.md) — 了解 WebUI 中各配置项与生成的 TOML 文件。
+- [部署指南](deployment.md) — 配置跨主机连接、端口边界和运行时目录。
