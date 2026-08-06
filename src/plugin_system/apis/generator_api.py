@@ -5,7 +5,11 @@
 使用方式：
     from src.plugin_system.apis import generator_api
     replyer = generator_api.get_replyer(chat_stream)
-    success, reply_set, _ = await generator_api.generate_reply(chat_stream, action_data, reasoning)
+    success, llm_response = await generator_api.generate_reply(
+        chat_stream=chat_stream,
+        action_data=action_data,
+        reply_reason=reasoning,
+    )
 """
 
 import traceback
@@ -101,8 +105,9 @@ async def generate_reply(
     Args:
         chat_stream: 聊天流对象（优先）
         chat_id: 聊天ID（备用）
-        action_data: 动作数据（向下兼容，包含reply_to和extra_info）
+        action_data: 兼容上下文（可包含 extra_info、reason 和 unknown_words）
         reply_message: 回复的消息对象
+        think_level: 思考等级
         extra_info: 额外信息，用于补充上下文
         reply_reason: 回复原因
         available_actions: 可用动作
@@ -111,13 +116,11 @@ async def generate_reply(
         enable_tool: 是否启用工具调用
         enable_splitter: 是否启用消息分割器
         enable_chinese_typo: 是否启用错字生成器
-        return_prompt: 是否返回提示词
-        model_set_with_weight: 模型配置列表，每个元素为 (TaskConfig, weight) 元组
         request_type: 请求类型（可选，记录LLM使用）
         from_plugin: 是否来自插件
         reply_time_point: 回复时间点
     Returns:
-        Tuple[bool, List[Tuple[str, Any]], Optional[str]]: (是否成功, 回复集合, 提示词)
+        Tuple[bool, Optional[LLMGenerationDataModel]]: (是否成功, 生成结果对象)
     """
     try:
         # 如果 reply_time_point 未传入，设置为当前时间戳
@@ -228,14 +231,12 @@ async def rewrite_reply(
         chat_id: 聊天ID（备用）
         enable_splitter: 是否启用消息分割器
         enable_chinese_typo: 是否启用错字生成器
-        model_set_with_weight: 模型配置列表，每个元素为 (TaskConfig, weight) 元组
         raw_reply: 原始回复内容
         reason: 回复原因
         reply_to: 回复对象
-        return_prompt: 是否返回提示词
 
     Returns:
-        Tuple[bool, List[Tuple[str, Any]]]: (是否成功, 回复集合)
+        Tuple[bool, Optional[LLMGenerationDataModel]]: (是否成功, 生成结果对象)
     """
     try:
         # 获取回复器

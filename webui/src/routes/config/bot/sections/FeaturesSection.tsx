@@ -375,6 +375,22 @@ export const FeaturesSection = React.memo(function FeaturesSection({
               允许当前实例将看到的表情包据为己有
             </p>
 
+            <div className="flex items-center justify-between gap-4 border-t pt-4">
+              <div>
+                <Label htmlFor="emoji_vector_selection_enabled">向量筛选表情候选</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  开启时使用 embedding 召回；关闭后改用随机候选
+                </p>
+              </div>
+              <Switch
+                id="emoji_vector_selection_enabled"
+                checked={emojiConfig.vector_selection_enabled}
+                onCheckedChange={(checked) =>
+                  onEmojiChange({ ...emojiConfig, vector_selection_enabled: checked })
+                }
+              />
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="selection_candidate_count">最终候选数量</Label>
               <Input
@@ -395,7 +411,15 @@ export const FeaturesSection = React.memo(function FeaturesSection({
               />
             </div>
 
-            <div className="flex items-center space-x-2 border-t pt-4">
+            <div className="flex items-center justify-between gap-4 border-t pt-4">
+              <div>
+                <Label htmlFor="usage_scene_enabled" className="cursor-pointer">
+                  学习真人使用场景
+                </Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  会调用模型学习真人发图语境；关闭后不再学习或参与选择
+                </p>
+              </div>
               <Switch
                 id="usage_scene_enabled"
                 checked={emojiConfig.usage_scene_enabled}
@@ -403,9 +427,6 @@ export const FeaturesSection = React.memo(function FeaturesSection({
                   onEmojiChange({ ...emojiConfig, usage_scene_enabled: checked })
                 }
               />
-              <Label htmlFor="usage_scene_enabled" className="cursor-pointer">
-                学习真人使用场景
-              </Label>
             </div>
 
             {emojiConfig.usage_scene_enabled && (
@@ -452,28 +473,30 @@ export const FeaturesSection = React.memo(function FeaturesSection({
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <div className="flex items-center justify-between gap-4">
-                    <Label htmlFor="usage_scene_weight">初筛场景权重</Label>
-                    <span className="text-sm tabular-nums text-muted-foreground">
-                      {Math.round(emojiConfig.usage_scene_weight * 100)}%
-                    </span>
+                {emojiConfig.vector_selection_enabled && (
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <Label htmlFor="usage_scene_weight">初筛场景权重</Label>
+                      <span className="text-sm tabular-nums text-muted-foreground">
+                        {Math.round(emojiConfig.usage_scene_weight * 100)}%
+                      </span>
+                    </div>
+                    <Slider
+                      id="usage_scene_weight"
+                      value={[emojiConfig.usage_scene_weight]}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      onValueChange={(values) =>
+                        onEmojiChange({ ...emojiConfig, usage_scene_weight: values[0] })
+                      }
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>仅情感</span>
+                      <span>仅场景</span>
+                    </div>
                   </div>
-                  <Slider
-                    id="usage_scene_weight"
-                    value={[emojiConfig.usage_scene_weight]}
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    onValueChange={(values) =>
-                      onEmojiChange({ ...emojiConfig, usage_scene_weight: values[0] })
-                    }
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>仅情感</span>
-                    <span>仅场景</span>
-                  </div>
-                </div>
+                )}
               </div>
             )}
 

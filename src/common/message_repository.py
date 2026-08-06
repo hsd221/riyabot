@@ -85,6 +85,9 @@ def find_messages(
         # 排除 id 为 "notice" 的消息
         query = query.where(Messages.message_id != "notice")
 
+        # 排除已撤回的消息
+        query = query.where(Messages.is_recalled == False)  # noqa: E712
+
         if filter_bot:
             query = query.where(Messages.user_id != global_config.bot.qq_account)
 
@@ -205,6 +208,9 @@ def count_messages(message_filter: dict[str, Any]) -> int:
 
         # 排除 id 为 "notice" 的消息
         query = query.where(Messages.message_id != "notice")
+
+        # 排除已撤回的消息，保持与 find_messages 的口径一致
+        query = query.where(Messages.is_recalled == False)  # noqa: E712
 
         count = query.count()
         return count

@@ -33,6 +33,7 @@ import { WebUIFeedbackSurveyPage, RiyaBotFeedbackSurveyPage } from './routes/sur
 import { Layout } from './components/layout'
 import { getAuthStatus } from './lib/fetch-with-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
+import { parseSettingsTab, type SettingsTab } from './lib/settings-route'
 
 const showRouterDevtools = import.meta.env.DEV && import.meta.env.VITE_ROUTER_DEVTOOLS === 'true'
 
@@ -216,6 +217,9 @@ const pluginMirrorsRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/settings',
+  validateSearch: (search: Record<string, unknown>): { tab?: SettingsTab } => ({
+    tab: parseSettingsTab(search.tab),
+  }),
   component: SettingsPage,
 })
 

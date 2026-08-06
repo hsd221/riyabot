@@ -526,6 +526,9 @@ class EmojiManager:
 
         ``None`` 表示向量能力不可用，空列表表示向量检索成功但没有达标候选。
         """
+        if not global_config.emoji.vector_selection_enabled:
+            return None
+
         try:
             candidates = [
                 EmojiVectorCandidate(emoji.hash, tuple(emoji.emotion))
@@ -559,6 +562,9 @@ class EmojiManager:
         limit: int = 30,
     ) -> Optional[List[Tuple["MaiEmoji", tuple[str, ...], float]]]:
         """按真人使用场景向量召回表情，每张表情只保留最高场景分。"""
+        if not global_config.emoji.vector_selection_enabled or not global_config.emoji.usage_scene_enabled:
+            return None
+
         try:
             self._ensure_db()
             emojis_by_hash = {emoji.hash: emoji for emoji in self.emoji_objects if not emoji.is_deleted and emoji.hash}
@@ -609,6 +615,9 @@ class EmojiManager:
 
     async def _index_emoji_vector(self, emoji: "MaiEmoji") -> None:
         """尽力写入表情情感向量；失败不影响表情本身入库。"""
+        if not global_config.emoji.vector_selection_enabled:
+            return
+
         try:
             indexed = await self.vector_index.upsert(emoji.hash, emoji.emotion)
             if not indexed:

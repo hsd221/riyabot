@@ -17,11 +17,12 @@ output: strict_json
 {scene_profile}
 
 判定规则：
-1. 只在连续消息能支持行为与后果之间关系时提取。不要把猜测的动机、未发生的结果或单条临时发言写成模式。
-2. action 写可执行、可复用的互动策略；outcome 写已出现的可观察变化，例如补充信息、继续追问、情绪缓和或话题推进。两者都不得包含人名、ID、具体型号、临时梗、截图内容或一次性任务。
-3. speaker=SELF 代表 {bot_name}。主体为 {bot_name} 时，actor_type 必须是 "maibot_self"，learning_type 必须是 "self_reflection"；其他单个用户使用 "other_user" / "observed_behavior"；明显由多人共同形成的互动使用 "group_collective" / "observed_behavior"；主体无法确定才使用 "unknown" / "observed_behavior"。
-4. source_ids 必须是聊天记录中真实存在的行号字符串，并直接支撑这条行为链。不要编造、复用无关编号或引用场景画像中的编号。
-5. 每条模式都应有明确价值；最多输出 5 条。证据不足时宁可输出空数组。
+1. 每行格式为 `[行号] [YYYY-MM-DD HH:MM:SS] 发言者说 内容`，时间使用同一时区。判断连续性时必须比较时间间隔；跨天或间隔超过 8 小时的消息，除非文字明确延续同一互动，否则不得拼成同一行为与后果链。
+2. 只在连续消息能支持行为与后果之间关系时提取。不要把猜测的动机、未发生的结果或单条临时发言写成模式。
+3. action 写可执行、可复用的互动策略；outcome 写已出现的可观察变化，例如补充信息、继续追问、情绪缓和或话题推进。两者都不得包含人名、ID、具体型号、临时梗、截图内容或一次性任务。
+4. speaker=SELF 代表 {bot_name}。主体为 {bot_name} 时，actor_type 必须是 "maibot_self"，learning_type 必须是 "self_reflection"；其他单个用户使用 "other_user" / "observed_behavior"；明显由多人共同形成的互动使用 "group_collective" / "observed_behavior"；主体无法确定才使用 "unknown" / "observed_behavior"。
+5. source_ids 必须是聊天记录中真实存在的行号字符串，并直接支撑这条行为链。不要编造、复用无关编号或引用场景画像中的编号。
+6. 每条模式都应有明确价值；最多输出 5 条。证据不足时宁可输出空数组。
 
 输出协议：只输出严格合法的 JSON 数组，不要 Markdown、解释或额外字段。每项字段必须完整：
 [

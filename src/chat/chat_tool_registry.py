@@ -346,12 +346,13 @@ class ChatToolRegistry:
         )
         try:
             result = await self.executor.execute_tool_call(safe_call)
-        except Exception as exc:
+        except Exception:
+            logger.exception(f"工具 {tool_call.func_name} 执行失败")
             return ToolExecutionResult(
                 call_id=tool_call.call_id,
                 tool_name=tool_call.func_name,
                 success=False,
-                content=f"工具执行失败: {exc}",
+                content="工具执行失败，请稍后重试。",
             )
         if not result:
             return ToolExecutionResult(
@@ -415,8 +416,9 @@ class ChatToolRegistry:
             return self._failure(tool_call, f"Action {tool_call.func_name} 处理器创建失败。")
         try:
             result = await handler.execute()
-        except Exception as exc:
-            return self._failure(tool_call, f"Action 执行失败: {exc}")
+        except Exception:
+            logger.exception(f"Action {tool_call.func_name} 执行失败")
+            return self._failure(tool_call, "Action 执行失败，请稍后重试。")
 
         if isinstance(result, tuple):
             success = bool(result[0]) if result else False

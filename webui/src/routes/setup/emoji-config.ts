@@ -8,6 +8,7 @@ export const DEFAULT_EMOJI_CONFIG: EmojiConfig = {
   steal_emoji: true,
   content_filtration: false,
   filtration_prompt: '符合公序良俗',
+  vector_selection_enabled: true,
   usage_scene_enabled: true,
   usage_scene_context_messages: 8,
   usage_scene_max_scenes: 8,
@@ -24,6 +25,8 @@ export function normalizeEmojiConfig(config: Partial<EmojiConfig>): EmojiConfig 
     steal_emoji: config.steal_emoji ?? DEFAULT_EMOJI_CONFIG.steal_emoji,
     content_filtration: config.content_filtration ?? DEFAULT_EMOJI_CONFIG.content_filtration,
     filtration_prompt: config.filtration_prompt ?? DEFAULT_EMOJI_CONFIG.filtration_prompt,
+    vector_selection_enabled:
+      config.vector_selection_enabled ?? DEFAULT_EMOJI_CONFIG.vector_selection_enabled,
     usage_scene_enabled: config.usage_scene_enabled ?? DEFAULT_EMOJI_CONFIG.usage_scene_enabled,
     usage_scene_context_messages:
       config.usage_scene_context_messages ?? DEFAULT_EMOJI_CONFIG.usage_scene_context_messages,

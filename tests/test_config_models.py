@@ -185,6 +185,7 @@ class EmojiConfigTest(unittest.TestCase):
     def test_usage_scene_defaults_and_bounds(self) -> None:
         config = EmojiConfig()
 
+        self.assertTrue(config.vector_selection_enabled)
         self.assertTrue(config.usage_scene_enabled)
         self.assertEqual(config.usage_scene_context_messages, 8)
         self.assertEqual(config.usage_scene_max_scenes, 8)
@@ -354,6 +355,7 @@ class OfficialConfigTest(unittest.TestCase):
             ]
         )
 
+        self.assertTrue(ExpressionConfig().vector_selection_enabled)
         self.assertEqual(ExpressionConfig().get_expression_config_for_chat(), (True, True, True))
         with patch("src.chat.message_receive.chat_stream.get_chat_manager", return_value=fake_manager):
             self.assertEqual(config._parse_stream_config_to_chat_id("qq:123:group"), "qq:123:True")

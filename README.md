@@ -8,6 +8,8 @@
     <img src="https://img.shields.io/badge/FastAPI-WebUI-009688?logo=fastapi&logoColor=white" alt="FastAPI WebUI">
     <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="GPL-3.0">
   </p>
+
+  <p><a href="https://hsd221.github.io/riyabot/">在线文档</a></p>
 </div>
 
 ## 介绍
@@ -90,6 +92,23 @@ docker compose up -d
 ```
 
 注意：当前 compose 使用容器内 `/RiyaBot` 和宿主机 `data/RiyaBot` 作为默认路径。若你从旧部署迁移，需要手动把旧数据目录复制到新路径。
+
+## 程序更新
+
+WebUI 的“系统设置 > 关于”可以检查并切换更新频道：
+
+- `正式版` 选择 `main` 分支可达的最新正式 SemVer 标签，不包含预发布标签。
+- `开发版` 跟踪远端 `dev` 分支的完整提交 SHA。
+
+切换频道只保存跟踪偏好，不会立即更新。Git 源码安装在当前提交可识别、受跟踪文件无修改、目标为快进提交且
+`git`、`uv`、`bun` 均可用时，可以由 Runner 执行一键更新并重启。目标落后、分支已分叉或检查结果变化时，
+更新会被拒绝，不会执行强制重置或降级。
+
+代码快进后如果依赖同步或 WebUI 构建失败，Runner 会记录失败阶段并尝试启动当前工作区；WebUI 会读取该结果，
+不会仅因服务恢复就把本次更新显示为成功。此时目标代码可能已经检出，需要根据 Runner 日志修复依赖或构建问题。
+
+Docker 镜像和压缩包安装支持在线检查，但不会在运行中的容器或安装目录内替换自身。Docker 部署发现新版本后，
+请拉取对应的 GHCR 镜像并重新创建容器；无需也不应向核心容器挂载 Docker socket。
 
 ## 项目结构
 

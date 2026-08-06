@@ -11,10 +11,20 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.21@sha256:ff07b86af50d4d9391d9daf4ff89ce42
 
 WORKDIR /RiyaBot
 
+ARG VCS_REF=""
+ARG BUILD_REF=""
+ARG BUILD_DATE=""
 ENV PATH="/RiyaBot/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    RIYABOT_INSTALLATION_MODE=docker \
+    RIYABOT_BUILD_REVISION="$VCS_REF" \
+    RIYABOT_BUILD_REF="$BUILD_REF"
+
+LABEL org.opencontainers.image.source="https://github.com/hsd221/riyabot" \
+      org.opencontainers.image.created="$BUILD_DATE" \
+      org.opencontainers.image.revision="$VCS_REF"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \

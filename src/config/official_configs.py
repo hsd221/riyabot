@@ -349,6 +349,9 @@ class ExpressionConfig(ConfigBase):
     格式: [["qq:12345:group", "qq:67890:private"]]
     """
 
+    vector_selection_enabled: bool = True
+    """是否使用向量召回筛选表达候选；关闭后使用传统选择并跳过相关 embedding 调用"""
+
     expression_self_reflect: bool = True
     """是否启用自动表达优化"""
 
@@ -655,6 +658,9 @@ class EmojiConfig(ConfigBase):
     filtration_prompt: str = "符合公序良俗"
     """表情包过滤要求"""
 
+    vector_selection_enabled: bool = True
+    """是否使用向量召回筛选表情候选；关闭后使用随机候选并跳过相关 embedding 调用"""
+
     usage_scene_enabled: bool = True
     """是否学习并使用真人发送表情包时的场景"""
 
@@ -944,6 +950,14 @@ class ExperimentalConfig(ConfigBase):
     - type: "group" 或 "private"
     - prompt内容: 要添加的额外prompt文本
     """
+
+
+@dataclass
+class UpdateConfig(ConfigBase):
+    """程序更新配置。"""
+
+    channel: Literal["stable", "dev"] = "stable"
+    """跟踪频道：stable 检查正式版本标签，dev 检查开发分支提交。"""
 
 
 @dataclass

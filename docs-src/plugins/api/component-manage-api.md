@@ -41,7 +41,7 @@ def get_plugin_info(plugin_name: str) -> Optional[PluginInfo]:
 
 ### 3. 获取指定组件信息
 ```python
-def get_component_info(component_name: str, component_type: ComponentType) -> Optional[Union[CommandInfo, ActionInfo, EventHandlerInfo]]:
+def get_component_info(component_name: str, component_type: ComponentType) -> Optional[Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]:
 ```
 获取指定组件的信息。
 
@@ -50,11 +50,11 @@ def get_component_info(component_name: str, component_type: ComponentType) -> Op
 - `component_type` (ComponentType): 组件类型。
 
 **Returns:**
-- `Optional[Union[CommandInfo, ActionInfo, EventHandlerInfo]]`: 组件信息对象，如果组件不存在则返回 `None`。
+- `Optional[Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]`: 组件信息对象，如果组件不存在则返回 `None`。
 
 ### 4. 获取指定类型的所有组件信息
 ```python
-def get_components_info_by_type(component_type: ComponentType) -> Dict[str, Union[CommandInfo, ActionInfo, EventHandlerInfo]]:
+def get_components_info_by_type(component_type: ComponentType) -> Dict[str, Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]:
 ```
 获取指定类型的所有组件信息。
 
@@ -62,11 +62,11 @@ def get_components_info_by_type(component_type: ComponentType) -> Dict[str, Unio
 - `component_type` (ComponentType): 组件类型。
 
 **Returns:**
-- `Dict[str, Union[CommandInfo, ActionInfo, EventHandlerInfo]]`: 包含指定类型组件信息的字典，键为组件名称，值为对应的组件信息对象。
+- `Dict[str, Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]`: 包含指定类型组件信息的字典，键为组件名称，值为对应的组件信息对象。
 
 ### 5. 获取指定类型的所有启用的组件信息
 ```python
-def get_enabled_components_info_by_type(component_type: ComponentType) -> Dict[str, Union[CommandInfo, ActionInfo, EventHandlerInfo]]:
+def get_enabled_components_info_by_type(component_type: ComponentType) -> Dict[str, Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]:
 ```
 获取指定类型的所有启用的组件信息。
 
@@ -74,7 +74,7 @@ def get_enabled_components_info_by_type(component_type: ComponentType) -> Dict[s
 - `component_type` (ComponentType): 组件类型。
 
 **Returns:**
-- `Dict[str, Union[CommandInfo, ActionInfo, EventHandlerInfo]]`: 包含指定类型启用组件信息的字典，键为组件名称，值为对应的组件信息对象。
+- `Dict[str, Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]`: 包含指定类型启用组件信息的字典，键为组件名称，值为对应的组件信息对象。
 
 ### 6. 获取指定 Action 的注册信息
 ```python

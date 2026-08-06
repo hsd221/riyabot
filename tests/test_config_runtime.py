@@ -37,6 +37,7 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
         self.assertEqual(bot_document["bot"]["platform"], "qq")
         self.assertEqual(bot_document["bot"]["nickname"], "璃夜")
         self.assertEqual(bot_document["chat"]["max_context_size"], 30)
+        self.assertEqual(bot_document["update"]["channel"], "stable")
         self.assertNotIn("dream", bot_document)
         self.assertEqual(model_document["api_providers"], [])
         self.assertEqual(model_document["models"], [])
@@ -65,12 +66,14 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
             ("emoji", "emoji_chance"): 0.4,
             ("emoji", "max_reg_num"): 100,
             ("emoji", "check_interval"): 10,
+            ("emoji", "vector_selection_enabled"): True,
             ("emoji", "usage_scene_enabled"): True,
             ("emoji", "usage_scene_context_messages"): 8,
             ("emoji", "usage_scene_max_scenes"): 8,
             ("emoji", "usage_scene_weight"): 0.6,
             ("emoji", "selection_candidate_count"): 8,
             ("expression", "expression_checked_only"): True,
+            ("expression", "vector_selection_enabled"): True,
             ("expression", "expression_self_reflect"): True,
             ("expression", "expression_auto_check_interval"): 600,
             ("expression", "expression_auto_check_count"): 20,
@@ -83,6 +86,7 @@ class ConfigRuntimeHelpersTest(unittest.TestCase):
             ("debug", "show_replyer_prompt"): False,
             ("debug", "show_replyer_reasoning"): False,
             ("webui", "anti_crawler_mode"): "loose",
+            ("update", "channel"): "stable",
         }
         for path, expected in expected_bot_values.items():
             with self.subTest(path=path):

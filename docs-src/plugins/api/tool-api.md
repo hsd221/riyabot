@@ -15,13 +15,14 @@ from src.plugin_system import tool_api
 ### 1. 获取工具实例
 
 ```python
-def get_tool_instance(tool_name: str) -> Optional[BaseTool]:
+def get_tool_instance(tool_name: str, chat_stream: Optional["ChatStream"] = None) -> Optional[BaseTool]:
 ```
 
 获取指定名称的工具实例。
 
 **Args**:
 - `tool_name`: 工具名称字符串
+- `chat_stream`: 可选的聊天流对象，用于传递聊天上下文信息
 
 **Returns**:
 - `Optional[BaseTool]`: 工具实例，如果工具不存在则返回 None

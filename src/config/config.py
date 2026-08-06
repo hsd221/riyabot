@@ -38,6 +38,7 @@ from src.config.official_configs import (
     MemoryConfig,
     DebugConfig,
     WebUIConfig,
+    UpdateConfig,
 )
 
 from .api_ada_configs import (
@@ -60,8 +61,8 @@ CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 
 # 考虑到，实际上配置文件中的mai_version是不会自动更新的,所以采用硬编码
 # 对该字段的更新，请严格参照语义化版本规范：https://semver.org/lang/zh-CN/
-MMC_VERSION = "0.13.0"
-BOT_CONFIG_VERSION = "7.6.0"
+MMC_VERSION = "0.14.0-dev.1"
+BOT_CONFIG_VERSION = "7.8.0"
 MODEL_CONFIG_VERSION = "1.12.0"
 
 
@@ -443,6 +444,7 @@ class Config(ConfigBase):
     memory: MemoryConfig
     debug: DebugConfig
     voice: VoiceConfig
+    update: UpdateConfig = field(default_factory=UpdateConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
 
 
@@ -590,6 +592,7 @@ def _create_default_bot_config() -> Config:
         memory=MemoryConfig(),
         debug=DebugConfig(),
         voice=VoiceConfig(),
+        update=UpdateConfig(),
     )
 
 

@@ -356,6 +356,38 @@ class MessageArchiver:
 
     # -- 维护方法 -----------------------------------------------------------
 
+    async def delete_by_message_id(self, message_id: str, stream_id: str | None = None) -> int:
+        """按消息 ID 删除归档记录，用于消息被撤回后的清理。
+
+        归档发生在 _observe 早期，早于回复决策，因此一条消息只要触发过观察
+        就已留下原文副本。撤回后必须主动删除，否则查询层的过滤覆盖不到它，
+        且一旦被 layer1 摘要吸收就无法再按 ID 反查。
+
+        Args:
+            message_id: 被撤回消息的 ID
+            stream_id: 可选的聊天流限定，避免跨流误删同 ID 记录
+
+        Returns:
+            删除的记录条数
+        """
+        if not message_id:
+            return 0
+
+        try:
+            condition = RawMessageArchive.message_id == str(message_id)
+            if stream_id:
+                condition &= RawMessageArchive.stream_id == str(stream_id)
+
+            with memory_db.atomic():
+                deleted = RawMessageArchive.delete().where(condition).execute()
+
+            if deleted:
+                self._logger.info(f"撤回消息归档已删除 | msg={message_id} | 删除 {deleted} 条")
+            return deleted
+        except Exception as exc:
+            self._logger.error(f"删除撤回消息归档失败 | msg={message_id} | {exc}")
+            return 0
+
     async def cleanup_old_messages(self, older_than_days: int = 30) -> int:
         """清理超过指定天数的旧消息。
 

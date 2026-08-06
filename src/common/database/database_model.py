@@ -251,6 +251,7 @@ class Messages(BaseModel):
     is_command = BooleanField(default=False)
     intercept_message_level = IntegerField(default=0)
     is_notify = BooleanField(default=False)
+    is_recalled = BooleanField(default=False, index=True)  # 消息是否已被撤回
 
     selected_expressions = TextField(null=True)
 

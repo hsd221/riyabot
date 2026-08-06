@@ -282,6 +282,23 @@ class EmojiManagerPeriodicRegistrationTest(unittest.IsolatedAsyncioTestCase):
 
 
 class EmojiManagerLookupTest(unittest.IsolatedAsyncioTestCase):
+    async def test_disabled_vector_selection_skips_search_and_index_writes(self) -> None:
+        manager = make_manager()
+        emoji = make_emoji("hash-a", emotions=["开心"])
+        manager.emoji_objects = [emoji]
+
+        with patch.object(
+            emoji_manager.global_config.emoji,
+            "vector_selection_enabled",
+            False,
+            create=True,
+        ):
+            self.assertIsNone(await manager.get_emoji_candidates_by_vector("开心", limit=5))
+            await manager._index_emoji_vector(emoji)
+
+        manager.vector_index.search.assert_not_awaited()
+        manager.vector_index.upsert.assert_not_awaited()
+
     async def test_emoji_selection_distance_memory_and_database_fallbacks(self) -> None:
         manager = make_manager()
         happy = make_emoji("happy", full_path="/tmp/happy.png", description="happy desc", emotions=["开心", "快乐"])

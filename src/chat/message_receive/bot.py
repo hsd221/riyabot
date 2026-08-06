@@ -11,9 +11,19 @@ from src.config.config import global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.message_receive.message import MessageRecv
 from src.chat.message_receive.storage import MessageStorage
+from src.chat.message_receive.recall_registry import recall_registry
 from src.chat.heart_flow.heartflow_message_processor import HeartFCMessageReceiver
 from src.plugin_system.core import component_registry, events_manager, global_announcement_manager
 from src.plugin_system.base import BaseCommand, EventType
+
+# 记忆系统 — 原始消息归档（撤回清理需要）
+try:
+    from src.memory.layer0_archive import MessageArchiver as _MessageArchiver
+
+    _HAS_MEMORY_ARCHIVE = True
+except ImportError:
+    _MessageArchiver = None  # type: ignore
+    _HAS_MEMORY_ARCHIVE = False
 
 # 定义日志配置
 
@@ -331,8 +341,8 @@ class ChatBot:
                 op = mi.user_info
                 gid = mi.group_info.group_id if mi.group_info else None
 
-                # 撤回事件打印；无法获取被撤回者则省略
-                if sub_type == "recall":
+                # 撤回事件：适配器下发的是 group_recall / friend_recall
+                if sub_type in ("group_recall", "friend_recall", "recall"):
                     recalled_name = None
                     try:
                         if isinstance(recalled, dict):
@@ -343,6 +353,8 @@ class ChatBot:
                             )
                     except Exception:
                         pass
+
+                    await self._handle_message_recall(msg_id)
 
                     if recalled_name and str(recalled_id) != str(getattr(op, "user_id", None)):
                         logger.info(
@@ -378,6 +390,34 @@ class ChatBot:
             return True
 
         return
+
+    async def _handle_message_recall(self, message_id: Optional[str]) -> None:
+        """处理消息撤回：登记 ID、标记数据库、清理归档。
+
+        登记必须先于数据库操作，因为撤回可能早于消息落库；此时数据库无行可标记，
+        需要由内存登记表在 store_message 阶段拦截补写。
+        """
+        if not message_id:
+            logger.warning("撤回通知缺少消息 ID，无法定位目标消息", event_code="chat.recall.missing_id")
+            return
+
+        msg_id = str(message_id)
+
+        # 1. 先登记到内存，兜住「撤回早于落库」的时序竞争
+        matched = MessageStorage.mark_message_recalled(msg_id)
+        recall_registry.register(msg_id, matched_in_db=matched)
+
+        # 2. 清理第 0 层归档。归档在 _observe 早期发生，早于回复决策，
+        #    查询层的过滤覆盖不到这份独立副本，必须主动删除。
+        if _HAS_MEMORY_ARCHIVE and _MessageArchiver is not None:
+            try:
+                await _MessageArchiver().delete_by_message_id(msg_id)
+            except Exception:
+                logger.exception(
+                    "清理撤回消息归档失败",
+                    event_code="chat.recall.archive_cleanup_failed",
+                    message_id=msg_id,
+                )
 
     async def echo_message_process(self, raw_data: Dict[str, Any]) -> None:
         """

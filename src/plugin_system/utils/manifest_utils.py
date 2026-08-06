@@ -17,7 +17,7 @@ logger = get_logger("manifest_utils")
 class VersionComparator:
     """版本号比较器
 
-    支持语义化版本号比较，自动处理snapshot版本，并支持向前兼容性检查
+    支持语义化版本号比较，自动处理预发布版本，并支持向前兼容性检查
     """
 
     # 版本兼容性映射表（硬编码）
@@ -40,10 +40,10 @@ class VersionComparator:
 
     @staticmethod
     def normalize_version(version: str) -> str:
-        """标准化版本号，移除snapshot标识
+        """标准化版本号，移除预发布标识
 
         Args:
-            version: 原始版本号，如 "0.8.0-snapshot.1"
+            version: 原始版本号，如 "0.14.0-dev.1"
 
         Returns:
             str: 标准化后的版本号，如 "0.8.0"
@@ -51,8 +51,8 @@ class VersionComparator:
         if not version:
             return "0.0.0"
 
-        # 移除snapshot部分
-        normalized = re.sub(r"-snapshot\.\d+", "", version.strip())
+        # 兼容正式版和开发版的 SemVer 预发布后缀，插件兼容判断按基础版本比较。
+        normalized = re.sub(r"-(?:snapshot|dev|alpha|beta|rc)(?:[.-]?\d+)?$", "", version.strip(), flags=re.IGNORECASE)
 
         # 确保版本号格式正确
         if not re.match(r"^\d+(\.\d+){0,2}$", normalized):

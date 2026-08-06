@@ -35,6 +35,12 @@ jobs:
           ref: ${{ inputs.branch || 'dev' }}
           fetch-depth: 0
 
+      - name: Resolve build identity
+        id: build_identity
+        run: |
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       - name: Clone lpmm
         run: git clone https://github.com/Mai-with-u/MaiMBot-LPMM.git MaiMBot-LPMM
 
@@ -70,8 +76,9 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-amd64-buildcache,mode=max
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.build_identity.outputs.created }}
+            VCS_REF=${{ steps.build_identity.outputs.revision }}
+            BUILD_REF=${{ inputs.branch || 'dev' }}
 
   build-arm64:
     name: Build ARM64 Image
@@ -84,6 +91,12 @@ jobs:
         with:
           ref: ${{ inputs.branch || 'dev' }}
           fetch-depth: 0
+
+      - name: Resolve build identity
+        id: build_identity
+        run: |
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Clone lpmm
         run: git clone https://github.com/Mai-with-u/MaiMBot-LPMM.git MaiMBot-LPMM
@@ -120,8 +133,9 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-arm64-buildcache,mode=max
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.build_identity.outputs.created }}
+            VCS_REF=${{ steps.build_identity.outputs.revision }}
+            BUILD_REF=${{ inputs.branch || 'dev' }}
 
   create-manifest:
     name: Create Multi-Arch Manifest

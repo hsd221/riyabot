@@ -2,6 +2,7 @@ import json
 import importlib
 import unittest
 from types import SimpleNamespace
+from typing import get_args, get_type_hints
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 from maim_message import GroupInfo, UserInfo
@@ -28,7 +29,7 @@ from src.plugin_system.apis import (
     tool_api,
 )
 from src.plugin_system.base.base_plugin import BasePlugin
-from src.plugin_system.base.component_types import ComponentType
+from src.plugin_system.base.component_types import ComponentType, ToolInfo
 
 
 test_db = SqliteDatabase(":memory:")
@@ -1174,6 +1175,20 @@ class ComponentToolPluginPersonApiTest(unittest.IsolatedAsyncioTestCase):
                 component_manage_api.locally_disable_component("x", "bad", "stream-1")  # type: ignore[arg-type]
             with self.assertRaises(ValueError):
                 component_manage_api.get_locally_disabled_components("stream-1", "bad")  # type: ignore[arg-type]
+
+    def test_component_manage_api_annotations_include_tool_info(self) -> None:
+        def contains_type(annotation, expected_type) -> bool:
+            return annotation is expected_type or any(
+                contains_type(argument, expected_type) for argument in get_args(annotation)
+            )
+
+        for function in (
+            component_manage_api.get_component_info,
+            component_manage_api.get_components_info_by_type,
+            component_manage_api.get_enabled_components_info_by_type,
+        ):
+            return_annotation = get_type_hints(function)["return"]
+            self.assertTrue(contains_type(return_annotation, ToolInfo), function.__name__)
 
     async def test_plugin_manage_api_delegates_to_plugin_manager_and_reports_missing_path(self) -> None:
         manager_module = importlib.import_module("src.plugin_system.core.plugin_manager")

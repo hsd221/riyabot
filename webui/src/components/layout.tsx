@@ -67,6 +67,7 @@ interface MenuSection {
 type ThemeMode = 'light' | 'dark' | 'system'
 
 const DESKTOP_NAVIGATION_QUERY = '(min-width: 1024px)'
+const PROJECT_DOCS_URL = 'https://hsd221.github.io/riyabot/'
 
 const themeOptions: Array<{
   value: ThemeMode
@@ -581,7 +582,7 @@ export function Layout({ children }: LayoutProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => openExternalLink('https://docs.mai-mai.org')}
+                onClick={() => openExternalLink(PROJECT_DOCS_URL)}
                 className="hidden h-10 w-10 gap-2 px-0 sm:inline-flex sm:h-11 sm:w-auto sm:px-4"
                 title="查看项目文档"
               >
@@ -672,7 +673,7 @@ export function Layout({ children }: LayoutProps) {
                         className="ios-row ios-touch min-h-[58px] w-full text-left focus-visible:bg-accent/60 focus-visible:ring-0"
                         onClick={() => {
                           setMobileActionsOpen(false)
-                          openExternalLink('https://docs.mai-mai.org')
+                          openExternalLink(PROJECT_DOCS_URL)
                         }}
                       >
                         <span className="flex items-center gap-3">

@@ -26,18 +26,18 @@ class ExampleCommand(BaseCommand):
     command_description = "这是一个示例命令" # 命令描述
     command_pattern = r"" # 命令匹配的正则表达式
 
-    async def execute(self) -> Tuple[bool, Optional[str], bool]:
+    async def execute(self) -> Tuple[bool, Optional[str], int]:
         """
         执行Command的主要逻辑
 
         Returns:
-            Tuple[bool, str, bool]: 
+            Tuple[bool, Optional[str], int]:
                 - 第一个bool表示是否成功执行
-                - 第二个str是执行结果消息
-                - 第三个bool表示是否需要阻止消息继续处理
+                - 第二个str是可选的执行结果消息
+                - 第三个int表示拦截力度：0=不拦截，1=不触发回复(replyer可见)，2=不触发回复(replyer不可见)
         """
         # ---- 执行命令的逻辑 ----
-        return True, "执行成功", False
+        return True, "执行成功", 0
 ```
 **`command_pattern`**: 该Command匹配的正则表达式，用于精确匹配用户输入。
 
@@ -54,13 +54,13 @@ class ExampleCommand(BaseCommand):
     command_description = "这是一个示例命令"
     command_pattern = r"/example (?P<param1>\w+) (?P<param2>\w+)"
 
-    async def execute(self) -> Tuple[bool, Optional[str], bool]:
+    async def execute(self) -> Tuple[bool, Optional[str], int]:
         # 获取匹配的参数
         param1 = self.matched_groups.get("param1")
         param2 = self.matched_groups.get("param2")
         
         # 执行逻辑
-        return True, f"参数1: {param1}, 参数2: {param2}", False
+        return True, f"参数1: {param1}, 参数2: {param2}", 0
 ```
 
 ---
@@ -71,19 +71,19 @@ class BaseCommand:
     def get_config(self, key: str, default=None):
         """获取插件配置值，使用嵌套键访问"""
 
-    async def send_text(self, content: str, reply_to: str = "") -> bool:
+    async def send_text(self, content: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送回复消息"""
 
-    async def send_type(self, message_type: str, content: str, display_message: str = "", typing: bool = False, reply_to: str = "") -> bool:
+    async def send_custom(self, message_type: str, content: str | Dict, display_message: str = "", typing: bool = False, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送指定类型的回复消息到当前聊天环境"""
 
     async def send_command(self, command_name: str, args: Optional[dict] = None, display_message: str = "", storage_message: bool = True) -> bool:
         """发送命令消息"""
 
-    async def send_emoji(self, emoji_base64: str) -> bool:
+    async def send_emoji(self, emoji_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送表情包"""
 
-    async def send_image(self, image_base64: str) -> bool:
+    async def send_image(self, image_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送图片"""
 ```
 具体参数与用法参见`BaseCommand`基类的定义。

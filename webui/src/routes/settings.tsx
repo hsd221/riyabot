@@ -23,9 +23,9 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { toggleThemeWithTransition, useTheme } from '@/components/use-theme'
 import { useAnimation } from '@/hooks/use-animation'
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import type { CSSProperties } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -36,6 +36,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/hooks/use-toast'
 import { validatePassword } from '@/lib/password-validator'
 import { APP_VERSION, APP_NAME } from '@/lib/version'
+import { parseSettingsTab, type SettingsTab } from '@/lib/settings-route'
+import { SystemUpdatePanel } from '@/components/system-update-panel'
 import {
   getSetting,
   setSetting,
@@ -78,8 +80,6 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 
-type SettingsTab = 'appearance' | 'security' | 'other' | 'about'
-
 type SettingsTabItem = {
   value: SettingsTab
   label: string
@@ -120,9 +120,13 @@ const SETTINGS_TABS: SettingsTabItem[] = [
 ]
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
+  const search = useSearch({ strict: false })
+  const initialTab = parseSettingsTab(search.tab) ?? 'appearance'
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
   const [tabDialogOpen, setTabDialogOpen] = useState(false)
   const activeTabItem = SETTINGS_TABS.find((item) => item.value === activeTab) ?? SETTINGS_TABS[0]
+
+  useEffect(() => setActiveTab(initialTab), [initialTab])
 
   return (
     <ScrollArea className="h-full">
@@ -1395,6 +1399,8 @@ function OtherTab() {
 function AboutTab() {
   return (
     <div className="space-y-4 sm:space-y-6">
+      <SystemUpdatePanel />
+
       {/* GitHub 开源地址 */}
       <div className="ios-group bg-primary/5 p-4 sm:p-6">
         <div className="flex items-start gap-3 sm:gap-4">
@@ -1468,19 +1474,40 @@ function AboutTab() {
         <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-sm font-medium">RiyaBot Core</p>
-            <p className="text-xs text-muted-foreground sm:text-sm">独立维护的 RiyaBot 核心</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">WebUI</p>
             <p className="text-xs text-muted-foreground sm:text-sm">
-              Based on the upstream WebUI by Mai-with-u and{' '}
               <a
-                href="https://github.com/DrSmoothl"
+                href="https://github.com/hsd221"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary underline"
               >
-                @MotricSeven
+                @hsd221
+              </a>
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium">WebUI</p>
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              <a
+                href="https://github.com/hsd221"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                @hsd221
+              </a>
+            </p>
+          </div>
+          <div className="border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              Core 与 WebUI 均源于{' '}
+              <a
+                href="https://github.com/Mai-with-u/MaiBot"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                MaiBot
               </a>
             </p>
           </div>

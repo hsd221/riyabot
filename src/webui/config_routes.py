@@ -42,6 +42,7 @@ from src.config.official_configs import (
     MemoryConfig,
     DebugConfig,
     VoiceConfig,
+    UpdateConfig,
 )
 from src.config.api_ada_configs import (
     ModelTaskConfig,
@@ -84,6 +85,7 @@ BOT_SECTION_SCHEMAS = {
     "memory": MemoryConfig,
     "debug": DebugConfig,
     "voice": VoiceConfig,
+    "update": UpdateConfig,
 }
 
 LEGACY_BOT_SECTIONS = {"dream", "jargon", "mood"}
@@ -311,6 +313,41 @@ def _save_structured_config(filename: str, config_data: Any, *, prune_bot: bool 
             _prune_legacy_bot_config_keys(existing_document)
         document_to_save = existing_document
     _atomic_write_config(filename, _render_config_bytes(document_to_save), fingerprint)
+
+
+def read_bot_config_section(section_name: str) -> Any:
+    """Read one known bot configuration section through the canonical TOML boundary."""
+    if section_name not in BOT_SECTION_SCHEMAS:
+        raise HTTPException(status_code=404, detail=f"配置节 '{section_name}' 不存在")
+    config_data, _ = _load_config_document("bot_config.toml")
+    if section_name not in config_data:
+        raise HTTPException(status_code=404, detail=f"配置节 '{section_name}' 不存在")
+    return copy.deepcopy(config_data[section_name])
+
+
+def save_bot_config_section(section_name: str, section_data: Any) -> None:
+    """Validate and atomically persist one known bot configuration section."""
+    if section_name not in BOT_SECTION_SCHEMAS:
+        raise HTTPException(status_code=404, detail=f"配置节 '{section_name}' 不存在")
+
+    config_data, fingerprint = _load_config_document("bot_config.toml")
+    if section_name not in config_data:
+        raise HTTPException(status_code=404, detail=f"配置节 '{section_name}' 不存在")
+
+    if isinstance(section_data, list):
+        config_data[section_name] = section_data
+    elif isinstance(section_data, dict) and isinstance(config_data[section_name], dict):
+        _update_toml_doc(config_data[section_name], section_data)
+    else:
+        config_data[section_name] = section_data
+
+    _prune_legacy_bot_config_keys(config_data, section_name)
+    try:
+        Config.from_dict(config_data)
+    except Exception as exc:
+        _log_config_failure("璃夜主程序配置节数据验证失败", exc)
+        raise HTTPException(status_code=400, detail=_CONFIG_VALIDATION_DETAIL) from exc
+    _atomic_write_config("bot_config.toml", _render_config_bytes(config_data), fingerprint)
 
 
 def _model_api_providers(config_data: Any) -> list[dict[str, Any]]:
@@ -585,36 +622,7 @@ async def update_model_config(config_data: ConfigBody, _auth: bool = Depends(req
 async def update_bot_config_section(section_name: str, section_data: SectionBody, _auth: bool = Depends(require_auth)):
     """更新璃夜主程序配置的指定节（保留注释和格式）"""
     try:
-        # 读取现有配置
-        config_data, fingerprint = _load_config_document("bot_config.toml")
-
-        # 更新指定节
-        if section_name not in config_data:
-            raise HTTPException(status_code=404, detail=f"配置节 '{section_name}' 不存在")
-
-        # 使用递归合并保留注释（对于字典类型）
-        # 对于数组类型（如 platforms, aliases），直接替换
-        if isinstance(section_data, list):
-            # 列表直接替换
-            config_data[section_name] = section_data
-        elif isinstance(section_data, dict) and isinstance(config_data[section_name], dict):
-            # 字典递归合并
-            _update_toml_doc(config_data[section_name], section_data)
-        else:
-            # 其他类型直接替换
-            config_data[section_name] = section_data
-
-        _prune_legacy_bot_config_keys(config_data, section_name)
-
-        # 验证完整配置
-        try:
-            Config.from_dict(config_data)
-        except Exception as e:
-            _log_config_failure("璃夜主程序配置节数据验证失败", e)
-            raise HTTPException(status_code=400, detail=_CONFIG_VALIDATION_DETAIL) from e
-
-        # 保存配置（格式化数组为多行，保留注释）
-        _atomic_write_config("bot_config.toml", _render_config_bytes(config_data), fingerprint)
+        save_bot_config_section(section_name, section_data)
 
         logger.info("配置节已更新（保留注释）", section=section_name)
         return {"success": True, "message": f"配置节 '{section_name}' 已保存"}

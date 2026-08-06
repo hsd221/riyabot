@@ -265,6 +265,11 @@ class ChatMessageBuilderFormattingTest(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             anonymous = await builder.build_anonymous_messages([message, other], show_ids=True)
+            timestamped_anonymous = await builder.build_anonymous_messages(
+                [message, other],
+                show_ids=True,
+                show_timestamps=True,
+            )
             person_ids = await builder.get_person_id_list(
                 [
                     {"user_platform": "qq", "user_id": "u1"},
@@ -277,6 +282,10 @@ class ChatMessageBuilderFormattingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[图片1] 的内容：a small cat", anonymous)
         self.assertIn("[1] A说 hello [图片1] 回复 A @B", anonymous)
         self.assertIn("[2] B说 second [图片1]", anonymous)
+        first_time = builder.translate_timestamp_to_human_readable(1.0, mode="normal")
+        second_time = builder.translate_timestamp_to_human_readable(2.0, mode="normal")
+        self.assertIn(f"[1] [{first_time}] A说 hello [图片1] 回复 A @B", timestamped_anonymous)
+        self.assertIn(f"[2] [{second_time}] B说 second [图片1]", timestamped_anonymous)
         self.assertEqual(set(person_ids), {"qq-u1", "qq-u2"})
 
         bare = await builder.build_bare_messages([message, other])

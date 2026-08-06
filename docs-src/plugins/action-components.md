@@ -1,12 +1,19 @@
-# ⚡ Action组件详解
+# ⚡ Action 组件（兼容层）
 
-## 📖 什么是Action
+## 先确认 Action 的定位
 
-Action是给璃夜在回复之外提供额外功能的兼容智能组件，**由璃夜的决策系统自主选择是否使用**。Planner 会把 legacy `BaseAction` 转换为原生 Tool schema 提供给模型，执行时仍通过 `ActionManager` 调用现有 Action 实现。
+RiyaBot 的聊天执行协议已经统一为 LLM Tool Call，但 `BaseAction` 组件本身仍然保留。它是现有插件的兼容组件，继续负责发送表情、语音、文件或执行其他聊天效果。
 
-`reply` 是聊天系统内置 Tool，不是 Action；模型不发起任何 Tool Call 就表示本轮静默结束，不存在模型侧的 `no_reply` Action。Action不是直接响应用户命令，而是让璃夜根据聊天情境选择额外行为。
+当前流程分成两层：
 
-### Action的特点
+1. `ChatToolRegistry` 把原生 `BaseTool`、内置 `reply` 和兼容 `BaseAction` 汇总到同一个 Tool 目录；
+2. 模型以 Tool Call 的形式选择 Action 后，`ActionManager` 再创建并执行原来的 `BaseAction` 实例。
+
+因此，Action 已经迁移到统一的 Tool Call 执行边界，但没有迁移成 `BaseTool`。开发新插件时，请先看 [Tool 组件](./tool-components.md)；只有需要 Action 的激活类型、随机激活、消息类型过滤或既有 Action 行为时，才使用本页的 `BaseAction`。
+
+`reply` 是聊天系统内置 Tool，不是 Action；模型不发起任何 Tool Call 就表示本轮静默结束，不存在模型侧的 `no_reply` Action。Action 不是直接响应用户命令，而是让璃夜根据聊天情境选择额外行为。
+
+### Action 的特点
 
 - 🧠 **智能激活**：璃夜根据多种条件智能判断是否使用
 - 🎲 **可随机性**：可以使用随机数激活，增加行为的不可预测性，更接近真人交流
@@ -15,7 +22,7 @@ Action是给璃夜在回复之外提供额外功能的兼容智能组件，**由
 
 ---
 
-## 🎯 Action组件的基本结构
+## 🎯 Action 组件的基本结构
 首先，所有的Action都应该继承`BaseAction`类。
 
 其次，每个Action组件都应该实现以下基本信息：
@@ -61,23 +68,34 @@ class ExampleAction(BaseAction):
 **请知悉，对于不同的处理器，其支持的消息类型可能会有所不同。在开发时请注意。**
 
 #### action_parameters: 该Action的参数说明。
-这是一个字典，键为参数名，值为参数说明。这个字段可以帮助LLM理解如何使用这个Action，并由LLM返回对应的参数，最后传递到 Action 的 **`action_data`** 属性中。其格式与你定义的格式完全相同 **（除非LLM哈气了，返回了错误的内容）**。
+这是一个字典，键为参数名，值为参数说明。这个字段帮助 LLM 理解如何使用 Action。每个自定义参数都会作为必填字符串字段加入兼容 Action 的 Tool schema；模型返回的自定义参数会传递到 Action 的 **`action_data`** 属性中。运行时仍会校验参数是否齐全，不能把模型返回的数据当作可信输入。
+
+### 兼容 Action 的公共 Tool Call 参数
+
+`ChatToolRegistry` 将 Action 转换为 Tool schema 时，还会自动加入两个必填参数：
+
+| 参数 | 作用 |
+|---|---|
+| `target_message_id` | 要处理的真实消息 ID，必须来自当前聊天记录中的 `m+数字` 标识，且不能指向机器人自己的消息。 |
+| `reason` | 选择该 Action 的直接原因；它只用于执行记录，不要在其中撰写发给用户的最终回复。 |
+
+这两个参数由聊天层处理，不属于 `action_parameters`，也不会作为自定义字段写入 `action_data`。插件只需要读取 `action_data` 中自己声明的参数；Action 的执行结果会以 Tool Result 形式返回聊天流程。
 
 ---
 
-## 🎯 Action 调用的决策机制
+## 🎯 兼容 Action 的决策机制
 
-Action采用**两层决策机制**来优化性能和决策质量：
+Action 采用**两层决策机制**来控制候选范围和最终调用：
 
 > 设计目的：在加载许多插件的时候降低LLM决策压力，避免让璃夜在过多的选项中纠结。
 
 **第一层：激活控制（Activation Control）**
 
-激活决定璃夜是否 **“知道”** 这个Action的存在，即这个Action是否进入决策候选池。不被激活的Action璃夜永远不会选择。
+激活决定璃夜是否 **“知道”** 这个 Action 的存在，即这个 Action 是否进入 Planner 的候选工具池。不被激活的 Action 不能被本轮选择。
 
 **第二层：使用决策（Usage Decision）**
 
-在Action被激活后，使用条件决定璃夜什么时候会 **“选择”** 使用这个Action。
+在 Action 被激活后，模型仍会根据工具描述、`action_require` 和当前聊天上下文决定是否调用它。进入候选池不代表每轮都会执行。
 
 ### 决策参数详解 🔧
 
@@ -105,7 +123,7 @@ class DisabledAction(BaseAction):
 
 #### `ALWAYS` 激活
 
-`ActionActivationType.ALWAYS` 会使得 Action 永远会被激活，即一直在 Action 候选池中
+`ActionActivationType.ALWAYS` 会使 Action 始终进入候选池，但不保证模型每轮都会调用它。
 
 这种激活方式适合需要始终出现在候选池中的插件动作，例如状态同步或持续可用的外部能力。
 
@@ -158,11 +176,11 @@ class GreetingAction(BaseAction):
         return True, "发送了问候"
 ```
 
-一个完整的使用`ActionActivationType.KEYWORD`的例子请参考`plugins/hello_world_plugin`中的`ByeAction`。
+一个使用 `ActionActivationType.KEYWORD` 的实际例子请参考 `src/plugins/built_in/tts_plugin/plugin.py`。
 
 #### 第二层：使用决策
 
-**在Action被激活后，使用条件决定璃夜什么时候会"选择"使用这个Action**。
+**在 Action 被激活后，模型仍会根据使用条件决定什么时候调用这个 Action**。
 
 这一层由以下因素综合决定：
 
@@ -195,7 +213,7 @@ class EmojiAction(BaseAction):
     - 使用随机数进行决策，当`random.random() < self.random_activation_probability`时，璃夜才"知道"可以使用这个Action
 2. **第二层使用决策**：
 
-   - 即使Action被激活，璃夜还会根据 `action_require` 中的条件判断是否真正选择使用
+   - 即使 Action 被激活，模型还会根据 `action_require` 中的条件判断是否真正调用
    - 例如：如果刚刚已经发过表情，根据"不要连续发送多个表情"的要求，璃夜可能不会选择这个Action
 
 ---
@@ -216,32 +234,31 @@ class BaseAction:
         self.is_group: bool           # 是否群聊
 
         # 消息体
-        self.action_message: dict     # 消息数据
+        self.action_message: DatabaseMessages  # 触发本轮的消息对象
 
         # Action相关属性
-        self.action_data: dict        # Action执行时的数据
+        self.action_data: dict        # Action执行时的数据（LLM返回的参数）
         self.thinking_id: str         # 思考ID
 ```
-action_message为一个字典，包含的键值对如下（省略了不必要的键值对）
+`action_message` 是 `DatabaseMessages` 对象（定义见 `src.common.data_models.database_data_model.DatabaseMessages`），常用属性包括：
 
 ```python
-{
-    "message_id": "1234567890",  # 消息id，str
-    "time": 1627545600.0,  # 时间戳，float
-    "chat_id": "abcdef123456",  # 聊天ID，str
-    "reply_to": None,  # 回复消息id，str或None
-    "interest_value": 0.85,  # 兴趣值，float
-    "is_mentioned": True,  # 是否被提及，bool
-    "chat_info_last_active_time": 1627548600.0,  # 最后活跃时间，float
-    "processed_plain_text": None,  # 处理后的文本，str或None
-    "additional_config": None,  # Adapter传来的additional_config，dict或None
-    "is_emoji": False,  # 是否为表情，bool
-    "is_picid": False,  # 是否为图片ID，bool
-    "is_command": False  # 是否为命令，bool
-}
+message_id: str                      # 消息id
+time: float                          # 时间戳
+chat_id: str                         # 聊天ID
+reply_to: str | None                 # 回复的消息id
+interest_value: float | None         # 兴趣值
+is_mentioned: bool | None            # 是否被提及
+processed_plain_text: str | None     # 处理后的文本
+additional_config: str | None        # Adapter 传来的附加配置
+is_emoji: bool                       # 是否为表情
+is_picid: bool                       # 是否为图片ID
+is_command: bool                     # 是否为命令
+user_id: str                         # 发送者用户ID
+user_nickname: str                   # 发送者昵称
 ```
 
-部分值的格式请自行查询数据库。
+完整字段请查阅 `DatabaseMessages` 类定义。
 
 ---
 
@@ -254,22 +271,28 @@ class BaseAction:
     async def wait_for_new_message(self, timeout: int = 1200) -> Tuple[bool, str]:
         """等待新消息或超时"""
 
-    async def send_text(self, content: str, reply_to: str = "", reply_to_platform_id: str = "", typing: bool = False) -> bool:
+    async def send_text(self, content: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, typing: bool = False, storage_message: bool = True) -> bool:
         """发送文本消息"""
 
-    async def send_emoji(self, emoji_base64: str) -> bool:
+    async def send_emoji(self, emoji_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送表情包"""
 
-    async def send_image(self, image_base64: str) -> bool:
+    async def send_image(self, image_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送图片"""
 
-    async def send_custom(self, message_type: str, content: str, typing: bool = False, reply_to: str = "") -> bool:
-        """发送自定义类型消息"""
-
-    async def store_action_info(self, action_build_into_prompt: bool = False, action_prompt_display: str = "", action_done: bool = True) -> None:
-        """存储动作信息到数据库"""
+    async def send_custom(self, message_type: str, content: str | Dict, typing: bool = False, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
+        """发送自定义类型消息，如 video、file、audio 等"""
 
     async def send_command(self, command_name: str, args: Optional[dict] = None, display_message: str = "", storage_message: bool = True) -> bool:
         """发送命令消息"""
+
+    async def store_action_info(self, action_build_into_prompt: bool = False, action_prompt_display: str = "", action_done: bool = True) -> None:
+        """存储动作信息到数据库"""
 ```
 具体参数与用法参见`BaseAction`基类的定义。
+
+## 相关文档
+
+- [Tool 组件](./tool-components.md) - 新插件的原生结构化 Tool Call 组件。
+- [插件快速开始](./quick-start.md) - 从最小插件开始，并了解何时使用兼容 Action。
+- [Command 组件](./command-components.md) - 需要由用户明确输入命令时使用。
