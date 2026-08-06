@@ -490,7 +490,9 @@ class HeartFChatting:
         # 同时更新话题摘要。摘要是多条消息融合的自然语言，一旦吸收就无法按
         # message_id 反查删除，因此必须在进入摘要前就把撤回消息滤掉。
         if self.topic_summarizer is not None:
-            summarizable = [msg for msg in messages if not recall_registry.is_recalled(getattr(msg, "message_id", None))]
+            summarizable = [
+                msg for msg in messages if not recall_registry.is_recalled(getattr(msg, "message_id", None))
+            ]
             try:
                 if hasattr(self.topic_summarizer, "add_messages"):
                     await self.topic_summarizer.add_messages(
