@@ -753,8 +753,7 @@ enabled = true
         with tempfile.TemporaryDirectory() as tmp_dir:
             plugin_dir = Path(tmp_dir)
             write_manifest(plugin_dir)
-            (plugin_dir / "config.toml").write_text(
-                """
+            original_config = """
 [plugin]
 config_version = "1.0.0"
 enabled = false
@@ -763,12 +762,13 @@ removed = "old"
 [settings]
 threshold = 0.9
 old_only = "ignored"
-""".strip(),
-                encoding="utf-8",
-            )
+""".strip()
+            (plugin_dir / "config.toml").write_text(original_config, encoding="utf-8")
 
             plugin = ConcreteConfigPlugin(str(plugin_dir))
             saved = toml.load(plugin_dir / "config.toml")
+            backup_files = list(plugin_dir.glob("config.toml.backup_*"))
+            backup_content = backup_files[0].read_text(encoding="utf-8") if backup_files else ""
 
         self.assertFalse(plugin.enable_plugin)
         self.assertEqual(plugin.config["plugin"]["config_version"], "2.0.0")
@@ -781,6 +781,28 @@ old_only = "ignored"
         self.assertEqual(saved["plugin"]["config_version"], "2.0.0")
         self.assertFalse(saved["plugin"]["enabled"])
         self.assertEqual(saved["settings"]["threshold"], 0.9)
+        self.assertEqual(len(backup_files), 1)
+        self.assertEqual(backup_content, original_config)
+
+    def test_plugin_base_keeps_original_config_when_migration_backup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_dir = Path(tmp_dir)
+            write_manifest(plugin_dir)
+            config_path = plugin_dir / "config.toml"
+            original_config = """
+[plugin]
+config_version = "1.0.0"
+enabled = false
+removed = "keep"
+""".strip()
+            config_path.write_text(original_config, encoding="utf-8")
+
+            with patch.object(ConcreteConfigPlugin, "_backup_config_file", return_value=""):
+                plugin = ConcreteConfigPlugin(str(plugin_dir))
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original_config)
+            self.assertEqual(plugin.config["plugin"]["config_version"], "1.0.0")
+            self.assertEqual(plugin.config["plugin"]["removed"], "keep")
 
     def test_plugin_base_dependency_checks_and_manifest_error_paths_are_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

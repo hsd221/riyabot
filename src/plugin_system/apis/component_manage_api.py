@@ -40,7 +40,7 @@ def get_plugin_info(plugin_name: str) -> Optional[PluginInfo]:
 # === 组件查询方法 ===
 def get_component_info(
     component_name: str, component_type: ComponentType
-) -> Optional[Union[CommandInfo, ActionInfo, EventHandlerInfo]]:
+) -> Optional[Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]:
     """
     获取指定组件的信息。
 
@@ -48,7 +48,7 @@ def get_component_info(
         component_name (str): 组件名称。
         component_type (ComponentType): 组件类型。
     Returns:
-        Union[CommandInfo, ActionInfo, EventHandlerInfo]: 组件信息对象，如果组件不存在则返回 None。
+        Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]: 组件信息对象，如果组件不存在则返回 None。
     """
     from src.plugin_system.core.component_registry import component_registry
 
@@ -57,7 +57,7 @@ def get_component_info(
 
 def get_components_info_by_type(
     component_type: ComponentType,
-) -> Dict[str, Union[CommandInfo, ActionInfo, EventHandlerInfo]]:
+) -> Dict[str, Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]:
     """
     获取指定类型的所有组件信息。
 
@@ -74,7 +74,7 @@ def get_components_info_by_type(
 
 def get_enabled_components_info_by_type(
     component_type: ComponentType,
-) -> Dict[str, Union[CommandInfo, ActionInfo, EventHandlerInfo]]:
+) -> Dict[str, Union[CommandInfo, ActionInfo, ToolInfo, EventHandlerInfo]]:
     """
     获取指定类型的所有启用的组件信息。
 

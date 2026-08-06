@@ -267,6 +267,36 @@ class ChatToolRegistryTest(unittest.IsolatedAsyncioTestCase):
         safe_call = executor.execute_tool_call.await_args.args[0]
         self.assertIsNot(safe_call.args, original_args)
 
+    async def test_native_tool_exception_returns_safe_error_without_exception_details(self) -> None:
+        from src.chat import chat_tool_registry
+
+        registry, _, executor = self.make_registry()
+        executor.execute_tool_call.side_effect = RuntimeError("cannot open /srv/private/config.toml")
+
+        with (
+            patch.object(
+                chat_tool_registry,
+                "get_llm_available_tool_definitions",
+                return_value=[("lookup", {"name": "lookup", "description": "lookup", "parameters": []})],
+            ),
+            patch.object(
+                chat_tool_registry.global_announcement_manager,
+                "get_disabled_chat_actions",
+                return_value=[],
+            ),
+            patch.object(
+                chat_tool_registry.global_announcement_manager,
+                "get_disabled_chat_tools",
+                return_value=[],
+            ),
+        ):
+            registry.get_tool_definitions()
+            result = await registry.execute(ToolCall("call-1", "lookup", {}))
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.content, "工具执行失败，请稍后重试。")
+        self.assertNotIn("/srv/private/config.toml", result.content)
+
     async def test_legacy_action_call_uses_existing_handler_and_validates_target(self) -> None:
         from src.chat import chat_tool_registry
 
@@ -328,6 +358,38 @@ class ChatToolRegistryTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(missing.success)
         self.assertIn("不存在", missing.content)
         self.assertEqual(action_manager.create_action.call_count, 1)
+
+    async def test_legacy_action_exception_returns_safe_error_without_exception_details(self) -> None:
+        from src.chat import chat_tool_registry
+
+        registry, action_manager, _ = self.make_registry()
+        registry.set_available_actions({"legacy": make_action("legacy")})
+        action_manager.create_action.return_value = SimpleNamespace(
+            execute=AsyncMock(side_effect=RuntimeError("implementation detail: /opt/plugin/private.py"))
+        )
+
+        with (
+            patch.object(chat_tool_registry, "get_llm_available_tool_definitions", return_value=[]),
+            patch.object(
+                chat_tool_registry.global_announcement_manager,
+                "get_disabled_chat_actions",
+                return_value=[],
+            ),
+            patch.object(
+                chat_tool_registry.global_announcement_manager,
+                "get_disabled_chat_tools",
+                return_value=[],
+            ),
+        ):
+            registry.get_tool_definitions()
+            result = await registry.execute(
+                ToolCall("call-1", "legacy", {"target_message_id": "m1", "reason": "run", "value": "payload"}),
+                messages_by_id={"m1": make_message()},
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.content, "Action 执行失败，请稍后重试。")
+        self.assertNotIn("/opt/plugin/private.py", result.content)
 
     async def test_legacy_action_result_is_bounded_before_planner_reuse(self) -> None:
         from src.chat import chat_tool_registry

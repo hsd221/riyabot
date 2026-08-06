@@ -13,12 +13,13 @@ logger = get_logger("base_plugin")
 
 
 class BasePlugin(PluginBase):
-    """基于Action和Command的插件基类
+    """基于多种组件的插件基类
 
-    所有上述类型的插件都应该继承这个基类，一个插件可以包含多种组件：
+    所有插件都应该继承这个基类，一个插件可以包含多种组件：
     - Action组件：处理聊天中的动作
     - Command组件：处理命令请求
-    - 未来可扩展：Scheduler、Listener等
+    - BaseTool组件：提供结构化的LLM工具调用
+    - EventHandler组件：监听和处理生命周期、消息等事件
     """
 
     def __init__(self, *args, **kwargs):

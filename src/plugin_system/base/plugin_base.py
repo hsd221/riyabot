@@ -514,12 +514,17 @@ class PluginBase(ABC):
                     # 迁移旧配置值到新结构
                     migrated_config = self._migrate_config_values(existing_config, new_config_structure)
 
-                    # 保存迁移后的配置
-                    self._save_config_to_file(migrated_config, config_file_path)
+                    # 覆盖原文件前保留旧配置，备份失败时保留原文件避免数据丢失。
+                    backup_path = self._backup_config_file(config_file_path)
+                    if not backup_path:
+                        logger.error(f"{self.log_prefix} 配置迁移前备份失败，保留原配置文件")
+                        self.config = existing_config
+                    else:
+                        self._save_config_to_file(migrated_config, config_file_path)
 
-                    logger.info(f"{self.log_prefix} 配置文件已从 v{current_version} 更新到 v{expected_version}")
+                        logger.info(f"{self.log_prefix} 配置文件已从 v{current_version} 更新到 v{expected_version}")
 
-                    self.config = migrated_config
+                        self.config = migrated_config
                 else:
                     logger.debug(f"{self.log_prefix} 配置版本匹配 (v{current_version})，直接加载")
                     self.config = existing_config
