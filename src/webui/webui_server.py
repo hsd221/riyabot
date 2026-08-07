@@ -209,7 +209,7 @@ class WebUIServer:
                 "WebUI 静态文件目录不存在",
                 event_code="webui.static.missing_dist",
                 path=str(static_path),
-                remediation="cd webui && bun run build",
+                remediation="main 分支已内置 webui/dist；dev 分支请执行 cd webui && bun run build",
             )
             return
 
@@ -218,7 +218,7 @@ class WebUIServer:
                 "WebUI 静态入口文件不存在",
                 event_code="webui.static.missing_index",
                 path=str(static_path / "index.html"),
-                remediation="cd webui && bun run build",
+                remediation="main 分支已内置 webui/dist；dev 分支请执行 cd webui && bun run build",
             )
             return
 
