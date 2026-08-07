@@ -27,7 +27,7 @@ def get_person_id(platform: str, user_id: int | str) -> str:
 
 #### 示例
 ```python
-person_id = person_api.get_person_id("qq", 123456)
+person_id = person_api.get_person_id("telegram", 123456)
 ```
 
 ### 2. 用户信息查询

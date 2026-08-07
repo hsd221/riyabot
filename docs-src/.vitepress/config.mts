@@ -5,12 +5,17 @@ export default withMermaid(
   defineConfig({
     lang: 'zh-CN',
     title: 'RiyaBot',
-    description: '一个面向 QQ 群聊的拟生命体聊天机器人',
+    description: '一个基于大语言模型、长期记忆、行为规划和插件系统的拟生命体聊天机器人',
     base: '/riyabot/',
     lastUpdated: true,
     cleanUrls: true,
+    head: [
+      ['link', { rel: 'icon', type: 'image/svg+xml', href: '/riyabot/logo.svg' }],
+    ],
 
     themeConfig: {
+      logo: '/logo.svg',
+
       nav: [
         { text: '指南', link: '/guide/installation' },
         { text: '插件开发', link: '/plugins/index' },

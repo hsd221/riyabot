@@ -57,7 +57,7 @@ src/
 
 ## 记忆系统（src/memory）
 
-记忆是一个持久化边界：
+记忆是一个持久化的系统边界，所有读写都通过统一接口进行：
 
 - **SQLite 是唯一事实来源**（`schema.py`、`store.py`），**Qdrant 向量索引是可选的**，向量层不可用时会优雅降级；
 - 统一通过 `MemoryStore` / `QdrantManager` 访问，写操作有排序、恢复与一致性协调机制（`write_ops.py`、`reconciliation.py`）；

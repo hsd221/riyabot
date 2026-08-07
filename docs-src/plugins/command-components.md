@@ -1,12 +1,10 @@
-# 💻 Command组件详解
+# 💻 Command 组件详解
 
-## 📖 什么是Command
+## 📖 什么是 Command
 
-Command是直接响应用户明确指令的组件，与Action不同，Command是**被动触发**的，当用户输入特定格式的命令时立即执行。
+Command 是直接响应用户明确指令的组件。与 Action 不同，Command 是**被动触发**的：当用户输入特定格式的命令时立即执行。Command 通过正则表达式匹配用户输入，提供确定性的功能服务。
 
-Command通过正则表达式匹配用户输入，提供确定性的功能服务。
-
-### 🎯 Command的特点
+### 🎯 Command 的特点
 
 - 🎯 **确定性执行**：匹配到命令立即执行，无随机性
 - ⚡ **即时响应**：用户主动触发，快速响应
@@ -16,9 +14,9 @@ Command通过正则表达式匹配用户输入，提供确定性的功能服务�
 
 ---
 
-## 🛠️ Command组件的基本结构
+## 🛠️ Command 组件的基本结构
 
-首先，Command组件需要继承自`BaseCommand`类，并实现必要的方法。
+首先，Command 组件需要继承自 `BaseCommand` 类，并实现必要的方法。
 
 ```python
 class ExampleCommand(BaseCommand):
@@ -39,14 +37,14 @@ class ExampleCommand(BaseCommand):
         # ---- 执行命令的逻辑 ----
         return True, "执行成功", 0
 ```
-**`command_pattern`**: 该Command匹配的正则表达式，用于精确匹配用户输入。
 
-请注意：如果希望能获取到命令中的参数，请在正则表达式中使用有命名的捕获组，例如`(?P<param_name>pattern)`。
+**`command_pattern`**：该 Command 匹配的正则表达式，用于精确匹配用户输入。
 
-这样在匹配时，内部实现可以使用`re.match.groupdict()`方法获取到所有捕获组的参数，并以字典的形式存储在`self.matched_groups`中。
+请注意：如果希望能获取到命令中的参数，请在正则表达式中使用有命名的捕获组，例如 `(?P<param_name>pattern)`。这样在匹配时，内部实现可以使用 `re.match.groupdict()` 方法获取到所有捕获组的参数，并以字典的形式存储在 `self.matched_groups` 中。
 
 ### 匹配样例
-假设我们有一个命令`/example param1=value1 param2=value2`，对应的正则表达式可以是：
+
+假设我们有一个命令 `/example param1=value1 param2=value2`，对应的正则表达式可以是：
 
 ```python
 class ExampleCommand(BaseCommand):
@@ -58,7 +56,7 @@ class ExampleCommand(BaseCommand):
         # 获取匹配的参数
         param1 = self.matched_groups.get("param1")
         param2 = self.matched_groups.get("param2")
-        
+
         # 执行逻辑
         return True, f"参数1: {param1}, 参数2: {param2}", 0
 ```
@@ -66,6 +64,7 @@ class ExampleCommand(BaseCommand):
 ---
 
 ## Command 内置方法说明
+
 ```python
 class BaseCommand:
     def get_config(self, key: str, default=None):
@@ -86,4 +85,5 @@ class BaseCommand:
     async def send_image(self, image_base64: str, set_reply: bool = False, reply_message: Optional["DatabaseMessages"] = None, storage_message: bool = True) -> bool:
         """发送图片"""
 ```
-具体参数与用法参见`BaseCommand`基类的定义。
+
+具体参数与用法参见 `BaseCommand` 基类的定义。
