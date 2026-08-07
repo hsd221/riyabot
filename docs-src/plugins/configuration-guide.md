@@ -1,18 +1,12 @@
-# ⚙️ 插件配置完整指南
+# ⚙️ 插件配置指南
 
-本文档将全面指导你如何为你的插件**定义配置**和在组件中**访问配置**，帮助你构建一个健壮、规范且自带文档的配置系统。
+本文说明如何为插件**定义配置**、并在组件中**读取配置**。
 
-> **🚨 重要原则：任何时候都不要手动创建 config.toml 文件！**
->
-> 系统会根据你在代码中定义的 `config_schema` 自动生成配置文件。手动创建配置文件会破坏自动化流程，导致配置不一致、缺失注释和文档等问题。
+> **🚨 不要手动创建 `config.toml` 文件。** 系统会根据代码中的 `config_schema` 自动生成配置文件。手动创建会破坏自动化流程，导致配置不一致、缺少注释和文档。
 
 ## 配置版本管理
 
-### 🎯 版本管理概述
-
-插件系统提供了强大的**配置版本管理机制**，可以在插件升级时自动处理配置文件的迁移和更新，确保配置结构始终与代码保持同步。
-
-### 🔄 配置版本管理工作流程
+插件升级时配置结构可能变化。系统通过 `config_version` 检测版本差异，并在必要时自动迁移配置，保证配置结构与代码保持同步：
 
 ```mermaid
 graph TD
@@ -32,16 +26,14 @@ graph TD
     D --> N
     G --> N
     I --> N
-    
+
     style J fill:#FFB6C1
     style K fill:#90EE90
     style G fill:#87CEEB
     style N fill:#DDA0DD
 ```
 
-### 📊 版本管理策略
-
-#### 1. 配置版本定义
+### 定义版本
 
 在 `config_schema` 的 `plugin` 节中定义 `config_version`：
 
@@ -55,35 +47,26 @@ config_schema = {
 }
 ```
 
-#### 2. 版本检查行为
+### 版本检查行为
 
-- **无版本信息** (`config_version` 不存在)
-  - 系统会**跳过版本检查**，直接加载现有配置
-  - 适用于旧版本插件的兼容性处理
-  - 日志显示：`配置文件无版本信息，跳过版本检查`
+- **无版本信息**：跳过版本检查和迁移，直接加载现有配置，用于兼容没有版本号的旧插件（日志显示 `配置文件无版本信息，跳过版本检查`）。新增的配置项不会写入该文件，代码通过 `get_config()` 的默认值读取它们。
+- **版本匹配**：直接加载现有配置。
+- **版本不匹配**：自动执行配置迁移，过程如下：
 
-- **有版本信息** (存在 `config_version` 字段)
-  - 比较当前版本与期望版本
-  - 版本不匹配时自动执行配置迁移
-  - 版本匹配时直接加载配置
+1. 根据最新的 `config_schema` 生成新配置结构；
+2. 保留旧配置中仍然存在的字段值；
+3. 新增的配置项写入 Schema 中定义的默认值；
+4. 将 `config_version` 更新为最新版本；
+5. 覆盖写回原配置文件。
 
-#### 3. 配置迁移过程
+被移除的配置项会在日志中输出警告。
 
-当检测到版本不匹配时，系统会：
+> **⚠️ 迁移会直接覆盖原文件，不保留备份、不自动回滚。** 修改 `config_schema` 前，请先备份配置并在测试环境验证。
 
-1. **生成新配置结构** - 根据最新的 `config_schema` 生成新的配置结构
-2. **迁移配置值** - 将旧配置文件中的值迁移到新结构中
-3. **处理新增字段** - 新增的配置项使用默认值
-4. **更新版本号** - `config_version` 字段自动更新为最新版本
-5. **保存配置文件** - 迁移后的配置直接覆盖原文件，系统不会自动保留备份；升级前请自行备份需要保留的配置。
+### 升级示例
 
-### 🔧 实际使用示例
+假设插件从 v1.0 升级到 v1.1，新增了权限管理功能。旧版本配置：
 
-#### 版本升级场景
-
-假设你的插件从 v1.0 升级到 v1.1，新增了权限管理功能：
-
-**旧版本配置 (v1.0.0):**
 ```toml
 [plugin]
 enabled = true
@@ -94,7 +77,8 @@ min_duration = 60
 max_duration = 3600
 ```
 
-**新版本Schema (v1.1.0):**
+新版本 Schema（新增 `permissions` 节）：
+
 ```python
 config_schema = {
     "plugin": {
@@ -112,75 +96,18 @@ config_schema = {
 }
 ```
 
-**迁移后配置 (v1.1.0):**
-```toml
-[plugin]
-enabled = true  # 保留原值
-config_version = "1.1.0"  # 自动更新
-
-[mute]
-min_duration = 60  # 保留原值
-max_duration = 3600  # 保留原值
-
-[permissions]  # 新增节，使用默认值
-allowed_users = []
-allowed_groups = []
-```
-
-**系统行为:**
-- 检测到配置版本从 v1.0.0 变为 v1.1.0；
-- 保留旧配置中仍存在的字段值；
-- 为新增的 `permissions` 配置节写入 Schema 默认值；
-- 将 `config_version` 更新为 v1.1.0；
-- 系统会详细记录配置迁移过程。
-
-#### 无版本配置的兼容性
-
-对于没有版本信息的旧配置文件：
-
-**旧配置文件（无版本）:**
-```toml
-[plugin]
-enabled = true
-# 没有 config_version 字段
-
-[mute]
-min_duration = 60
-max_duration = 3600
-```
-
-**系统行为:**
-- 检测不到 `config_version`；
-- 跳过版本检查和迁移，直接加载现有配置；
-- 新增的配置项不会写入该文件，代码通过 `get_config()` 的默认值读取它们；
-- 系统会记录跳过版本检查的日志。
-
-### ⚠️ 重要注意事项
-
-#### 1. 版本号管理
-- 当你修改 `config_schema` 时，**必须同步更新** `config_version`
-- 请使用语义化版本号 (例如：`1.0.0`, `1.1.0`, `2.0.0`)
-
-#### 2. 迁移策略
-- **保留原值优先**: 迁移时优先保留用户的原有配置值
-- **新增字段默认值**: 新增的配置项使用Schema中定义的默认值
-- **移除字段警告**: 如果某个配置项在新版本中被移除，会在日志中显示警告
-
-#### 3. 兼容性考虑
-- **旧版本兼容**: 无版本信息的配置文件会跳过版本检查
-- **不保留备份**: 迁移后直接覆盖原配置文件，不保留备份
-- **迁移失败风险**: 迁移会直接写回原配置文件，系统不会自动回滚；修改 Schema 前应先备份配置并在测试环境验证。
+迁移后：`[mute]` 的字段值被保留，新增的 `[permissions]` 节写入默认值，`config_version` 更新为 `1.1.0`。
 
 ## 配置定义
 
-配置的定义在你的插件主类（继承自 `BasePlugin`）中完成，主要通过两个类属性：
+配置定义在插件主类（继承自 `BasePlugin`）中完成，主要有两个类属性：
 
-1.  `config_section_descriptions`: 一个字典，用于描述配置文件的各个区段（`[section]`）。
-2.  `config_schema`: 核心部分，一个嵌套字典，用于定义每个区段下的具体配置项。
+1. `config_section_descriptions`：字典，描述配置文件的各个区段（`[section]`）；
+2. `config_schema`：核心部分，嵌套字典，定义每个区段下的具体配置项。
 
-### `ConfigField`：配置项的基石
+### `ConfigField`：配置项的定义
 
-每个配置项都通过一个 `ConfigField` 对象来定义。`ConfigField` 是一个 dataclass（定义见 `src/plugin_system/base/config_types.py`），常用字段如下：
+每个配置项通过一个 `ConfigField` 对象定义。`ConfigField` 是一个 dataclass（定义见 `src/plugin_system/base/config_types.py`），常用字段如下：
 
 ```python
 from src.plugin_system import ConfigField
@@ -200,7 +127,7 @@ class ConfigField:
 
 ### 配置示例
 
-让我们以一个功能丰富的禁言插件 `MutePlugin` 为例（这里仅作演示，插件本身不一定存在于仓库中），看看如何定义它的配置。
+以禁言插件 `MutePlugin` 为例（这里仅作演示，插件本身不一定存在于仓库中）：
 
 ```python
 from src.plugin_system import BasePlugin, register_plugin, ConfigField
@@ -218,7 +145,6 @@ class MutePlugin(BasePlugin):
         "components": "组件启用控制",
         "mute": "核心禁言功能配置",
         "smart_mute": "智能禁言Action的专属配置",
-        "logging": "日志记录相关配置"
     }
 
     # 步骤2: 使用ConfigField定义详细的配置Schema
@@ -261,7 +187,7 @@ class MutePlugin(BasePlugin):
     # 这里是插件方法，略去
 ```
 
-当 `mute_plugin` 首次加载且其目录中不存在 `config.toml` 时，系统会自动创建以下文件：
+当插件首次加载且目录中不存在 `config.toml` 时，系统会自动生成以下文件：
 
 ```toml
 # mute_plugin - 自动生成的配置文件
@@ -317,37 +243,25 @@ level = "INFO"
 prefix = "[MutePlugin]"
 ```
 
----
-
 ## 配置访问
 
-如果你想要在你的组件中访问配置，可以通过组件内置的 `get_config()` 方法访问配置。
-
-其参数为一个命名空间化的字符串。以上面的 `MutePlugin` 为例，你可以这样访问配置：
+在组件中，通过内置的 `get_config()` 方法读取配置。参数为命名空间化的字符串，以上面的 `MutePlugin` 为例：
 
 ```python
 enable_smart_mute = self.get_config("components.enable_smart_mute", True)
 ```
 
-如果尝试访问了一个不存在的配置项，系统会自动返回默认值（你传递的）或者 `None`。
+如果访问了不存在的配置项，`get_config()` 会返回你传入的默认值；未传默认值时返回 `None`。
 
----
+## 最佳实践
 
-## 最佳实践与注意事项
+1. **Schema 优先**：所有配置项都必须在 `config_schema` 中声明，包括类型、默认值和描述。
+2. **描述清晰**：为每个 `ConfigField` 和 `config_section_descriptions` 编写清晰、准确的描述，它们会直接成为配置文件的注释。
+3. **提供合理默认值**：确保插件在默认配置下就能正常运行（或处于一个安全禁用的状态）。
+4. **gitignore**：将 `plugins/*/config.toml` 或 `src/plugins/built_in/*/config.toml` 加入 `.gitignore`，避免提交个人敏感信息。
+5. **只修改，不创建**：自动生成的 `config.toml` 只应被用户**修改**，而不是从零创建。
 
+## 相关文档
 
-**🚨 核心原则：永远不要手动创建 config.toml 文件！**
-
-1.  **🔥 绝不手动创建配置文件**: **任何时候都不要手动创建 `config.toml` 文件**！必须通过在 `plugin.py` 中定义 `config_schema` 让系统自动生成。
-    - ❌ **禁止**：`touch config.toml`、手动编写配置文件
-    - ✅ **正确**：定义 `config_schema`，启动插件，让系统自动生成
-
-2.  **Schema优先**: 所有配置项都必须在 `config_schema` 中声明，包括类型、默认值和描述。
-
-3.  **描述清晰**: 为每个 `ConfigField` 和 `config_section_descriptions` 编写清晰、准确的描述。这会直接成为你的插件文档的一部分。
-
-4.  **提供合理默认值**: 确保你的插件在默认配置下就能正常运行（或处于一个安全禁用的状态）。
-
-5.  **gitignore**: 将 `plugins/*/config.toml` 或 `src/plugins/built_in/*/config.toml` 加入 `.gitignore`，以避免提交个人敏感信息。
-
-6.  **配置文件只供修改**: 自动生成的 `config.toml` 文件只应该被用户**修改**，而不是从零创建。
+- [插件快速开始](./quick-start.md) — 从最小插件开始，了解组件注册与配置示例。
+- [Manifest 系统指南](./manifest-guide.md) — 了解与运行时配置分离的插件元数据。

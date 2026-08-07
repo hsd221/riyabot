@@ -1,36 +1,22 @@
 # 🚀 快速开始指南
 
-本指南将带你从零开始创建一个功能完整的 RiyaBot 插件。
+本指南将带你从零开始创建一个功能完整的 RiyaBot 插件。示例代码位于项目根目录的 `plugins/hello_world_plugin/` 下。
 
-## 📖 概述
-
-这个指南将带你快速创建你的第一个 RiyaBot 插件。我们将创建一个简单的问候插件，展示插件系统的基本概念。
-
-以下代码都在项目根目录的 `plugins/hello_world_plugin/` 目录下。
-
-### 一个方便的小设计
-
-在开发中，我们在`__init__.py`中定义了一个`__all__`变量，包含了所有需要导出的类和函数。
-这样在其他地方导入时，可以直接使用 `from src.plugin_system import *` 来导入所有插件相关的类和函数。
-或者你可以直接使用 `from src.plugin_system import BasePlugin, register_plugin, ComponentInfo` 之类的方式来导入你需要的部分。
-
-### 📂 准备工作
+## 准备工作
 
 确保你已经：
 
-1. 克隆了RiyaBot项目
-2. 安装了Python依赖
-3. 了解基本的Python语法
+1. 克隆了 RiyaBot 项目
+2. 安装了 Python 依赖
+3. 了解基本的 Python 语法
 
-## 🏗️ 创建插件
+## 创建插件
 
 ### 1. 创建插件目录
 
-在项目根目录的 `plugins/` 文件夹下创建你的插件目录
+在项目根目录的 `plugins/` 文件夹下创建你的插件目录，这里我们命名为 `hello_world_plugin`。
 
-这里我们创建一个名为 `hello_world_plugin` 的目录
-
-### 2. 创建`_manifest.json`文件
+### 2. 创建 `_manifest.json` 文件
 
 在插件目录下面创建一个 `_manifest.json` 文件，内容如下：
 
@@ -46,7 +32,7 @@
 }
 ```
 
-有关 `_manifest.json` 的详细说明，请参考 [Manifest文件指南](./manifest-guide.md)。
+有关 `_manifest.json` 的详细说明，请参考 [Manifest 文件指南](./manifest-guide.md)。
 
 ### 3. 创建最简单的插件
 
@@ -77,24 +63,20 @@ class HelloWorldPlugin(BasePlugin):
 
 **解释一下这些代码：**
 
-- 首先，我们在 `plugin.py` 中定义了一个 `HelloWorldPlugin` 插件类。它继承自 `BasePlugin`，提供插件的基本功能。
-- 通过给类加上 `@register_plugin` 装饰器，我们告诉系统这是一个插件。
-- `plugin_name` 等是插件的基本信息，必须填写
+- `HelloWorldPlugin` 继承自 `BasePlugin`，插件的基本功能都由基类提供；
+- `@register_plugin` 装饰器告诉系统这是一个插件；
+- `plugin_name` 等是插件的基本信息，必须填写；
 - `get_plugin_components()` 返回插件的功能组件。当前示例没有定义 Tool、Action、Command 或 EventHandler，因此返回空列表。
 
 ### 4. 测试基础插件
 
-现在就可以测试这个插件了！启动 RiyaBot：
-
-直接通过启动器运行 RiyaBot，或者执行 `python bot.py`。
-
-在日志中应该能看到插件加载信息。虽然插件还没有任何功能，但它已经成功运行了！
+现在就可以测试这个插件了。启动 RiyaBot（直接通过启动器运行，或执行 `python bot.py`），在日志中应该能看到插件加载信息。虽然插件还没有任何功能，但它已经成功运行了！
 
 ![1750326700269](image/quick-start/1750326700269.png)
 
 ### 5. 添加第一个功能：原生 Tool
 
-新插件需要被模型按结构化参数调用时，优先使用 `BaseTool`。Tool 会直接进入当前聊天流程的原生工具目录，模型通过 Tool Call 传入参数，工具再返回结构化结果。工具本身不负责生成最终聊天文本，也不应把模型传入的参数当作可信指令。
+需要让模型按结构化参数调用时，优先使用 `BaseTool`。Tool 会直接进入当前聊天流程的原生工具目录，模型通过 Tool Call 传入参数，工具再返回结构化结果。工具本身不负责生成最终聊天文本，也不应把模型传入的参数当作可信指令。
 
 下面添加一个简单的问候 Tool。它只返回问候结果，由后续聊天流程决定是否生成最终回复：
 
@@ -144,7 +126,7 @@ class HelloWorldPlugin(BasePlugin):
 重启 RiyaBot，在聊天中提出明确需要该能力的请求，例如：
 
 ```
-请使用问候工具，生成“欢迎新成员”的问候内容。
+请使用问候工具，生成"欢迎新成员"的问候内容。
 ```
 
 模型可能会调用 `GreetingTool`。Tool 的返回值会作为当前轮次的不可信工具结果继续交给聊天流程；如果模型随后调用内置 `reply`，Replyer 才会生成发给用户的最终文本。没有 Tool Call 并不代表 Tool 注册失败，是否调用仍由模型根据工具描述和当前上下文决定。
@@ -157,13 +139,9 @@ class HelloWorldPlugin(BasePlugin):
 
 > 新插件若需要被模型按结构化参数直接调用，请先阅读 [Tool 组件详解](./tool-components.md) 并使用 `BaseTool`。Action 已接入统一的 Tool Call 执行边界，但 `BaseAction` 仍是兼容组件。
 
-Action 适合扩展发送表情、禁言、发送语音或操作外部能力等已有聊天动作。
+Action 适合扩展发送表情、禁言、发送语音或操作外部能力等已有聊天动作。更深入的说明见 [Action 组件详解](./action-components.md)，这里先专注把功能跑起来。
 
-> Action 的激活机制、与内置 `reply` 的关系等更深入的说明，见 [Action 组件详解](./action-components.md)。这里先专注把功能跑起来。
-
-现在让我们给插件添加一个兼容 Action。这个 Action 可以对用户发送一句问候语。下面的代码是只注册该 Action 的最小片段；如果同时保留前面的 Tool，请在最终的 `get_plugin_components()` 返回列表中同时保留两者。
-
-在 `plugin.py` 文件中添加兼容 Action 组件：
+现在给插件添加一个兼容 Action，对用户发送一句问候语。下面的代码是只注册该 Action 的最小片段；如果同时保留前面的 Tool，请在最终的 `get_plugin_components()` 返回列表中同时保留两者。
 
 ```python
 from typing import List, Tuple, Type
@@ -219,13 +197,13 @@ class HelloWorldPlugin(BasePlugin):
 
 **解释一下这些代码：**
 
-- `HelloAction` 是我们定义的问候动作类，继承自 `BaseAction`，并实现了核心功能。
-- 在 `HelloWorldPlugin` 中，我们通过 `get_plugin_components()` 方法，通过调用`get_action_info()`这个内置方法将 `HelloAction` 注册为插件的一个组件。
-- 这样一来，当插件被加载时，问候动作也会被一并加载，并可以在RiyaBot中使用。
-- `execute()` 函数是Action的核心，定义了当Action被RiyaBot选择后，具体要做什么
-- `self.send_text()` 是发送文本消息的便捷方法
+- `HelloAction` 是我们定义的问候动作类，继承自 `BaseAction`，并实现了核心功能；
+- 在 `HelloWorldPlugin` 中，我们通过 `get_plugin_components()` 方法，调用 `get_action_info()` 这个内置方法将 `HelloAction` 注册为插件的一个组件；
+- 这样一来，当插件被加载时，问候动作也会被一并加载，并可以在 RiyaBot 中使用；
+- `execute()` 函数是 Action 的核心，定义了当 Action 被 RiyaBot 选择后，具体要做什么；
+- `self.send_text()` 是发送文本消息的便捷方法。
 
-Action 组件中有关 `activation_type`、`action_parameters`、`action_require`、`associated_types` 等的详细说明请参考 [Action 组件指南](./action-components.md)。需要新增原生模型工具时，请参考 [Tool 组件详解](./tool-components.md)。
+`activation_type`、`action_parameters`、`action_require`、`associated_types` 等属性的详细说明请参考 [Action 组件详解](./action-components.md)。需要新增原生模型工具时，请参考 [Tool 组件详解](./tool-components.md)。
 
 ### 8. 测试兼容 Action
 
@@ -243,15 +221,13 @@ RiyaBot 可能会选择使用你的问候 Action，发送回复：
 
 ![1750332508760](image/quick-start/1750332508760.png)
 
-> **💡 小提示**：RiyaBot会智能地决定什么时候使用它。如果没有立即看到效果，多试几次不同的消息。
+> **💡 小提示**：RiyaBot 会智能地决定什么时候使用它。如果没有立即看到效果，多试几次不同的消息。
 
 🎉 太棒了！你的插件已经有实际功能了！
 
 ### 9. 添加第二个功能：时间查询 Command
 
-现在让我们添加一个 Command 组件。Command 和 Action 不同，它直接响应用户命令：
-
-Command 是确定性的直接响应，不由 LLM 判断是否调用。
+Command 和 Action 不同，它直接响应用户命令，是确定性的直接响应，不由 LLM 判断是否调用：
 
 ```python
 # 在现有代码基础上，添加Command组件
@@ -302,18 +278,18 @@ class HelloWorldPlugin(BasePlugin):
         ]
 ```
 
-同样的，我们通过 `get_plugin_components()` 方法，调用 `get_command_info()` 将 `TimeCommand` 注册为插件组件。
+同样地，我们通过 `get_plugin_components()` 方法，调用 `get_command_info()` 将 `TimeCommand` 注册为插件组件。
 
-**Command组件解释：**
+**Command 组件解释：**
 
-- `command_pattern` 使用正则表达式匹配用户输入
-- `^/time$` 表示精确匹配 "/time"
+- `command_pattern` 使用正则表达式匹配用户输入；
+- `^/time$` 表示精确匹配 `/time`。
 
-有关 Command 组件的更多信息，请参考 [Command组件指南](./command-components.md)。
+有关 Command 组件的更多信息，请参考 [Command 组件详解](./command-components.md)。
 
 ### 10. 测试时间查询 Command
 
-重启RiyaBot，发送命令：
+重启 RiyaBot，发送命令：
 
 ```
 /time
@@ -335,13 +311,13 @@ class HelloWorldPlugin(BasePlugin):
 
 ### 1. 添加配置文件
 
-想要为插件添加配置文件吗？让我们一起来配置`config_schema`属性！
+想要为插件添加配置文件吗？让我们一起来配置 `config_schema` 属性！
 
-> **🚨 重要：不要手动创建config.toml文件！**
+> **🚨 重要：不要手动创建 config.toml 文件！**
 >
-> 我们需要在插件代码中定义配置Schema，让系统自动生成配置文件。
+> 我们需要在插件代码中定义配置 Schema，让系统自动生成配置文件。
 
-首先，在插件类中定义配置Schema：
+首先，在插件类中定义配置 Schema：
 
 ```python
 from src.plugin_system import ConfigField
@@ -411,7 +387,7 @@ enable_emoji = true
 format = "%Y-%m-%d %H:%M:%S"
 ```
 
-然后修改Action和Command代码，通过 `get_config()` 方法让它们读取配置（配置的键是命名空间式的）：
+然后修改 Action 和 Command 代码，通过 `get_config()` 方法让它们读取配置（配置的键是命名空间式的）：
 
 ```python
 class HelloAction(BaseAction):
@@ -464,10 +440,10 @@ class TimeCommand(BaseCommand):
 
 **配置系统工作流程：**
 
-1. **定义Schema**: 在插件代码中定义配置结构
-2. **自动生成**: 启动插件时，系统会自动生成 `config.toml` 文件
-3. **用户修改**: 用户可以修改生成的配置文件
-4. **代码读取**: 使用 `self.get_config()` 读取配置值
+1. **定义 Schema**：在插件代码中定义配置结构；
+2. **自动生成**：启动插件时，系统会自动生成 `config.toml` 文件；
+3. **用户修改**：用户可以修改生成的配置文件；
+4. **代码读取**：使用 `self.get_config()` 读取配置值。
 
 **绝对不要手动创建 `config.toml` 文件！**
 
@@ -479,4 +455,4 @@ class TimeCommand(BaseCommand):
 
 ---
 
-🎉 恭喜你！你已经成功的创建了自己的插件了！
+🎉 恭喜你！你已经成功创建了自己的插件了！

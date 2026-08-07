@@ -26,11 +26,13 @@ cd riyabot
 
 ```bash
 mkdir -p docker-config/mmc docker-config/adapters docker-config/napcat
-if [ ! -f docker-config/mmc/.env ]; then cp template/template.env docker-config/mmc/.env; fi
-if [ ! -f docker-config/adapters/config.toml ]; then touch docker-config/adapters/config.toml; fi
+cp template/template.env docker-config/mmc/.env
+touch docker-config/adapters/config.toml
 ```
 
-核心与适配器通过旧版消息 WebSocket 通信。容器之间需要使用同一个强随机令牌，并且核心容器内的监听地址必须允许 Compose 网络访问。将令牌同时写入核心挂载的 `.env`，不能只写在当前 shell 的环境变量中：
+> 如果 `docker-config/mmc/.env` 已存在，不要用 `cp` 覆盖它，请直接修改现有文件。
+
+核心与适配器通过旧版消息 WebSocket 通信。容器之间需要使用同一个强随机令牌，并且核心容器内的监听地址必须允许 Compose 网络访问。将令牌写入核心挂载的 `.env`，不能只写在当前 shell 的环境变量中：
 
 ```bash
 export MAIBOT_LEGACY_SERVER_TOKEN="$(openssl rand -hex 32)"
@@ -69,7 +71,7 @@ Compose 会根据仓库根目录的 `Dockerfile` 构建核心镜像，并启动�
 
 - **core**：RiyaBot 核心与 WebUI；
 - **adapters**：消息协议适配器；
-- **napcat**：QQ 登录与消息收发客户端。
+- **napcat**：登录消息平台账号、收发消息的客户端。
 
 查看服务状态和日志：
 

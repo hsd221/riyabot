@@ -11,21 +11,21 @@ RiyaBot 的聊天执行协议已经统一为 LLM Tool Call，但 `BaseAction` �
 
 因此，Action 已经迁移到统一的 Tool Call 执行边界，但没有迁移成 `BaseTool`。开发新插件时，请先看 [Tool 组件](./tool-components.md)；只有需要 Action 的激活类型、随机激活、消息类型过滤或既有 Action 行为时，才使用本页的 `BaseAction`。
 
-`reply` 是聊天系统内置 Tool，不是 Action；模型不发起任何 Tool Call 就表示本轮静默结束，不存在模型侧的 `no_reply` Action。Action 不是直接响应用户命令，而是让璃夜根据聊天情境选择额外行为。
+另外请留意：`reply` 是聊天系统内置 Tool，不是 Action；模型不发起任何 Tool Call 就表示本轮静默结束。Action 也不是直接响应用户命令，而是让璃夜根据聊天情境选择额外行为。
 
 ### Action 的特点
 
-- 🧠 **智能激活**：璃夜根据多种条件智能判断是否使用
-- 🎲 **可随机性**：可以使用随机数激活，增加行为的不可预测性，更接近真人交流
+- 🧠 **智能激活**：璃夜根据多种条件判断是否使用
+- 🎲 **可随机性**：可以用随机数激活，让行为更难以预测，更接近真人交流
 - 🤖 **拟人化**：让璃夜的回应更自然、更有个性
 - 🔄 **情境感知**：基于聊天上下文做出合适的反应
 
 ---
 
 ## 🎯 Action 组件的基本结构
-首先，所有的Action都应该继承`BaseAction`类。
 
-其次，每个Action组件都应该实现以下基本信息：
+首先，所有的 Action 都应该继承 `BaseAction` 类。其次，每个 Action 组件都应该实现以下基本信息：
+
 ```python
 class ExampleAction(BaseAction):
     action_name = "example_action" # 动作的唯一标识符
@@ -40,18 +40,18 @@ class ExampleAction(BaseAction):
     async def execute(self) -> Tuple[bool, str]:
         """
         执行Action的主要逻辑
-        
+
         Returns:
             Tuple[bool, str]: (是否成功, 执行结果描述)
         """
         # ---- 执行动作的逻辑 ----
         return True, "执行成功"
 ```
-#### associated_types: 该Action会发送的消息类型，例如文本、表情等。
 
-这部分由Adapter传递给处理器。
+### associated_types：该 Action 会发送的消息类型
 
-以 RiyaBot-NapCat-Adapter 为例，可选项目如下：
+例如文本、表情等，这部分由 Adapter 传递给处理器。以 RiyaBot-NapCat-Adapter 为例，可选项目如下：
+
 | 类型 | 说明 | 格式 |
 | --- | --- | --- |
 | text | 文本消息 | str |
@@ -65,9 +65,10 @@ class ExampleAction(BaseAction):
 | videourl | 视频URL消息 | str: 视频的URL |
 | file | 文件消息 | str: 文件的路径 |
 
-**请知悉，对于不同的处理器，其支持的消息类型可能会有所不同。在开发时请注意。**
+> 注意：不同的处理器支持的消息类型可能不同，开发时请以所用 Adapter 的支持为准。
 
-#### action_parameters: 该Action的参数说明。
+### action_parameters：该 Action 的参数说明
+
 这是一个字典，键为参数名，值为参数说明。这个字段帮助 LLM 理解如何使用 Action。每个自定义参数都会作为必填字符串字段加入兼容 Action 的 Tool schema；模型返回的自定义参数会传递到 Action 的 **`action_data`** 属性中。运行时仍会校验参数是否齐全，不能把模型返回的数据当作可信输入。
 
 ### 兼容 Action 的公共 Tool Call 参数
@@ -87,11 +88,11 @@ class ExampleAction(BaseAction):
 
 Action 采用**两层决策机制**来控制候选范围和最终调用：
 
-> 设计目的：在加载许多插件的时候降低LLM决策压力，避免让璃夜在过多的选项中纠结。
+> 设计目的：在加载了许多插件时降低 LLM 的决策压力，避免让璃夜在过多的选项中纠结。
 
 **第一层：激活控制（Activation Control）**
 
-激活决定璃夜是否 **“知道”** 这个 Action 的存在，即这个 Action 是否进入 Planner 的候选工具池。不被激活的 Action 不能被本轮选择。
+激活决定璃夜是否"知道"这个 Action 的存在，即这个 Action 是否进入 Planner 的候选工具池。不被激活的 Action 不能被本轮选择。
 
 **第二层：使用决策（Usage Decision）**
 
@@ -110,12 +111,12 @@ Action 采用**两层决策机制**来控制候选范围和最终调用：
 
 #### `NEVER` 激活
 
-`ActionActivationType.NEVER` 会使得 Action 永远不会被激活
+`ActionActivationType.NEVER` 会使得 Action 永远不会被激活。
 
 ```python
 class DisabledAction(BaseAction):
     activation_type = ActionActivationType.NEVER  # 永远不激活
-    
+
     async def execute(self) -> Tuple[bool, str]:
         # 这个Action永远不会被执行
         return False, "这个Action被禁用"
@@ -132,7 +133,7 @@ class AlwaysActivatedAction(BaseAction):
     action_name = "sync_status"
     action_description = "同步当前聊天相关状态"
     activation_type = ActionActivationType.ALWAYS  # 永远激活
-    
+
     async def execute(self) -> Tuple[bool, str]:
         # 执行插件自己的扩展功能
         return True, "状态同步完成"
@@ -140,18 +141,16 @@ class AlwaysActivatedAction(BaseAction):
 
 #### `RANDOM` 激活
 
-`ActionActivationType.RANDOM`会使得这个 Action 根据随机概率决定是否加入候选池。
+`ActionActivationType.RANDOM` 会让这个 Action 根据随机概率决定是否加入候选池。
 
-概率则由代码中的`random_activation_probability`控制。在内部实现中我们使用了`random.random()`来生成一个0到1之间的随机数，并与这个概率进行比较。
-
-因此使用这个方法需要实现`random_activation_probability`属性。
+概率由代码中的 `random_activation_probability` 控制。内部实现中，我们用 `random.random()` 生成一个 0 到 1 之间的随机数，再与这个概率比较。因此使用此方法需要实现 `random_activation_probability` 属性。
 
 ```python
 class SurpriseAction(BaseAction):
     activation_type = ActionActivationType.RANDOM  # 基于随机概率激活
     # 随机激活概率
     random_activation_probability = 0.1  # 10%概率激活
-  
+
     async def execute(self) -> Tuple[bool, str]:
         # 执行惊喜动作
         return True, "发送了惊喜内容"
@@ -159,18 +158,16 @@ class SurpriseAction(BaseAction):
 
 #### `KEYWORD` 激活
 
-`ActionActivationType.KEYWORD`会使得这个 Action 在检测到特定关键词时激活。
+`ActionActivationType.KEYWORD` 会让这个 Action 在检测到特定关键词时激活。
 
-关键词由代码中的`activation_keywords`定义，而`keyword_case_sensitive`则控制关键词匹配时是否区分大小写。在内部实现中，我们使用了`in`操作符来检查消息内容是否包含这些关键词。
-
-因此，使用此种方法需要实现`activation_keywords`和`keyword_case_sensitive`属性。
+关键词由代码中的 `activation_keywords` 定义，`keyword_case_sensitive` 则控制匹配时是否区分大小写。内部实现中，我们使用 `in` 操作符检查消息内容是否包含这些关键词。因此使用此方法需要实现 `activation_keywords` 和 `keyword_case_sensitive` 属性。
 
 ```python
 class GreetingAction(BaseAction):
     activation_type = ActionActivationType.KEYWORD  # 关键词激活
     activation_keywords = ["你好", "hello", "hi", "嗨"] # 关键词配置
     keyword_case_sensitive = False  # 不区分大小写
-  
+
     async def execute(self) -> Tuple[bool, str]:
         # 执行问候逻辑
         return True, "发送了问候"
@@ -180,12 +177,12 @@ class GreetingAction(BaseAction):
 
 #### 第二层：使用决策
 
-**在 Action 被激活后，模型仍会根据使用条件决定什么时候调用这个 Action**。
+**在 Action 被激活后，模型仍会根据使用条件决定什么时候调用这个 Action。**
 
 这一层由以下因素综合决定：
 
-- `action_require`：使用场景描述，帮助LLM判断何时选择
-- `action_parameters`：所需参数，影响Action的可执行性
+- `action_require`：使用场景描述，帮助 LLM 判断何时选择
+- `action_parameters`：所需参数，影响 Action 的可执行性
 - 当前聊天上下文和璃夜的决策逻辑
 
 ---
@@ -208,17 +205,13 @@ class EmojiAction(BaseAction):
 
 **决策流程**：
 
-1. **第一层激活判断**：
-
-    - 使用随机数进行决策，当`random.random() < self.random_activation_probability`时，璃夜才"知道"可以使用这个Action
-2. **第二层使用决策**：
-
-   - 即使 Action 被激活，模型还会根据 `action_require` 中的条件判断是否真正调用
-   - 例如：如果刚刚已经发过表情，根据"不要连续发送多个表情"的要求，璃夜可能不会选择这个Action
+1. **第一层激活判断**：使用随机数进行决策，当 `random.random() < self.random_activation_probability` 时，璃夜才"知道"可以使用这个 Action；
+2. **第二层使用决策**：即使 Action 被激活，模型还会根据 `action_require` 中的条件判断是否真正调用。例如，如果刚刚已经发过表情，根据"不要连续发送多个表情"的要求，璃夜可能不会选择这个 Action。
 
 ---
 
 ## Action 内置属性说明
+
 ```python
 class BaseAction:
     def __init__(self):
@@ -240,6 +233,7 @@ class BaseAction:
         self.action_data: dict        # Action执行时的数据（LLM返回的参数）
         self.thinking_id: str         # 思考ID
 ```
+
 `action_message` 是 `DatabaseMessages` 对象（定义见 `src.common.data_models.database_data_model.DatabaseMessages`），常用属性包括：
 
 ```python
@@ -263,11 +257,12 @@ user_nickname: str                   # 发送者昵称
 ---
 
 ## Action 内置方法说明
+
 ```python
 class BaseAction:
     def get_config(self, key: str, default=None):
         """获取插件配置值，使用嵌套键访问"""
-    
+
     async def wait_for_new_message(self, timeout: int = 1200) -> Tuple[bool, str]:
         """等待新消息或超时"""
 
@@ -289,7 +284,8 @@ class BaseAction:
     async def store_action_info(self, action_build_into_prompt: bool = False, action_prompt_display: str = "", action_done: bool = True) -> None:
         """存储动作信息到数据库"""
 ```
-具体参数与用法参见`BaseAction`基类的定义。
+
+具体参数与用法参见 `BaseAction` 基类的定义。
 
 ## 相关文档
 

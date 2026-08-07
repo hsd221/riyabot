@@ -121,10 +121,10 @@ def get_streams_summary() -> Dict[str, int]:
     - `total_streams`：总聊天流数量
     - `group_streams`：群聊流数量
     - `private_streams`：私聊流数量
-    - `qq_streams`：QQ平台流数量
+    - `qq_streams`：QQ 平台流数量（字段名沿用源码）
 
 
 ## 注意事项
 
-1. 大部分函数在参数不合法时候会抛出异常，请确保你的程序进行了捕获。
+1. 大部分函数在参数不合法时候会抛出异常，请确保您的程序进行了捕获。
 2. `ChatStream`对象包含了聊天的完整信息，包括用户信息、群信息等。
