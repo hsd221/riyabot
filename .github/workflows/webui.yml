@@ -38,11 +38,12 @@ jobs:
         run: bun run build
 
   build-and-commit:
-    # main 推送或 tag 推送时把构建产物提交回仓库，让源码安装用户克隆即得。
-    # 响应 tag 推送，保证打 tag 发 release 时该 tag 必然包含最新 dist（无需等 main 的构建提交先行）。
+    # main 推送时把构建产物提交回仓库，让源码安装用户克隆即得。
+    # dist 提交会先行入 main，因此之后打的 tag / 发的 release 天然包含最新构建产物，
+    # 无需响应 tag 事件（避免强推 tag 的隐患）。
     # 注意：本 job 的提交只改 webui/dist，而本工作流的 push 触发条件有 paths 过滤（仅 webui/**），
     # 因此该提交不会递归触发本工作流；docker-image-main.yml 未被过滤会随之重建镜像，属预期行为。
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref_type == 'tag')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -59,6 +60,11 @@ jobs:
       - name: Build
         run: bun run build
       - name: Commit webui/dist
+        env:
+          # 分支保护规则（require-pr-and-ruff-for-collaborators）不允许 GITHUB_TOKEN 直推 main，
+          # 且个人仓库 ruleset 不支持给 GitHub Actions 加 bypass；必须用管理员 PAT 推送
+          # （管理员在 bypass 名单内）。未配置 Secret 时降级用 GITHUB_TOKEN，会被规则拒绝并明确报错。
+          PUSH_TOKEN: ${{ secrets.WEBUI_DIST_PUSH_TOKEN }}
         run: |
           # dist 在 .gitignore 中，git diff 看不到未跟踪文件；
           # 必须先 add -f 再检查暂存区，否则永远判定"无变化"而跳过提交。
@@ -70,4 +76,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: 构建 webui/dist [skip ci]"
-          git push
+          if [ -z "$PUSH_TOKEN" ]; then
+            echo "::warning::未配置 WEBUI_DIST_PUSH_TOKEN，改用 GITHUB_TOKEN 推送，可能被分支保护规则拒绝"
+            git push origin main
+            exit 0
+          fi
+          # 用 git 凭据注入 token，避免出现在日志或 git remote 中
+          git config http.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          git push origin main
