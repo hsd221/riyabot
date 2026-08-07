@@ -30,7 +30,7 @@ RiyaBot is a Python 3.10+ QQ-chat bot with a React 19/TypeScript dashboard. `bot
 | Learned behavior and expressions | `src/bw_learner/` | Separate from durable memory storage. |
 | Model requests and embeddings | `src/llm_models/` | Provider clients, payloads, request traces, embedding profile. |
 | Plugin SDK and runtime | `src/plugin_system/`, `plugins/` | Public facades versus external plugin implementations. |
-| Dashboard frontend/backend | `webui/`, `src/webui/` | Build frontend before relying on `webui/dist/` in backend serving. |
+| Dashboard frontend/backend | `webui/`, `src/webui/` | `webui/dist/` 是构建产物，改动 webui 源码后需本地构建并强制提交入库（见 CONVENTIONS）。 |
 | Documentation site and guides | `docs-src/` | VitePress source; build with `cd docs-src && bun run docs:build`. |
 | Prompts | `prompts/`, `src/common/prompt_manager.py` | Keep dotted IDs, metadata, and `###SECTION:` variants stable. |
 
@@ -71,6 +71,7 @@ Search the owning package before creating any new utility. Use the public facade
 - React remains typed and functional; follow `webui/` Prettier and package scripts.
 - Core TOML definitions live in `src/config/`; generated TOML in `config/` is runtime state, not hand-maintained source.
 - Use Conventional Commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`.
+- `webui/dist/` 是构建产物，在 `.gitignore` 中；每次改动 `webui/` 源码后必须手动 `cd webui && bun run build`，再 `git add -f webui/dist` 与代码一起提交（clone 用户依赖 dist 开箱即用，后端 `src/webui/webui_server.py` 从 `webui/dist/` 服务静态资源）。提交前若 dist 落后于源码（如构建时间早于最近源码改动），先重建再入库。
 
 ## BRANCH AND SUBMISSION WORKFLOW
 - Treat `dev` as the integration branch and `main` as the stable release branch.
@@ -80,7 +81,7 @@ Search the owning package before creating any new utility. Use the public facade
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not commit `.env`, credentials, tokens, private databases, `config/`, `data/`, `logs/`, or `tests/artifacts/`.
-- Do not edit `webui/dist/`, `webui/node_modules/`, `docs-src/.vitepress/dist/`, `docs-src/node_modules/`, caches, or `.claude/worktrees/` as source; those are generated or separate copies.
+- Do not hand-edit `webui/dist/` files (rebuild via `bun run build` instead); do not commit `webui/node_modules/`, `docs-src/.vitepress/dist/`, `docs-src/node_modules/`, caches, or `.claude/worktrees/` as source; those are generated or separate copies.
 - Do not bypass prompt loading with ad hoc file reads or rename dotted prompt IDs/`###SECTION:` headings during unrelated work.
 - Do not expose plugin input, model output, uploads, remote responses, or adapter traffic as trusted data.
 - Do not alter configuration, plugin, database, Docker-path, or authentication schemas without a compatibility/migration note.

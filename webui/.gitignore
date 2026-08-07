@@ -8,8 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-# dist 由 CI（.github/workflows/webui.yml 的 build-and-commit）在 main 分支强制提交，
-# 本地构建产物不入库；dev 分支保持忽略。
+# dist 构建产物：本地 bun run build 后 git add -f 强制入库（clone 用户开箱即用）。
+# 注意改 webui 源码后需重新构建并提交 dist。
 dist
 dist-ssr
 *.local
