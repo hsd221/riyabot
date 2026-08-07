@@ -81,6 +81,7 @@ jobs:
             git push origin main
             exit 0
           fi
-          # 用 git 凭据注入 token，避免出现在日志或 git remote 中
-          git config http.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
+          # 用 git 凭据注入 token，避免出现在日志或 git remote 中。
+          # 必须 --global 覆盖 checkout 设置的本地 extraheader（否则推送仍用 GITHUB_TOKEN，被分支保护拒绝）。
+          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)"
           git push origin main
