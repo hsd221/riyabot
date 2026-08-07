@@ -38,8 +38,11 @@ jobs:
         run: bun run build
 
   build-and-commit:
-    # 仅主分支推送时把构建产物提交回仓库，让源码安装用户克隆即得
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # main 推送或 tag 推送时把构建产物提交回仓库，让源码安装用户克隆即得。
+    # 响应 tag 推送，保证打 tag 发 release 时该 tag 必然包含最新 dist（无需等 main 的构建提交先行）。
+    # 注意：本 job 的提交只改 webui/dist，而本工作流的 push 触发条件有 paths 过滤（仅 webui/**），
+    # 因此该提交不会递归触发本工作流；docker-image-main.yml 未被过滤会随之重建镜像，属预期行为。
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref_type == 'tag')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -57,13 +60,14 @@ jobs:
         run: bun run build
       - name: Commit webui/dist
         run: |
-          if git diff --quiet -- dist/; then
+          # dist 在 .gitignore 中，git diff 看不到未跟踪文件；
+          # 必须先 add -f 再检查暂存区，否则永远判定"无变化"而跳过提交。
+          git add -f dist/
+          if git diff --cached --quiet; then
             echo "dist 无变化，跳过提交"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # dist 仍在 .gitignore 中（避免 dev 分支误提交），此处强制加入
-          git add -f dist/
           git commit -m "chore: 构建 webui/dist [skip ci]"
           git push
