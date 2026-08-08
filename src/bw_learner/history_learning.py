@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Iterator, Mapping
@@ -55,6 +57,8 @@ from src.llm_models.utils_model import LLMRequest
 logger = get_logger("history_learning")
 
 DEPTH_WINDOW_BUDGETS: dict[str, int | None] = {"fast": 8, "balanced": 20, "deep": 40, "full": None}
+DEFAULT_HISTORY_EXTRACTION_CONCURRENCY = 1
+MAX_HISTORY_EXTRACTION_CONCURRENCY = 16
 MAX_CONTINUATION_TAIL_MESSAGES = 12
 MAX_CONTINUATION_FOLLOW_UP_MESSAGES = 40
 MAX_CONTINUATION_WINDOW_MESSAGES = 80
@@ -178,6 +182,12 @@ ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 CancellationCheck = Callable[[], bool]
 ExtractionPageCallback = Callable[[int], Awaitable[None] | None]
 CheckpointCallback = Callable[[HistoryWindowCheckpoint], Awaitable[None] | None]
+
+
+@dataclass(frozen=True)
+class _WindowExtractionOutcome:
+    checkpoint: HistoryWindowCheckpoint
+    evidence_messages: tuple[ImportedMessage, ...]
 
 
 def group_chat_id(platform: str, group_id: str | int) -> str:
@@ -424,6 +434,108 @@ class ChatHistoryLearner:
             )
         ).candidates
 
+    async def _extract_natural_window(
+        self,
+        window: HistoryWindow,
+        following: HistoryWindow | None,
+        *,
+        chat_name: str,
+        eligible_sender_ids: Iterable[str] | None,
+        excluded_sender_ids: Iterable[str] | None,
+        extract_memories: bool,
+        update_profiles: bool,
+        page_progress: ExtractionPageCallback,
+        reserve_follow_up: Callable[[], None],
+        should_cancel: CancellationCheck | None,
+    ) -> _WindowExtractionOutcome:
+        """Extract one natural window without mutating cross-window result state."""
+
+        window_result: HistoryWindowResult | None = None
+        continuation: HistoryWindow | None = None
+        candidates_parts: list[HistoryCandidates] = []
+        continuation_window_ids: list[str] = []
+        incomplete_window_ids: list[str] = []
+        model_call_count = 0
+
+        async def record_page(page: int) -> None:
+            nonlocal model_call_count
+            model_call_count += 1
+            await _notify_extraction_page(page_progress, page)
+
+        follow_up_started = False
+
+        async def record_follow_up_page(page: int) -> None:
+            nonlocal follow_up_started
+            if not follow_up_started:
+                reserve_follow_up()
+                follow_up_started = True
+            await record_page(page)
+
+        if should_cancel and should_cancel():
+            raise HistoryLearningCancelled("聊天记录学习已取消")
+        try:
+            window_result = await self.extract_window_result(
+                window,
+                chat_name=chat_name,
+                eligible_sender_ids=eligible_sender_ids,
+                excluded_sender_ids=excluded_sender_ids,
+                extract_memories=extract_memories,
+                update_profiles=update_profiles,
+                page_progress=record_page,
+            )
+            window_candidates = window_result.candidates
+            if window_result.continuation.needs_follow_up:
+                window_candidates = _exclude_candidates_referencing(
+                    window_candidates,
+                    window_result.continuation.tail_evidence_ids,
+                )
+            candidates_parts.append(window_candidates)
+            if not window_result.catalog_complete:
+                incomplete_window_ids.append(window.window_id)
+        except HistoryLearningOutputError as error:
+            logger.warning(f"历史学习窗口 {window.window_id} 输出无效，已跳过: {error}")
+            incomplete_window_ids.append(window.window_id)
+
+        if window_result is not None and window_result.continuation.needs_follow_up and following is not None:
+            continuation = _build_continuation_window(
+                window,
+                following,
+                window_result.continuation.tail_evidence_ids,
+            )
+            continuation_window_ids.append(continuation.window_id)
+
+        if continuation is not None:
+            if should_cancel and should_cancel():
+                raise HistoryLearningCancelled("聊天记录学习已取消")
+            try:
+                follow_up_result = await self.extract_window_result(
+                    continuation,
+                    chat_name=chat_name,
+                    eligible_sender_ids=eligible_sender_ids,
+                    excluded_sender_ids=excluded_sender_ids,
+                    extract_memories=extract_memories,
+                    update_profiles=update_profiles,
+                    page_progress=record_follow_up_page,
+                )
+                candidates_parts.append(follow_up_result.candidates)
+                if not follow_up_result.catalog_complete:
+                    incomplete_window_ids.append(continuation.window_id)
+            except HistoryLearningOutputError as error:
+                logger.warning(f"历史学习续接窗口 {continuation.window_id} 输出无效，已跳过: {error}")
+                incomplete_window_ids.append(continuation.window_id)
+
+        checkpoint = HistoryWindowCheckpoint(
+            window_id=window.window_id,
+            candidates=_merge_window_candidates(candidates_parts),
+            continuation_window_ids=tuple(continuation_window_ids),
+            incomplete_window_ids=tuple(dict.fromkeys(incomplete_window_ids)),
+            model_call_count=model_call_count,
+        )
+        return _WindowExtractionOutcome(
+            checkpoint=checkpoint,
+            evidence_messages=(*window.messages, *(following.messages if following is not None else ())),
+        )
+
     async def consolidate(
         self,
         candidates: HistoryCandidates,
@@ -539,11 +651,22 @@ class ChatHistoryLearner:
         should_cancel: CancellationCheck | None = None,
         extract_memories: bool = False,
         update_profiles: bool = False,
+        extraction_concurrency: int = DEFAULT_HISTORY_EXTRACTION_CONCURRENCY,
         resume_checkpoints: Mapping[str, HistoryWindowCheckpoint] | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
     ) -> HistoryLearningResult:
         if depth not in DEPTH_WINDOW_BUDGETS:
             raise ValueError(f"unsupported learning depth: {depth}")
+        if (
+            type(extraction_concurrency) is not int
+            or not DEFAULT_HISTORY_EXTRACTION_CONCURRENCY
+            <= extraction_concurrency
+            <= MAX_HISTORY_EXTRACTION_CONCURRENCY
+        ):
+            raise ValueError(
+                "extraction concurrency must be between "
+                f"{DEFAULT_HISTORY_EXTRACTION_CONCURRENCY} and {MAX_HISTORY_EXTRACTION_CONCURRENCY}"
+            )
         eligible = tuple(dict.fromkeys(str(sender_id) for sender_id in eligible_sender_ids or ()))
         excluded = tuple(dict.fromkeys(str(sender_id) for sender_id in excluded_sender_ids or ()))
         options = dict(window_options or {})
@@ -566,9 +689,8 @@ class ChatHistoryLearner:
         evidence: dict[str, ImportedMessage] = {}
         extracted: list[HistoryCandidates] = []
         continuation_window_ids: list[str] = []
-        continuation_keys: set[tuple[str, str]] = set()
         incomplete_window_ids: list[str] = []
-        model_call_count = sum(checkpoint.model_call_count for checkpoint in checkpoints.values())
+        model_call_count = 0
         resumed_extraction_calls = sum(max(1, checkpoint.model_call_count) for checkpoint in checkpoints.values())
         extraction_total = len(selected_summaries) + sum(
             max(0, checkpoint.model_call_count - 1) for checkpoint in checkpoints.values()
@@ -577,104 +699,84 @@ class ChatHistoryLearner:
         await _notify(progress, "extracting", extraction_completed, extraction_total)
 
         async def record_extraction_page(page: int) -> None:
-            nonlocal extraction_completed, extraction_total, model_call_count
+            nonlocal extraction_completed, extraction_total
             if page > 1:
                 extraction_total += 1
-            model_call_count += 1
             extraction_completed += 1
             await _notify(progress, "extracting", extraction_completed, extraction_total)
 
-        for window, following in _with_following_window(iter_history_windows(normalized_path, **options)):
-            if window.window_id not in selected_window_id_set:
-                continue
-            if should_cancel and should_cancel():
-                raise HistoryLearningCancelled("聊天记录学习已取消")
-            saved_checkpoint = checkpoints.get(window.window_id)
-            if saved_checkpoint is not None:
-                extracted.append(saved_checkpoint.candidates)
-                checkpoint_messages = (*window.messages, *(following.messages if following is not None else ()))
-                _retain_candidate_evidence(saved_checkpoint.candidates, checkpoint_messages, evidence)
-                continuation_window_ids.extend(saved_checkpoint.continuation_window_ids)
-                incomplete_window_ids.extend(saved_checkpoint.incomplete_window_ids)
-                continue
-            window_result: HistoryWindowResult | None = None
-            continuation: HistoryWindow | None = None
-            window_candidates_parts: list[HistoryCandidates] = []
-            window_continuation_ids: list[str] = []
-            window_incomplete_ids: list[str] = []
-            model_calls_before_window = model_call_count
-            try:
-                window_result = await self.extract_window_result(
-                    window,
-                    chat_name=chat_name,
-                    eligible_sender_ids=eligible or None,
-                    excluded_sender_ids=excluded,
-                    extract_memories=extract_memories,
-                    update_profiles=update_profiles,
-                    page_progress=record_extraction_page,
+        def reserve_follow_up() -> None:
+            nonlocal extraction_total
+            extraction_total += 1
+
+        async def apply_outcome(outcome: _WindowExtractionOutcome, *, persist_checkpoint: bool) -> None:
+            nonlocal model_call_count
+            checkpoint = outcome.checkpoint
+            extracted.append(checkpoint.candidates)
+            _retain_candidate_evidence(checkpoint.candidates, outcome.evidence_messages, evidence)
+            continuation_window_ids.extend(checkpoint.continuation_window_ids)
+            incomplete_window_ids.extend(checkpoint.incomplete_window_ids)
+            model_call_count += checkpoint.model_call_count
+            if persist_checkpoint:
+                await _notify_checkpoint(checkpoint_callback, checkpoint)
+
+        pending: deque[asyncio.Task[_WindowExtractionOutcome]] = deque()
+
+        async def drain_oldest() -> None:
+            outcome = await pending[0]
+            pending.popleft()
+            await apply_outcome(outcome, persist_checkpoint=True)
+
+        try:
+            for window, following in _with_following_window(iter_history_windows(normalized_path, **options)):
+                if window.window_id not in selected_window_id_set:
+                    continue
+                if should_cancel and should_cancel():
+                    raise HistoryLearningCancelled("聊天记录学习已取消")
+                saved_checkpoint = checkpoints.get(window.window_id)
+                if saved_checkpoint is not None:
+                    while pending:
+                        await drain_oldest()
+                    await apply_outcome(
+                        _WindowExtractionOutcome(
+                            checkpoint=saved_checkpoint,
+                            evidence_messages=(
+                                *window.messages,
+                                *(following.messages if following is not None else ()),
+                            ),
+                        ),
+                        persist_checkpoint=False,
+                    )
+                    continue
+
+                pending.append(
+                    asyncio.create_task(
+                        self._extract_natural_window(
+                            window,
+                            following,
+                            chat_name=chat_name,
+                            eligible_sender_ids=eligible or None,
+                            excluded_sender_ids=excluded,
+                            extract_memories=extract_memories,
+                            update_profiles=update_profiles,
+                            page_progress=record_extraction_page,
+                            reserve_follow_up=reserve_follow_up,
+                            should_cancel=should_cancel,
+                        ),
+                        name=f"history-extract-{window.window_id}",
+                    )
                 )
-                window_candidates = window_result.candidates
-                if window_result.continuation.needs_follow_up:
-                    window_candidates = _exclude_candidates_referencing(
-                        window_candidates,
-                        window_result.continuation.tail_evidence_ids,
-                    )
-                extracted.append(window_candidates)
-                window_candidates_parts.append(window_candidates)
-                _retain_candidate_evidence(window_candidates, window.messages, evidence)
-                if not window_result.catalog_complete:
-                    incomplete_window_ids.append(window.window_id)
-                    window_incomplete_ids.append(window.window_id)
-            except HistoryLearningOutputError as error:
-                logger.warning(f"历史学习窗口 {window.window_id} 输出无效，已跳过: {error}")
-                incomplete_window_ids.append(window.window_id)
-                window_incomplete_ids.append(window.window_id)
+                if len(pending) >= extraction_concurrency:
+                    await drain_oldest()
 
-            if window_result is not None and window_result.continuation.needs_follow_up and following is not None:
-                continuation_key = (window.window_id, following.window_id)
-                if continuation_key not in continuation_keys:
-                    continuation_keys.add(continuation_key)
-                    continuation = _build_continuation_window(
-                        window,
-                        following,
-                        window_result.continuation.tail_evidence_ids,
-                    )
-                    continuation_window_ids.append(continuation.window_id)
-                    window_continuation_ids.append(continuation.window_id)
-                    extraction_total += 1
-
-            if continuation is not None:
-                try:
-                    follow_up_result = await self.extract_window_result(
-                        continuation,
-                        chat_name=chat_name,
-                        eligible_sender_ids=eligible or None,
-                        excluded_sender_ids=excluded,
-                        extract_memories=extract_memories,
-                        update_profiles=update_profiles,
-                        page_progress=record_extraction_page,
-                    )
-                    extracted.append(follow_up_result.candidates)
-                    window_candidates_parts.append(follow_up_result.candidates)
-                    _retain_candidate_evidence(follow_up_result.candidates, continuation.messages, evidence)
-                    if not follow_up_result.catalog_complete:
-                        incomplete_window_ids.append(continuation.window_id)
-                        window_incomplete_ids.append(continuation.window_id)
-                except HistoryLearningOutputError as error:
-                    logger.warning(f"历史学习续接窗口 {continuation.window_id} 输出无效，已跳过: {error}")
-                    incomplete_window_ids.append(continuation.window_id)
-                    window_incomplete_ids.append(continuation.window_id)
-
-            await _notify_checkpoint(
-                checkpoint_callback,
-                HistoryWindowCheckpoint(
-                    window_id=window.window_id,
-                    candidates=_merge_window_candidates(window_candidates_parts),
-                    continuation_window_ids=tuple(window_continuation_ids),
-                    incomplete_window_ids=tuple(dict.fromkeys(window_incomplete_ids)),
-                    model_call_count=model_call_count - model_calls_before_window,
-                ),
-            )
+            while pending:
+                await drain_oldest()
+        except BaseException:
+            for pending_task in pending:
+                pending_task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            raise
 
         if should_cancel and should_cancel():
             raise HistoryLearningCancelled("聊天记录学习已取消")

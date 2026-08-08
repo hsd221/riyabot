@@ -1,6 +1,7 @@
 import { Info, LoaderCircle, ShieldCheck, Sparkles, Trash2, TriangleAlert } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
@@ -54,12 +55,14 @@ interface ChatHistoryImportSettingsProps {
   participantScope: ChatHistoryParticipantScope
   extractMemories: boolean
   updateProfiles: boolean
+  extractionConcurrency: number
   starting: boolean
   deleting: boolean
   onDepthChange: (depth: ChatHistoryLearningDepth) => void
   onParticipantScopeChange: (scope: ChatHistoryParticipantScope) => void
   onExtractMemoriesChange: (enabled: boolean) => void
   onUpdateProfilesChange: (enabled: boolean) => void
+  onExtractionConcurrencyChange: (concurrency: number) => void
   onStart: () => void
   onDelete: () => void
 }
@@ -74,12 +77,14 @@ export function ChatHistoryImportSettings({
   participantScope,
   extractMemories,
   updateProfiles,
+  extractionConcurrency,
   starting,
   deleting,
   onDepthChange,
   onParticipantScopeChange,
   onExtractMemoriesChange,
   onUpdateProfilesChange,
+  onExtractionConcurrencyChange,
   onStart,
   onDelete,
 }: ChatHistoryImportSettingsProps) {
@@ -149,6 +154,41 @@ export function ChatHistoryImportSettings({
               </span>
             </span>
           </div>
+          <label
+            htmlFor="history-extraction-concurrency"
+            className="ios-row ios-touch cursor-pointer items-center gap-4"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-[16px] leading-6">LLM 提取并发量</span>
+              <span
+                id="history-extraction-concurrency-description"
+                className="block text-[13px] leading-5 text-muted-foreground"
+              >
+                可同时处理 1–16
+                个独立自然窗口。单窗口分页保持串行，结果与断点仍按原窗口顺序提交；并发过高可能触发模型限流。
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <Input
+                id="history-extraction-concurrency"
+                name="history-extraction-concurrency"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={16}
+                step={1}
+                value={extractionConcurrency}
+                aria-describedby="history-extraction-concurrency-description"
+                className="h-10 w-20 text-right tabular-nums"
+                onChange={(event) => {
+                  const value = event.currentTarget.valueAsNumber
+                  if (!Number.isFinite(value)) return
+                  onExtractionConcurrencyChange(Math.min(16, Math.max(1, Math.trunc(value))))
+                }}
+              />
+              <span className="text-[13px] text-muted-foreground">个</span>
+            </span>
+          </label>
         </div>
 
         {depth === 'full' ? (

@@ -6,6 +6,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from src.bw_learner.history_learning import (
+    DEFAULT_HISTORY_EXTRACTION_CONCURRENCY,
+    MAX_HISTORY_EXTRACTION_CONCURRENCY,
+)
+
 
 MAX_PARTICIPANT_SELECTION_OVERRIDES = 200
 
@@ -90,6 +95,12 @@ class ChatHistoryImportStartRequest(BaseModel):
     participant_scope: ChatHistoryParticipantScopeRequest | None = None
     extract_memories: bool = False
     update_profiles: bool = False
+    extraction_concurrency: int = Field(
+        default=DEFAULT_HISTORY_EXTRACTION_CONCURRENCY,
+        ge=DEFAULT_HISTORY_EXTRACTION_CONCURRENCY,
+        le=MAX_HISTORY_EXTRACTION_CONCURRENCY,
+        strict=True,
+    )
 
 
 class ChatHistoryImportDeleteResponse(BaseModel):

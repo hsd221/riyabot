@@ -88,6 +88,26 @@ describe('Chat history import enrichment', () => {
     expect(resultSource).toContain("label: '运行时画像'")
   })
 
+  it('lets users configure bounded LLM window extraction concurrency', async () => {
+    const pageSource = await Bun.file(
+      new URL('../src/routes/resource/chat-history-import.tsx', import.meta.url)
+    ).text()
+    const settingsSource = await Bun.file(
+      new URL('../src/routes/resource/chat-history-import-settings.tsx', import.meta.url)
+    ).text()
+    const typesSource = await Bun.file(
+      new URL('../src/types/chat-history-import.ts', import.meta.url)
+    ).text()
+
+    expect(settingsSource).toContain('id="history-extraction-concurrency"')
+    expect(settingsSource).toContain('min={1}')
+    expect(settingsSource).toContain('max={16}')
+    expect(settingsSource).toContain('单窗口分页保持串行')
+    expect(pageSource).toContain('const [extractionConcurrency, setExtractionConcurrency]')
+    expect(pageSource).toContain('extraction_concurrency: extractionConcurrency')
+    expect(typesSource).toContain('extraction_concurrency?: number')
+  })
+
   it('offers full scanning, paginated member selection, and explicit profile review', async () => {
     const settingsSource = await Bun.file(
       new URL('../src/routes/resource/chat-history-import-settings.tsx', import.meta.url)
