@@ -309,6 +309,68 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         atom = MemoryAtom.get(MemoryAtom.atom_id == "atom-faded-disabled-sweep")
         self.assertEqual(atom.status, "active")
 
+    async def test_cleanup_raw_archive_removes_only_expired_rows(self) -> None:
+        now_ts = datetime.datetime.now().timestamp()
+        old_ts = now_ts - (dream_agent.RAW_ARCHIVE_RETENTION_DAYS + 1) * 86400
+        RawMessageArchive.create(
+            stream_id="group-1",
+            message_id="msg-archive-old",
+            user_id="user-a",
+            content="很久以前的原始消息",
+            timestamp=old_ts,
+            chat_type="group",
+        )
+        RawMessageArchive.create(
+            stream_id="group-1",
+            message_id="msg-archive-fresh",
+            user_id="user-b",
+            content="刚刚发生的原始消息",
+            timestamp=now_ts,
+            chat_type="group",
+        )
+        task = DreamTask(FakeStore())
+
+        deleted = await task._cleanup_raw_archive()
+
+        self.assertEqual(deleted, 1)
+        self.assertIsNone(RawMessageArchive.get_or_none(RawMessageArchive.message_id == "msg-archive-old"))
+        self.assertIsNotNone(RawMessageArchive.get_or_none(RawMessageArchive.message_id == "msg-archive-fresh"))
+
+    async def test_cleanup_raw_archive_survives_archiver_failure(self) -> None:
+        task = DreamTask(FakeStore())
+
+        with patch(
+            "src.memory.layer0_archive.MessageArchiver.cleanup_old_messages",
+            side_effect=RuntimeError("archiver unavailable"),
+        ):
+            deleted = await task._cleanup_raw_archive()
+
+        self.assertEqual(deleted, 0)
+
+    def test_prune_weak_associations_removes_low_weight_edges(self) -> None:
+        from src.memory.atom_association import AssociationType, AtomAssociationStore
+
+        assoc_store = AtomAssociationStore()
+        self.assertTrue(assoc_store.add_association("atom-strong-a", "atom-strong-b", AssociationType.SEQUENTIAL, 0.8))
+        self.assertTrue(assoc_store.add_association("atom-weak-a", "atom-weak-b", AssociationType.SEQUENTIAL, 0.05))
+        task = DreamTask(FakeStore())
+
+        pruned = task._prune_weak_associations()
+
+        self.assertEqual(pruned, 1)
+        self.assertEqual(assoc_store.count(), 1)
+
+    def test_prune_weak_associations_survives_store_failure(self) -> None:
+        task = DreamTask(FakeStore())
+
+        with patch(
+            "src.memory.atom_association.AtomAssociationStore.prune_weak",
+            side_effect=RuntimeError("store unavailable"),
+        ):
+            pruned = task._prune_weak_associations()
+
+        self.assertEqual(pruned, 0)
+
     async def test_triage_raw_archive_routes_daily_material_by_significance(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
         high = RawMessageArchive.create(

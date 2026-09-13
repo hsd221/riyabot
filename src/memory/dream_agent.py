@@ -81,6 +81,12 @@ GRAPH_ATOMS_LIMIT: int = 20
 NOISE_CLEANUP_DAYS: int = 30
 """噪声池默认保留天数，超过此期限的噪声条目才会被清理"""
 
+RAW_ARCHIVE_RETENTION_DAYS: int = 30
+"""原始消息归档保留天数，日常梦境周期清理超过此期限的归档"""
+
+ASSOCIATION_PRUNE_THRESHOLD: float = 0.1
+"""每周梦境周期清理权重低于此阈值的弱关联"""
+
 WEEKLY_NOISE_RECYCLE_DAYS: int = 14
 """每周恍然大悟机制扫描的噪声窗口"""
 
@@ -1655,6 +1661,28 @@ class DreamTask(AsyncTask):
             logger.error(f"噪声清理阶段异常: {e}")
             return 0
 
+    async def _cleanup_raw_archive(self, older_than_days: int | None = None) -> int:
+        """清理超出保留窗口的原始消息归档，防止归档表随时间无限增长。"""
+        try:
+            from src.memory.layer0_archive import MessageArchiver
+
+            retention_days = older_than_days if older_than_days is not None else RAW_ARCHIVE_RETENTION_DAYS
+            return await MessageArchiver().cleanup_old_messages(older_than_days=retention_days)
+        except Exception as e:
+            logger.warning("原始归档清理阶段异常: %s", e)
+            return 0
+
+    def _prune_weak_associations(self, threshold: float | None = None) -> int:
+        """清理权重低于阈值的弱关联，防止关联表随时间无限增长。"""
+        try:
+            from src.memory.atom_association import AtomAssociationStore
+
+            prune_threshold = threshold if threshold is not None else ASSOCIATION_PRUNE_THRESHOLD
+            return AtomAssociationStore().prune_weak(threshold=prune_threshold)
+        except Exception as e:
+            logger.warning("弱关联清理阶段异常: %s", e)
+            return 0
+
     # ── Phase 3: 图谱构建 ─────────────────────────────────────────────
 
     async def _build_graph(self, limit: int | None = None) -> tuple[int, int]:
@@ -1774,6 +1802,7 @@ class DreamTask(AsyncTask):
         Phase 4: 记忆巩固（importance≥0.6, weight≤0.4, max 50）
         Phase 5: 遗忘生态维护
         Phase 6: 噪声清理（NoisePool > 30 天）
+        Phase 7: 原始归档清理（RawMessageArchive > 30 天）
         """
         dream_run_id = self._create_dream_run("daily")
         if dream_run_id is None:
@@ -1786,6 +1815,7 @@ class DreamTask(AsyncTask):
         scores_reassessed = 0
         privacy_stats: dict[str, int] = {}
         forgetting_stats: dict[str, int] = {}
+        archived_cleaned = 0
 
         try:
             summary_ingested = self._ingest_topic_bridge_summaries(max_age_days=1)
@@ -1801,6 +1831,7 @@ class DreamTask(AsyncTask):
             atoms_processed = await self._consolidate(max_age_days=1)
             forgetting_stats = await self._run_forgetting_sweep()
             noise_cleaned = await self._clean_noise()
+            archived_cleaned = await self._cleanup_raw_archive()
         except Exception as e:
             logger.exception(f"日常梦境周期异常: {e}")
             self._finalize_dream_run(dream_run_id, "failed", atoms_processed, str(e))
@@ -1818,6 +1849,8 @@ class DreamTask(AsyncTask):
             triage_stats=triage_stats,
             phase_summaries=DAILY_DREAM_PHASES,
         )
+        if archived_cleaned:
+            summary += f"，清理{archived_cleaned}条旧归档"
         self._finalize_dream_run(dream_run_id, "completed", atoms_processed, summary)
         logger.info(f"日常梦境完成: {summary}")
 
@@ -1835,6 +1868,7 @@ class DreamTask(AsyncTask):
         Phase 7: 梦呓编织（可选）— 通过 DreamWeaver 从 NoisePool 提取洞见
         Phase 8: 噪声回收（14 天窗口）
         Phase 9: 噪声清理（30 天外）
+        Phase 10: 弱关联修剪（weight < 0.1）
         """
         dream_run_id = self._create_dream_run("weekly")
         if dream_run_id is None:
@@ -1897,6 +1931,9 @@ class DreamTask(AsyncTask):
             # Phase 11: 清理超出月度回收窗口的旧噪声
             noise_cleaned = await self._clean_noise(older_than_days=NOISE_CLEANUP_DAYS)
 
+            # Phase 12: 修剪权重过低的原子关联
+            pruned_associations = self._prune_weak_associations()
+
         except Exception as e:
             logger.exception(f"每周梦境周期异常: {e}")
             self._finalize_dream_run(dream_run_id, "failed", atoms_processed, str(e))
@@ -1910,6 +1947,8 @@ class DreamTask(AsyncTask):
             logger.info(
                 f"噪声回收: 晋升 {recycled_promoted} 条，丢弃 {recycled_discarded} 条，伏笔洞见 {recycled_insights} 条"
             )
+        if pruned_associations > 0:
+            logger.info(f"弱关联修剪: 移除 {pruned_associations} 条")
 
         summary = self._build_summary(
             atoms_processed,
@@ -1929,6 +1968,8 @@ class DreamTask(AsyncTask):
             summary += f"，回收{recycled_promoted}条"
         if recycled_insights:
             summary += f"，伏笔洞见{recycled_insights}条"
+        if pruned_associations:
+            summary += f"，修剪{pruned_associations}条弱关联"
         self._finalize_dream_run(dream_run_id, "completed", atoms_processed, summary)
         logger.info(f"每周梦境完成: {summary}")
 
