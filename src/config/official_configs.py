@@ -288,6 +288,18 @@ class MemoryConfig(ConfigBase):
     - False: 沿用旧模式，使用 LLM 生成问题
     """
 
+    dream_enabled: bool = True
+    """是否启用梦境维护任务（闲时执行记忆巩固、图谱构建、洞见生成等周期性维护）"""
+
+    forgetting_enabled: bool = True
+    """是否启用记忆遗忘扫描（定期衰减/归档/删除低权重记忆，同时控制梦境周期内的遗忘阶段）"""
+
+    graph_retrieval_enabled: bool = True
+    """是否在记忆检索中使用梦境构建的实体图谱做关联扩展"""
+
+    expression_context_enabled: bool = True
+    """是否在回复提示词中注入用户表达风格上下文（来自表达学习画像）"""
+
     # ------------------------------------------------------------------
     # 存储配置（可通过 bot_config.toml [memory] 段覆盖 MemoryStoreConfig 默认值）
     # ------------------------------------------------------------------
