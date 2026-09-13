@@ -131,6 +131,24 @@ def _has_unknown_words(unknown_words: Optional[list[str]]) -> bool:
     return any(str(word).strip() for word in unknown_words or [])
 
 
+def _resolve_graph_store() -> Optional[Any]:
+    """按配置解析共享图谱存储实例；开关关闭或存储不可用时返回 None。"""
+    try:
+        from src.config.config import global_config
+
+        if not bool(getattr(global_config.memory, "graph_retrieval_enabled", True)):
+            return None
+    except Exception:
+        pass
+    try:
+        from src.memory.graph_store import get_graph_store
+
+        return get_graph_store()
+    except Exception as e:
+        logger.debug("图谱存储不可用，跳过图谱关联扩展: %s", e)
+        return None
+
+
 def _should_run_memory_retrieval(
     chat_talking_prompt_short: str,
     target: str,
@@ -283,6 +301,8 @@ async def build_memory_retrieval_prompt(
         question: 回复中带的问题
         user_id: 用户 ID（可选，用于 profile 上下文检索）
                 不传则尝试从 chat_stream.user_info 提取
+        graph_store: GraphStore 实例（可选；缺省时按 memory.graph_retrieval_enabled
+                配置自动解析进程级共享实例，用于图谱关联扩展）
         allow_llm_question: 无可用 planner question 时，是否调用 memory.retrieval.question 判断/生成查询
         question_from_planner: question 是否来自 group/private planner；False 时始终信任显式 question
 
@@ -378,6 +398,9 @@ async def build_memory_retrieval_prompt(
         from src.memory.layer3_retrieval import MemoryRetriever
 
         store = get_memory_store()
+        if graph_store is None:
+            # 未显式注入时使用进程级共享实例，让梦境构建的实体图谱参与关联扩展
+            graph_store = _resolve_graph_store()
         retriever = MemoryRetriever(store, graph_store=graph_store)
 
         query_text = _build_memory_query_text(

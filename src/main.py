@@ -248,9 +248,9 @@ class MainSystem:
                 try:
                     from src.memory.dream_agent import DreamTask
                     from src.memory.dream_weaver import DreamWeaver
-                    from src.memory.graph_store import GraphStore
+                    from src.memory.graph_store import get_graph_store
 
-                    graph_store = GraphStore()
+                    graph_store = get_graph_store()
                     dream_weaver = DreamWeaver(store=store)
                     dream_task = DreamTask(
                         store=store,

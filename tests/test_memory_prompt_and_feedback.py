@@ -129,6 +129,78 @@ class MemoryPromptIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cross &amp; memory", block)
         self.assertEqual(atom_ids, ["atom-a", "atom-b"])
 
+    def test_resolve_graph_store_respects_config_gate_and_shares_instance(self) -> None:
+        disabled_config = SimpleNamespace(memory=SimpleNamespace(graph_retrieval_enabled=False))
+        with patch("src.config.config.global_config", disabled_config):
+            self.assertIsNone(prompt_integration._resolve_graph_store())
+
+        enabled_config = SimpleNamespace(memory=SimpleNamespace(graph_retrieval_enabled=True))
+        with (
+            patch("src.config.config.global_config", enabled_config),
+            patch("src.memory.graph_store.get_graph_store", return_value="shared-graph") as factory,
+        ):
+            self.assertEqual(prompt_integration._resolve_graph_store(), "shared-graph")
+        factory.assert_called_once_with()
+
+    async def test_build_memory_retrieval_prompt_auto_resolves_shared_graph_store(self) -> None:
+        created: list[object] = []
+
+        class GraphCapturingRetriever:
+            def __init__(self, store, graph_store=None):
+                created.append(graph_store)
+
+            async def get_context_for_reply_with_ids(self, **kwargs):
+                return "local memory", ["atom-a"]
+
+            async def get_cross_scene_context_with_ids(self, **kwargs):
+                return "", []
+
+        with (
+            patch("src.memory.get_memory_store", return_value=object()),
+            patch("src.memory.layer3_retrieval.MemoryRetriever", GraphCapturingRetriever),
+            patch.object(prompt_integration, "_resolve_graph_store", return_value="shared-graph") as resolve,
+        ):
+            await prompt_integration.build_memory_retrieval_prompt(
+                chat_talking_prompt_short="Alice: 之前说过喜欢猫",
+                sender="Alice",
+                target="还记得之前说过什么吗？",
+                chat_stream=SimpleNamespace(stream_id="stream-1", group_info=object(), user_info=None),
+                question="之前说过什么？",
+            )
+
+        resolve.assert_called_once_with()
+        self.assertEqual(created, ["shared-graph"])
+
+    async def test_build_memory_retrieval_prompt_prefers_explicit_graph_store(self) -> None:
+        created: list[object] = []
+
+        class GraphCapturingRetriever:
+            def __init__(self, store, graph_store=None):
+                created.append(graph_store)
+
+            async def get_context_for_reply_with_ids(self, **kwargs):
+                return "local memory", ["atom-a"]
+
+            async def get_cross_scene_context_with_ids(self, **kwargs):
+                return "", []
+
+        with (
+            patch("src.memory.get_memory_store", return_value=object()),
+            patch("src.memory.layer3_retrieval.MemoryRetriever", GraphCapturingRetriever),
+            patch.object(prompt_integration, "_resolve_graph_store") as resolve,
+        ):
+            await prompt_integration.build_memory_retrieval_prompt(
+                chat_talking_prompt_short="Alice: 之前说过喜欢猫",
+                sender="Alice",
+                target="还记得之前说过什么吗？",
+                chat_stream=SimpleNamespace(stream_id="stream-1", group_info=object(), user_info=None),
+                question="之前说过什么？",
+                graph_store="explicit-graph",
+            )
+
+        resolve.assert_not_called()
+        self.assertEqual(created, ["explicit-graph"])
+
 
 class MemoryFeedbackTest(unittest.IsolatedAsyncioTestCase):
     def test_bigram_jaccard_and_usage_analysis_return_expected_reinforcement_levels(self) -> None:

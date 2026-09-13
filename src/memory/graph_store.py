@@ -744,3 +744,22 @@ class GraphStore:
             "evidence": entry.evidence,
             "confidence": entry.confidence,
         }
+
+
+# ---------------------------------------------------------------------------
+# 进程级共享实例
+# ---------------------------------------------------------------------------
+
+_shared_graph_store: Optional[GraphStore] = None
+
+
+def get_graph_store() -> GraphStore:
+    """获取进程级共享的 GraphStore 实例（懒初始化，建表幂等）。
+
+    梦境周期的图谱构建与检索期的图谱关联扩展共用同一实例，
+    避免各处重复执行建表检查。
+    """
+    global _shared_graph_store
+    if _shared_graph_store is None:
+        _shared_graph_store = GraphStore()
+    return _shared_graph_store
