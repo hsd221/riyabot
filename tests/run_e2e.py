@@ -202,6 +202,7 @@ class E2EOrchestrator:
 
         # ---- stdout/stderr 读取任务 ----
         self._bot_stderr_task: Optional[asyncio.Task] = None
+        self._bot_stdout_task: Optional[asyncio.Task] = None
 
         # 构建阶段计划
         self._build_plan()
@@ -277,23 +278,17 @@ class E2EOrchestrator:
         results: list[tuple[str, bool, str]] = []
         failed = False
 
-        # 1. LLM 服务 ds2api
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(HEALTH_CHECK_URL)
-                ok = r.status_code == 200
-                detail = f"HTTP {r.status_code}" if not ok else "响应正常"
-                results.append(("LLM 服务 ds2api", ok, detail))
-                if not ok:
-                    failed = True
-        except ImportError:
-            results.append(("LLM 服务 ds2api", False, "httpx 未安装"))
+        # 1. LLM 服务可达性（探测 model_config.toml 中所有 api_provider）
+        provider_probes = await self._probe_llm_providers()
+        alive_count = sum(1 for _, alive, _ in provider_probes if alive)
+        for url, alive, detail in provider_probes:
+            results.append((f"LLM 服务 {url}", alive, detail))
+        if not provider_probes:
+            results.append(("LLM 服务", False, "未能解析任何 api_provider"))
             failed = True
-        except Exception as e:
-            results.append(("LLM 服务 ds2api", False, str(e)))
+        elif alive_count == 0:
             failed = True
+        # 个别 provider 不可达不算致命：例如嵌入供应商暂不可用时记忆检索会自动降级
 
         # 2. Chat export 文件
         if not CHAT_EXPORT_DIR.is_dir():
@@ -353,6 +348,42 @@ class E2EOrchestrator:
 
         print("\n  ✅ 所有验证通过。")
         return True
+
+    @staticmethod
+    async def _probe_llm_providers() -> list[tuple[str, bool, str]]:
+        """探测 model_config.toml 中所有 api_provider 的可达性。
+
+        返回 (base_url, 是否可达, 详情) 列表；TOML 解析失败时回退到内置默认地址。
+        任意 HTTP 响应（含 401/403 鉴权错误）都视为服务存活，只有连接层失败才算不可达。
+        """
+        urls: list[str] = []
+        try:
+            import tomlkit
+
+            doc = tomlkit.parse(MODEL_CONFIG_PATH.read_text(encoding="utf-8"))
+            for provider in doc.get("api_providers", []):
+                base_url = str(provider.get("base_url", "") or "").strip().rstrip("/")
+                if base_url and base_url not in urls:
+                    urls.append(base_url)
+        except Exception:
+            pass
+        if not urls:
+            urls = [HEALTH_CHECK_URL]
+
+        try:
+            import httpx
+        except ImportError:
+            return [(url, False, "httpx 未安装") for url in urls]
+
+        probes: list[tuple[str, bool, str]] = []
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            for base_url in urls:
+                try:
+                    response = await client.get(f"{base_url}/models")
+                    probes.append((base_url, True, f"HTTP {response.status_code}"))
+                except Exception as e:
+                    probes.append((base_url, False, str(e)))
+        return probes
 
     @staticmethod
     def _file_md5(path: Path) -> str:
@@ -415,7 +446,7 @@ class E2EOrchestrator:
             # 读取 stderr 等待初始化完成标记
             bot_ready = asyncio.Event()
 
-            async def _read_bot_stderr(marker: str, ready_ev: asyncio.Event) -> None:
+            async def _read_bot_stderr(markers: tuple[str, ...], ready_ev: asyncio.Event) -> None:
                 """持续读取 bot stderr，检测初始化完成标记"""
                 assert self._bot_process is not None
                 assert self._bot_process.stderr is not None
@@ -426,11 +457,21 @@ class E2EOrchestrator:
                     decoded = line.decode("utf-8", errors="replace").rstrip()
                     if decoded:
                         print(f"  [bot] {decoded[:200]}", flush=True)
-                    if marker in decoded:
+                    if any(marker in decoded for marker in markers):
                         ready_ev.set()
 
+            async def _drain_bot_stdout() -> None:
+                """排空 bot stdout，防止管道写满后阻塞 worker 进程"""
+                assert self._bot_process is not None
+                assert self._bot_process.stdout is not None
+                while True:
+                    line = await self._bot_process.stdout.readline()
+                    if not line:
+                        break
+
+            self._bot_stdout_task = asyncio.create_task(_drain_bot_stdout())
             self._bot_stderr_task = asyncio.create_task(
-                _read_bot_stderr("已成功唤醒", bot_ready),
+                _read_bot_stderr(("系统初始化完成", "system.initialize.completed"), bot_ready),
             )
 
             try:
@@ -861,6 +902,13 @@ class E2EOrchestrator:
             self._bot_stderr_task.cancel()
             try:
                 await self._bot_stderr_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if self._bot_stdout_task and not self._bot_stdout_task.done():
+            self._bot_stdout_task.cancel()
+            try:
+                await self._bot_stdout_task
             except (asyncio.CancelledError, Exception):
                 pass
 

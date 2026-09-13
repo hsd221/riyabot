@@ -275,13 +275,14 @@ def build_message_dict(
     Returns:
         符合 get_global_api().process_message() 格式的 dict
     """
-    timestamp_sec = parsed.timestamp_ms / 1000.0
     group_id = override_group_id or parsed.group_id
 
     message_info: dict[str, Any] = {
         "platform": "qq",
         "message_id": str(uuid.uuid4()),
-        "time": timestamp_sec,
+        # 回放内容使用当前时刻：聊天轮次管线按 wall-clock 窗口收集待处理消息，
+        # 携带导出历史时间戳的消息会永远落在窗口外，导致不观察、不归档、不回复。
+        "time": time.time(),
         "user_info": {
             "platform": "qq",
             "user_id": parsed.sender_uid,
