@@ -297,9 +297,6 @@ class MemoryConfig(ConfigBase):
     graph_retrieval_enabled: bool = True
     """是否在记忆检索中使用梦境构建的实体图谱做关联扩展"""
 
-    expression_context_enabled: bool = True
-    """是否在回复提示词中注入用户表达风格上下文（来自表达学习画像）"""
-
     # ------------------------------------------------------------------
     # 存储配置（可通过 bot_config.toml [memory] 段覆盖 MemoryStoreConfig 默认值）
     # ------------------------------------------------------------------

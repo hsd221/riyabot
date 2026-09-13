@@ -277,18 +277,15 @@ class OfficialConfigTest(unittest.TestCase):
         self.assertTrue(config.dream_enabled)
         self.assertTrue(config.forgetting_enabled)
         self.assertTrue(config.graph_retrieval_enabled)
-        self.assertTrue(config.expression_context_enabled)
 
         overridden = MemoryConfig(
             dream_enabled=False,
             forgetting_enabled=False,
             graph_retrieval_enabled=False,
-            expression_context_enabled=False,
         )
         self.assertFalse(overridden.dream_enabled)
         self.assertFalse(overridden.forgetting_enabled)
         self.assertFalse(overridden.graph_retrieval_enabled)
-        self.assertFalse(overridden.expression_context_enabled)
 
     def test_chat_config_time_ranges_and_talk_value_rules(self) -> None:
         config = ChatConfig(
