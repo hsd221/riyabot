@@ -186,18 +186,21 @@ class MainSystem:
             )
 
             # 启动记忆遗忘定期扫描
-            try:
-                from src.memory.forgetting import ForgettingManager, ForgettingSweepTask
+            if mc.forgetting_enabled:
+                try:
+                    from src.memory.forgetting import ForgettingManager, ForgettingSweepTask
 
-                forgetting_manager = ForgettingManager(store)
-                await async_task_manager.add_task(ForgettingSweepTask(forgetting_manager))
-                logger.info(
-                    "记忆遗忘扫描任务已注册", event_code="memory.forgetting.task_registered", interval_seconds=3600
-                )
-            except Exception:
-                logger.warning(
-                    "记忆遗忘扫描任务注册失败", event_code="memory.forgetting.task_register_failed", exc_info=True
-                )
+                    forgetting_manager = ForgettingManager(store)
+                    await async_task_manager.add_task(ForgettingSweepTask(forgetting_manager))
+                    logger.info(
+                        "记忆遗忘扫描任务已注册", event_code="memory.forgetting.task_registered", interval_seconds=3600
+                    )
+                except Exception:
+                    logger.warning(
+                        "记忆遗忘扫描任务注册失败", event_code="memory.forgetting.task_register_failed", exc_info=True
+                    )
+            else:
+                logger.info("记忆遗忘扫描已通过配置关闭", event_code="memory.forgetting.disabled")
 
             # 创建写操作日志记录器（供编码管线和一致性协调任务共享）
             memory_op_logger = None
@@ -241,27 +244,33 @@ class MainSystem:
                 logger.warning("编码管线任务注册失败", event_code="memory.encoding.task_register_failed", exc_info=True)
 
             # 启动梦境维护任务
-            try:
-                from src.memory.dream_agent import DreamTask
-                from src.memory.dream_weaver import DreamWeaver
-                from src.memory.graph_store import GraphStore
+            if mc.dream_enabled:
+                try:
+                    from src.memory.dream_agent import DreamTask
+                    from src.memory.dream_weaver import DreamWeaver
+                    from src.memory.graph_store import GraphStore
 
-                graph_store = GraphStore()
-                dream_weaver = DreamWeaver(store=store)
-                dream_task = DreamTask(
-                    store=store,
-                    forgetting_manager=forgetting_manager,
-                    graph_store=graph_store,
-                    dream_weaver=dream_weaver,
-                )
-                await async_task_manager.add_task(dream_task)
-                logger.info(
-                    "梦境维护任务已注册",
-                    event_code="memory.dream.task_registered",
-                    interval_seconds=dream_task.run_interval,
-                )
-            except Exception:
-                logger.warning("梦境维护任务注册失败", event_code="memory.dream.task_register_failed", exc_info=True)
+                    graph_store = GraphStore()
+                    dream_weaver = DreamWeaver(store=store)
+                    dream_task = DreamTask(
+                        store=store,
+                        forgetting_manager=forgetting_manager,
+                        graph_store=graph_store,
+                        dream_weaver=dream_weaver,
+                        forgetting_enabled=mc.forgetting_enabled,
+                    )
+                    await async_task_manager.add_task(dream_task)
+                    logger.info(
+                        "梦境维护任务已注册",
+                        event_code="memory.dream.task_registered",
+                        interval_seconds=dream_task.run_interval,
+                    )
+                except Exception:
+                    logger.warning(
+                        "梦境维护任务注册失败", event_code="memory.dream.task_register_failed", exc_info=True
+                    )
+            else:
+                logger.info("梦境维护任务已通过配置关闭", event_code="memory.dream.disabled")
 
             # 启动双写一致性协调任务
             try:

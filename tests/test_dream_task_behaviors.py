@@ -278,6 +278,37 @@ class DreamTaskDatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(archived.chat_type, "memory_archive_episodic")
         self.assertIn("小明很久以前", archived.content)
 
+    async def test_forgetting_sweep_skipped_when_disabled_by_config_flag(self) -> None:
+        old_time = datetime.datetime.now() - datetime.timedelta(days=1)
+        MemoryAtom.create(
+            atom_id="atom-faded-disabled-sweep",
+            atom_type="episodic",
+            content="小明很久以前随口提到另一件无后续的小事",
+            entities='["小明"]',
+            importance=0.2,
+            confidence=0.4,
+            weight=0.05,
+            created_at=old_time,
+            last_accessed_at=old_time,
+            last_reinforced_at=old_time,
+            ttl_days=365,
+            decay_type="exponential",
+            reinforcement_count=0,
+            source_scene="group_chat",
+            privacy_level="context_sensitive",
+            status="active",
+        )
+        manager = FakeForgettingManager()
+        task = DreamTask(FakeStore(), forgetting_manager=manager, forgetting_enabled=False)
+
+        stats = await task._run_forgetting_sweep()
+
+        self.assertEqual(stats, {"decayed": 0, "archived": 0, "deleted": 0})
+        self.assertEqual(manager.calls, 0)
+        self.assertIs(task._forgetting_manager, manager)
+        atom = MemoryAtom.get(MemoryAtom.atom_id == "atom-faded-disabled-sweep")
+        self.assertEqual(atom.status, "active")
+
     async def test_triage_raw_archive_routes_daily_material_by_significance(self) -> None:
         now_ts = datetime.datetime.now().timestamp()
         high = RawMessageArchive.create(

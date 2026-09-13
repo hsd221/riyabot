@@ -265,7 +265,7 @@ class DreamTask(AsyncTask):
     Attributes:
         _store: MemoryStore 实例
         _forgetting_manager: 可选的 ForgettingManager
-        _graph_store: 可选的 GraphStore（未实现时通过 Peewee 直接操作表）
+        _graph_store: 可选的 GraphStore（梦境周期用于构建实体图谱）
     """
 
     def __init__(
@@ -274,14 +274,16 @@ class DreamTask(AsyncTask):
         forgetting_manager: Optional[Any] = None,
         graph_store: Optional[Any] = None,
         dream_weaver: Optional[Any] = None,
+        forgetting_enabled: bool = True,
     ):
         """初始化 DreamTask
 
         Args:
             store: MemoryStore 实例（承载 SQLite + Qdrant）
             forgetting_manager: ForgettingManager 实例（可选，用于获取衰减统计）
-            graph_store: GraphStore 实例（可选，暂未实现时可为 None）
+            graph_store: GraphStore 实例（可选，用于周期性图谱构建）
             dream_weaver: DreamWeaver 实例（可选，用于梦呓编织洞见生成）
+            forgetting_enabled: 是否允许梦境周期执行遗忘扫描（由 memory.forgetting_enabled 配置控制）
         """
         super().__init__(
             task_name="dream_task",
@@ -292,6 +294,7 @@ class DreamTask(AsyncTask):
         self._forgetting_manager = forgetting_manager
         self._graph_store = graph_store
         self._dream_weaver = dream_weaver
+        self._forgetting_enabled = bool(forgetting_enabled)
 
     # ── 主循环 ──────────────────────────────────────────────────────────
 
@@ -1584,6 +1587,9 @@ class DreamTask(AsyncTask):
     async def _run_forgetting_sweep(self) -> dict[str, int]:
         """Phase 4 — 执行遗忘扫描，维护低权重记忆生态。"""
         try:
+            if not self._forgetting_enabled:
+                logger.debug("遗忘扫描已通过配置关闭，跳过梦境遗忘阶段")
+                return {"decayed": 0, "archived": 0, "deleted": 0}
             if self._forgetting_manager is None:
                 from src.memory.forgetting import ForgettingManager
 
